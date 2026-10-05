@@ -142,8 +142,13 @@ export function prepare(input: OrderInput): PreparedContext {
   const fairnessBaseline = useSeasonFairness ? [...seasonBaseline] : new Array<number>(n).fill(0);
 
   // Locks.
+  //
+  // The slot array length is clamped to a usable integer. A format whose head count is
+  // not a positive integer is rejected by `precheck` with an actionable diagnostic, but
+  // `prepare` runs first, and `new Array(-1)` throws — so a malformed format must not be
+  // able to turn a reportable configuration error into an exception.
   const locksByGame: (number | undefined)[][] = games.map((game) =>
-    new Array<number | undefined>(game.playerCount).fill(undefined),
+    new Array<number | undefined>(Math.max(0, Math.floor(game.playerCount) || 0)).fill(undefined),
   );
   const requiredByGame: number[][] = games.map(() => []);
   const invalidLocks: { lock: LockEntry; reason: string }[] = [];

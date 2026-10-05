@@ -686,6 +686,28 @@ describe('unsatisfiable inputs', () => {
     expect(noGames.ok).toBe(false);
     expect(noGames.diagnostics.some((d) => d.code === 'NO_GAMES')).toBe(true);
   });
+
+  /**
+   * A head count that is not a positive integer cannot come from the FORMAT screen
+   * (the stepper is bounded 1..8) or from a JSON import (which clamps it), but it must
+   * still produce an actionable diagnostic rather than an exception: generation runs in
+   * a worker, where a thrown error reaches the captain as "generation failed" with
+   * nothing to act on.
+   */
+  it.each([
+    ['zero', 0],
+    ['negative', -1],
+    ['fractional', 1.5],
+  ])('reports a malformed head count (%s) instead of throwing', (_label, playerCount) => {
+    const gameDefs = games([{ id: 'g1', name: 'Broken', kinds: ['SINGLES'], playerCount }]);
+    const result = generateOrder(orderInput(sampleRoster(), gameDefs));
+
+    expect(result.ok).toBe(false);
+    const diagnostic = result.diagnostics.find((d) => d.code === 'INVALID_GAME');
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic!.gameId).toBe('g1');
+    expect(diagnostic!.suggestions.length).toBeGreaterThan(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -734,6 +756,118 @@ describe('manual editing', () => {
     const result = evaluateManualOrder(input, edited);
     expect(result.ok).toBe(false);
     expect(result.violations.some((v) => v.code === 'DUPLICATE_PLAYER_IN_GAME')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Explanation ↔ validator agreement (spec §19)
+// ---------------------------------------------------------------------------
+
+/**
+ * The reasons shown on screen must never contradict the validator shown next to them.
+ *
+ * A hand-edited line-up is the only way to produce an illegal order, and it is exactly
+ * when the captain most needs the reasons to be honest: a green "nothing is violated"
+ * on the very game that breaks a rule trains them to ignore the panel entirely.
+ */
+describe('explanation agrees with the hard-constraint validator', () => {
+  const roster = sampleRoster();
+  const gameDefs = sampleFormatGames();
+
+  const constraintFactorFor = (solution: OrderSolution, gameId: string) =>
+    solution.explanation.games
+      .find((game) => game.gameId === gameId)!
+      .factors.find((factor) => factor.key === 'constraint')!;
+
+  it('claims no violation only when the validator agrees', () => {
+    const input = orderInput(roster, gameDefs);
+    const [best] = expectOk(generateOrder(input));
+    expect(validateHardConstraints(input, best.assignments)).toEqual([]);
+
+    for (const game of best.explanation.games) {
+      const factor = constraintFactorFor(best, game.gameId);
+      expect(factor.tone).toBe('positive');
+      expect(factor.detail).toContain('違反していません');
+    }
+    expect(best.explanation.overall.some((factor) => factor.tone === 'negative' && factor.key === 'constraint')).toBe(
+      false,
+    );
+  });
+
+  it('names the breached constraint on the game that breaks it', () => {
+    const participants = roster.map((p) => createParticipantConfig(p.id));
+    participants[0] = { ...participants[0], excludedGameIds: ['g1'] };
+    const input = orderInput(roster, gameDefs, { participants });
+    const [best] = expectOk(generateOrder(input));
+
+    const edited: GameAssignment[] = best.assignments.map((assignment) =>
+      assignment.gameId === 'g1' ? { ...assignment, playerIds: ['p1'] } : assignment,
+    );
+    const result = evaluateManualOrder(input, edited);
+    expect(result.ok).toBe(false);
+
+    const offending = constraintFactorFor(result.solution!, 'g1');
+    expect(offending.tone).toBe('negative');
+    expect(offending.detail).not.toContain('違反していません');
+    expect(offending.detail).toContain('出場不可');
+
+    // Games that are still legal keep saying so.
+    const clean = constraintFactorFor(result.solution!, 'g2');
+    expect(clean.tone).toBe('positive');
+  });
+
+  it('reports a forbidden pair forced in by hand', () => {
+    const input = orderInput(roster, gameDefs, { pairs: [pair('p1', 'p2', 'FORBIDDEN')] });
+    const [best] = expectOk(generateOrder(input));
+    const edited: GameAssignment[] = best.assignments.map((assignment) =>
+      assignment.gameId === 'g3' ? { ...assignment, playerIds: ['p1', 'p2'] } : assignment,
+    );
+    const result = evaluateManualOrder(input, edited);
+    expect(result.violations.some((violation) => violation.code === 'FORBIDDEN_PAIR')).toBe(true);
+
+    const factor = constraintFactorFor(result.solution!, 'g3');
+    expect(factor.tone).toBe('negative');
+    expect(factor.detail).toContain('禁止ペア');
+  });
+
+  it('surfaces a violation that belongs to no single game in the summary', () => {
+    const participants = roster.map((p) => createParticipantConfig(p.id));
+    participants[0] = { ...participants[0], maxAppearances: 1 };
+    const input = orderInput(roster, gameDefs, { participants });
+    const [best] = expectOk(generateOrder(input));
+
+    // Force p1 into three games, well past their cap of one.
+    const edited: GameAssignment[] = best.assignments.map((assignment) =>
+      assignment.gameId === 'g1' || assignment.gameId === 'g2' || assignment.gameId === 'g6'
+        ? { ...assignment, playerIds: ['p1'] }
+        : assignment,
+    );
+    const result = evaluateManualOrder(input, edited);
+    expect(result.violations.some((violation) => violation.code === 'MAX_APPEARANCES_EXCEEDED')).toBe(true);
+
+    const summary = result.solution!.explanation.overall.find((factor) => factor.key === 'constraint');
+    expect(summary).toBeDefined();
+    expect(summary!.tone).toBe('negative');
+    expect(summary!.detail).toContain('最大出場回数');
+  });
+
+  it('never reports an imputed rating as if it were entered', () => {
+    const unrated = roster.map((player, index) => (index === 4 ? { ...player, rating: null } : player));
+    const input = orderInput(unrated, gameDefs);
+    const [best] = expectOk(generateOrder(input));
+
+    const tally = best.tallies.find((entry) => entry.playerId === 'p5')!;
+    expect(tally.ratingImputed).toBe(true);
+    expect(tally.effectiveRating).not.toBe(0);
+    expect(best.metrics.hasImputedRating).toBe(true);
+
+    // Every game p5 appears in says the value is provisional, rather than quoting it flat.
+    const appearances = best.explanation.games.filter((game) => game.playerIds.includes('p5'));
+    expect(appearances.length).toBeGreaterThan(0);
+    for (const game of appearances) {
+      const strengthFactors = game.factors.filter((factor) => factor.key === 'strength');
+      expect(strengthFactors.some((factor) => factor.detail.includes('中央値'))).toBe(true);
+    }
   });
 });
 

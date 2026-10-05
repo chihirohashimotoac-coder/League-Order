@@ -24,6 +24,7 @@ import { planSeasonCommit, planSeasonWithdrawal } from '../domain/orders/seasonL
 import { Repository, type Snapshot } from '../storage/repository';
 import type { BackendKind } from '../storage/db';
 import { buildSeed } from '../storage/seed';
+import { useToast } from '../components/ui';
 
 /**
  * Application data store.
@@ -43,6 +44,21 @@ export interface AppData {
   seasonCommits: SeasonCommit[];
   settings: AppSettings;
 }
+
+/**
+ * Outcome of a delete attempt.
+ *
+ * An order whose appearances are still counted in the season totals cannot be deleted:
+ * see `deleteOrder` below and `Repository.deleteOrder`.
+ */
+export interface DeleteOrderResult {
+  ok: boolean;
+  reason: 'deleted' | 'seasonCommitted' | 'notFound';
+  message: string;
+}
+
+export const SEASON_COMMITTED_DELETE_MESSAGE =
+  'このオーダーはシーズン成績へ反映されています。先に「シーズン反映を取り消す」必要があります。';
 
 /** Outcome of a season commit, so the UI can report exactly what moved. */
 export interface SeasonCommitResult {
@@ -83,7 +99,11 @@ export interface AppStore extends AppData {
   savePair(pair: PairSetting): void;
   deletePair(pairId: string): void;
   saveOrder(order: SavedOrder): void;
-  deleteOrder(orderId: string): void;
+  /**
+   * Deletes a saved order, or refuses when its season contribution is still counted.
+   * Deleting never rolls season totals back by itself — that is `withdrawSeason`.
+   */
+  deleteOrder(orderId: string): DeleteOrderResult;
   saveSettings(settings: AppSettings): void;
   /**
    * Applies a finalized version's appearances to the season totals, idempotently.
@@ -139,11 +159,17 @@ const STORAGE_NOTICES: Partial<Record<BackendKind, string>> = {
     'このブラウザ・モードでは保存領域が使用できません。データはこのタブを閉じると失われます。JSON エクスポートで控えを取ってください。',
 };
 
+const WRITE_FAILURE_NOTICE =
+  '保存に失敗しました。表示中の内容はこのタブでは有効ですが、保存されていません。JSON エクスポートで控えを取ってください。';
+
 export function AppStoreProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [data, setData] = useState<AppData>(EMPTY);
   const [ready, setReady] = useState(false);
   const [backendKind, setBackendKind] = useState<BackendKind | null>(null);
+  /** Set once a write has actually failed, so a lost save is never silent (spec §24). */
+  const [writeFailed, setWriteFailed] = useState(false);
   const repositoryRef = useRef<Repository | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -166,18 +192,26 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
     };
   }, []);
 
-  /** Applies a state change and persists it. Persistence failures never break the UI. */
+  /**
+   * Applies a state change and persists it.
+   *
+   * A persistence failure never breaks the UI — the in-memory state stays authoritative
+   * so the captain can finish the match — but it is never swallowed either: a lost write
+   * is reported immediately and latched into `storageNotice`, because a save that only
+   * looks successful is how an order disappears on the next reload (spec §24).
+   */
   const write = useCallback(
     (update: (current: AppData) => AppData, persist: (repository: Repository) => Promise<void>) => {
       setData((current) => update(current));
       const repository = repositoryRef.current;
       if (repository) {
         void persist(repository).catch(() => {
-          /* Reported through `storageNotice`; the in-memory state stays authoritative. */
+          setWriteFailed(true);
+          toast.show(WRITE_FAILURE_NOTICE, 'error');
         });
       }
     },
-    [],
+    [toast],
   );
 
   const store = useMemo<AppStore>(() => {
@@ -223,7 +257,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
       ...data,
       ready,
       backendKind,
-      storageNotice: backendKind ? (STORAGE_NOTICES[backendKind] ?? null) : null,
+      storageNotice: writeFailed
+        ? WRITE_FAILURE_NOTICE
+        : backendKind
+          ? (STORAGE_NOTICES[backendKind] ?? null)
+          : null,
       activeTeamId,
       activeTeam,
       teamPlayers,
@@ -337,15 +375,36 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           (repository) => repository.saveOrder(order),
         ),
 
-      deleteOrder: (orderId) =>
+      deleteOrder: (orderId) => {
+        // Season totals are the one thing in this app that cannot be reconstructed from
+        // anything else. An order that still has a ledger entry is therefore undeletable
+        // until the captain explicitly withdraws the contribution, which keeps the two
+        // steps visible instead of silently changing the standings.
+        if (seasonCommitFor(orderId)) {
+          return {
+            ok: false,
+            reason: 'seasonCommitted',
+            message: SEASON_COMMITTED_DELETE_MESSAGE,
+          };
+        }
+        if (!data.orders.some((order) => order.id === orderId)) {
+          return { ok: false, reason: 'notFound', message: 'オーダーが見つかりません' };
+        }
+
         write(
           (current) => ({
             ...current,
             orders: current.orders.filter((o) => o.id !== orderId),
-            seasonCommits: current.seasonCommits.filter((commit) => commit.id !== orderId),
           }),
-          (repository) => repository.deleteOrder(orderId),
-        ),
+          async (repository) => {
+            // The repository re-checks against stored state, so the invariant survives
+            // even if this in-memory copy were somehow stale.
+            const outcome = await repository.deleteOrder(orderId);
+            if (outcome === 'blocked') throw new Error(SEASON_COMMITTED_DELETE_MESSAGE);
+          },
+        );
+        return { ok: true, reason: 'deleted', message: '削除しました' };
+      },
 
       saveSettings: (settings) =>
         write(
@@ -425,7 +484,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
 
       replaceEverything: async (incoming) => {
         setData(incoming);
-        await repositoryRef.current?.replaceAll(incoming);
+        try {
+          await repositoryRef.current?.replaceAll(incoming);
+        } catch (error) {
+          setWriteFailed(true);
+          toast.show(WRITE_FAILURE_NOTICE, 'error');
+          throw error;
+        }
       },
 
       mergeEverything: async (incoming) => {
@@ -441,12 +506,18 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           ),
           settings: current.settings,
         }));
-        await repositoryRef.current?.mergeAll(incoming);
+        try {
+          await repositoryRef.current?.mergeAll(incoming);
+        } catch (error) {
+          setWriteFailed(true);
+          toast.show(WRITE_FAILURE_NOTICE, 'error');
+          throw error;
+        }
       },
 
       snapshot,
     };
-  }, [data, ready, backendKind, write]);
+  }, [data, ready, backendKind, writeFailed, write, toast]);
 
   return <AppStoreContext.Provider value={store}>{children}</AppStoreContext.Provider>;
 }

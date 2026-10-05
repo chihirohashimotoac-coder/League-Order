@@ -478,7 +478,9 @@ export function evaluateManualOrder(
     tallies: buildTallies(ctx, evaluation),
     score: roundScore(evaluation.breakdown),
     metrics: buildMetrics(ctx, evaluation),
-    explanation: buildExplanation(ctx, bctx, selection, evaluation),
+    // The reasons are told about the violations, so a hand-edited line-up never gets a
+    // "nothing is violated" rationale while the validator says otherwise (spec §15).
+    explanation: buildExplanation(ctx, bctx, selection, evaluation, violations),
     warnings: buildWarnings(ctx, evaluation, candidates, meta),
     meta,
   };
