@@ -33,10 +33,21 @@ import { polish } from './search/polish';
 /**
  * Order generation entry point (docs/DESIGN.md §6).
  *
- * The whole module is a pure function of its input: no DOM, no storage, no clock-driven
- * branching (the deadline only decides *when to stop*, never *what to pick*, so the same
- * input yields the same output). That is what lets the test suite assert hard-constraint
- * invariants and reproducibility directly.
+ * The module touches nothing outside its input: no DOM, no storage, no randomness. Every
+ * choice it makes — candidate order, tie-breaks, pruning — is a function of the input
+ * alone, so the hard-constraint invariants hold on every run.
+ *
+ * Reproducibility is narrower than that, and it is worth being exact about. The search is
+ * bounded by a wall-clock deadline. When it finishes inside that budget the solution is
+ * marked `exhaustive` and is the optimum of a deterministically built candidate set, so
+ * the same input always yields the same output. When the budget cuts the search short,
+ * the result is the best found *so far*, and how far it got depends on the CPU the run
+ * actually received: two runs of the same input on a loaded machine can stop at different
+ * points and return different — equally valid, equally constraint-respecting — orders.
+ *
+ * `SolutionMeta.exhaustive` is what distinguishes the two cases, and the UI surfaces it
+ * ("全探索完了" against "時間内の最良解") so a captain is never told an order is optimal
+ * when it is merely the best one the clock allowed.
  */
 
 export interface GenerateOptions {

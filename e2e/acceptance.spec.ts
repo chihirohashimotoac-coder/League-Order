@@ -31,8 +31,30 @@ async function generate(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 }
 
+/**
+ * Finalizes, and waits until the app says it is done.
+ *
+ * The version is persisted asynchronously, so moving straight on leaves the next action
+ * racing a finalization that is still settling — a reload in that window can tear the
+ * write down and the order comes back a version short.
+ */
 async function finalize(page: Page): Promise<void> {
+  const before = await versionBadge(page);
   await page.getByRole('button', { name: /オーダーを確定|再確定/ }).click();
+  await expect(stateBanner(page)).toContainText('確定済み');
+  await expect
+    .poll(async () => versionBadge(page), {
+      message: `the finalized version should advance past v${before}`,
+    })
+    .toBeGreaterThan(before);
+}
+
+/** The version number in the state banner, or 0 while the order is still a draft. */
+async function versionBadge(page: Page): Promise<number> {
+  const banner = page.locator('.state-banner .state-title');
+  if ((await banner.count()) === 0) return 0;
+  const match = /v(\d+)/.exec(await banner.innerText());
+  return match ? Number(match[1]) : 0;
 }
 
 async function commitSeason(page: Page): Promise<void> {

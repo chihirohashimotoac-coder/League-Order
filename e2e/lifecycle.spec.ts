@@ -26,8 +26,33 @@ async function generate(page: Page): Promise<void> {
 
 const stateBanner = (page: Page) => page.locator('.state-banner');
 
+/**
+ * Finalizes, and waits until the app says it is done.
+ *
+ * Clicking and moving straight on leaves the next action racing a finalization that is
+ * still settling: the version is written to storage asynchronously, so a reload issued
+ * in that window can tear the write down and the order comes back a version short.
+ * That is a flake, and it cost a CI run — waiting for the banner to report the
+ * finalized state gives the write a real settling point and, just as usefully, makes a
+ * finalization that silently does nothing fail here rather than three steps later.
+ */
 async function finalize(page: Page): Promise<void> {
+  const before = await versionBadge(page);
   await page.getByRole('button', { name: /オーダーを確定|再確定/ }).click();
+  await expect(stateBanner(page)).toContainText('確定済み');
+  await expect
+    .poll(async () => versionBadge(page), {
+      message: `the finalized version should advance past v${before}`,
+    })
+    .toBeGreaterThan(before);
+}
+
+/** The version number in the state banner, or 0 while the order is still a draft. */
+async function versionBadge(page: Page): Promise<number> {
+  const banner = page.locator('.state-banner .state-title');
+  if ((await banner.count()) === 0) return 0;
+  const match = /v(\d+)/.exec(await banner.innerText());
+  return match ? Number(match[1]) : 0;
 }
 
 interface SlotOption {
