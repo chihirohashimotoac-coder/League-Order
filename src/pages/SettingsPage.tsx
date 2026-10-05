@@ -215,6 +215,7 @@ export function SettingsPage(): React.JSX.Element {
                 formats: [],
                 pairs: [],
                 orders: [],
+                seasonCommits: [],
                 settings: { ...settings, activeTeamId: null },
               })
               .then(() => {

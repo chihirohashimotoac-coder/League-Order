@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { GameSlotDef, MatchInfo, OrderSolution, Player } from '../domain/types';
+import type {
+  GameSlotDef,
+  MatchInfo,
+  OrderLifecycleState,
+  OrderSolution,
+  OrderVersion,
+  Player,
+} from '../domain/types';
+import { diffVersionWithCurrent, latestVersion } from '../domain/orders/lifecycle';
 import {
   buildPlayerSchedules,
   buildShareLayout,
@@ -17,6 +25,7 @@ import {
   type RenderedShareImage,
   type ShareImageVariant,
   type ShareTextFormat,
+  type ShareVersionInfo,
 } from '../share';
 import { MatchInfoFields } from './MatchInfoFields';
 import { Sheet, useToast } from './ui';
@@ -37,10 +46,20 @@ const IMAGE_VARIANTS: { key: ShareImageVariant; label: string; hint: string }[] 
   { key: 'detail', label: '詳細', hint: '保存・キャプテン確認用。出場回数と Rating を併記。' },
 ];
 
-const TEXT_FORMATS: { key: ShareTextFormat; label: string; hint: string }[] = [
+const BASE_TEXT_FORMATS: { key: ShareTextFormat; label: string; hint: string }[] = [
   { key: 'line', label: 'LINE', hint: 'LINE のトークへそのまま貼れる形式。' },
   { key: 'simple', label: 'シンプル', hint: '装飾なし。1 ゲーム 1 行。' },
   { key: 'detail', label: '詳細', hint: '出場回数と Rating を含むキャプテン控え。' },
+];
+
+/** Only offered once a re-finalization exists to describe (追加要件 §10). */
+const UPDATE_TEXT_FORMATS: { key: ShareTextFormat; label: string; hint: string }[] = [
+  { key: 'updateDiff', label: '変更点のみ', hint: '前の版からの変更だけを伝えます。' },
+  {
+    key: 'updateFull',
+    label: '変更点＋全文',
+    hint: '変更点に続けて最新オーダーの全文も載せます。',
+  },
 ];
 
 export function ShareSheet({
@@ -49,6 +68,8 @@ export function ShareSheet({
   solution,
   match,
   onMatchChange,
+  lifecycle,
+  versions,
   onClose,
 }: {
   games: GameSlotDef[];
@@ -56,6 +77,9 @@ export function ShareSheet({
   solution: OrderSolution;
   match: MatchInfo;
   onMatchChange: (next: MatchInfo) => void;
+  /** Lifecycle of the order being shared; drives the version badge and draft warning. */
+  lifecycle: OrderLifecycleState;
+  versions: OrderVersion[];
   onClose: () => void;
 }): React.JSX.Element {
   const toast = useToast();
@@ -73,9 +97,42 @@ export function ShareSheet({
     files: canShareFiles(),
   }));
 
+  const latest = useMemo(() => latestVersion(versions), [versions]);
+
+  /**
+   * What the shared copy is labelled as.
+   *
+   * While the order is UPDATED the badge stays on the version the team actually has
+   * (v1), because sharing now would hand them content that no longer matches any
+   * confirmed version — the warning below says exactly that.
+   */
+  const versionInfo = useMemo<ShareVersionInfo>(
+    () => ({
+      version: latest?.version ?? 0,
+      isUpdate: (latest?.version ?? 0) > 1,
+      draft: lifecycle !== 'FINALIZED',
+    }),
+    [latest, lifecycle],
+  );
+
+  const previous = versions.length >= 2 ? versions[versions.length - 2] : null;
+  const updateDiff = useMemo(() => {
+    if (!previous || !latest) return null;
+    return diffVersionWithCurrent(previous, {
+      games: latest.games,
+      assignments: latest.assignments,
+      players: latest.players,
+    });
+  }, [previous, latest]);
+
+  const textFormats = useMemo(
+    () => (updateDiff ? [...BASE_TEXT_FORMATS, ...UPDATE_TEXT_FORMATS] : BASE_TEXT_FORMATS),
+    [updateDiff],
+  );
+
   const layout = useMemo(
-    () => buildShareLayout(games, players, solution, match, variant),
-    [games, players, solution, match, variant],
+    () => buildShareLayout(games, players, solution, match, variant, versionInfo),
+    [games, players, solution, match, variant, versionInfo],
   );
 
   const images: RenderedShareImage[] = useMemo(() => {
@@ -88,8 +145,12 @@ export function ShareSheet({
   }, [layout]);
 
   const text = useMemo(
-    () => renderShareText(games, players, solution, match, textFormat),
-    [games, players, solution, match, textFormat],
+    () =>
+      renderShareText(games, players, solution, match, textFormat, {
+        version: versionInfo,
+        diff: updateDiff ?? undefined,
+      }),
+    [games, players, solution, match, textFormat, versionInfo, updateDiff],
   );
 
   const schedules = useMemo(
@@ -105,12 +166,12 @@ export function ShareSheet({
 
   const playerText = useMemo(() => {
     if (tab !== 'player') return '';
-    return activeSchedule ? renderPlayerText(activeSchedule, match) : '';
-  }, [tab, activeSchedule, match]);
+    return activeSchedule ? renderPlayerText(activeSchedule, match, versionInfo) : '';
+  }, [tab, activeSchedule, match, versionInfo]);
 
   const allPlayersText = useMemo(
-    () => renderAllPlayersText(games, players, solution, match),
-    [games, players, solution, match],
+    () => renderAllPlayersText(games, players, solution, match, versionInfo),
+    [games, players, solution, match, versionInfo],
   );
 
   const shareableText = tab === 'player' ? playerText || allPlayersText : text;
@@ -149,6 +210,23 @@ export function ShareSheet({
 
   return (
     <Sheet title="共有" onClose={onClose}>
+      {lifecycle !== 'FINALIZED' ? (
+        <div className="notice warn" data-testid="share-draft-warning">
+          <span aria-hidden="true">△</span>
+          <span className="small-text">
+            <strong>
+              {lifecycle === 'DRAFT'
+                ? 'このオーダーはまだ確定されていません'
+                : `確定版 v${latest?.version ?? 1} から変更されています`}
+            </strong>
+            <br />
+            {lifecycle === 'DRAFT'
+              ? 'プレビューと共有は可能ですが、確定するとバージョンが付き、メンバーがどれを最新版か判断できます。'
+              : 'このまま共有するとメンバーが見る版がどれか分からなくなります。先に再確定することをおすすめします。'}
+          </span>
+        </div>
+      ) : null}
+
       <div className="share-tabs" role="tablist" aria-label="共有形式">
         {(
           [
@@ -232,7 +310,7 @@ export function ShareSheet({
 
       {tab === 'text' ? (
         <>
-          <Segmented label="テキスト形式" options={TEXT_FORMATS} value={textFormat} onChange={setTextFormat} />
+          <Segmented label="テキスト形式" options={textFormats} value={textFormat} onChange={setTextFormat} />
           <label className="field">
             <span className="visually-hidden">共有テキスト</span>
             <textarea

@@ -11,12 +11,16 @@ import {
 import type {
   AppSettings,
   LeagueFormat,
+  OrderId,
+  OrderVersion,
   PairSetting,
   Player,
   SavedOrder,
+  SeasonCommit,
   Team,
   TeamId,
 } from '../domain/types';
+import { planSeasonCommit, planSeasonWithdrawal } from '../domain/orders/seasonLedger';
 import { Repository, type Snapshot } from '../storage/repository';
 import type { BackendKind } from '../storage/db';
 import { buildSeed } from '../storage/seed';
@@ -36,7 +40,20 @@ export interface AppData {
   formats: LeagueFormat[];
   pairs: PairSetting[];
   orders: SavedOrder[];
+  seasonCommits: SeasonCommit[];
   settings: AppSettings;
+}
+
+/** Outcome of a season commit, so the UI can report exactly what moved. */
+export interface SeasonCommitResult {
+  ok: boolean;
+  /** Number of players whose totals changed. */
+  changed: number;
+  /** True when the commit was already up to date and nothing was applied. */
+  noop: boolean;
+  /** Players whose totals had to be clamped at zero (hand-edited totals). */
+  clamped: string[];
+  message: string;
 }
 
 export interface AppStore extends AppData {
@@ -52,6 +69,8 @@ export interface AppStore extends AppData {
   teamFormats: LeagueFormat[];
   teamPairs: PairSetting[];
   teamOrders: SavedOrder[];
+  /** Ledger lookup by order id. */
+  seasonCommitFor(orderId: OrderId): SeasonCommit | null;
 
   setActiveTeam(teamId: TeamId): void;
   saveTeam(team: Team): void;
@@ -66,6 +85,14 @@ export interface AppStore extends AppData {
   saveOrder(order: SavedOrder): void;
   deleteOrder(orderId: string): void;
   saveSettings(settings: AppSettings): void;
+  /**
+   * Applies a finalized version's appearances to the season totals, idempotently.
+   * Re-running it for the same version changes nothing; running it for a newer version
+   * applies only the difference (see `domain/orders/seasonLedger.ts`).
+   */
+  commitSeason(order: SavedOrder, version: OrderVersion): SeasonCommitResult;
+  /** Withdraws an order's season contribution entirely. */
+  withdrawSeason(orderId: OrderId): SeasonCommitResult;
   replaceEverything(snapshot: Snapshot): Promise<void>;
   mergeEverything(snapshot: Snapshot): Promise<void>;
   snapshot(): Snapshot;
@@ -79,6 +106,7 @@ const EMPTY: AppData = {
   formats: [],
   pairs: [],
   orders: [],
+  seasonCommits: [],
   settings: {
     activeTeamId: null,
     optimizer: {
@@ -184,8 +212,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
       formats: data.formats,
       pairs: data.pairs,
       orders: data.orders,
+      seasonCommits: data.seasonCommits,
       settings: { ...data.settings, activeTeamId },
     });
+
+    const seasonCommitFor = (orderId: OrderId): SeasonCommit | null =>
+      data.seasonCommits.find((commit) => commit.id === orderId) ?? null;
 
     return {
       ...data,
@@ -198,6 +230,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
       teamFormats,
       teamPairs,
       teamOrders,
+      seasonCommitFor,
 
       setActiveTeam: (teamId) =>
         write(
@@ -233,6 +266,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
               formats: current.formats.filter((format) => format.teamId !== teamId),
               pairs: current.pairs.filter((pair) => pair.teamId !== teamId),
               orders: current.orders.filter((order) => order.teamId !== teamId),
+              seasonCommits: current.seasonCommits.filter((commit) => commit.teamId !== teamId),
               settings:
                 current.settings.activeTeamId === teamId
                   ? { ...current.settings, activeTeamId: teams[0]?.id ?? null }
@@ -305,7 +339,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
 
       deleteOrder: (orderId) =>
         write(
-          (current) => ({ ...current, orders: current.orders.filter((o) => o.id !== orderId) }),
+          (current) => ({
+            ...current,
+            orders: current.orders.filter((o) => o.id !== orderId),
+            seasonCommits: current.seasonCommits.filter((commit) => commit.id !== orderId),
+          }),
           (repository) => repository.deleteOrder(orderId),
         ),
 
@@ -314,6 +352,76 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           (current) => ({ ...current, settings }),
           (repository) => repository.saveSettings(settings),
         ),
+
+      commitSeason: (order, version) => {
+        const existing = seasonCommitFor(order.id);
+        const plan = planSeasonCommit(
+          order.id,
+          order.teamId,
+          version,
+          existing,
+          data.players,
+          Date.now(),
+        );
+        const commit = plan.commit!;
+        const updatedOrder: SavedOrder = { ...order, seasonApplied: true, updatedAt: Date.now() };
+
+        write(
+          (current) => ({
+            ...current,
+            players: plan.updatedPlayers.reduce((acc, player) => upsert(acc, player), current.players),
+            orders: upsert(current.orders, updatedOrder),
+            seasonCommits: upsert(current.seasonCommits, commit),
+          }),
+          async (repository) => {
+            await repository.savePlayers(plan.updatedPlayers);
+            await repository.saveOrder(updatedOrder);
+            await repository.saveSeasonCommit(commit);
+          },
+        );
+
+        return {
+          ok: true,
+          changed: plan.updatedPlayers.length,
+          noop: plan.noop,
+          clamped: plan.clamped,
+          message: plan.noop
+            ? `v${version.version} は既に反映済みです (二重加算はありません)`
+            : `v${version.version} をシーズン累計へ反映しました (${plan.updatedPlayers.length} 名を更新)`,
+        };
+      },
+
+      withdrawSeason: (orderId) => {
+        const existing = seasonCommitFor(orderId);
+        if (!existing) {
+          return { ok: false, changed: 0, noop: true, clamped: [], message: 'まだ反映されていません' };
+        }
+        const plan = planSeasonWithdrawal(existing, data.players);
+        const order = data.orders.find((entry) => entry.id === orderId);
+        const updatedOrder = order ? { ...order, seasonApplied: false, updatedAt: Date.now() } : null;
+
+        write(
+          (current) => ({
+            ...current,
+            players: plan.updatedPlayers.reduce((acc, player) => upsert(acc, player), current.players),
+            orders: updatedOrder ? upsert(current.orders, updatedOrder) : current.orders,
+            seasonCommits: current.seasonCommits.filter((commit) => commit.id !== orderId),
+          }),
+          async (repository) => {
+            await repository.savePlayers(plan.updatedPlayers);
+            if (updatedOrder) await repository.saveOrder(updatedOrder);
+            await repository.deleteSeasonCommit(orderId);
+          },
+        );
+
+        return {
+          ok: true,
+          changed: plan.updatedPlayers.length,
+          noop: plan.noop,
+          clamped: plan.clamped,
+          message: `シーズン反映を取り消しました (${plan.updatedPlayers.length} 名を更新)`,
+        };
+      },
 
       replaceEverything: async (incoming) => {
         setData(incoming);
@@ -327,6 +435,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           formats: incoming.formats.reduce((acc, format) => upsert(acc, format), current.formats),
           pairs: incoming.pairs.reduce((acc, pair) => upsert(acc, pair), current.pairs),
           orders: incoming.orders.reduce((acc, order) => upsert(acc, order), current.orders),
+          seasonCommits: incoming.seasonCommits.reduce(
+            (acc, commit) => upsert(acc, commit),
+            current.seasonCommits,
+          ),
           settings: current.settings,
         }));
         await repositoryRef.current?.mergeAll(incoming);

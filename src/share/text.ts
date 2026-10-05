@@ -1,4 +1,5 @@
-import type { GameSlotDef, MatchInfo, OrderSolution, Player } from '../domain/types';
+import type { GameSlotDef, MatchInfo, Player } from '../domain/types';
+import type { OrderDiff } from '../domain/orders/lifecycle';
 import {
   GENERIC_TITLE,
   buildGameRows,
@@ -7,8 +8,9 @@ import {
   formatMatchDate,
   formatMatchDateShort,
   matchupLine,
+  versionText,
 } from './layout';
-import type { PlayerSchedule, ShareTextFormat } from './types';
+import type { PlayerSchedule, ShareTextFormat, ShareVersionInfo, ShareableOrder } from './types';
 
 /**
  * Text renderers for sharing (要件 §6, docs/DESIGN.md 追補 §S5).
@@ -26,36 +28,44 @@ function tidy(lines: readonly string[]): string {
     .replace(/^\n+|\n+$/g, '');
 }
 
-function headerLines(match: MatchInfo, options: { emoji: boolean; shortDate: boolean }): string[] {
+function headerLines(
+  match: MatchInfo,
+  options: { emoji: boolean; shortDate: boolean },
+  version?: ShareVersionInfo,
+): string[] {
   const title = match.leagueName.trim() || GENERIC_TITLE;
   const date = options.shortDate ? formatMatchDateShort(match.matchDate) : formatMatchDate(match.matchDate);
   const lead = [date, title].filter(Boolean).join(' ');
   const matchup = matchupLine(match);
-  return [options.emoji ? `🎯 ${lead}` : lead, matchup].filter((line) => line.trim().length > 0);
+  return [options.emoji ? `🎯 ${lead}` : lead, matchup, versionText(version)].filter(
+    (line) => line.trim().length > 0,
+  );
 }
 
 /** LINE-oriented: one emoji, a full-width separator, player names on their own line. */
 export function renderLineText(
   games: readonly GameSlotDef[],
   players: readonly Player[],
-  solution: OrderSolution,
+  solution: ShareableOrder,
   match: MatchInfo,
+  version?: ShareVersionInfo,
 ): string {
   const rows = buildGameRows(games, players, solution);
   const body = rows.flatMap((row) => [`${row.no}｜${row.gameName}`, row.players, '']);
-  return tidy([...headerLines(match, { emoji: true, shortDate: true }), '', ...body]);
+  return tidy([...headerLines(match, { emoji: true, shortDate: true }, version), '', ...body]);
 }
 
 /** Plain variant: no emoji, one line per game. */
 export function renderSimpleText(
   games: readonly GameSlotDef[],
   players: readonly Player[],
-  solution: OrderSolution,
+  solution: ShareableOrder,
   match: MatchInfo,
+  version?: ShareVersionInfo,
 ): string {
   const rows = buildGameRows(games, players, solution);
   return tidy([
-    ...headerLines(match, { emoji: false, shortDate: false }),
+    ...headerLines(match, { emoji: false, shortDate: false }, version),
     '',
     ...rows.map((row) => `${row.no} ${row.gameName} : ${row.players}`),
   ]);
@@ -70,11 +80,12 @@ export function renderSimpleText(
 export function renderDetailText(
   games: readonly GameSlotDef[],
   players: readonly Player[],
-  solution: OrderSolution,
+  solution: ShareableOrder,
   match: MatchInfo,
+  version?: ShareVersionInfo,
 ): string {
-  const layout = buildShareLayout(games, players, solution, match, 'detail');
-  const lines: string[] = [...headerLines(match, { emoji: false, shortDate: false }), ''];
+  const layout = buildShareLayout(games, players, solution, match, 'detail', version);
+  const lines: string[] = [...headerLines(match, { emoji: false, shortDate: false }, version), ''];
 
   lines.push('--- ORDER ---');
   for (const row of layout.games) lines.push(`${row.no} ${row.gameName} : ${row.players}`);
@@ -90,28 +101,105 @@ export function renderDetailText(
   return tidy(lines);
 }
 
+/**
+ * "Order changed" message for a re-finalized order (追加要件 §10).
+ *
+ * Leads with the change itself, because that is the only part a member who already has
+ * the previous copy needs to read. `includeFullOrder` appends the complete current
+ * order for anyone who missed the earlier message, which is the second of the two forms
+ * the requirement asks for.
+ */
+export function renderUpdateText(
+  games: readonly GameSlotDef[],
+  players: readonly Player[],
+  solution: ShareableOrder,
+  match: MatchInfo,
+  diff: OrderDiff,
+  version: ShareVersionInfo,
+  options: { includeFullOrder: boolean },
+): string {
+  const title = match.leagueName.trim() || GENERIC_TITLE;
+  const date = formatMatchDateShort(match.matchDate);
+  const lead = [date, title].filter(Boolean).join(' ');
+  const lines: string[] = [
+    `🎯 オーダー変更 v${version.version}`,
+    [lead, matchupLine(match)].filter(Boolean).join(' / '),
+    '',
+  ];
+
+  if (diff.changes.length === 0) {
+    lines.push('変更はありません。');
+  } else {
+    lines.push('変更：');
+    for (const row of diff.changes) {
+      lines.push(`G${row.order} ${row.gameName}`);
+      if (row.kind === 'added') {
+        lines.push('(追加)', `↓`, row.afterNames.join(' / ') || '(未配置)');
+      } else if (row.kind === 'removed') {
+        lines.push(row.beforeNames.join(' / ') || '(未配置)', '↓', '(削除)');
+      } else {
+        lines.push(row.beforeNames.join(' / ') || '(未配置)', '↓', row.afterNames.join(' / ') || '(未配置)');
+      }
+      lines.push('');
+    }
+  }
+
+  if (options.includeFullOrder) {
+    lines.push('【最新オーダー】');
+    for (const row of buildGameRows(games, players, solution)) {
+      lines.push(`${row.no} ${row.gameName} : ${row.players}`);
+    }
+  }
+
+  return tidy(lines);
+}
+
+export interface ShareTextContext {
+  diff?: OrderDiff;
+  version?: ShareVersionInfo;
+}
+
 export function renderShareText(
   games: readonly GameSlotDef[],
   players: readonly Player[],
-  solution: OrderSolution,
+  solution: ShareableOrder,
   match: MatchInfo,
   format: ShareTextFormat,
+  context: ShareTextContext = {},
 ): string {
+  const { version, diff } = context;
   switch (format) {
     case 'line':
-      return renderLineText(games, players, solution, match);
+      return renderLineText(games, players, solution, match, version);
     case 'simple':
-      return renderSimpleText(games, players, solution, match);
+      return renderSimpleText(games, players, solution, match, version);
     case 'detail':
-      return renderDetailText(games, players, solution, match);
+      return renderDetailText(games, players, solution, match, version);
+    case 'updateDiff':
+    case 'updateFull':
+      // Without a diff or a version there is nothing to describe as a change; fall back
+      // to the ordinary LINE message rather than emitting an empty "changed" notice.
+      if (!diff || !version) return renderLineText(games, players, solution, match, version);
+      return renderUpdateText(games, players, solution, match, diff, version, {
+        includeFullOrder: format === 'updateFull',
+      });
     default:
-      return renderSimpleText(games, players, solution, match);
+      return renderSimpleText(games, players, solution, match, version);
   }
 }
 
 /** One player's own schedule (要件 §5). */
-export function renderPlayerText(schedule: PlayerSchedule, match: MatchInfo): string {
-  const lines: string[] = [...headerLines(match, { emoji: false, shortDate: false }), '', schedule.name, ''];
+export function renderPlayerText(
+  schedule: PlayerSchedule,
+  match: MatchInfo,
+  version?: ShareVersionInfo,
+): string {
+  const lines: string[] = [
+    ...headerLines(match, { emoji: false, shortDate: false }, version),
+    '',
+    schedule.name,
+    '',
+  ];
 
   if (schedule.entries.length === 0) {
     lines.push('出場なし');
@@ -130,8 +218,9 @@ export function renderPlayerText(schedule: PlayerSchedule, match: MatchInfo): st
 export function renderAllPlayersText(
   games: readonly GameSlotDef[],
   players: readonly Player[],
-  solution: OrderSolution,
+  solution: ShareableOrder,
   match: MatchInfo,
+  version?: ShareVersionInfo,
 ): string {
   const schedules = buildPlayerSchedules(games, players, solution);
   const blocks = schedules.map((schedule) => {
@@ -147,5 +236,9 @@ export function renderAllPlayersText(
     return lines.join('\n');
   });
 
-  return tidy([...headerLines(match, { emoji: false, shortDate: false }), '', blocks.join('\n\n')]);
+  return tidy([
+    ...headerLines(match, { emoji: false, shortDate: false }, version),
+    '',
+    blocks.join('\n\n'),
+  ]);
 }

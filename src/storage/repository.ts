@@ -4,6 +4,7 @@ import type {
   PairSetting,
   Player,
   SavedOrder,
+  SeasonCommit,
   Team,
 } from '../domain/types';
 import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../domain/orders/presets';
@@ -36,6 +37,8 @@ export interface Snapshot {
   formats: LeagueFormat[];
   pairs: PairSetting[];
   orders: SavedOrder[];
+  /** Season-commit ledger: what each order has already contributed to season totals. */
+  seasonCommits: SeasonCommit[];
   settings: AppSettings;
 }
 
@@ -52,12 +55,13 @@ export class Repository {
 
   /** Loads everything in one go — the dataset is small and the app works offline. */
   async loadAll(): Promise<Snapshot> {
-    const [teams, players, formats, pairs, orders, settingsRows] = await Promise.all([
+    const [teams, players, formats, pairs, orders, seasonCommits, settingsRows] = await Promise.all([
       this.backend.getAll<Team>('teams'),
       this.backend.getAll<Player>('players'),
       this.backend.getAll<LeagueFormat>('formats'),
       this.backend.getAll<PairSetting>('pairs'),
       this.backend.getAll<SavedOrder>('orders'),
+      this.backend.getAll<SeasonCommit>('seasonCommits'),
       this.backend.getAll<SettingsRecord>('settings'),
     ]);
 
@@ -79,7 +83,11 @@ export class Repository {
       players,
       formats,
       pairs,
-      orders: orders.sort((a, b) => b.createdAt - a.createdAt),
+      // Orders written by a build without versioning are read back as drafts.
+      orders: orders
+        .map((order) => ({ ...order, versions: order.versions ?? [] }))
+        .sort((a, b) => b.createdAt - a.createdAt),
+      seasonCommits,
       settings,
     };
   }
@@ -89,17 +97,19 @@ export class Repository {
   }
 
   async deleteTeam(teamId: string): Promise<void> {
-    const [players, formats, pairs, orders] = await Promise.all([
+    const [players, formats, pairs, orders, commits] = await Promise.all([
       this.backend.getAll<Player>('players'),
       this.backend.getAll<LeagueFormat>('formats'),
       this.backend.getAll<PairSetting>('pairs'),
       this.backend.getAll<SavedOrder>('orders'),
+      this.backend.getAll<SeasonCommit>('seasonCommits'),
     ]);
     await Promise.all([
       ...players.filter((p) => p.teamId === teamId).map((p) => this.backend.remove('players', p.id)),
       ...formats.filter((f) => f.teamId === teamId).map((f) => this.backend.remove('formats', f.id)),
       ...pairs.filter((p) => p.teamId === teamId).map((p) => this.backend.remove('pairs', p.id)),
       ...orders.filter((o) => o.teamId === teamId).map((o) => this.backend.remove('orders', o.id)),
+      ...commits.filter((c) => c.teamId === teamId).map((c) => this.backend.remove('seasonCommits', c.id)),
     ]);
     await this.backend.remove('teams', teamId);
   }
@@ -140,8 +150,19 @@ export class Repository {
     return this.backend.put('orders', order);
   }
 
-  deleteOrder(orderId: string): Promise<void> {
-    return this.backend.remove('orders', orderId);
+  async deleteOrder(orderId: string): Promise<void> {
+    await this.backend.remove('orders', orderId);
+    // The ledger entry is meaningless without its order; the caller is responsible for
+    // withdrawing the season contribution first if that is what the user wanted.
+    await this.backend.remove('seasonCommits', orderId);
+  }
+
+  saveSeasonCommit(commit: SeasonCommit): Promise<void> {
+    return this.backend.put('seasonCommits', commit);
+  }
+
+  deleteSeasonCommit(orderId: string): Promise<void> {
+    return this.backend.remove('seasonCommits', orderId);
   }
 
   saveSettings(settings: AppSettings): Promise<void> {
@@ -157,6 +178,7 @@ export class Repository {
       this.backend.putMany('formats', snapshot.formats),
       this.backend.putMany('pairs', snapshot.pairs),
       this.backend.putMany('orders', snapshot.orders),
+      this.backend.putMany('seasonCommits', snapshot.seasonCommits),
     ]);
     await this.saveSettings(snapshot.settings);
   }
@@ -169,6 +191,7 @@ export class Repository {
       this.backend.putMany('formats', snapshot.formats),
       this.backend.putMany('pairs', snapshot.pairs),
       this.backend.putMany('orders', snapshot.orders),
+      this.backend.putMany('seasonCommits', snapshot.seasonCommits),
     ]);
   }
 

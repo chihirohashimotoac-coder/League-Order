@@ -1,7 +1,7 @@
 import type {
   GameSlotDef,
   MatchInfo,
-  OrderSolution,
+  OrderVersion,
   Player,
   PlayerId,
 } from '../domain/types';
@@ -12,6 +12,8 @@ import type {
   ShareImageVariant,
   ShareLayout,
   ShareTallyRow,
+  ShareVersionInfo,
+  ShareableOrder,
 } from './types';
 
 /**
@@ -53,7 +55,7 @@ function nameLookup(players: readonly Player[]): (id: PlayerId) => string {
 }
 
 function ratingLabel(
-  solution: OrderSolution,
+  solution: ShareableOrder,
   playerId: PlayerId,
 ): string {
   const tally = solution.tallies.find((entry) => entry.playerId === playerId);
@@ -67,7 +69,7 @@ function ratingLabel(
 export function buildGameRows(
   games: readonly GameSlotDef[],
   players: readonly Player[],
-  solution: OrderSolution,
+  solution: ShareableOrder,
 ): ShareGameRow[] {
   const nameOf = nameLookup(players);
   const byGame = new Map(solution.assignments.map((entry) => [entry.gameId, entry]));
@@ -91,9 +93,10 @@ export function buildGameRows(
 export function buildShareLayout(
   games: readonly GameSlotDef[],
   players: readonly Player[],
-  solution: OrderSolution,
+  solution: ShareableOrder,
   match: MatchInfo,
   variant: ShareImageVariant,
+  version?: ShareVersionInfo,
 ): ShareLayout {
   const nameOf = nameLookup(players);
 
@@ -129,6 +132,7 @@ export function buildShareLayout(
       teamName: match.teamName.trim(),
       opponentName: match.opponentName.trim(),
       dateText: formatMatchDate(match.matchDate),
+      versionText: versionText(version),
     },
     games: buildGameRows(games, players, solution),
     tally,
@@ -141,10 +145,39 @@ export function buildShareLayout(
  * Transposes an order into "player → the games they play" (要件 §5), so each member can
  * see their own schedule without scanning the whole sheet.
  */
+/**
+ * One-line version badge (追加要件 §6, §7).
+ *
+ * `ORDER v1` once finalized, `ORDER v2 · 更新版` for a re-finalization so a member can
+ * tell at a glance that an earlier copy is superseded, and an explicit "未確定" marker
+ * for a draft so an unconfirmed order is never mistaken for the real one.
+ */
+export function versionText(version?: ShareVersionInfo): string {
+  if (!version) return '';
+  if (version.draft) return '未確定 (DRAFT)';
+  if (version.version <= 0) return '';
+  return version.isUpdate ? `ORDER v${version.version} · 更新版` : `ORDER v${version.version}`;
+}
+
+/** Turns a finalized snapshot into something the share renderers can read. */
+export function shareableFromVersion(version: OrderVersion): ShareableOrder {
+  return {
+    assignments: version.assignments,
+    tallies: version.tallies,
+    metrics: { hasImputedRating: version.hasImputedRating },
+    meta: { label: version.label },
+  };
+}
+
+/** The badge describing a stored version. */
+export function versionInfoOf(version: OrderVersion): ShareVersionInfo {
+  return { version: version.version, isUpdate: version.version > 1, draft: false };
+}
+
 export function buildPlayerSchedules(
   games: readonly GameSlotDef[],
   players: readonly Player[],
-  solution: OrderSolution,
+  solution: ShareableOrder,
 ): PlayerSchedule[] {
   const ordered = sortedGames(games);
   const nameOf = nameLookup(players);

@@ -3,13 +3,21 @@ import type {
   Diagnostic,
   GameSlotDef,
   MatchInfo,
+  OrderLifecycleState,
   Player,
   SavedOrder,
+  SeasonCommitStatus,
 } from '../domain/types';
+import { ORDER_STATE_LABELS } from '../domain/types';
 import { sortedGames } from '../domain/games/format';
+import {
+  diffVersionWithCurrent,
+  latestVersion,
+  nextVersionNumber,
+} from '../domain/orders/lifecycle';
+import { SEASON_STATUS_LABELS } from '../domain/orders/seasonLedger';
 import { ShareSheet } from '../components/ShareSheet';
-import { createId } from '../utils/id';
-import { useAppStore } from '../state/appStore';
+import { VersionDiff } from '../components/VersionDiff';
 import {
   canRedo,
   canUndo,
@@ -18,7 +26,7 @@ import {
   type UndoableAction,
   type UndoableState,
 } from '../state/orderSession';
-import { Bar, Card, ConfirmDialog, EmptyState, Metric, useToast } from '../components/ui';
+import { Bar, Card, ConfirmDialog, EmptyState, Metric, Sheet } from '../components/ui';
 
 /**
  * ORDER RESULT screen (spec §14–§22, §26).
@@ -37,6 +45,13 @@ export function ResultPage({
   onMatchChange,
   onRegenerate,
   onReoptimise,
+  record,
+  lifecycle,
+  seasonStatus,
+  onFinalize,
+  onSaveDraft,
+  onCommitSeason,
+  onWithdrawSeason,
 }: {
   session: UndoableState;
   dispatch: (action: UndoableAction) => void;
@@ -47,11 +62,19 @@ export function ResultPage({
   onMatchChange: (next: MatchInfo) => void;
   onRegenerate: () => void;
   onReoptimise: (keepGameId: string | null) => void;
+  /** The persisted order, once it has been saved or finalized. */
+  record: SavedOrder | null;
+  lifecycle: OrderLifecycleState;
+  seasonStatus: SeasonCommitStatus;
+  onFinalize: () => void;
+  onSaveDraft: () => void;
+  onCommitSeason: () => void;
+  onWithdrawSeason: () => void;
 }): React.JSX.Element {
-  const store = useAppStore();
-  const toast = useToast();
   const [shareOpen, setShareOpen] = useState(false);
   const [confirmSeason, setConfirmSeason] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
 
   const state = session.present;
   const solution = state.current;
@@ -78,44 +101,19 @@ export function ResultPage({
 
   const violatingGames = new Set(state.violations.map((violation) => violation.gameId).filter(Boolean));
 
-  const saveToHistory = (): void => {
-    if (!store.activeTeamId) return;
-    const order: SavedOrder = {
-      id: createId('ord'),
-      teamId: store.activeTeamId,
-      title: `${new Date().toLocaleDateString('ja-JP')} ${solution.meta.label}`,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      input: state.input,
-      solution,
-      match,
-      seasonApplied: false,
-    };
-    store.saveOrder(order);
-    toast.show('履歴に保存しました', 'ok');
-  };
+  const versions = record?.versions ?? [];
+  const latest = latestVersion(versions);
 
-  const applySeason = (): void => {
-    const updated: Player[] = [];
-    for (const tally of solution.tallies) {
-      if (tally.count === 0) continue;
-      const player = store.teamPlayers.find((candidate) => candidate.id === tally.playerId);
-      if (!player) continue;
-      const byKind = { ...player.seasonAppearancesByKind };
-      for (const [kind, count] of Object.entries(tally.countByKind)) {
-        if (count === undefined) continue;
-        byKind[kind as keyof typeof byKind] = (byKind[kind as keyof typeof byKind] ?? 0) + count;
-      }
-      updated.push({
-        ...player,
-        seasonAppearances: player.seasonAppearances + tally.count,
-        seasonAppearancesByKind: byKind,
-      });
-    }
-    store.savePlayers(updated);
-    toast.show(`${updated.length} 名のシーズン累計を更新しました`, 'ok');
-    setConfirmSeason(false);
-  };
+  // The diff a captain needs to see is "what changed since the team was last told",
+  // i.e. the latest finalized version against the working copy.
+  const pendingDiff =
+    latest && solution
+      ? diffVersionWithCurrent(latest, {
+          games: ordered,
+          assignments: solution.assignments,
+          players,
+        })
+      : null;
 
   return (
     <>
@@ -141,6 +139,15 @@ export function ResultPage({
           ))}
         </div>
       ) : null}
+
+      <OrderStateBanner
+        lifecycle={lifecycle}
+        versions={versions.length}
+        latestVersion={latest?.version ?? 0}
+        seasonStatus={seasonStatus}
+        changeCount={pendingDiff?.changes.length ?? 0}
+        onShowDiff={() => setDiffOpen(true)}
+      />
 
       {state.edited ? (
         <div className="notice info">
@@ -392,15 +399,61 @@ export function ResultPage({
         );
       })}
 
+      <h2 className="section-title">確定とシーズン</h2>
+      <Card>
+        <div className="row wrap" style={{ gap: 8, marginBottom: 10 }}>
+          <button
+            type="button"
+            className="btn small primary"
+            onClick={onFinalize}
+            disabled={state.violations.length > 0}
+          >
+            {lifecycle === 'DRAFT'
+              ? `オーダーを確定 (v${nextVersionNumber(versions)})`
+              : lifecycle === 'UPDATED'
+                ? `再確定 (v${nextVersionNumber(versions)})`
+                : `確定済み v${latest?.version ?? 1}`}
+          </button>
+          {pendingDiff && pendingDiff.changed ? (
+            <button type="button" className="btn small" onClick={() => setDiffOpen(true)}>
+              変更点を確認 ({pendingDiff.changes.length})
+            </button>
+          ) : null}
+          <button type="button" className="btn small" onClick={onSaveDraft}>
+            下書きを保存
+          </button>
+        </div>
+
+        <div className="row wrap" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => setConfirmSeason(true)}
+            disabled={lifecycle !== 'FINALIZED'}
+            title={
+              lifecycle === 'FINALIZED'
+                ? undefined
+                : '確定済みのオーダーだけがシーズン累計へ反映できます'
+            }
+          >
+            {seasonStatus === 'none' ? 'シーズン累計へ反映' : 'シーズン累計を再反映'}
+          </button>
+          {seasonStatus !== 'none' ? (
+            <button type="button" className="btn small danger" onClick={() => setConfirmWithdraw(true)}>
+              反映を取り消す
+            </button>
+          ) : null}
+        </div>
+        <p className="tiny dim" style={{ marginBottom: 0, marginTop: 8 }}>
+          {lifecycle === 'FINALIZED'
+            ? '同じオーダーを何度反映しても二重加算されません (反映済みの差分だけが適用されます)。'
+            : '確定するとシーズン累計へ反映できるようになります。'}
+        </p>
+      </Card>
+
       <h2 className="section-title">その他</h2>
       <Card>
         <div className="row wrap" style={{ gap: 8 }}>
-          <button type="button" className="btn small" onClick={saveToHistory}>
-            履歴に保存
-          </button>
-          <button type="button" className="btn small" onClick={() => setConfirmSeason(true)}>
-            シーズン累計へ反映
-          </button>
           <button
             type="button"
             className="btn small"
@@ -454,20 +507,95 @@ export function ResultPage({
           solution={solution}
           match={match}
           onMatchChange={onMatchChange}
+          lifecycle={lifecycle}
+          versions={versions}
           onClose={() => setShareOpen(false)}
         />
       ) : null}
 
+      {diffOpen && pendingDiff && latest ? (
+        <Sheet title={`v${latest.version} からの変更`} onClose={() => setDiffOpen(false)}>
+          <VersionDiff
+            diff={pendingDiff}
+            beforeLabel={`v${latest.version} (確定済み)`}
+            afterLabel="現在の内容"
+          />
+        </Sheet>
+      ) : null}
+
       {confirmSeason ? (
         <ConfirmDialog
-          title="シーズン累計へ反映"
-          message="このオーダーの出場回数を各メンバーのシーズン累計へ加算します。同じオーダーで二重に実行すると二重加算になります。"
+          title={seasonStatus === 'none' ? 'シーズン累計へ反映' : 'シーズン累計を再反映'}
+          message={
+            seasonStatus === 'none'
+              ? `確定版 v${latest?.version ?? 1} の出場回数をシーズン累計へ反映します。反映済みの分は記録されるため、同じ内容を何度実行しても二重加算されません。`
+              : `シーズン累計を確定版 v${latest?.version ?? 1} の内容に合わせます。既に反映済みの分との差分だけが適用されます。`
+          }
           confirmLabel="反映する"
           onCancel={() => setConfirmSeason(false)}
-          onConfirm={applySeason}
+          onConfirm={() => {
+            onCommitSeason();
+            setConfirmSeason(false);
+          }}
+        />
+      ) : null}
+
+      {confirmWithdraw ? (
+        <ConfirmDialog
+          title="シーズン反映を取り消す"
+          message="このオーダーがシーズン累計へ加えた分をすべて差し戻します。反映前の数値に戻ります。"
+          confirmLabel="取り消す"
+          destructive
+          onCancel={() => setConfirmWithdraw(false)}
+          onConfirm={() => {
+            onWithdrawSeason();
+            setConfirmWithdraw(false);
+          }}
         />
       ) : null}
     </>
+  );
+}
+
+function OrderStateBanner({
+  lifecycle,
+  versions,
+  latestVersion: latest,
+  seasonStatus,
+  changeCount,
+  onShowDiff,
+}: {
+  lifecycle: OrderLifecycleState;
+  versions: number;
+  latestVersion: number;
+  seasonStatus: SeasonCommitStatus;
+  changeCount: number;
+  onShowDiff: () => void;
+}): React.JSX.Element {
+  const tone = lifecycle === 'DRAFT' ? 'draft' : lifecycle === 'FINALIZED' ? 'finalized' : 'updated';
+  const note =
+    lifecycle === 'DRAFT'
+      ? '確定するとバージョンが付き、チームへ共有できます。'
+      : lifecycle === 'FINALIZED'
+        ? `最新の確定版は v${latest} です。${SEASON_STATUS_LABELS[seasonStatus]}。`
+        : `v${latest} を共有済みです。${changeCount} 件の変更があるため、再確定してから共有してください。`;
+
+  return (
+    <div className={`state-banner ${tone}`}>
+      <span aria-hidden="true">{lifecycle === 'FINALIZED' ? '✓' : lifecycle === 'UPDATED' ? '!' : '✎'}</span>
+      <span className="state-text">
+        <span className="state-title">
+          {ORDER_STATE_LABELS[lifecycle]}
+          {versions > 0 ? ` ・ v${latest}` : ''}
+        </span>
+        <span className="state-note">{note}</span>
+      </span>
+      {lifecycle === 'UPDATED' ? (
+        <button type="button" className="btn small" onClick={onShowDiff}>
+          変更点
+        </button>
+      ) : null}
+    </div>
   );
 }
 

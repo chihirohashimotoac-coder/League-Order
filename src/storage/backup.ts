@@ -4,6 +4,7 @@ import type {
   PairSetting,
   Player,
   SavedOrder,
+  SeasonCommit,
   Team,
 } from '../domain/types';
 import { GAME_KINDS, PAIR_AFFINITIES } from '../domain/types';
@@ -197,7 +198,30 @@ export function parseBackup(raw: string): ImportResult {
   const orders: SavedOrder[] = (Array.isArray(data.orders) ? data.orders : [])
     .filter(isRecord)
     .filter((row) => typeof row.id === 'string' && isRecord(row.input) && isRecord(row.solution))
-    .map((row) => row as unknown as SavedOrder);
+    .map((row) => ({
+      ...(row as unknown as SavedOrder),
+      // Backups written before versioning existed carry no versions: those orders are
+      // read back as drafts rather than being rejected.
+      versions: Array.isArray(row.versions) ? (row.versions as SavedOrder['versions']) : [],
+    }));
+
+  const seasonCommits: SeasonCommit[] = (Array.isArray(data.seasonCommits) ? data.seasonCommits : [])
+    .filter(isRecord)
+    .filter((row) => typeof row.id === 'string' && Array.isArray(row.appearances))
+    .map((row) => ({
+      id: asString(row.id),
+      teamId: asString(row.teamId),
+      committedVersion: Math.max(1, Math.round(asNumber(row.committedVersion, 1))),
+      committedAt: asNumber(row.committedAt, Date.now()),
+      appearances: (row.appearances as unknown[])
+        .filter(isRecord)
+        .map((record) => ({
+          playerId: asString(record.playerId),
+          count: Math.round(asNumber(record.count, 0)),
+          byKind: parseKindCounts(record.byKind),
+        }))
+        .filter((record) => record.playerId !== ''),
+    }));
 
   const settingsRow = isRecord(data.settings) ? data.settings : {};
   const settings: AppSettings = {
@@ -229,5 +253,9 @@ export function parseBackup(raw: string): ImportResult {
   }
 
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, snapshot: { teams, players, formats, pairs, orders, settings }, warnings };
+  return {
+    ok: true,
+    snapshot: { teams, players, formats, pairs, orders, seasonCommits, settings },
+    warnings,
+  };
 }

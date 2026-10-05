@@ -29,6 +29,8 @@ const COLORS = {
   card: '#182131',
   cardAlt: '#1d2838',
   badge: '#0f2436',
+  draftBadge: '#3a2a12',
+  draftText: '#fbbf24',
   accent: '#4cc9f0',
   text: '#f2f7fd',
   muted: '#9badc4',
@@ -106,7 +108,8 @@ function buildHeaderBlock(ctx: CanvasRenderingContext2D, layout: ShareLayout): B
   const vsH = opponentLines.length > 0 ? 22 : 0;
   const opponentH = opponentLines.length * 32;
   const dateH = layout.header.dateText ? 26 : 0;
-  const height = 10 + titleH + teamH + vsH + opponentH + dateH + 16;
+  const versionH = layout.header.versionText ? 24 : 0;
+  const height = 10 + titleH + teamH + vsH + opponentH + dateH + versionH + 16;
 
   return {
     height,
@@ -147,6 +150,23 @@ function buildHeaderBlock(ctx: CanvasRenderingContext2D, layout: ShareLayout): B
         target.font = font(17);
         target.fillText(layout.header.dateText, WIDTH / 2, y + 2);
         y += 26;
+      }
+
+      // Version badge: small and muted so it never competes with the order itself, but
+      // always present once an order has been finalized (追加要件 §6).
+      if (layout.header.versionText) {
+        const isDraft = layout.header.versionText.includes('未確定');
+        target.font = font(13, 'bold');
+        const label = layout.header.versionText;
+        const textWidth = target.measureText(label).width;
+        const padX = 10;
+        const boxWidth = textWidth + padX * 2;
+        const boxX = (WIDTH - boxWidth) / 2;
+        target.fillStyle = isDraft ? COLORS.draftBadge : COLORS.badge;
+        drawRoundedRect(target, boxX, y + 2, boxWidth, 22, 11);
+        target.fillStyle = isDraft ? COLORS.draftText : COLORS.accent;
+        target.fillText(label, WIDTH / 2, y + 7);
+        y += 24;
       }
 
       target.textAlign = 'left';

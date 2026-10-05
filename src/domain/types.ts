@@ -439,6 +439,73 @@ export type GenerateResult =
 // Persistence
 // ---------------------------------------------------------------------------
 
+/**
+ * Lifecycle of a saved order (追加要件 §2).
+ *
+ * The state is **derived**, never stored: it is a pure function of the finalized
+ * versions and the content of the working copy (see `domain/orders/lifecycle.ts`).
+ * That makes the transitions unambiguous and impossible to leave stale — opening the
+ * share screen or regenerating an image cannot change it, while any edit that changes
+ * what the team would see flips FINALIZED to UPDATED on its own.
+ */
+export type OrderLifecycleState = 'DRAFT' | 'FINALIZED' | 'UPDATED';
+
+export const ORDER_STATE_LABELS: Record<OrderLifecycleState, string> = {
+  DRAFT: '未確定',
+  FINALIZED: '確定済み',
+  UPDATED: '変更あり (再確定が必要)',
+};
+
+/** Appearances a single player accrued in one version of an order. */
+export interface AppearanceRecord {
+  playerId: PlayerId;
+  count: number;
+  byKind: Partial<Record<GameKind, number>>;
+}
+
+/**
+ * An immutable snapshot taken when an order is finalized (追加要件 §4, §5).
+ *
+ * It carries its own copies of the games, players, participants and match context, so a
+ * later rename, roster change or format edit can never rewrite what was already shared.
+ */
+export interface OrderVersion {
+  /** 1-based, incrementing per finalization of the same order. */
+  version: number;
+  finalizedAt: number;
+  /** Canonical digest of the shared content; drives the lifecycle state. */
+  fingerprint: string;
+  assignments: GameAssignment[];
+  games: GameSlotDef[];
+  players: Player[];
+  participants: ParticipantConfig[];
+  match: MatchInfo;
+  tallies: PlayerTally[];
+  /** Appearances this version contributes to season totals. */
+  appearances: AppearanceRecord[];
+  /** Order type (preset label) that produced it. */
+  label: string;
+  hasImputedRating: boolean;
+}
+
+/**
+ * Ledger entry recording exactly what a saved order has contributed to season totals
+ * (追加要件 §12). The ledger — not a flag and not a dialog — is what makes committing
+ * idempotent: re-committing applies the difference against this record, which is zero
+ * when nothing changed.
+ */
+export interface SeasonCommit {
+  /** Keyed by order: one active commit per order. */
+  id: OrderId;
+  teamId: TeamId;
+  committedVersion: number;
+  committedAt: number;
+  /** The exact amounts currently reflected in the players' season totals. */
+  appearances: AppearanceRecord[];
+}
+
+export type SeasonCommitStatus = 'none' | 'current' | 'outdated';
+
 export interface SavedOrder {
   id: OrderId;
   teamId: TeamId;
@@ -450,7 +517,13 @@ export interface SavedOrder {
   solution: OrderSolution;
   /** Match context captured alongside the order, for re-sharing it later. */
   match?: MatchInfo;
-  /** True once the order's appearances have been committed to season totals. */
+  /** Finalized snapshots, oldest first. Empty while the order is still a draft. */
+  versions: OrderVersion[];
+  /**
+   * Legacy cache of "has been committed to the season".
+   * The `seasonCommits` ledger is the source of truth; this is kept in step for
+   * backups written by, and readable by, older builds.
+   */
   seasonApplied: boolean;
 }
 

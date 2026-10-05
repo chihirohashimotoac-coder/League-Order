@@ -87,6 +87,7 @@ describe('Repository', () => {
       formats: [],
       pairs: [],
       orders: [],
+      seasonCommits: [],
       settings: seed.settings,
     };
     await repository.mergeAll(extra);

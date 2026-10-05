@@ -55,6 +55,13 @@ function Harness({
       onMatchChange={() => undefined}
       onRegenerate={() => undefined}
       onReoptimise={() => undefined}
+      record={null}
+      lifecycle="DRAFT"
+      seasonStatus="none"
+      onFinalize={() => undefined}
+      onSaveDraft={() => undefined}
+      onCommitSeason={() => undefined}
+      onWithdrawSeason={() => undefined}
     />
   );
 }

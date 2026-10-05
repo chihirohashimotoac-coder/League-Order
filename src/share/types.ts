@@ -1,4 +1,4 @@
-import type { PlayerId } from '../domain/types';
+import type { GameAssignment, PlayerId, PlayerTally } from '../domain/types';
 
 /**
  * Share layout model (docs/DESIGN.md 追補 §S1, §S4).
@@ -11,7 +11,36 @@ import type { PlayerId } from '../domain/types';
 /** Compact is for the team chat; detail is the captain's record. */
 export type ShareImageVariant = 'compact' | 'detail';
 
-export type ShareTextFormat = 'line' | 'simple' | 'detail';
+export type ShareTextFormat = 'line' | 'simple' | 'detail' | 'updateDiff' | 'updateFull';
+
+/**
+ * Version badge carried on every shared form (追加要件 §6, §7).
+ *
+ * Kept deliberately small on the image — one muted line — so it does not compete with
+ * the order itself, while still telling a member which copy they are looking at.
+ */
+export interface ShareVersionInfo {
+  /** Finalized version number, or 0 while the order is still a draft. */
+  version: number;
+  /** True for v2 and later: the team has already seen an earlier copy. */
+  isUpdate: boolean;
+  /** True when nothing has been finalized yet. */
+  draft: boolean;
+}
+
+/**
+ * The parts of an order the share layer reads.
+ *
+ * `OrderSolution` satisfies this structurally, and so does a stored `OrderVersion` (via
+ * `shareableFromVersion`), which is how a past version can be re-shared exactly as it
+ * was finalized.
+ */
+export interface ShareableOrder {
+  assignments: readonly GameAssignment[];
+  tallies: readonly PlayerTally[];
+  metrics: { hasImputedRating: boolean };
+  meta: { label: string };
+}
 
 export interface ShareHeader {
   /** League name when set, otherwise the generic title. */
@@ -21,6 +50,8 @@ export interface ShareHeader {
   opponentName: string;
   /** Pre-formatted, e.g. `2026/10/08`. Empty when no date is set. */
   dateText: string;
+  /** e.g. `ORDER v2 · 更新版`, or `未確定 (DRAFT)`. Empty when not applicable. */
+  versionText: string;
 }
 
 export interface ShareGameRow {

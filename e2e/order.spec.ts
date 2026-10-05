@@ -229,7 +229,9 @@ test.describe('persistence and offline', () => {
   test('saves an order to history and reopens it', async ({ page }) => {
     await openFresh(page);
     await generate(page);
-    await page.getByRole('button', { name: '履歴に保存' }).click();
+    // Saving without finalizing keeps the order a draft; finalizing is covered in
+    // e2e/lifecycle.spec.ts.
+    await page.getByRole('button', { name: '下書きを保存' }).click();
 
     await tab(page, '履歴').click();
     await expect(page.getByRole('heading', { name: '履歴', level: 1 })).toBeVisible();

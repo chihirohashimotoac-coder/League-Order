@@ -55,6 +55,7 @@ export function buildSeed(): Snapshot {
     formats: [format],
     pairs: [],
     orders: [],
+    seasonCommits: [],
     settings: { ...DEFAULT_SETTINGS, activeTeamId: team.id },
   };
 }

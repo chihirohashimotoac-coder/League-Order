@@ -18,6 +18,7 @@ export const STORE_NAMES = [
   'formats',
   'pairs',
   'orders',
+  'seasonCommits',
   'settings',
 ] as const;
 
@@ -41,7 +42,9 @@ export interface StorageBackend {
 }
 
 const DB_NAME = 'darts-league-order';
-const DB_VERSION = 1;
+// v2 added the `seasonCommits` store. The upgrade handler creates any store that is
+// missing, so an existing v1 database is upgraded in place with its data intact.
+const DB_VERSION = 2;
 
 function promisify<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
