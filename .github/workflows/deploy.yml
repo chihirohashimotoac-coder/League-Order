@@ -60,6 +60,23 @@ jobs:
       - name: End-to-end tests (mobile and desktop)
         run: npm run test:e2e
 
+      # Printed into the log as well as uploaded, because the artifact blob host is not
+      # reachable from every network, and a failure nobody can read is a failure nobody
+      # can fix. Each error-context.md holds the page's accessibility snapshot at the
+      # moment the assertion gave up, which is usually the whole diagnosis.
+      - name: Print the failure context
+        if: failure()
+        run: |
+          found=0
+          while IFS= read -r f; do
+            found=1
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done < <(find test-results -name 'error-context.md' -print 2>/dev/null)
+          [ "$found" = 0 ] && echo "no error-context.md files were produced"
+          exit 0
+
       - name: Upload the Playwright report when the suite fails
         if: failure()
         uses: actions/upload-artifact@v4
