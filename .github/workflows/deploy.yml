@@ -1,0 +1,92 @@
+name: Build, verify and deploy to GitHub Pages
+
+# The app is a Vite PWA, so what gets published is the built `dist/`, never the
+# repository root: `index.html` at the root is the Vite source entry and loads
+# `/src/main.tsx`, which a browser cannot execute. Pages has no build step of its own,
+# so the build happens here and the output is handed to Pages as an artifact.
+#
+# Deployment is gated on the full verification suite. These tests exist to protect
+# invariants nobody is watching for — above all that an order whose appearances are
+# already counted in the season standings cannot be deleted — so a red suite must stop
+# the release rather than annotate it.
+
+on:
+  push:
+    branches: [main]
+  # Lets a deploy be re-run from the Actions tab without pushing a commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race. In-progress runs are allowed to finish so a half-uploaded
+# artifact is not published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  verify-and-build:
+    name: Verify and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit, integration and component tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # The repo's playwright.config.ts prefers a pre-installed Chromium when one is
+      # present and otherwise falls back to Playwright's own, so the runner only needs
+      # the browser it does not have.
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests (mobile and desktop)
+        run: npm run test:e2e
+
+      - name: Upload the Playwright report when the suite fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      # `vite.config.ts` sets `base: './'`, so the built asset, manifest and service
+      # worker references are all relative and work unchanged under the project
+      # sub-path (…github.io/League-Order/) without rewriting anything here.
+      - name: Upload the built site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    # Nothing is published unless lint, every test and the build all passed.
+    needs: verify-and-build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
