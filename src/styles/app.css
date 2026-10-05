@@ -146,6 +146,30 @@ body {
   cursor: pointer;
 }
 
+/*
+ * The tab bar's height is load-bearing: `.action-bar` is anchored above it at
+ * `--nav-height`, and the main scroll area reserves the same amount. A label that wraps
+ * to a second line therefore does not just look different — it makes the bar taller than
+ * the offset everything else assumes, and the action bar ends up underneath it. (At
+ * 320px, "フォーマット" wrapped and buried 5px of the share and regenerate buttons.)
+ *
+ * Keeping the label on one line makes that impossible by construction, at any width and
+ * for any label, rather than relying on a particular string fitting a particular box.
+ */
+.tab-bar button .tab-label {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Below ~360px five labels no longer fit at the normal size; shrink rather than wrap. */
+@media (max-width: 359px) {
+  .tab-bar button {
+    font-size: 9.5px;
+  }
+}
+
 .tab-bar button .tab-icon {
   font-size: 19px;
   line-height: 1;

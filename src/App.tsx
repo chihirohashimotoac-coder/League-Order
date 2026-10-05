@@ -431,7 +431,7 @@ export function App(): React.JSX.Element {
             <span className="tab-icon" aria-hidden="true">
               {tab.icon}
             </span>
-            {tab.label}
+            <span className="tab-label">{tab.label}</span>
           </button>
         ))}
       </nav>

@@ -150,11 +150,23 @@ export class Repository {
     return this.backend.put('orders', order);
   }
 
-  async deleteOrder(orderId: string): Promise<void> {
+  /**
+   * Deletes a saved order — unless its season contribution is still counted.
+   *
+   * Removing the order while a ledger entry exists would strand the appearances it
+   * added to the players' season totals: the amounts would stay in the totals with no
+   * record of where they came from and no way left to withdraw them. The ledger entry
+   * is therefore treated as a lock, and the refusal is enforced here rather than only
+   * in the UI, so no caller can corrupt the totals by skipping the check.
+   *
+   * Withdrawing the contribution is a separate, explicit user action (`withdrawSeason`);
+   * deleting must never roll season totals back on its own.
+   */
+  async deleteOrder(orderId: string): Promise<'deleted' | 'blocked'> {
+    const commit = await this.backend.get<SeasonCommit>('seasonCommits', orderId);
+    if (commit) return 'blocked';
     await this.backend.remove('orders', orderId);
-    // The ledger entry is meaningless without its order; the caller is responsible for
-    // withdrawing the season contribution first if that is what the user wanted.
-    await this.backend.remove('seasonCommits', orderId);
+    return 'deleted';
   }
 
   saveSeasonCommit(commit: SeasonCommit): Promise<void> {

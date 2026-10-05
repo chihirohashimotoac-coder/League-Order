@@ -8,6 +8,7 @@ import { GAME_KIND_LABELS, PAIR_AFFINITY_LABELS } from '../../domain/types';
 import { runLengths } from '../../domain/orders/consecutive';
 import { round } from '../../utils/math';
 import type { Combo } from '../candidates/combinations';
+import type { HardViolation } from '../constraints/validate';
 import type { PreparedContext } from '../prepare';
 import type { Evaluation } from './score';
 import type { BoundContext } from '../search/bound';
@@ -37,9 +38,31 @@ export function buildExplanation(
   bctx: BoundContext,
   selection: readonly Combo[],
   evaluation: Evaluation,
+  /**
+   * Hard-constraint violations of the line-up being explained.
+   *
+   * Empty for anything the search produced — a solution that breaks a hard constraint is
+   * never returned — but a hand-edited line-up can break one, and the reasons must then
+   * say so. An explanation that asserts "nothing is violated" next to a validator that
+   * says otherwise is worse than no explanation at all: it teaches the captain to
+   * distrust the screen.
+   */
+  violations: readonly HardViolation[] = [],
 ): OrderExplanation {
   const games: GameExplanation[] = [];
   const w = ctx.weights;
+
+  const violationsByGame = new Map<string, HardViolation[]>();
+  const globalViolations: HardViolation[] = [];
+  for (const violation of violations) {
+    if (violation.gameId === undefined) {
+      globalViolations.push(violation);
+      continue;
+    }
+    const list = violationsByGame.get(violation.gameId);
+    if (list) list.push(violation);
+    else violationsByGame.set(violation.gameId, [violation]);
+  }
 
   for (let gi = 0; gi < selection.length; gi += 1) {
     const combo = selection[gi];
@@ -198,18 +221,44 @@ export function buildExplanation(
         tone: 'neutral',
       });
     }
-    factors.push({
-      key: 'constraint',
-      label: 'Hard制約',
-      detail: `出場不可・出場可能範囲・最大出場回数・禁止ペアのいずれにも違反していません (${names.join(' / ')})。`,
-      tone: 'positive',
-    });
+    const gameViolations = violationsByGame.get(game.id) ?? [];
+    factors.push(
+      gameViolations.length > 0
+        ? {
+            key: 'constraint',
+            label: 'Hard制約違反',
+            detail: gameViolations.map((violation) => violation.message).join(' '),
+            tone: 'negative',
+          }
+        : {
+            key: 'constraint',
+            label: 'Hard制約',
+            detail: `出場不可・出場可能範囲・最大出場回数・禁止ペアのいずれにも違反していません (${names.join(' / ')})。`,
+            tone: 'positive',
+          },
+    );
 
     games.push({ gameId: game.id, playerIds: combo.members.map((pi) => ctx.playerIds[pi]), factors });
   }
 
   // --- Order-level summary --------------------------------------------------
-  const overall: ExplanationFactor[] = [
+  const overall: ExplanationFactor[] = [];
+
+  // Violations that are not tied to a single game (appearance bounds, locks) belong at
+  // the top of the summary, ahead of any soft score that would otherwise read as praise.
+  if (violations.length > 0) {
+    overall.push({
+      key: 'constraint',
+      label: 'Hard制約違反',
+      detail:
+        globalViolations.length > 0
+          ? globalViolations.map((violation) => violation.message).join(' ')
+          : `${violations.length} 件の違反があります (各ゲームの理由を確認してください)。`,
+      tone: 'negative',
+    });
+  }
+
+  overall.push(
     {
       key: 'fairness',
       label: '出場回数の均等性',
@@ -239,7 +288,7 @@ export function buildExplanation(
       detail: `全ゲーム平均の適性評価 ${(evaluation.gameFitRaw * 100).toFixed(0)}%`,
       tone: toneFor(evaluation.gameFitRaw),
     },
-  ];
+  );
 
   if (ctx.multiPlayerGameCount > 0) {
     overall.push({

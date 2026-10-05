@@ -10,7 +10,7 @@ import {
   shareableFromVersion,
   versionInfoOf,
 } from '../share';
-import { useAppStore } from '../state/appStore';
+import { SEASON_COMMITTED_DELETE_MESSAGE, useAppStore } from '../state/appStore';
 import { VersionDiff } from '../components/VersionDiff';
 import { Card, ConfirmDialog, EmptyState, Sheet, useToast } from '../components/ui';
 
@@ -28,6 +28,7 @@ export function HistoryPage({ onOpen }: { onOpen: (order: SavedOrder) => void })
     null,
   );
   const [confirmDelete, setConfirmDelete] = useState<SavedOrder | null>(null);
+  const [confirmWithdraw, setConfirmWithdraw] = useState<SavedOrder | null>(null);
 
   if (store.teamOrders.length === 0) {
     return (
@@ -143,22 +144,74 @@ export function HistoryPage({ onOpen }: { onOpen: (order: SavedOrder) => void })
         />
       ) : null}
 
+      {/*
+        Deleting an order that is still counted in the season totals is refused, not
+        warned about: the appearances would otherwise stay in the standings with the
+        ledger entry that recorded them gone, which is unrecoverable. Withdrawing is
+        offered here as its own step with its own confirmation, so the data only ever
+        changes when the captain asks for it (追加要件 §10, §11).
+      */}
       {confirmDelete ? (
+        store.seasonCommitFor(confirmDelete.id) ? (
+          <Sheet
+            title="削除できません"
+            onClose={() => setConfirmDelete(null)}
+            footer={
+              <>
+                {/* Not "閉じる": the sheet's own ✕ already carries that name, and two
+                    buttons with the same accessible name in one dialog is ambiguous to
+                    a screen reader. */}
+                <button type="button" className="btn grow" onClick={() => setConfirmDelete(null)}>
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  className="btn danger grow"
+                  onClick={() => {
+                    setConfirmWithdraw(confirmDelete);
+                    setConfirmDelete(null);
+                  }}
+                >
+                  シーズン反映を取り消す
+                </button>
+              </>
+            }
+          >
+            <p className="small-text" style={{ marginTop: 0 }} data-testid="delete-blocked">
+              {SEASON_COMMITTED_DELETE_MESSAGE}
+            </p>
+            <p className="tiny dim" style={{ marginBottom: 0 }}>
+              取り消すと、このオーダーがシーズン累計へ加えた分だけが差し戻されます。内容を確認したうえで、改めて削除してください。
+            </p>
+          </Sheet>
+        ) : (
+          <ConfirmDialog
+            title="オーダーを削除"
+            message={`${confirmDelete.title} を履歴から削除します。この操作は取り消せません。`}
+            confirmLabel="削除する"
+            destructive
+            onCancel={() => setConfirmDelete(null)}
+            onConfirm={() => {
+              const result = store.deleteOrder(confirmDelete.id);
+              toast.show(result.message, result.ok ? 'ok' : 'error');
+              setConfirmDelete(null);
+              if (result.ok) setPreview(null);
+            }}
+          />
+        )
+      ) : null}
+
+      {confirmWithdraw ? (
         <ConfirmDialog
-          title="オーダーを削除"
-          message={`${confirmDelete.title} を履歴から削除します。${
-            store.seasonCommitFor(confirmDelete.id)
-              ? ' このオーダーはシーズン累計へ反映済みです。先に「反映を取り消す」を実行しないと、累計に反映分が残ります。'
-              : ''
-          }`}
-          confirmLabel="削除する"
+          title="シーズン反映を取り消す"
+          message={`${confirmWithdraw.title} がシーズン累計へ加えた分をすべて差し戻します。反映前の数値に戻ります。オーダー自体はまだ削除されません。`}
+          confirmLabel="取り消す"
           destructive
-          onCancel={() => setConfirmDelete(null)}
+          onCancel={() => setConfirmWithdraw(null)}
           onConfirm={() => {
-            store.deleteOrder(confirmDelete.id);
-            toast.show('削除しました', 'ok');
-            setConfirmDelete(null);
-            setPreview(null);
+            const result = store.withdrawSeason(confirmWithdraw.id);
+            toast.show(result.message, result.ok ? 'ok' : 'error');
+            setConfirmWithdraw(null);
           }}
         />
       ) : null}

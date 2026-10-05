@@ -45,15 +45,20 @@ export function precheck(input: OrderInput): Diagnostic[] {
   }
 
   for (const game of ctx.games) {
-    if (game.playerCount < 1) {
+    // A fractional head count is as unusable as a missing one: no assignment can ever
+    // match it, so it is reported here rather than surfacing as "no order found".
+    if (!Number.isInteger(game.playerCount) || game.playerCount < 1) {
       diagnostics.push({
         code: 'INVALID_GAME',
         gameId: game.id,
-        message: `${game.name}: 必要人数が 1 未満です。`,
-        suggestions: [{ kind: 'other', message: '必要人数を 1 以上に設定してください。', gameId: game.id }],
+        message: `${game.name}: 必要人数 (${game.playerCount}) が 1 以上の整数ではありません。`,
+        suggestions: [{ kind: 'other', message: '必要人数を 1 以上の整数に設定してください。', gameId: game.id }],
       });
     }
   }
+  // The remaining checks reason about head counts arithmetically, so there is nothing
+  // meaningful to add until the format itself is valid.
+  if (diagnostics.length > 0) return diagnostics;
 
   // Per-game eligibility.
   for (let gi = 0; gi < ctx.gameCount; gi += 1) {
