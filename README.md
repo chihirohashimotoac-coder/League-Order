@@ -16,7 +16,7 @@
 | 生成 | 5 プリセット (勝利優先 / バランス / 公平性優先 / 育成重視 / 新ペア試行) ・最大 3 候補の比較 |
 | 調整 | ロック (スロット単位 / ゲーム単位) ・手動編集 (リアルタイム再評価) ・Undo / Redo ・部分再最適化 |
 | 説明 | ゲームごとの生成理由・評価内訳・警告・解が無い場合の原因と解決候補 |
-| 共有 | 縦長オーダー画像 (PNG) ・テキスト・クリップボード・OS 共有シート |
+| 共有 | LINE 向け縦長 PNG (コンパクト / 詳細) ・プレイヤー別ビュー ・3 種のテキスト ・クリップボード ・端末標準の共有メニュー (Web Share API) |
 | 保存 | IndexedDB (localStorage / メモリへ自動縮退) ・JSON Export / Import ・オーダー履歴・シーズン累計 |
 | 動作 | PWA / オフライン動作 / モバイルファースト / iOS・Android・PC ブラウザ |
 
@@ -57,7 +57,7 @@ npx tsx scripts/sample.ts   # 仕様 §38 のサンプル検証を出力
 
 ```
 src/
-  components/     再利用 UI
+  components/     再利用 UI (ShareSheet / MatchInfoFields を含む)
   pages/          画面 (HOME / PLAYERS / PAIRS / FORMATS / SETUP / RESULT / HISTORY / SETTINGS)
   state/          App ストア + オーダーセッション (Undo 付き reducer)
   domain/         エンティティと純粋なドメインロジック   ← React / DOM / Storage 非依存
@@ -68,12 +68,19 @@ src/
     scoring/      評価関数と生成理由
     search/       Beam / Branch and Bound / 局所探索
     generateOrder.ts  diagnose.ts  runner.ts  order.worker.ts
+  share/          共有 (Presentation) 層                ← optimizer / UI / Storage 非依存
+    layout.ts     レイアウトモデル・折返し・ページ分割 (純関数)
+    text.ts       LINE / シンプル / 詳細 / プレイヤー別テキスト (純関数)
+    canvas.ts     Canvas 2D による PNG 生成
+    webShare.ts   Web Share API・クリップボード・ダウンロード
   storage/        IndexedDB / フォールバック / Repository / JSON バックアップ
   utils/          汎用ヘルパー
 ```
 
-`domain/` と `optimizer/` が React・DOM・Storage に依存しないことは、
-ESLint の `no-restricted-imports` / `no-restricted-globals` で機械的に検査しています。
+`domain/` と `optimizer/` が React・DOM・Storage に依存しないこと、および
+`share/` が `optimizer/` に依存しないことは、ESLint の `no-restricted-imports` /
+`no-restricted-globals` で機械的に検査しています。
+共有機能は生成済みの結果を読むだけで、制約・最適化・Lock・再最適化・公平性の挙動には関与しません。
 
 最適化は **Web Worker** 上で実行され、生成中も UI は固まりません
 (Worker が使えない環境では同期実行へ自動縮退)。
@@ -101,6 +108,23 @@ ESLint の `no-restricted-imports` / `no-restricted-globals` で機械的に検�
 - 5 名 / 11 枠 → 3,2,2,2,2 (最大差 1)
 
 が単一指標から自動的に導かれます。最大差・標準偏差は検品用に併記します。
+
+### 共有 (LINE 向け)
+
+ORDER RESULT の「共有」から SHARE 画面を開きます。
+
+- **画像** — 論理幅 540px を Device Pixel Ratio に応じて 2〜3 倍で描画し、
+  **1080〜1620px 幅の縦長 PNG** を生成します。
+  「コンパクト」はチーム LINE 向けにオーダーだけを大きな文字で、
+  「詳細」は出場回数・Rating・オーダータイプを追加します。
+  **内部の評価スコアは共有物には一切含めません。**
+- **テキスト** — LINE 形式 (🎯 と全角区切り) / シンプル形式 / 詳細形式。
+- **プレイヤー別** — 各メンバーが自分の出場ゲームとパートナーだけを確認できます。
+- Web Share API 対応端末では端末標準の共有メニュー (LINE・Messenger・Discord・AirDrop 等) に
+  PNG を直接渡します。非対応端末では画像の保存とテキストのコピーへ自動的に切り替わります。
+- 画像生成は Canvas 2D による自前描画で、外部ライブラリも Web フォントも使いません。
+  そのため **オフラインでも画像・テキストを生成できます**。
+- ゲーム数が多い場合は文字を縮小せず、縦に伸ばし、上限を超えたら複数ページへ分割します。
 
 ### Rating 未入力 (Unknown)
 

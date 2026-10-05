@@ -27,6 +27,32 @@ export default tseslint.config(
     },
   },
   {
+    /**
+     * The share layer presents a finished order. It must never reach into the optimizer,
+     * so adding a share feature cannot change constraint, scoring or search behaviour
+     * (追加要件 §15).
+     */
+    files: ['src/share/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/optimizer/**'],
+              message: 'share must not depend on the optimizer (DESIGN.md 追補 §S9).',
+            },
+            {
+              group: ['**/state/**', '**/pages/**', '**/components/**', '**/storage/**'],
+              message: 'share must not depend on UI or storage layers (DESIGN.md 追補 §S9).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Purity boundary for the domain and optimizer layers.
     files: ['src/domain/**/*.ts', 'src/optimizer/**/*.ts'],
     ignores: ['**/*.test.ts', 'src/optimizer/order.worker.ts', 'src/optimizer/runner.ts'],
@@ -40,8 +66,8 @@ export default tseslint.config(
           ],
           patterns: [
             {
-              group: ['**/storage/**', '**/components/**', '**/pages/**', '**/state/**'],
-              message: 'domain/optimizer must not depend on storage or UI layers (DESIGN.md §12).',
+              group: ['**/storage/**', '**/components/**', '**/pages/**', '**/state/**', '**/share/**'],
+              message: 'domain/optimizer must not depend on storage, UI or share layers (DESIGN.md §12).',
             },
           ],
         },

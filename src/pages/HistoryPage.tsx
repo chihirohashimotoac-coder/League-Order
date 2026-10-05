@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { SavedOrder } from '../domain/types';
 import { sortedGames } from '../domain/games/format';
-import { renderOrderText } from '../domain/orders/renderText';
-import { copyText } from '../utils/shareImage';
+import { createMatchInfo } from '../domain/types';
+import { copyText, renderDetailText } from '../share';
 import { useAppStore } from '../state/appStore';
 import { Card, ConfirmDialog, EmptyState, Sheet, useToast } from '../components/ui';
 
@@ -76,9 +76,12 @@ export function HistoryPage({ onOpen }: { onOpen: (order: SavedOrder) => void })
             className="btn small"
             style={{ marginTop: 10 }}
             onClick={async () => {
-              const text = renderOrderText(preview.input.games, preview.input.players, preview.solution, {
-                title: preview.title,
-              });
+              const text = renderDetailText(
+                preview.input.games,
+                preview.input.players,
+                preview.solution,
+                preview.match ?? createMatchInfo(preview.title),
+              );
               const ok = await copyText(text);
               toast.show(ok ? 'コピーしました' : 'コピーできませんでした', ok ? 'ok' : 'error');
             }}

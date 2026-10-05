@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import type { AppSettings, ScoreWeights } from '../domain/types';
 import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../domain/orders/presets';
 import { parseBackup, serialiseBackup } from '../storage/backup';
-import { downloadText } from '../utils/shareImage';
+import { downloadText } from '../share';
 import { useAppStore } from '../state/appStore';
 import { Card, ConfirmDialog, Field, Stepper, useToast } from '../components/ui';
 

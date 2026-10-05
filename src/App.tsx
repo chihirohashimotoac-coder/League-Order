@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Diagnostic, OrderInput, SavedOrder } from './domain/types';
+import type { Diagnostic, MatchInfo, OrderInput, SavedOrder } from './domain/types';
+import { createMatchInfo } from './domain/types';
 import { syncParticipants } from './domain/orders/participants';
+import {
+  autoValuesOf,
+  syncMatchWithTeam,
+  type AutoMatchValues,
+} from './domain/orders/matchInfo';
 import { createRunner, type OrderRunner } from './optimizer/runner';
 import { useAppStore } from './state/appStore';
 import {
@@ -38,6 +44,7 @@ export function App(): React.JSX.Element {
   const runnerRef = useRef<OrderRunner | null>(null);
 
   const [draft, setDraft] = useState<SetupDraft | null>(null);
+  const [match, setMatch] = useState<MatchInfo>(() => createMatchInfo());
   const [applyUpdate, setApplyUpdate] = useState<(() => void) | null>(null);
 
   // A new build is never applied automatically — the captain decides when.
@@ -68,6 +75,21 @@ export function App(): React.JSX.Element {
       };
     });
   }, [store.ready, store.teamPlayers, store.teamFormats, store.settings]);
+
+  /**
+   * Keeps the match header in step with the active team (see `syncMatchWithTeam`).
+   *
+   * The previous automatic values are read into a local before the ref is updated: the
+   * state updater runs after this effect body, so reading the ref from inside it would
+   * always see the new values and never recognise an untouched field.
+   */
+  const autoMatch = useRef<AutoMatchValues>({ teamName: '', leagueName: '' });
+  useEffect(() => {
+    if (!store.ready) return;
+    const previous = autoMatch.current;
+    autoMatch.current = autoValuesOf(store.activeTeam);
+    setMatch((current) => syncMatchWithTeam(current, previous, store.activeTeam));
+  }, [store.ready, store.activeTeam]);
 
   const dispatch = useCallback((action: UndoableAction) => {
     setSession((current) => (current ? undoableReducer(current, action) : current));
@@ -152,6 +174,9 @@ export function App(): React.JSX.Element {
         candidates: [order.solution],
       });
       setSession(restored);
+      // A saved order carries the match it was played for, so re-sharing it later
+      // reproduces the same header.
+      if (order.match) setMatch(order.match);
       setDiagnostics([]);
       setPage('result');
       toast.show('履歴から読み込みました', 'ok');
@@ -223,6 +248,8 @@ export function App(): React.JSX.Element {
           <SetupPage
             draft={draft}
             onDraftChange={setDraft}
+            match={match}
+            onMatchChange={setMatch}
             onGenerate={handleGenerate}
             generating={generating}
           />
@@ -235,6 +262,8 @@ export function App(): React.JSX.Element {
               games={games}
               diagnostics={diagnostics}
               generating={generating}
+              match={match}
+              onMatchChange={setMatch}
               onRegenerate={handleRegenerate}
               onReoptimise={handleReoptimise}
             />

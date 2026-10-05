@@ -8,6 +8,7 @@ import { ToastProvider } from '../components/ui';
 import { createUndoable, undoableReducer, type UndoableState } from '../state/orderSession';
 import { generateOrder } from '../optimizer/generateOrder';
 import { orderInput, sampleFormatGames, sampleRoster } from '../test/factories';
+import { createMatchInfo } from '../domain/types';
 import 'fake-indexeddb/auto';
 
 /**
@@ -50,6 +51,8 @@ function Harness({
       games={games}
       diagnostics={[]}
       generating={false}
+      match={createMatchInfo('テストチーム')}
+      onMatchChange={() => undefined}
       onRegenerate={() => undefined}
       onReoptimise={() => undefined}
     />

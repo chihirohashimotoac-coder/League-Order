@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type {
   FormatId,
   GameKind,
+  MatchInfo,
   OptimizerSettings,
   OrderInput,
   ParticipantConfig,
@@ -17,6 +18,7 @@ import {
   minAppearancesFor,
 } from '../domain/orders/participants';
 import { useAppStore } from '../state/appStore';
+import { MatchInfoFields } from '../components/MatchInfoFields';
 import { Card, EmptyState, Field, Sheet, Stepper, useToast } from '../components/ui';
 
 /**
@@ -36,11 +38,15 @@ export interface SetupDraft {
 export function SetupPage({
   draft,
   onDraftChange,
+  match,
+  onMatchChange,
   onGenerate,
   generating,
 }: {
   draft: SetupDraft;
   onDraftChange: (next: SetupDraft) => void;
+  match: MatchInfo;
+  onMatchChange: (next: MatchInfo) => void;
   onGenerate: (input: OrderInput) => void;
   generating: boolean;
 }): React.JSX.Element {
@@ -119,6 +125,13 @@ export function SetupPage({
 
   return (
     <>
+      <Card title="試合情報">
+        <p className="tiny dim" style={{ marginTop: 0 }}>
+          共有する画像とテキストの見出しに使います。空欄でも生成できます。
+        </p>
+        <MatchInfoFields value={match} onChange={onMatchChange} />
+      </Card>
+
       <Card title="フォーマット">
         <Field label="使用するフォーマット">
           <select

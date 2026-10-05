@@ -208,6 +208,9 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi | null>(null);
 
+/** Never let notifications bury the screen they are describing. */
+const MAX_VISIBLE_TOASTS = 3;
+
 export function ToastProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
@@ -215,7 +218,9 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
   const show = useCallback((message: string, tone: Toast['tone'] = 'plain') => {
     const id = nextId.current;
     nextId.current += 1;
-    setToasts((current) => [...current, { id, message, tone }]);
+    // Keep only the most recent few: a burst of actions must not cover the controls the
+    // user is still working with.
+    setToasts((current) => [...current, { id, message, tone }].slice(-MAX_VISIBLE_TOASTS));
     setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 3200);
   }, []);
 

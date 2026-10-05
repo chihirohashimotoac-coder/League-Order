@@ -186,19 +186,18 @@ test.describe('order generation workflow', () => {
     expect(firstThree.join(' ')).not.toContain('遠藤');
   });
 
-  test('copies the order as text and offers a share image', async ({ page, context }) => {
+  // Smoke test for the entry point only; e2e/share.spec.ts covers the share screen itself.
+  test('opens the share screen with an image and copyable text', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await openFresh(page);
     await generate(page);
 
-    await page.getByRole('button', { name: '共有' }).click();
+    await page.getByRole('button', { name: '共有', exact: true }).click();
     await expect(page.getByRole('dialog', { name: '共有' })).toBeVisible();
-    await expect(page.locator('img.share-preview')).toBeVisible();
+    await expect(page.locator('img.share-preview').first()).toBeVisible();
 
     await page.getByRole('button', { name: 'テキストをコピー' }).click();
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboard).toContain('ORDER');
-    expect(clipboard).toContain('出場回数');
     for (const name of ['青木', '馬場', '千葉', '土井', '遠藤']) {
       expect(clipboard).toContain(name);
     }

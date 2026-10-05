@@ -239,6 +239,14 @@ function TeamEditor({
           placeholder="例: チーム A"
         />
       </Field>
+      <Field label="リーグ名 (任意)" hint="共有するオーダーの見出しに使われます。">
+        <input
+          type="text"
+          value={draft.leagueName ?? ''}
+          onChange={(event) => setDraft({ ...draft, leagueName: event.target.value })}
+          placeholder="例: 秋季リーグ Div.2"
+        />
+      </Field>
       <Field label="メモ (任意)">
         <textarea
           value={draft.note ?? ''}

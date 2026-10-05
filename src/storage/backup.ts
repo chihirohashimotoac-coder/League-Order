@@ -125,6 +125,7 @@ export function parseBackup(raw: string): ImportResult {
     .map((row) => ({
       id: asString(row.id),
       name: asString(row.name, '名称未設定チーム'),
+      leagueName: typeof row.leagueName === 'string' ? row.leagueName : undefined,
       note: typeof row.note === 'string' ? row.note : undefined,
       createdAt: asNumber(row.createdAt, Date.now()),
     }))

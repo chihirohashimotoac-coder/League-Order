@@ -79,8 +79,30 @@ export interface Player {
 export interface Team {
   id: TeamId;
   name: string;
+  /** League this team plays in. Used on shared orders; purely descriptive. */
+  leagueName?: string;
   note?: string;
   createdAt: number;
+}
+
+/**
+ * Context about the match itself: who it is against, when, and in which league.
+ *
+ * This is deliberately NOT part of `OrderInput`. It has no effect on constraints,
+ * scoring or search — it only appears on the shared image and text — so keeping it out
+ * of the optimizer's input leaves the engine's behaviour untouched.
+ */
+export interface MatchInfo {
+  /** Empty string when unset. */
+  leagueName: string;
+  teamName: string;
+  opponentName: string;
+  /** `YYYY-MM-DD`, or an empty string when unset. */
+  matchDate: string;
+}
+
+export function createMatchInfo(teamName = '', leagueName = ''): MatchInfo {
+  return { leagueName, teamName, opponentName: '', matchDate: '' };
 }
 
 /** One game (one row of the order sheet) inside a league format. */
@@ -426,6 +448,8 @@ export interface SavedOrder {
   /** Full input snapshot so the order can be reopened and re-optimised. */
   input: OrderInput;
   solution: OrderSolution;
+  /** Match context captured alongside the order, for re-sharing it later. */
+  match?: MatchInfo;
   /** True once the order's appearances have been committed to season totals. */
   seasonApplied: boolean;
 }

@@ -2,13 +2,12 @@ import { useMemo, useState } from 'react';
 import type {
   Diagnostic,
   GameSlotDef,
-  OrderSolution,
+  MatchInfo,
   Player,
   SavedOrder,
 } from '../domain/types';
 import { sortedGames } from '../domain/games/format';
-import { renderOrderText } from '../domain/orders/renderText';
-import { copyText, downloadText, renderOrderImage, shareImage } from '../utils/shareImage';
+import { ShareSheet } from '../components/ShareSheet';
 import { createId } from '../utils/id';
 import { useAppStore } from '../state/appStore';
 import {
@@ -19,7 +18,7 @@ import {
   type UndoableAction,
   type UndoableState,
 } from '../state/orderSession';
-import { Bar, Card, ConfirmDialog, EmptyState, Metric, Sheet, useToast } from '../components/ui';
+import { Bar, Card, ConfirmDialog, EmptyState, Metric, useToast } from '../components/ui';
 
 /**
  * ORDER RESULT screen (spec §14–§22, §26).
@@ -34,6 +33,8 @@ export function ResultPage({
   games,
   diagnostics,
   generating,
+  match,
+  onMatchChange,
   onRegenerate,
   onReoptimise,
 }: {
@@ -42,6 +43,8 @@ export function ResultPage({
   games: GameSlotDef[];
   diagnostics: Diagnostic[];
   generating: boolean;
+  match: MatchInfo;
+  onMatchChange: (next: MatchInfo) => void;
   onRegenerate: () => void;
   onReoptimise: (keepGameId: string | null) => void;
 }): React.JSX.Element {
@@ -85,6 +88,7 @@ export function ResultPage({
       updatedAt: Date.now(),
       input: state.input,
       solution,
+      match,
       seasonApplied: false,
     };
     store.saveOrder(order);
@@ -448,7 +452,8 @@ export function ResultPage({
           games={ordered}
           players={players}
           solution={solution}
-          teamName={store.activeTeam?.name ?? 'ORDER'}
+          match={match}
+          onMatchChange={onMatchChange}
           onClose={() => setShareOpen(false)}
         />
       ) : null}
@@ -463,85 +468,6 @@ export function ResultPage({
         />
       ) : null}
     </>
-  );
-}
-
-function ShareSheet({
-  games,
-  players,
-  solution,
-  teamName,
-  onClose,
-}: {
-  games: GameSlotDef[];
-  players: Player[];
-  solution: OrderSolution;
-  teamName: string;
-  onClose: () => void;
-}): React.JSX.Element {
-  const toast = useToast();
-  const title = `${teamName} ORDER`;
-  const text = useMemo(
-    () => renderOrderText(games, players, solution, { title }),
-    [games, players, solution, title],
-  );
-  const image = useMemo(
-    () =>
-      renderOrderImage(games, players, solution, {
-        title,
-        subtitle: new Date().toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }),
-      }),
-    [games, players, solution, title],
-  );
-
-  return (
-    <Sheet title="共有" onClose={onClose}>
-      {image ? (
-        <img className="share-preview" src={image} alt="オーダー画像のプレビュー" />
-      ) : (
-        <p className="small-text muted">この環境では画像を生成できませんでした。テキストをご利用ください。</p>
-      )}
-
-      <div className="row wrap" style={{ gap: 8, marginBottom: 12 }}>
-        <button
-          type="button"
-          className="btn primary grow"
-          disabled={!image}
-          onClick={async () => {
-            if (!image) return;
-            const outcome = await shareImage(image, 'darts-order.png', title);
-            if (outcome.method !== 'none') toast.show(outcome.message, 'ok');
-          }}
-        >
-          画像を共有 / 保存
-        </button>
-        <button
-          type="button"
-          className="btn grow"
-          onClick={async () => {
-            const ok = await copyText(text);
-            toast.show(ok ? 'テキストをコピーしました' : 'コピーできませんでした', ok ? 'ok' : 'error');
-          }}
-        >
-          テキストをコピー
-        </button>
-        <button
-          type="button"
-          className="btn grow"
-          onClick={() => {
-            downloadText(text, 'darts-order.txt', 'text/plain');
-            toast.show('テキストを保存しました', 'ok');
-          }}
-        >
-          テキストを保存
-        </button>
-      </div>
-
-      <label className="field">
-        <span>テキスト</span>
-        <textarea readOnly value={text} rows={14} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 13 }} />
-      </label>
-    </Sheet>
   );
 }
 
