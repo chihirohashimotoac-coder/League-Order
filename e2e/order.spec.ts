@@ -341,19 +341,20 @@ test.describe('persistence and offline', () => {
     await page.getByRole('button', { name: 'メンバーを追加' }).click();
 
     await page.getByLabel('名前 (必須)').fill('新人テスト');
-    // Leave Rating empty on purpose: it must persist as Unknown, not 0.
+    // Leave Rating and PPR empty on purpose: they must persist as Unknown, not 0.
     await page.getByRole('button', { name: '保存', exact: true }).click();
 
     const row = page.locator('.list-row').filter({ hasText: '新人テスト' });
     await expect(row).toHaveCount(1);
-    await expect(row).toContainText('Rt. —');
+    await expect(row).toContainText('戦力データ未設定');
 
     await page.reload();
     await tab(page, 'メンバー').click();
     const reloaded = page.locator('.list-row').filter({ hasText: '新人テスト' });
     await expect(reloaded).toHaveCount(1);
-    await expect(reloaded).toContainText('Rt. —');
+    await expect(reloaded).toContainText('戦力データ未設定');
     await expect(reloaded).not.toContainText('Rt.0');
+    await expect(reloaded).not.toContainText('PPR 0');
   });
 
   test('saves an order to history and reopens it', async ({ page }) => {
