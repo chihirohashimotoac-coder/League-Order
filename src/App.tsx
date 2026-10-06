@@ -78,6 +78,22 @@ export function App(): React.JSX.Element {
 
   const hasTeams = store.teams.length > 0;
 
+  // The working order belongs to the team it was made for. Switching (or deleting) the
+  // active team detaches it: otherwise SETUP re-syncs to the new team's roster while
+  // `record` still points at the old team's order, and re-generating would write one
+  // team's line-up into the other team's history.
+  const workingTeam = useRef<string | null>(null);
+  useEffect(() => {
+    if (!store.ready) return;
+    const previous = workingTeam.current;
+    workingTeam.current = store.activeTeamId;
+    if (previous !== null && previous !== store.activeTeamId) {
+      setSession(null);
+      setRecord(null);
+      setDiagnostics([]);
+    }
+  }, [store.ready, store.activeTeamId]);
+
   // Every screen opens at its top; keeping the previous screen's scroll offset made HOME
   // open mid-page with the main action scrolled out of view.
   useEffect(() => {
@@ -183,9 +199,11 @@ export function App(): React.JSX.Element {
         lastPreset: input.preset,
         optimizer: input.settings,
       });
+      // Never revise another team's order with this team's input.
+      if (record && record.teamId !== input.teamId) setRecord(null);
       void run(input);
     },
-    [run, store],
+    [run, store, record],
   );
 
   /** Drops the working copy so the next generation is a brand-new order. */

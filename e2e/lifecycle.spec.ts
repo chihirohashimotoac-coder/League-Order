@@ -505,4 +505,45 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await expect(stateBanner(page)).toContainText('未確定');
     await expect(page.getByRole('button', { name: 'オーダーを確定 v1' })).toBeVisible();
   });
+
+  test('switching teams detaches the open order, so another team never revises it', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // A second team with one member and a one-game format.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: 'チームを追加' }).click();
+    await page.getByLabel('チーム名').fill('Bチーム');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await page.locator('.sheet .list-row').filter({ hasText: 'Bチーム' }).click();
+    await expect(page.getByRole('heading', { name: 'Bチーム', level: 1 })).toBeVisible();
+    await tab(page, 'メンバー').click();
+    await page.getByRole('button', { name: 'メンバーを追加' }).click();
+    await page.getByLabel('名前 (必須)').fill('ビーさん');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await tab(page, 'フォーマット').click();
+    await page.getByRole('button', { name: 'フォーマットを作成' }).click();
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+
+    // Team B's SETUP is not editing team A's order, and generating makes B's own draft.
+    await tab(page, 'オーダー').click();
+    await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+    await expect(page.getByTestId('editing-banner')).toHaveCount(0);
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(stateBanner(page)).toContainText('未確定');
+    await finalize(page);
+    await expect(stateBanner(page)).toContainText('v1');
+
+    // Team A's order is untouched: still one version, still A's players.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.locator('.sheet .list-row').filter({ hasText: 'サンプルチーム' }).click();
+    await tab(page, '履歴').click();
+    await expect(page.locator('.list-row')).toHaveCount(1);
+    await page.locator('.list-row').first().click();
+    await expect(page.getByText('1 版')).toBeVisible();
+    await expect(page.locator('.mini-order')).not.toContainText('ビーさん');
+  });
 });

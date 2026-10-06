@@ -283,6 +283,28 @@ test.describe('first run (§50-§53)', () => {
     await page.getByRole('button', { name: 'サンプルを削除' }).click();
     await expect(page.getByRole('button', { name: '自分のチームを作る' })).toBeVisible();
   });
+  test('leaving the demo keeps a team the captain created next to it', async ({ page }) => {
+    await openFresh(page);
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: 'チームを追加' }).click();
+    await page.getByLabel('チーム名').fill('KALAVINKA');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await page.keyboard.press('Escape');
+
+    await page.getByTestId('demo-banner').getByRole('button', { name: '自分のチームで始める' }).click();
+    await expect(page.getByRole('dialog', { name: '自分のチームで始める' })).toContainText(
+      'ほかのチームはそのまま残ります',
+    );
+    await page.getByRole('button', { name: 'サンプルを削除' }).click();
+
+    // Only the sample went; the captain's team is now the active one, and stays after a reload.
+    await expect(page.getByRole('heading', { name: 'KALAVINKA', level: 1 })).toBeVisible();
+    await expect(page.getByTestId('demo-banner')).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'KALAVINKA', level: 1 })).toBeVisible();
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await expect(page.getByRole('dialog', { name: 'チーム' }).locator('.list-row')).toHaveCount(1);
+  });
 });
 
 test.describe('participant rows (§18, §57)', () => {

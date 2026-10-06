@@ -297,21 +297,22 @@ export function HomePage({
       {confirmLeaveDemo ? (
         <ConfirmDialog
           title="自分のチームで始める"
-          message="サンプルのチーム・メンバー・フォーマット・履歴をすべて削除し、最初の画面に戻ります。"
+          message={
+            store.teams.some((entry) => !entry.demo)
+              ? 'サンプルのチームと、そのメンバー・フォーマット・履歴を削除します。ほかのチームはそのまま残ります。'
+              : 'サンプルのチーム・メンバー・フォーマット・履歴をすべて削除し、最初の画面に戻ります。'
+          }
           confirmLabel="サンプルを削除"
           destructive
           onCancel={() => setConfirmLeaveDemo(false)}
           onConfirm={() => {
             setConfirmLeaveDemo(false);
-            void store.replaceEverything({
-              teams: [],
-              players: [],
-              formats: [],
-              pairs: [],
-              orders: [],
-              seasonCommits: [],
-              settings: { ...store.settings, activeTeamId: null },
-            });
+            // Only the sample goes. A team the captain created next to it keeps all of its
+            // data and becomes the active team; with no team left, the app returns to the
+            // first-run screen.
+            for (const entry of store.teams.filter((candidate) => candidate.demo)) {
+              store.deleteTeam(entry.id);
+            }
           }}
         />
       ) : null}
