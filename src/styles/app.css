@@ -1,55 +1,68 @@
 /*
- * ARENA SCOREBOARD design system.
+ * LIGHT MATCH SHEET design system.
  *
- * Graphite surfaces, one Electric Cyan accent reserved for "the next thing to press",
- * and a separate status palette (draft / finalized / updated / error / lock / season)
- * that is never used for primary actions. Mobile is the primary design; wider screens
- * get more columns, not bigger phones.
+ * A tournament order sheet, printed on warm paper, crossed with a modern sports tool:
+ * white cards on an off-white page, ruled borders and whitespace for hierarchy (shadows
+ * only where something floats), ink-dark numerals, and one Deep Teal accent reserved
+ * for "the next thing to press" and for selection. Status colours (finalized / draft /
+ * updated / error / lock / season) are separate from the accent and always come with
+ * an icon and a word, never colour alone.
  *
- * Load-bearing rules from the previous stylesheet are kept on purpose:
+ * Load-bearing rules kept from the previous stylesheet:
  * - every control is at least --tap-target tall
  * - the tab bar label never wraps (the action bar is anchored at --nav-height above it)
  * - inputs stay at 16px so iOS Safari does not zoom on focus
  * - nothing scrolls sideways; wide data becomes stacked rows
  *
- * Effects are deliberately cheap: no backdrop-filter, no continuous animation, and
- * glow only on focus / selection.
+ * Effects are deliberately cheap: no backdrop-filter, no gradients beyond one faint
+ * dartboard motif, no continuous animation.
  */
 
 :root {
-  /* Surfaces */
-  --color-bg: #0d0f12;
-  --color-surface-1: #12161b; /* header, nav, sheets */
-  --color-surface-2: #171c22; /* cards */
-  --color-surface-3: #1d242c; /* strong surface, secondary buttons */
-  --color-input: #101419;
-  --color-border: #2a323b;
-  --color-border-strong: #394652;
+  /* Surfaces: paper page, white sheets, a cool grey for secondary areas. */
+  --color-bg: #f4f3ef; /* page */
+  --color-surface-1: #ffffff; /* header, nav, sheets */
+  --color-surface-2: #ffffff; /* cards */
+  --color-surface-3: #f0f2f3; /* secondary buttons, quiet areas */
+  --color-paper: #f8f7f3; /* number columns, table heads */
+  --color-input: #ffffff;
+  --color-border: #d7dde1;
+  --color-border-strong: #b8c2c9;
+  /* Boundary of an interactive control: ≥3:1 against white, page and surface-3. */
+  --color-control-border: #7e8a94;
 
-  /* Text — every pair below is ≥4.5:1 on --color-surface-2 (see PR notes). */
-  --color-text: #f4f7fa;
-  --color-text-secondary: #b4bec9;
-  --color-text-muted: #87929e;
-  --color-text-dim: #808b97;
+  /* Text — every pair below is ≥4.5:1 on white, the page and surface-3 (see PR notes). */
+  --color-text: #172026;
+  --color-text-secondary: #4f5d67;
+  --color-text-muted: #5a6670;
+  --color-text-dim: #616d77;
   /* Decoration only (rules, inactive pips). Never text. */
-  --color-decor: #66717d;
+  --color-decor: #b8c2c9;
 
-  /* Primary action */
-  --color-accent: #22d3ee;
-  --color-accent-hover: #67e8f9;
-  --color-accent-ink: #04232b;
+  /* Primary action and selection. `accent` is a fill (white text 4.75:1); `accent-text`
+     is the same hue darkened for text and icons on light surfaces (≥4.8:1). */
+  --color-accent: #087f8c;
+  --color-accent-hover: #066b76;
+  --color-accent-ink: #ffffff;
+  --color-accent-text: #076f7a;
+  --color-accent-tint: #e6f2f3;
+  --color-selection: #b9e3e8;
 
-  /* Status — never used for primary actions */
-  --color-success: #34d399;
-  --color-warning: #fbbf24;
-  --color-updated: #fb923c;
-  --color-danger: #f87171;
-  --color-lock: #a78bfa;
-  --color-season: #2dd4bf;
+  /* Status — never used for primary actions; each ≥4.5:1 as text on its own tint. */
+  --color-success: #1a7443;
+  --color-warning: #8a5800;
+  --color-warning-fill: #f2b33d;
+  --color-updated: #ae4a0c;
+  --color-danger: #be2f2a;
+  --color-lock: #6a45bf;
+  --color-season: #2d62a3;
+
+  --shadow-float: 0 8px 24px rgb(23 32 38 / 12%);
+  --shadow-bar: 0 -1px 0 var(--color-border), 0 -6px 16px rgb(23 32 38 / 6%);
 
   --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -66,7 +79,13 @@
   --font-body: system-ui, -apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP',
     'Noto Sans CJK JP', 'Yu Gothic UI', 'Segoe UI', sans-serif;
 
-  color-scheme: dark;
+  color-scheme: light;
+}
+
+/* Native text selection stays clearly visible on every surface (inputs included). */
+::selection {
+  background: var(--color-selection);
+  color: var(--color-text);
 }
 
 * {
@@ -115,7 +134,7 @@ textarea {
 /* -------------------------------------------------------------- typography */
 
 .kicker.accent {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .kicker {
@@ -215,7 +234,7 @@ textarea {
   border-bottom: 1px solid var(--color-border);
 }
 
-/* A short cyan rule under the brand: the one piece of "arena lighting" in the chrome. */
+/* A short teal rule under the brand, like the printed rule under a sheet's title. */
 .app-header::after {
   content: '';
   position: absolute;
@@ -233,9 +252,9 @@ textarea {
   height: 34px;
   flex: none;
   border-radius: 10px;
-  background: var(--color-bg);
+  background: var(--color-accent-tint);
   border: 1px solid var(--color-border-strong);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .header-titles {
@@ -246,7 +265,7 @@ textarea {
 }
 
 .header-titles .kicker {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -349,8 +368,8 @@ textarea {
 }
 
 .tab-bar button[aria-current='page'] .tab-icon {
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-  color: var(--color-accent);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-text);
 }
 
 /* Active indicator line on top of the tab: shape, not just colour. */
@@ -394,9 +413,8 @@ textarea {
   display: flex;
   gap: var(--space-2);
   padding: 10px max(12px, calc((100vw - 736px) / 2));
-  background: var(--color-bg);
-  border-top: 1px solid var(--color-border);
-  box-shadow: 0 -10px 24px rgb(0 0 0 / 35%);
+  background: var(--color-surface-1);
+  box-shadow: var(--shadow-bar);
 }
 
 .action-bar > .btn {
@@ -505,7 +523,7 @@ textarea {
 .btn.accent-outline:not(:disabled) {
   background: transparent;
   border-color: color-mix(in srgb, var(--color-accent) 60%, transparent);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .btn.danger {
@@ -517,7 +535,7 @@ textarea {
 .btn.danger-solid:not(:disabled) {
   background: var(--color-danger);
   border-color: var(--color-danger);
-  color: #2a0909;
+  color: #ffffff;
   font-weight: 800;
 }
 
@@ -548,7 +566,7 @@ textarea {
   font-weight: 800;
   padding: 1px 6px;
   border-radius: 999px;
-  background: rgb(4 35 43 / 16%);
+  background: rgb(255 255 255 / 22%);
   font-variant-numeric: tabular-nums;
 }
 
@@ -632,7 +650,7 @@ textarea {
 }
 
 .section-title .kicker {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .section-index {
@@ -642,9 +660,9 @@ textarea {
   height: 24px;
   padding: 0 4px;
   border-radius: 6px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border-strong);
-  color: var(--color-accent);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-text);
+  color: var(--color-text);
   font-size: 12.5px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
@@ -686,10 +704,22 @@ textarea {
   width: 100%;
   min-height: var(--tap-target);
   padding: 9px 12px;
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-control-border);
   border-radius: var(--radius-sm);
   background: var(--color-input);
+  color: var(--color-text);
   font-size: 16px; /* 16px stops iOS Safari zooming on focus. */
+}
+
+/* A strong, unmistakable focus edge: the border itself turns teal and thickens. */
+:where(input[type='text'], input[type='number'], input[type='search'], input[type='date'], select, textarea):focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+:where(input, select, textarea)[aria-invalid='true'] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 1px var(--color-danger);
 }
 
 input::placeholder,
@@ -724,6 +754,90 @@ input[type='range'] {
   flex: none;
 }
 
+/* Two short fields side by side (Rating / PPR); stacked below 340px. */
+.field-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field-pair .field {
+  margin-bottom: 0;
+}
+
+.field-pair-hint {
+  display: block;
+  margin: 6px 0 var(--space-3);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 339px) {
+  .field-pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Validation message: icon-free but always in words, and announced (role=alert). */
+.field-error {
+  margin: 6px 0 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--color-danger);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-danger);
+}
+
+/* Aptitude 1–5 per game kind: a row of five 44px number buttons. */
+.skill-row {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.skill-row + .skill-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.skill-name {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.skill-row .levels {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(var(--tap-target), 1fr));
+  gap: 4px;
+}
+
+.skill-row .levels button {
+  min-height: var(--tap-target);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  color: var(--color-text-secondary);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.skill-row .levels button[aria-pressed='true'] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+@media (max-width: 359px) {
+  .skill-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 /* ------------------------------------------------------------ chips, toggles */
 
 .chip {
@@ -732,7 +846,7 @@ input[type='range'] {
   gap: 6px;
   min-height: var(--tap-target);
   padding: 6px 14px;
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-control-border);
   border-radius: 999px;
   background: var(--color-input);
   color: var(--color-text-secondary);
@@ -744,9 +858,9 @@ input[type='range'] {
 
 .chip[aria-pressed='true'],
 .chip.on {
-  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-input));
+  background: var(--color-accent);
   border-color: var(--color-accent);
-  color: var(--color-text);
+  color: var(--color-accent-ink);
 }
 
 /* Selected chips get a check mark, so the state does not rely on colour. */
@@ -754,13 +868,14 @@ input[type='range'] {
   content: '✓';
   content: '✓' / '';
   font-weight: 900;
-  color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .chip.danger-on,
 .chip.danger-on[aria-pressed='true'] {
-  background: color-mix(in srgb, var(--color-danger) 16%, var(--color-input));
-  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 9%, var(--color-input));
+  border: 2px solid var(--color-danger);
+  padding: 5px 13px;
   color: var(--color-text);
 }
 
@@ -780,9 +895,9 @@ input[type='range'] {
   display: flex;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: var(--radius-md);
-  background: var(--color-input);
+  background: var(--color-surface-3);
 }
 
 .segmented button {
@@ -804,9 +919,8 @@ input[type='range'] {
 
 .segmented button[aria-pressed='true'],
 .segmented button[aria-selected='true'] {
-  background: var(--color-surface-3);
-  color: var(--color-text);
-  box-shadow: inset 0 -2px 0 var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 .segmented.wrap {
@@ -820,7 +934,7 @@ input[type='range'] {
 .stepper {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-control-border);
   border-radius: var(--radius-sm);
   overflow: hidden;
   background: var(--color-input);
@@ -899,7 +1013,7 @@ input[type='range'] {
 }
 
 .status-accent {
-  --tone: var(--color-accent);
+  --tone: var(--color-accent-text);
 }
 
 /* Custom properties inherit: a neutral pill inside a toned banner must not pick up the
@@ -910,7 +1024,7 @@ input[type='range'] {
 
 .status:not(.status-neutral) {
   --tone-border: color-mix(in srgb, var(--tone) 50%, transparent);
-  --tone-bg: color-mix(in srgb, var(--tone) 13%, var(--color-input));
+  --tone-bg: color-mix(in srgb, var(--tone) 10%, var(--color-input));
 }
 
 .badge {
@@ -949,7 +1063,7 @@ input[type='range'] {
 }
 
 .badge.accent {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
   border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
 }
 
@@ -973,8 +1087,8 @@ input[type='range'] {
   gap: 6px;
   padding: 2px 8px;
   border-radius: 4px;
-  background: var(--color-warning);
-  color: #261a00;
+  background: var(--color-warning-fill);
+  color: #2b1d00;
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.14em;
@@ -1029,7 +1143,7 @@ input[type='range'] {
 }
 
 .notice.info > .icon {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .notice.updated {
@@ -1121,6 +1235,87 @@ input[type='range'] {
   font-weight: 700;
 }
 
+/* "Rt.14 · PPR 68.4" under a player's name. */
+.strength-line {
+  display: block;
+  margin-top: 1px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.strength-line.unknown {
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+/* SOFT / STEEL / 未設定. Told apart by the word, not by colour. */
+.discipline-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  padding: 1px 7px;
+  border: 1px solid var(--color-text);
+  border-radius: 4px;
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.discipline-badge.d-unspecified {
+  border-style: dashed;
+  border-color: var(--color-control-border);
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+}
+
+/* What "strong" means for this order: "戦力評価 Rating 70% / PPR 30%". */
+.strength-basis {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+}
+
+.card .strength-basis {
+  margin: 0 0 var(--space-3);
+}
+
+.strength-basis .discipline-badge {
+  margin-top: 2px;
+}
+
+.strength-basis .basis-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.strength-basis .basis-note {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.discipline-picker button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--tap-target);
+}
+
 /* --------------------------------------------------------------- app states */
 
 .empty-state {
@@ -1139,13 +1334,13 @@ input[type='range'] {
   height: 56px;
   border-radius: 50%;
   border: 1px solid var(--color-border-strong);
-  background: var(--color-bg);
-  color: var(--color-accent);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-text);
   margin-bottom: 4px;
 }
 
 .empty-state .kicker {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .empty-title {
@@ -1246,7 +1441,7 @@ input[type='range'] {
 .bar {
   height: 6px;
   border-radius: 999px;
-  background: var(--color-input);
+  background: var(--color-surface-3);
   overflow: hidden;
   border: 1px solid var(--color-border);
 }
@@ -1338,7 +1533,7 @@ input[type='range'] {
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: rgb(5 6 8 / 72%);
+  background: rgb(23 32 38 / 45%);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -1352,11 +1547,11 @@ input[type='range'] {
   max-width: 760px;
   max-height: 90dvh;
   background: var(--color-surface-1);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-border);
   border-bottom: 0;
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
-  box-shadow: 0 -16px 40px rgb(0 0 0 / 45%);
+  box-shadow: 0 -8px 28px rgb(23 32 38 / 16%);
   animation: sheet-up 0.2s ease-out;
 }
 
@@ -1465,12 +1660,12 @@ input[type='range'] {
   max-width: 520px;
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  background: var(--color-surface-3);
+  background: var(--color-surface-1);
   border: 1px solid var(--color-border-strong);
   border-left-width: 4px;
   font-size: 14px;
   font-weight: 600;
-  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+  box-shadow: var(--shadow-float);
   animation: fade-in 0.15s ease-out;
 }
 
@@ -1500,13 +1695,13 @@ input[type='range'] {
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
   background:
-    /* Dartboard rings, top-right: the one decorative motif, painted once. */
+    /* Dartboard rings, top-right: the one decorative motif, printed faintly. */
     repeating-radial-gradient(
       circle at 108% -12%,
       transparent 0 26px,
-      rgb(34 211 238 / 7%) 26px 28px
+      rgb(8 127 140 / 7%) 26px 28px
     ),
-    linear-gradient(160deg, #161c23 0%, var(--color-bg) 85%);
+    var(--color-surface-2);
 }
 
 .hero::before {
@@ -1521,7 +1716,7 @@ input[type='range'] {
 }
 
 .hero .kicker {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .hero-title {
@@ -1597,7 +1792,7 @@ input[type='range'] {
   grid-template-columns: repeat(3, 1fr);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
-  background: var(--color-bg);
+  background: var(--color-paper);
   overflow: hidden;
 }
 
@@ -1654,8 +1849,8 @@ input[type='range'] {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: var(--color-surface-3);
-  color: var(--color-text);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-text);
 }
 
 .quick-tile .title {
@@ -1726,7 +1921,7 @@ input[type='range'] {
 }
 
 .edit-banner .icon {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .participants {
@@ -1744,18 +1939,20 @@ input[type='range'] {
   align-items: stretch;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
-  background: var(--color-surface-3);
+  background: var(--color-surface-2);
   transition: opacity 0.15s ease, background-color 0.15s ease;
 }
 
 .participant.is-out {
-  background: var(--color-surface-2);
-  border-color: var(--color-border);
+  background: var(--color-surface-3);
+  border-color: var(--color-border-strong);
   border-style: dashed;
 }
 
-.participant.is-out .p-main {
-  opacity: 0.62;
+/* Dimmed by colour, not opacity: an opacity fade would take the text below 4.5:1. */
+.participant.is-out .p-name strong,
+.participant.is-out .p-name .rt {
+  color: var(--color-text-muted);
 }
 
 .p-main {
@@ -1793,7 +1990,7 @@ input[type='range'] {
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  border: 2px solid var(--color-border-strong);
+  border: 2px solid var(--color-control-border);
   background: var(--color-input);
   color: transparent;
   pointer-events: none;
@@ -1861,7 +2058,7 @@ input[type='range'] {
   padding: 11px 12px;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
-  background: var(--color-surface-3);
+  background: var(--color-surface-2);
   text-align: left;
   cursor: pointer;
 }
@@ -1887,22 +2084,21 @@ input[type='range'] {
 .preset[aria-checked='true'] {
   border: 2px solid var(--color-accent);
   padding: 10px 11px;
-  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface-3));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 14%, transparent);
+  background: var(--color-accent-tint);
 }
 
 .preset[aria-checked='true'] .p-head .icon {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
-/* Muted text drops below 4.5:1 on the selected card's tint. */
+/* Secondary text keeps a comfortable margin over 4.5:1 on the selected card's tint. */
 .preset[aria-checked='true'] .p-desc {
   color: var(--color-text-secondary);
 }
 
 .preset .p-check-mark {
   margin-left: auto;
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .match-summary {
@@ -1923,9 +2119,9 @@ input[type='range'] {
   padding: 12px 12px 12px 14px;
   margin-bottom: var(--space-3);
   border-radius: var(--radius-lg);
-  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 40%, var(--color-surface-2));
   border-left: 5px solid var(--tone);
-  background: color-mix(in srgb, var(--tone) 9%, var(--color-surface-2));
+  background: color-mix(in srgb, var(--tone) 7%, var(--color-surface-2));
 }
 
 .state-banner .state-icon {
@@ -1935,7 +2131,8 @@ input[type='range'] {
   height: 44px;
   flex: none;
   border-radius: 12px;
-  background: color-mix(in srgb, var(--tone) 18%, var(--color-bg));
+  background: var(--color-surface-2);
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, var(--color-surface-2));
   color: var(--tone);
 }
 
@@ -1994,6 +2191,13 @@ input[type='range'] {
   cursor: pointer;
 }
 
+.candidate-tab .c-note {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-text-secondary);
+}
+
 .candidate-tab .c-head {
   display: flex;
   align-items: center;
@@ -2008,8 +2212,8 @@ input[type='range'] {
   height: 22px;
   flex: none;
   border-radius: 6px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border-strong);
+  background: var(--color-paper);
+  border: 1px solid var(--color-text);
   font-size: 12px;
   font-weight: 900;
 }
@@ -2067,8 +2271,7 @@ input[type='range'] {
 .candidate-tab[aria-pressed='true'] {
   border: 2px solid var(--color-accent);
   padding: 9px 9px 8px;
-  background: color-mix(in srgb, var(--color-accent) 9%, var(--color-surface-2));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent);
+  background: var(--color-accent-tint);
 }
 
 .candidate-tab[aria-pressed='true'] .c-letter {
@@ -2084,7 +2287,7 @@ input[type='range'] {
   margin-top: 6px;
   font-size: 11px;
   font-weight: 800;
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 @media (max-width: 359px) {
@@ -2137,8 +2340,8 @@ input[type='range'] {
 .order-game-head {
   display: flex;
   align-items: stretch;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface-1);
+  border-bottom: 1px solid var(--color-border-strong);
+  background: var(--color-paper);
 }
 
 .order-game-head .no {
@@ -2149,8 +2352,9 @@ input[type='range'] {
   width: 58px;
   flex: none;
   padding: 6px 0;
-  background: var(--color-bg);
-  border-right: 1px solid var(--color-border);
+  /* The number column of a printed score sheet: a ruled white box, ink numerals. */
+  background: var(--color-surface-2);
+  border-right: 2px solid var(--color-text);
 }
 
 .order-game-head .no small {
@@ -2158,6 +2362,9 @@ input[type='range'] {
   font-weight: 800;
   letter-spacing: 0.16em;
   color: var(--color-text-muted);
+  padding-bottom: 2px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--color-border-strong);
 }
 
 .order-game-head .no b {
@@ -2238,7 +2445,7 @@ input[type='range'] {
   justify-content: center;
   min-height: 56px;
   padding: 6px 34px 6px 12px;
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-control-border);
   border-radius: var(--radius-md);
   background: var(--color-input);
 }
@@ -2290,7 +2497,7 @@ input[type='range'] {
 }
 
 .slot-flag.edited {
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .slot-main {
@@ -2353,7 +2560,7 @@ input[type='range'] {
   width: var(--tap-target);
   min-height: var(--tap-target);
   flex: none;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
   background: var(--color-surface-3);
   color: var(--color-text-muted);
@@ -2362,7 +2569,8 @@ input[type='range'] {
 
 .lock-toggle[aria-pressed='true'] {
   border-color: var(--color-lock);
-  background: color-mix(in srgb, var(--color-lock) 18%, var(--color-surface-3));
+  background: color-mix(in srgb, var(--color-lock) 10%, var(--color-surface-2));
+  border-width: 2px;
   color: var(--color-lock);
 }
 
@@ -2409,7 +2617,7 @@ input[type='range'] {
   width: 8px;
   height: 14px;
   border-radius: 2px;
-  background: var(--color-surface-3);
+  background: var(--color-surface-2);
   border: 1px solid var(--color-decor);
 }
 
@@ -2669,8 +2877,8 @@ input[type='range'] {
 .mini-order .no {
   display: grid;
   place-items: center;
-  background: var(--color-bg);
-  border-right: 1px solid var(--color-border);
+  background: var(--color-paper);
+  border-right: 1px solid var(--color-border-strong);
   font-weight: 900;
   font-variant-numeric: tabular-nums;
 }
@@ -2753,8 +2961,8 @@ input[type='range'] {
   margin-bottom: 10px;
   border-radius: var(--radius-lg);
   background:
-    repeating-linear-gradient(135deg, transparent 0 10px, rgb(255 255 255 / 1.5%) 10px 20px),
-    var(--color-bg);
+    repeating-linear-gradient(135deg, transparent 0 10px, rgb(23 32 38 / 2.5%) 10px 20px),
+    var(--color-surface-3);
   border: 1px solid var(--color-border);
 }
 
@@ -2776,7 +2984,8 @@ input[type='range'] {
   display: block;
   width: 100%;
   border-radius: var(--radius-md);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-float);
 }
 
 .share-meta {
@@ -2809,7 +3018,7 @@ input[type='range'] {
 .player-schedule {
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-lg);
-  background: var(--color-bg);
+  background: var(--color-paper);
   padding: 14px;
   margin-bottom: 12px;
 }
@@ -2925,7 +3134,7 @@ input[type='range'] {
   background: repeating-radial-gradient(
     circle at 50% 42%,
     transparent 0 30px,
-    rgb(34 211 238 / 6%) 30px 32px
+    rgb(8 127 140 / 8%) 30px 32px
   );
   mask-image: radial-gradient(circle at 50% 42%, #000 0 40%, transparent 72%);
   -webkit-mask-image: radial-gradient(circle at 50% 42%, #000 0 40%, transparent 72%);
@@ -2933,7 +3142,7 @@ input[type='range'] {
 
 .welcome-board .kicker {
   margin-top: 18px;
-  color: var(--color-accent);
+  color: var(--color-accent-text);
   font-size: 12px;
 }
 
@@ -3021,7 +3230,7 @@ input[type='range'] {
   gap: 8px;
   padding: 12px max(16px, calc((100vw - 528px) / 2)) calc(12px + var(--safe-bottom));
   background: var(--color-surface-1);
-  border-top: 1px solid var(--color-border);
+  box-shadow: var(--shadow-bar);
 }
 
 .onboarding-foot .btn.primary {
@@ -3050,7 +3259,8 @@ input[type='range'] {
    a tap and would leave the last-tapped button looking highlighted. */
 @media (hover: hover) {
   .btn:hover:not(:disabled) {
-    border-color: var(--color-text-dim);
+    border-color: var(--color-control-border);
+    background: #e6e9eb;
   }
 
   .btn.primary:hover:not(:disabled) {
@@ -3058,7 +3268,8 @@ input[type='range'] {
     border-color: var(--color-accent-hover);
   }
 
-  .btn.ghost:hover:not(:disabled) {
+  .btn.ghost:hover:not(:disabled),
+  .btn.outline:hover:not(:disabled) {
     background: var(--color-surface-3);
     border-color: var(--color-border);
   }
