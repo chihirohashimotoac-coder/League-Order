@@ -237,6 +237,12 @@ export function Sheet({
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  // Where the current press started and ended. A `click` is dispatched on the nearest
+  // common ancestor of the press and release targets, so a text selection dragged from an
+  // input out onto the backdrop arrives as a click whose target *is* the backdrop. Only a
+  // press that both started and ended on the backdrop itself is a request to dismiss.
+  const pressStartedOnBackdrop = useRef(false);
+  const pressEndedOnBackdrop = useRef(false);
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
@@ -256,8 +262,27 @@ export function Sheet({
     <div
       className="sheet-backdrop"
       role="presentation"
+      // Nothing here calls preventDefault: native selection, copy / cut / paste and the
+      // context menu inside the sheet behave exactly as they do anywhere else.
+      onPointerDown={(event) => {
+        pressStartedOnBackdrop.current = event.target === event.currentTarget;
+        pressEndedOnBackdrop.current = false;
+      }}
+      onPointerUp={(event) => {
+        pressEndedOnBackdrop.current = event.target === event.currentTarget;
+      }}
+      onPointerCancel={() => {
+        pressStartedOnBackdrop.current = false;
+        pressEndedOnBackdrop.current = false;
+      }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        const dismiss =
+          event.target === event.currentTarget &&
+          pressStartedOnBackdrop.current &&
+          pressEndedOnBackdrop.current;
+        pressStartedOnBackdrop.current = false;
+        pressEndedOnBackdrop.current = false;
+        if (dismiss) onClose();
       }}
     >
       <div
