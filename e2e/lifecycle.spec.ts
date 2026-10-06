@@ -448,3 +448,61 @@ test.describe('history and immutable snapshots (追加要件 §5, §15)', () => 
     await expect(stateBanner(page)).toContainText('v1');
   });
 });
+
+test.describe('editing a saved order from SETUP (§64)', () => {
+  test('re-generating a finalized order from SETUP revises it to v2', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    await page.getByRole('button', { name: '戻る' }).click();
+    await expect(page.getByTestId('editing-banner')).toContainText('ORDER v1 を編集中');
+    await page.getByLabel('遠藤 を参加者に含める').uncheck();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+
+    await expect(stateBanner(page)).toContainText('再確定が必要');
+    await finalize(page);
+    await expect(stateBanner(page)).toContainText('v2');
+
+    // Still one order, now with two versions.
+    await tab(page, '履歴').click();
+    await expect(page.locator('.list-row')).toHaveCount(1);
+    await page.locator('.list-row').first().click();
+    await expect(page.getByText('2 版')).toBeVisible();
+  });
+
+  test('opening an order from history restores its setup conditions', async ({ page }) => {
+    await openApp(page);
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByLabel('遠藤 を参加者に含める').uncheck();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
+    await finalize(page);
+
+    // Start something else, so the setup draft no longer matches that order…
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByLabel('遠藤 を参加者に含める').check();
+
+    // …then reopen it: SETUP shows the conditions it was generated with.
+    await tab(page, '履歴').click();
+    await page.locator('.list-row').first().click();
+    await page.getByRole('button', { name: 'このオーダーを開いて編集' }).click();
+    await page.getByRole('button', { name: '戻る' }).click();
+    await expect(page.getByTestId('editing-banner')).toBeVisible();
+    await expect(page.getByLabel('遠藤 を参加者に含める')).not.toBeChecked();
+  });
+
+  test('"新規オーダーにする" detaches SETUP so the next generation is a new draft', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    await page.getByRole('button', { name: '戻る' }).click();
+    await page.getByRole('button', { name: '新規オーダーにする' }).click();
+    await expect(page.getByTestId('editing-banner')).toHaveCount(0);
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(stateBanner(page)).toContainText('未確定');
+    await expect(page.getByRole('button', { name: 'オーダーを確定 v1' })).toBeVisible();
+  });
+});

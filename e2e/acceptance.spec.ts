@@ -524,34 +524,27 @@ test.describe('realistic league flow (追加要件 §19-§21)', () => {
     await expect(stateBanner(page)).toContainText('確定済み');
     await expect(stateBanner(page)).toContainText('v1');
 
-    // 21-22. One player drops out; re-optimise around the gap.
+    // 21-22. One player drops out; re-generate around the gap from SETUP. The setup
+    // screen knows it is editing v1 and restored the conditions v1 was generated with.
     await page.getByRole('button', { name: '戻る' }).click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+    await expect(page.getByTestId('editing-banner')).toContainText('ORDER v1 を編集中');
+    await expect(page.getByLabel('土井 を参加者に含める')).toBeChecked();
     await page.getByLabel('土井 を参加者に含める').uncheck();
     await page.getByRole('button', { name: 'オーダーを生成' }).click();
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 
-    // A fresh generation from SETUP is a new order, so this one starts as a draft again.
-    await expect(stateBanner(page)).toContainText('未確定');
-    await finalize(page);
-    await expect(stateBanner(page)).toContainText('v1');
-
-    // 23-24. Back on the first order, an edit flips it to UPDATED with a readable diff.
-    await goTab(page, '履歴');
-    await page.locator('.list-row').filter({ hasText: 'シーズン反映済み' }).first().click();
-    await page.getByRole('button', { name: 'このオーダーを開いて編集' }).click();
-    // Slot 1 is still pinned from step 11, so the change goes to an unlocked slot.
-    const reopened = page.locator('.slot select:not([disabled])').first();
-    const reopenedValue = await reopened.inputValue();
-    const reopenedOptions = await reopened.locator('option').evaluateAll((nodes) =>
-      nodes.map((node) => (node as HTMLOptionElement).value).filter((value) => value !== ''),
-    );
-    await reopened.selectOption(reopenedOptions.find((value) => value !== reopenedValue)!);
+    // 23-24. Re-generating the reopened order revises it (§64): it is UPDATED against
+    // v1, not a brand-new draft, and the change is readable as a diff.
     await expect(stateBanner(page)).toContainText('再確定が必要');
+    await expect(page.getByRole('button', { name: '再確定 v2' })).toBeVisible();
     await page.getByRole('button', { name: /変更点/ }).first().click();
     const diff = page.getByRole('dialog', { name: /v1 からの変更/ });
     await expect(diff).toBeVisible();
-    await expect(diff.locator('.diff-list > li')).toHaveCount(1);
+    expect(await diff.locator('.diff-list > li').count()).toBeGreaterThan(0);
+    // 土井 dropped out, so they appear only on the "before" side.
+    const after = await diff.locator('.diff-change .after').allInnerTexts();
+    expect(after.some((text) => text.includes('土井'))).toBe(false);
     await page.getByRole('button', { name: '閉じる' }).click();
 
     // 25-26. Finalize v2 and share the update message.

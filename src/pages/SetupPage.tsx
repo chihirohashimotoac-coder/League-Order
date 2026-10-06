@@ -64,6 +64,8 @@ export function SetupPage({
   onMatchChange,
   onGenerate,
   generating,
+  editing,
+  onDetach,
   onNavigate,
 }: {
   draft: SetupDraft;
@@ -72,6 +74,10 @@ export function SetupPage({
   onMatchChange: (next: MatchInfo) => void;
   onGenerate: (input: OrderInput) => void;
   generating: boolean;
+  /** Set when these conditions belong to a saved order: generating revises it. */
+  editing: { title: string; latestVersion: number | null } | null;
+  /** Detaches from the saved order so the next generation starts a new one. */
+  onDetach: () => void;
   onNavigate: (page: Page) => void;
 }): React.JSX.Element {
   const store = useAppStore();
@@ -169,6 +175,25 @@ export function SetupPage({
 
   return (
     <>
+      {editing ? (
+        <div className="edit-banner" data-testid="editing-banner">
+          <Icon name="edit" size={18} />
+          <span className="grow">
+            <strong>
+              {editing.latestVersion ? `ORDER v${editing.latestVersion} を編集中` : '保存済みのオーダーを編集中'}
+            </strong>
+            <span className="muted" style={{ display: 'block' }}>
+              {editing.latestVersion
+                ? `生成し直すと変更点として扱われ、v${editing.latestVersion + 1} として再確定できます。`
+                : '生成し直すと、このオーダーの内容が更新されます。'}
+            </span>
+          </span>
+          <button type="button" className="btn small" onClick={onDetach}>
+            新規オーダーにする
+          </button>
+        </div>
+      ) : null}
+
       <SectionHeader index={1} kicker="FORMAT" title="フォーマット" />
       <Card>
         <Field label="使用するフォーマット">

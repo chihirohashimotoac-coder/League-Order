@@ -44,6 +44,10 @@ import { WelcomePage } from './pages/WelcomePage';
  * Owns navigation, the order session (with its undo history) and the optimizer runner.
  * The runner lives here rather than in a page so that generation survives navigating
  * between SETUP and RESULT.
+ *
+ * `record` is the persisted order the working copy belongs to. It is what makes a
+ * re-generation from SETUP a *revision* of that order (UPDATED → v2) rather than a new
+ * draft: it is only cleared when the captain explicitly starts a new order.
  */
 export function App(): React.JSX.Element {
   const store = useAppStore();
@@ -164,6 +168,14 @@ export function App(): React.JSX.Element {
     [toast],
   );
 
+  /**
+   * Generation from SETUP.
+   *
+   * When the working copy belongs to a saved order (`record`), this is a revision of that
+   * order: the record is kept, so the lifecycle compares the new line-up with the last
+   * finalized version and shows UPDATED → "再確定 v2". A new order is started explicitly
+   * (`startNewOrder`), never as a side effect of pressing generate.
+   */
   const handleGenerate = useCallback(
     (input: OrderInput) => {
       store.saveSettings({
@@ -171,9 +183,6 @@ export function App(): React.JSX.Element {
         lastPreset: input.preset,
         optimizer: input.settings,
       });
-      // Generating from SETUP starts a new order: it is a fresh draft, not a revision of
-      // whatever was previously finalized.
-      setRecord(null);
       void run(input);
     },
     [run, store],
@@ -235,11 +244,21 @@ export function App(): React.JSX.Element {
       // reproduces the same header, and its versions so the lifecycle resumes correctly.
       if (order.match) setMatch(order.match);
       setRecord(order);
+      // SETUP edits this order from now on: restore the conditions it was generated
+      // with, so going back and re-generating revises *this* order's line-up.
+      setDraft({
+        formatId: store.teamFormats.some((format) => format.id === order.input.formatId)
+          ? order.input.formatId
+          : (store.teamFormats[0]?.id ?? ''),
+        participants: syncParticipants(order.input.participants, store.teamPlayers),
+        preset: order.input.preset,
+        settings: order.input.settings,
+      });
       setDiagnostics([]);
       setPage('result');
       toast.show('履歴から読み込みました', 'ok');
     },
-    [toast],
+    [toast, store.teamFormats, store.teamPlayers],
   );
 
   const games = useMemo(() => {
@@ -456,6 +475,12 @@ export function App(): React.JSX.Element {
             onMatchChange={setMatch}
             onGenerate={handleGenerate}
             generating={generating}
+            editing={
+              record
+                ? { title: record.title, latestVersion: latest?.version ?? null }
+                : null
+            }
+            onDetach={resetWorkingOrder}
             onNavigate={setPage}
           />
         ) : null}
