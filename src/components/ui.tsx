@@ -8,25 +8,44 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import type { OrderLifecycleState } from '../domain/types';
+import { Icon, type IconName } from './icons';
 
-/** Shared presentational building blocks. Mobile-first: every control is ≥44px tall. */
+/**
+ * Shared presentational building blocks (Arena Scoreboard design system).
+ *
+ * Mobile-first: every control is at least `--tap-target` (44px) in both directions.
+ * Colour is never the only carrier of meaning — status components always pair it with
+ * an icon and a text label.
+ */
 
 export function Card({
   title,
+  kicker,
   children,
   flush = false,
   action,
+  className,
 }: {
   title?: string;
+  /** Small uppercase English accent shown before the title. */
+  kicker?: string;
   children: ReactNode;
   flush?: boolean;
   action?: ReactNode;
+  className?: string;
 }): React.JSX.Element {
+  const classes = ['card', flush ? 'flush' : '', className ?? ''].filter(Boolean).join(' ');
   return (
-    <section className={flush ? 'card flush' : 'card'}>
+    <section className={classes}>
       {title ? (
-        <div className="row between" style={flush ? { padding: '12px 14px 0' } : undefined}>
-          <h2 className="card-title" style={{ marginBottom: flush ? 8 : undefined }}>
+        <div className="card-head">
+          <h2 className="card-title">
+            {kicker ? (
+              <span className="kicker" aria-hidden="true">
+                {kicker}
+              </span>
+            ) : null}
             {title}
           </h2>
           {action}
@@ -34,6 +53,46 @@ export function Card({
       ) : null}
       {children}
     </section>
+  );
+}
+
+/**
+ * Section heading with an English scoreboard accent.
+ *
+ * The accent is `aria-hidden`, so the heading's accessible name is the Japanese title
+ * alone — a screen reader does not read "ORDER オーダー".
+ */
+export function SectionHeader({
+  title,
+  kicker,
+  index,
+  action,
+  id,
+}: {
+  title: string;
+  kicker?: string;
+  /** Step number for numbered flows (SETUP). */
+  index?: number;
+  action?: ReactNode;
+  id?: string;
+}): React.JSX.Element {
+  return (
+    <div className="section-head">
+      <h2 className="section-title" id={id}>
+        {index !== undefined ? (
+          <span className="section-index" aria-hidden="true">
+            {String(index).padStart(2, '0')}
+          </span>
+        ) : null}
+        {kicker ? (
+          <span className="kicker" aria-hidden="true">
+            {kicker}
+          </span>
+        ) : null}
+        <span className="section-name">{title}</span>
+      </h2>
+      {action}
+    </div>
   );
 }
 
@@ -72,11 +131,21 @@ export function Stepper({
 }): React.JSX.Element {
   return (
     <span className="stepper" role="group" aria-label={label}>
-      <button type="button" onClick={() => onChange(Math.max(min, value - 1))} aria-label={`${label}を1減らす`}>
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(min, value - 1))}
+        disabled={value <= min}
+        aria-label={`${label}を1減らす`}
+      >
         −
       </button>
       <span className="value">{format ? format(value) : value}</span>
-      <button type="button" onClick={() => onChange(Math.min(max, value + 1))} aria-label={`${label}を1増やす`}>
+      <button
+        type="button"
+        onClick={() => onChange(Math.min(max, value + 1))}
+        disabled={value >= max}
+        aria-label={`${label}を1増やす`}
+      >
         ＋
       </button>
     </span>
@@ -109,27 +178,79 @@ export function Chip({
   );
 }
 
+/** A pill-shaped single-choice switch. Uses `aria-pressed` buttons. */
+export function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  showHint = true,
+}: {
+  label: string;
+  options: readonly { key: T; label: string; hint?: string }[];
+  value: T;
+  onChange: (next: T) => void;
+  showHint?: boolean;
+}): React.JSX.Element {
+  const active = options.find((option) => option.key === value);
+  return (
+    <div className="field">
+      <span>{label}</span>
+      <div className="segmented" role="group" aria-label={label}>
+        {options.map((option) => (
+          <button
+            type="button"
+            key={option.key}
+            aria-pressed={value === option.key}
+            onClick={() => onChange(option.key)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {showHint && active?.hint ? <span className="hint">{active.hint}</span> : null}
+    </div>
+  );
+}
+
+/**
+ * Bottom sheet dialog: sticky header, scrolling body, sticky footer.
+ *
+ * `onClose` is read through a ref so the mount effect runs exactly once. Callers pass
+ * inline arrows, and re-running the effect on every parent render used to call
+ * `focus()` on the sheet again — stealing focus from whatever field inside it the
+ * captain was typing into.
+ */
 export function Sheet({
   title,
   onClose,
   children,
   footer,
+  className,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  className?: string;
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') closeRef.current();
     };
     document.addEventListener('keydown', onKey);
     ref.current?.focus();
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      // Hand focus back to the control that opened the sheet, if it is still there.
+      if (opener && opener.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, []);
 
   return (
     <div
@@ -139,15 +260,23 @@ export function Sheet({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
+      <div
+        className={className ? `sheet ${className}` : 'sheet'}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        ref={ref}
+      >
         <div className="sheet-head">
+          <span className="sheet-grabber" aria-hidden="true" />
           <h2>{title}</h2>
-          <button type="button" className="btn icon ghost" onClick={onClose} aria-label="閉じる">
-            ✕
+          <button type="button" className="btn icon ghost sheet-close" onClick={onClose} aria-label="閉じる">
+            <Icon name="close" />
           </button>
         </div>
-        {children}
-        {footer ? <div className="row" style={{ marginTop: 12 }}>{footer}</div> : null}
+        <div className="sheet-body">{children}</div>
+        {footer ? <div className="sheet-foot">{footer}</div> : null}
       </div>
     </div>
   );
@@ -179,7 +308,7 @@ export function ConfirmDialog({
           </button>
           <button
             type="button"
-            className={destructive ? 'btn danger grow' : 'btn primary grow'}
+            className={destructive ? 'btn danger-solid grow' : 'btn primary grow'}
             onClick={onConfirm}
           >
             {confirmLabel}
@@ -187,9 +316,7 @@ export function ConfirmDialog({
         </>
       }
     >
-      <p className="small-text muted" style={{ margin: 0 }}>
-        {message}
-      </p>
+      <p className="body-text">{message}</p>
     </Sheet>
   );
 }
@@ -210,6 +337,12 @@ const ToastContext = createContext<ToastApi | null>(null);
 
 /** Never let notifications bury the screen they are describing. */
 const MAX_VISIBLE_TOASTS = 3;
+
+const TOAST_ICONS: Record<Toast['tone'], IconName> = {
+  ok: 'check',
+  error: 'alert',
+  plain: 'info',
+};
 
 export function ToastProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -232,7 +365,8 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
       <div className="toast-stack" role="status" aria-live="polite">
         {toasts.map((toast) => (
           <div key={toast.id} className={`toast ${toast.tone}`}>
-            {toast.message}
+            <Icon name={TOAST_ICONS[toast.tone]} size={18} />
+            <span>{toast.message}</span>
           </div>
         ))}
       </div>
@@ -246,36 +380,98 @@ export function useToast(): ToastApi {
   return api ?? { show: () => undefined };
 }
 
-export function EmptyState({ children }: { children: ReactNode }): React.JSX.Element {
-  return <div className="empty-state">{children}</div>;
+// ------------------------------------------------------------- status & data
+
+export function EmptyState({
+  kicker,
+  title,
+  icon = 'target',
+  children,
+  action,
+}: {
+  kicker?: string;
+  title?: string;
+  icon?: IconName;
+  children?: ReactNode;
+  action?: ReactNode;
+}): React.JSX.Element {
+  return (
+    <div className="empty-state">
+      <span className="empty-icon" aria-hidden="true">
+        <Icon name={icon} size={28} />
+      </span>
+      {kicker ? <span className="kicker">{kicker}</span> : null}
+      {title ? <strong className="empty-title">{title}</strong> : null}
+      {children ? <p className="empty-body">{children}</p> : null}
+      {action ? <div className="empty-action">{action}</div> : null}
+    </div>
+  );
 }
 
 export function Metric({
   label,
   value,
   tone,
+  unit,
 }: {
   label: string;
   value: ReactNode;
   tone?: 'ok' | 'warn' | 'danger';
+  unit?: string;
 }): React.JSX.Element {
-  const color =
-    tone === 'ok' ? 'var(--ok)' : tone === 'warn' ? 'var(--warn)' : tone === 'danger' ? 'var(--danger)' : undefined;
   return (
-    <div className="metric">
+    <div className={tone ? `metric tone-${tone}` : 'metric'}>
       <span className="k">{label}</span>
-      <span className="v" style={color ? { color } : undefined}>
+      <span className="v">
         {value}
+        {unit ? <small>{unit}</small> : null}
       </span>
     </div>
   );
 }
 
-export function Bar({ value }: { value: number }): React.JSX.Element {
+export function Bar({ value, tone }: { value: number; tone?: 'muted' }): React.JSX.Element {
   const percent = Math.max(0, Math.min(100, Math.round(value * 100)));
   return (
-    <div className="bar" role="img" aria-label={`${percent}%`}>
+    <div className={tone ? `bar ${tone}` : 'bar'} role="img" aria-label={`${percent}%`}>
       <span style={{ width: `${percent}%` }} />
     </div>
   );
+}
+
+/** Lifecycle presentation shared by the header, the banner, history and sharing. */
+export const STATE_META: Record<
+  OrderLifecycleState,
+  { tone: 'draft' | 'finalized' | 'updated'; tag: string; icon: IconName }
+> = {
+  DRAFT: { tone: 'draft', tag: 'DRAFT', icon: 'edit' },
+  FINALIZED: { tone: 'finalized', tag: 'FINALIZED', icon: 'checkCircle' },
+  UPDATED: { tone: 'updated', tag: 'UPDATED', icon: 'alert' },
+};
+
+/** Icon + text status pill. Never colour alone. */
+export function StatusBadge({
+  tone,
+  icon,
+  children,
+  title,
+}: {
+  tone: 'draft' | 'finalized' | 'updated' | 'danger' | 'lock' | 'season' | 'accent' | 'neutral';
+  icon?: IconName;
+  children: ReactNode;
+  title?: string;
+}): React.JSX.Element {
+  return (
+    <span className={`status status-${tone}`} title={title}>
+      {icon ? <Icon name={icon} size={14} strokeWidth={2.4} /> : null}
+      <span>{children}</span>
+    </span>
+  );
+}
+
+/** `Rt.14`, `Rt.12.5`, or `Rt. —` when unknown (never "0"). */
+export function formatRating(rating: number | null | undefined): string {
+  if (rating === null || rating === undefined || !Number.isFinite(rating)) return 'Rt. —';
+  const text = Number.isInteger(rating) ? String(rating) : rating.toFixed(1);
+  return `Rt.${text}`;
 }
