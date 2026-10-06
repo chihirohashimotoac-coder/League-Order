@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 /**
@@ -610,6 +611,57 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await page.getByLabel('対戦相手 (任意)').fill('Team Z');
     await page.getByRole('button', { name: '閉じる' }).click();
     await expect(stateBanner(page)).toContainText('再確定が必要');
+
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await expect(page.getByRole('dialog', { name: '新しいオーダーを作る' })).toContainText('保存されていない変更');
+  });
+
+  test('"新規オーダーにする" asks before dropping unsaved edits', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+    await changeFirstSlot(page);
+
+    await page.getByRole('button', { name: '戻る' }).click();
+    await page.getByRole('button', { name: '新規オーダーにする' }).click();
+    const dialog = page.getByRole('dialog', { name: '新しいオーダーを作る' });
+    await expect(dialog).toContainText('保存されていない変更');
+    await dialog.getByRole('button', { name: 'キャンセル' }).click();
+    // Still editing the saved order.
+    await expect(page.getByTestId('editing-banner')).toContainText('ORDER v1 を編集中');
+  });
+
+  test('match-header edits count as unsaved on an order saved without a header', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // Turn the stored order into one written before the match header existed:
+    // export, drop `match`, import it back.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: /設定 \/ バックアップ/ }).click();
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'JSON エクスポート' }).click();
+    const backup = JSON.parse(readFileSync((await (await download).path())!, 'utf-8'));
+    for (const order of backup.data.orders) delete order.match;
+    await page.setInputFiles('input[type="file"]', {
+      name: 'legacy.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(backup), 'utf-8'),
+    });
+    await page.getByRole('button', { name: '置き換える' }).click();
+    await expect(page.getByText('インポートしました')).toBeVisible();
+
+    await tab(page, '履歴').click();
+    await page.locator('.list-row').first().click();
+    await page.getByRole('button', { name: 'このオーダーを開いて編集' }).click();
+    await expect(stateBanner(page)).toContainText('確定済み');
+
+    await page.getByRole('button', { name: '共有', exact: true }).click();
+    await page.locator('details.match-edit > summary').click();
+    await page.getByLabel('対戦相手 (任意)').fill('Team Z');
+    await page.getByRole('button', { name: '閉じる' }).click();
 
     await tab(page, 'ホーム').click();
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();

@@ -223,15 +223,15 @@ export function App(): React.JSX.Element {
    * or a saved order edited or re-generated since. `persist` stores the session's own
    * input and solution objects, so identity is exactly "unchanged since the last save".
    * The match header is compared by value on the fields the fingerprint reads: it is
-   * rebuilt by the team-sync effect, so its identity says nothing, and records written
-   * before the header existed have none to compare against.
+   * rebuilt by the team-sync effect, so its identity says nothing. Every record in the
+   * session has one (`persist` writes it; `openSavedOrder` fills it in for old records).
    */
   const unsaved =
     !!session?.present.current &&
     (!record ||
       record.solution !== session.present.current ||
       record.input !== session.present.input ||
-      (record.match !== undefined && !sameMatch(record.match, match)));
+      !sameMatch(record.match ?? match, match));
 
   const startNewOrder = useCallback(
     (force = false) => {
@@ -279,8 +279,11 @@ export function App(): React.JSX.Element {
       setSession(restored);
       // A saved order carries the match it was played for, so re-sharing it later
       // reproduces the same header, and its versions so the lifecycle resumes correctly.
-      if (order.match) setMatch(order.match);
-      setRecord(order);
+      // Orders saved before the match header existed have none: the header in use when
+      // they are opened becomes their baseline, so later edits still count as unsaved.
+      const baseline = order.match ?? match;
+      setMatch(baseline);
+      setRecord(order.match ? order : { ...order, match: baseline });
       // SETUP edits this order from now on: restore the conditions it was generated
       // with, so going back and re-generating revises *this* order's line-up.
       setDraft({
@@ -295,7 +298,7 @@ export function App(): React.JSX.Element {
       setPage('result');
       toast.show('履歴から読み込みました', 'ok');
     },
-    [toast, store.teamFormats, store.teamPlayers],
+    [toast, store.teamFormats, store.teamPlayers, match],
   );
 
   const games = useMemo(() => {
@@ -517,7 +520,8 @@ export function App(): React.JSX.Element {
                 ? { title: record.title, latestVersion: latest?.version ?? null }
                 : null
             }
-            onDetach={resetWorkingOrder}
+            // Detaching drops the working copy, so it asks first exactly like a new order.
+            onDetach={() => startNewOrder()}
             onNavigate={setPage}
           />
         ) : null}
