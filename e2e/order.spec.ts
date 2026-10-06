@@ -250,8 +250,9 @@ test.describe('first run (§50-§53)', () => {
 
     await tab(page, 'メンバー').click();
     await expect(page.locator('.list-row')).toHaveCount(3);
-    // An empty rating is Unknown, never 0.
-    await expect(page.locator('.list-row').filter({ hasText: 'かいり' })).toContainText('Rt. —');
+    // An empty rating is Unknown, never 0: with no PPR either, the row says so in words.
+    await expect(page.locator('.list-row').filter({ hasText: 'かいり' })).toContainText('戦力データ未設定');
+    await expect(page.locator('.list-row').filter({ hasText: 'ちひろ' })).toContainText('Rt.14');
     for (const sample of ['青木', '馬場']) {
       await expect(page.locator('.list-row').filter({ hasText: sample })).toHaveCount(0);
     }
