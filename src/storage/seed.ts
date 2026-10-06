@@ -1,18 +1,19 @@
-import type { LeagueFormat, Player, Team } from '../domain/types';
+import type { GameKind, LeagueFormat, Player, Team, TeamId } from '../domain/types';
 import { createId } from '../utils/id';
 import type { Snapshot } from './repository';
 import { DEFAULT_SETTINGS } from './repository';
 
 /**
- * First-run seed data.
+ * Sample ("demo") data.
  *
- * A brand-new install opens on a usable example rather than an empty screen: one team,
+ * Offered on the first-run screen as "サンプルで試す", never created silently: one team,
  * the five-player roster from spec §38 and a six-game format that mixes Singles,
- * Doubles and Trios, so "generate" works immediately.
+ * Doubles and Trios, so "generate" works immediately. The team carries `demo: true` so
+ * every screen can label it as sample data.
  */
 export function buildSeed(): Snapshot {
   const now = Date.now();
-  const team: Team = { id: createId('team'), name: 'マイチーム', createdAt: now };
+  const team: Team = { id: createId('team'), name: 'サンプルチーム', demo: true, createdAt: now };
 
   const roster: { name: string; rating: number | null; skills: Player['skills'] }[] = [
     { name: '青木', rating: 14, skills: { G501: 5, CRICKET: 4, SINGLES: 5, DOUBLES: 4, TRIOS: 3 } },
@@ -34,20 +35,7 @@ export function buildSeed(): Snapshot {
     createdAt: now + index,
   }));
 
-  const format: LeagueFormat = {
-    id: createId('fmt'),
-    teamId: team.id,
-    name: '標準6ゲーム (Singles/Doubles/Trios)',
-    games: [
-      { id: createId('gm'), order: 1, name: 'Singles 501', kinds: ['SINGLES', 'G501'], playerCount: 1 },
-      { id: createId('gm'), order: 2, name: 'Singles Cricket', kinds: ['SINGLES', 'CRICKET'], playerCount: 1 },
-      { id: createId('gm'), order: 3, name: 'Doubles 501', kinds: ['DOUBLES', 'G501'], playerCount: 2 },
-      { id: createId('gm'), order: 4, name: 'Doubles Cricket', kinds: ['DOUBLES', 'CRICKET'], playerCount: 2 },
-      { id: createId('gm'), order: 5, name: 'Trios', kinds: ['TRIOS'], playerCount: 3 },
-      { id: createId('gm'), order: 6, name: 'Singles 501', kinds: ['SINGLES', 'G501'], playerCount: 1 },
-    ],
-    createdAt: now,
-  };
+  const format = formatFromTemplate(FORMAT_TEMPLATES[0], team.id, now);
 
   return {
     teams: [team],
@@ -57,5 +45,67 @@ export function buildSeed(): Snapshot {
     orders: [],
     seasonCommits: [],
     settings: { ...DEFAULT_SETTINGS, activeTeamId: team.id },
+  };
+}
+
+/** Starter formats offered during onboarding (and used by the sample). */
+export interface FormatTemplate {
+  key: string;
+  name: string;
+  description: string;
+  games: { name: string; kinds: GameKind[]; playerCount: number }[];
+}
+
+export const FORMAT_TEMPLATES: readonly FormatTemplate[] = [
+  {
+    key: 'standard6',
+    name: '標準6ゲーム (Singles/Doubles/Trios)',
+    description: 'S501 / S Cricket / D501 / D Cricket / Trios / S501 ・ 10枠',
+    games: [
+      { name: 'Singles 501', kinds: ['SINGLES', 'G501'], playerCount: 1 },
+      { name: 'Singles Cricket', kinds: ['SINGLES', 'CRICKET'], playerCount: 1 },
+      { name: 'Doubles 501', kinds: ['DOUBLES', 'G501'], playerCount: 2 },
+      { name: 'Doubles Cricket', kinds: ['DOUBLES', 'CRICKET'], playerCount: 2 },
+      { name: 'Trios', kinds: ['TRIOS'], playerCount: 3 },
+      { name: 'Singles 501', kinds: ['SINGLES', 'G501'], playerCount: 1 },
+    ],
+  },
+  {
+    key: 'doubles4',
+    name: 'ダブルス中心4ゲーム',
+    description: 'D501 / D Cricket / D501 / D Cricket ・ 8枠',
+    games: [
+      { name: 'Doubles 501', kinds: ['DOUBLES', 'G501'], playerCount: 2 },
+      { name: 'Doubles Cricket', kinds: ['DOUBLES', 'CRICKET'], playerCount: 2 },
+      { name: 'Doubles 501', kinds: ['DOUBLES', 'G501'], playerCount: 2 },
+      { name: 'Doubles Cricket', kinds: ['DOUBLES', 'CRICKET'], playerCount: 2 },
+    ],
+  },
+  {
+    key: 'singles4',
+    name: 'シングルス4ゲーム',
+    description: 'S501 / S Cricket / S501 / S Cricket ・ 4枠',
+    games: [
+      { name: 'Singles 501', kinds: ['SINGLES', 'G501'], playerCount: 1 },
+      { name: 'Singles Cricket', kinds: ['SINGLES', 'CRICKET'], playerCount: 1 },
+      { name: 'Singles 501', kinds: ['SINGLES', 'G501'], playerCount: 1 },
+      { name: 'Singles Cricket', kinds: ['SINGLES', 'CRICKET'], playerCount: 1 },
+    ],
+  },
+];
+
+export function formatFromTemplate(template: FormatTemplate, teamId: TeamId, now: number): LeagueFormat {
+  return {
+    id: createId('fmt'),
+    teamId,
+    name: template.name,
+    games: template.games.map((game, index) => ({
+      id: createId('gm'),
+      order: index + 1,
+      name: game.name,
+      kinds: [...game.kinds],
+      playerCount: game.playerCount,
+    })),
+    createdAt: now,
   };
 }

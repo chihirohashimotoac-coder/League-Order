@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 /**
@@ -10,7 +11,9 @@ import { expect, test, type Page } from '@playwright/test';
 
 async function openApp(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Darts Order' })).toBeVisible();
+  // First run offers "own team" or "sample"; these tests work on the labelled sample.
+  await page.getByRole('button', { name: 'サンプルで試す' }).click();
+  await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 }
 
 function tab(page: Page, name: string) {
@@ -18,13 +21,13 @@ function tab(page: Page, name: string) {
 }
 
 async function generate(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await page.getByRole('button', { name: 'オーダーを生成' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 }
 
-const stateBanner = (page: Page) => page.locator('.state-banner');
+const stateBanner = (page: Page) => page.getByRole('region', { name: 'オーダーの状態' });
 
 /**
  * Finalizes, and waits until the app says it is done.
@@ -49,7 +52,7 @@ async function finalize(page: Page): Promise<void> {
 
 /** The version number in the state banner, or 0 while the order is still a draft. */
 async function versionBadge(page: Page): Promise<number> {
-  const banner = page.locator('.state-banner .state-title');
+  const banner = page.locator('[aria-label="オーダーの状態"] .state-title');
   if ((await banner.count()) === 0) return 0;
   const match = /v(\d+)/.exec(await banner.innerText());
   return match ? Number(match[1]) : 0;
@@ -110,7 +113,7 @@ async function seasonTotals(page: Page): Promise<Record<string, number>> {
   );
   const totals: Record<string, number> = {};
   for (const row of rows) {
-    const match = /Season (\d+) 回/.exec(row.meta);
+    const match = /シーズン (\d+) 回/.exec(row.meta);
     totals[row.name.replace(/\s+/g, '')] = match ? Number(match[1]) : 0;
   }
   return totals;
@@ -121,7 +124,7 @@ test.describe('order state model (追加要件 §2, §8)', () => {
     await openApp(page);
     await generate(page);
     await expect(stateBanner(page)).toContainText('未確定');
-    await expect(page.getByRole('button', { name: 'オーダーを確定 (v1)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'オーダーを確定 v1' })).toBeVisible();
   });
 
   test('finalizing produces v1, editing flips to UPDATED, re-finalizing produces v2', async ({ page }) => {
@@ -134,7 +137,7 @@ test.describe('order state model (追加要件 §2, §8)', () => {
 
     await changeFirstSlot(page);
     await expect(stateBanner(page)).toContainText('再確定が必要');
-    await expect(page.getByRole('button', { name: '再確定 (v2)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '再確定 v2' })).toBeVisible();
 
     await finalize(page);
     await expect(stateBanner(page)).toContainText('確定済み');
@@ -142,7 +145,7 @@ test.describe('order state model (追加要件 §2, §8)', () => {
 
     // And a third round.
     await changeFirstSlot(page);
-    await expect(page.getByRole('button', { name: '再確定 (v3)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '再確定 v3' })).toBeVisible();
     await finalize(page);
     await expect(stateBanner(page)).toContainText('v3');
   });
@@ -177,7 +180,7 @@ test.describe('order state model (追加要件 §2, §8)', () => {
     await openApp(page);
     await generate(page);
     await page.locator('.slot select').first().selectOption('');
-    await expect(page.getByText('Hard制約に違反しています')).toBeVisible();
+    await expect(page.getByText('絶対条件に違反しています')).toBeVisible();
     await expect(page.getByRole('button', { name: /オーダーを確定|再確定/ })).toBeDisabled();
   });
 });
@@ -411,8 +414,8 @@ test.describe('history and immutable snapshots (追加要件 §5, §15)', () => 
     const dialog = page.getByRole('dialog', { name: 'v1 の内容' });
     await expect(dialog).toBeVisible();
     // The snapshot still shows the name it was finalized under.
-    await expect(dialog.locator('table.data')).toContainText(original);
-    await expect(dialog.locator('table.data')).not.toContainText('改名後の選手');
+    await expect(dialog.locator('.mini-order')).toContainText(original);
+    await expect(dialog.locator('.mini-order')).not.toContainText('改名後の選手');
   });
 
   test('a finalized order and its versions survive a reload', async ({ page }) => {
@@ -446,3 +449,250 @@ test.describe('history and immutable snapshots (追加要件 §5, §15)', () => 
     await expect(stateBanner(page)).toContainText('v1');
   });
 });
+
+test.describe('editing a saved order from SETUP (§64)', () => {
+  test('re-generating a finalized order from SETUP revises it to v2', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    await page.getByRole('button', { name: '戻る' }).click();
+    await expect(page.getByTestId('editing-banner')).toContainText('ORDER v1 を編集中');
+    await page.getByLabel('遠藤 を参加者に含める').uncheck();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+
+    await expect(stateBanner(page)).toContainText('再確定が必要');
+    await finalize(page);
+    await expect(stateBanner(page)).toContainText('v2');
+
+    // Still one order, now with two versions.
+    await tab(page, '履歴').click();
+    await expect(page.locator('.list-row')).toHaveCount(1);
+    await page.locator('.list-row').first().click();
+    await expect(page.getByText('2 版')).toBeVisible();
+  });
+
+  test('opening an order from history restores its setup conditions', async ({ page }) => {
+    await openApp(page);
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByLabel('遠藤 を参加者に含める').uncheck();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
+    await finalize(page);
+
+    // Start something else, so the setup draft no longer matches that order…
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByLabel('遠藤 を参加者に含める').check();
+
+    // …then reopen it: SETUP shows the conditions it was generated with.
+    await tab(page, '履歴').click();
+    await page.locator('.list-row').first().click();
+    await page.getByRole('button', { name: 'このオーダーを開いて編集' }).click();
+    await page.getByRole('button', { name: '戻る' }).click();
+    await expect(page.getByTestId('editing-banner')).toBeVisible();
+    await expect(page.getByLabel('遠藤 を参加者に含める')).not.toBeChecked();
+  });
+
+  test('"新規オーダーにする" detaches SETUP so the next generation is a new draft', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    await page.getByRole('button', { name: '戻る' }).click();
+    await page.getByRole('button', { name: '新規オーダーにする' }).click();
+    await expect(page.getByTestId('editing-banner')).toHaveCount(0);
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(stateBanner(page)).toContainText('未確定');
+    await expect(page.getByRole('button', { name: 'オーダーを確定 v1' })).toBeVisible();
+  });
+
+  test('switching teams detaches the open order, so another team never revises it', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // A second team with one member and a one-game format.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: 'チームを追加' }).click();
+    await page.getByLabel('チーム名').fill('Bチーム');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await page.locator('.sheet .list-row').filter({ hasText: 'Bチーム' }).click();
+    await expect(page.getByRole('heading', { name: 'Bチーム', level: 1 })).toBeVisible();
+    await tab(page, 'メンバー').click();
+    await page.getByRole('button', { name: 'メンバーを追加' }).click();
+    await page.getByLabel('名前 (必須)').fill('ビーさん');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await tab(page, 'フォーマット').click();
+    await page.getByRole('button', { name: 'フォーマットを作成' }).click();
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+
+    // Team B's SETUP is not editing team A's order, and generating makes B's own draft.
+    await tab(page, 'オーダー').click();
+    await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+    await expect(page.getByTestId('editing-banner')).toHaveCount(0);
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(stateBanner(page)).toContainText('未確定');
+    await finalize(page);
+    await expect(stateBanner(page)).toContainText('v1');
+
+    // Team A's order is untouched: still one version, still A's players.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.locator('.sheet .list-row').filter({ hasText: 'サンプルチーム' }).click();
+    await tab(page, '履歴').click();
+    await expect(page.locator('.list-row')).toHaveCount(1);
+    await page.locator('.list-row').first().click();
+    await expect(page.getByText('1 版')).toBeVisible();
+    await expect(page.locator('.mini-order')).not.toContainText('ビーさん');
+  });
+
+  test('a failed re-generation keeps the saved order and the conditions it came from', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // Make the conditions impossible (two players cannot fill a Trios) and try again.
+    await page.getByRole('button', { name: '戻る' }).click();
+    await page.getByRole('button', { name: '解除' }).click();
+    await page.getByLabel('青木 を参加者に含める').check();
+    await page.getByLabel('馬場 を参加者に含める').check();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(page.getByText('オーダーを生成できませんでした')).toBeVisible();
+
+    // v1 is still what is shown, unchanged, and saving it keeps v1's own conditions.
+    await expect(stateBanner(page)).toContainText('確定済み');
+    await page.getByRole('button', { name: /変更を保存|下書きを保存/ }).click();
+    await tab(page, '履歴').click();
+    await page.locator('.list-row').first().click();
+    await page.getByRole('button', { name: 'このオーダーを開いて編集' }).click();
+    await page.getByRole('button', { name: '戻る' }).click();
+    await expect(page.getByLabel('遠藤 を参加者に含める')).toBeChecked();
+    await expect(page.getByLabel('土井 を参加者に含める')).toBeChecked();
+  });
+
+  test('asks before discarding unsaved edits to a saved order', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // Saved and unchanged: a new order starts without a question.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '作業中のオーダーを開く' }).click();
+    await changeFirstSlot(page);
+    await expect(stateBanner(page)).toContainText('再確定が必要');
+
+    // Edited since the last save: the captain is asked first, and cancelling keeps it.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    const dialog = page.getByRole('dialog', { name: '新しいオーダーを作る' });
+    await expect(dialog).toContainText('保存されていない変更');
+    await dialog.getByRole('button', { name: 'キャンセル' }).click();
+    await page.getByRole('button', { name: '作業中のオーダーを開く' }).click();
+    await expect(stateBanner(page)).toContainText('再確定が必要');
+
+    // Once re-finalized, nothing is pending and no question is asked.
+    await finalize(page);
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('asks before discarding an unsaved change to the match header', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // Change the opponent from the share sheet: the order becomes UPDATED.
+    await page.getByRole('button', { name: '共有', exact: true }).click();
+    await page.locator('details.match-edit > summary').click();
+    await page.getByLabel('対戦相手 (任意)').fill('Team Z');
+    await page.getByRole('button', { name: '閉じる' }).click();
+    await expect(stateBanner(page)).toContainText('再確定が必要');
+
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await expect(page.getByRole('dialog', { name: '新しいオーダーを作る' })).toContainText('保存されていない変更');
+  });
+
+  test('"新規オーダーにする" asks before dropping unsaved edits', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+    await changeFirstSlot(page);
+
+    await page.getByRole('button', { name: '戻る' }).click();
+    await page.getByRole('button', { name: '新規オーダーにする' }).click();
+    const dialog = page.getByRole('dialog', { name: '新しいオーダーを作る' });
+    await expect(dialog).toContainText('保存されていない変更');
+    await dialog.getByRole('button', { name: 'キャンセル' }).click();
+    // Still editing the saved order.
+    await expect(page.getByTestId('editing-banner')).toContainText('ORDER v1 を編集中');
+  });
+
+  test('match-header edits count as unsaved on an order saved without a header', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // Turn the stored order into one written before the match header existed:
+    // export, drop `match`, import it back.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: /設定 \/ バックアップ/ }).click();
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'JSON エクスポート' }).click();
+    const backup = JSON.parse(readFileSync((await (await download).path())!, 'utf-8'));
+    for (const order of backup.data.orders) delete order.match;
+    await page.setInputFiles('input[type="file"]', {
+      name: 'legacy.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(backup), 'utf-8'),
+    });
+    await page.getByRole('button', { name: '置き換える' }).click();
+    await expect(page.getByText('インポートしました')).toBeVisible();
+
+    await tab(page, '履歴').click();
+    await page.locator('.list-row').first().click();
+    await page.getByRole('button', { name: 'このオーダーを開いて編集' }).click();
+    await expect(stateBanner(page)).toContainText('確定済み');
+
+    await page.getByRole('button', { name: '共有', exact: true }).click();
+    await page.locator('details.match-edit > summary').click();
+    await page.getByLabel('対戦相手 (任意)').fill('Team Z');
+    await page.getByRole('button', { name: '閉じる' }).click();
+
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await expect(page.getByRole('dialog', { name: '新しいオーダーを作る' })).toContainText('保存されていない変更');
+  });
+
+  test('asks before switching teams while the open order has unsaved work', async ({ page }) => {
+    await openApp(page);
+    await generate(page); // a draft that was never saved
+
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: 'チームを追加' }).click();
+    await page.getByLabel('チーム名').fill('Bチーム');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await page.locator('.sheet .list-row').filter({ hasText: 'Bチーム' }).click();
+
+    // Asked first; cancelling keeps the team and the order.
+    const dialog = page.getByRole('dialog', { name: 'チームを切り替える' });
+    await expect(dialog).toContainText('保存されていない変更');
+    await dialog.getByRole('button', { name: 'キャンセル' }).click();
+    await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: '作業中のオーダーを開く' })).toBeVisible();
+
+    // Confirming switches and drops it.
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.locator('.sheet .list-row').filter({ hasText: 'Bチーム' }).click();
+    await page.getByRole('button', { name: '破棄して切り替える' }).click();
+    await expect(page.getByRole('heading', { name: 'Bチーム', level: 1 })).toBeVisible();
+    await expect(page.getByRole('button', { name: '作業中のオーダーを開く' })).toHaveCount(0);
+  });
+});
+

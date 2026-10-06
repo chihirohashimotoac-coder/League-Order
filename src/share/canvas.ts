@@ -18,28 +18,45 @@ const FONT_STACK =
   '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "YuGothic", "Noto Sans JP", "Noto Sans CJK JP", Meiryo, system-ui, -apple-system, sans-serif';
 
 const WIDTH = 540;
-const PAD = 26;
+const PAD = 24;
 /** Roughly a 1:2.6 aspect ratio — taller images get unreadable in a chat preview. */
 const MAX_PAGE_HEIGHT = 1400;
 /** Beyond this the PNG gets slow to encode and awkward to send. */
 const MAX_PIXELS = 12_000_000;
 
+/**
+ * Arena Scoreboard palette — the same tokens as the app (src/styles/app.css). Status
+ * colours appear only on the version badge; the order itself is white on graphite so it
+ * stays legible when LINE shrinks the image to a thumbnail.
+ */
 const COLORS = {
-  background: '#0d1420',
-  card: '#182131',
-  cardAlt: '#1d2838',
-  badge: '#0f2436',
-  draftBadge: '#3a2a12',
-  draftText: '#fbbf24',
-  accent: '#4cc9f0',
-  text: '#f2f7fd',
-  muted: '#9badc4',
-  dim: '#6f8299',
-  line: '#2c3b50',
+  background: '#0d0f12',
+  panel: '#12161b',
+  card: '#171c22',
+  numberPanel: '#1d242c',
+  line: '#2a323b',
+  lineStrong: '#394652',
+  accent: '#22d3ee',
+  text: '#f4f7fa',
+  secondary: '#b4bec9',
+  muted: '#87929e',
+  rings: 'rgba(34, 211, 238, 0.08)',
+  tone: {
+    draft: '#fbbf24',
+    finalized: '#34d399',
+    updated: '#fb923c',
+  },
 };
 
-function font(size: number, weight: 'normal' | 'bold' = 'normal'): string {
-  return `${weight === 'bold' ? '700 ' : ''}${size}px ${FONT_STACK}`;
+function font(size: number, weight: 'normal' | 'bold' | 'heavy' = 'normal'): string {
+  const w = weight === 'heavy' ? '900 ' : weight === 'bold' ? '700 ' : '';
+  return `${w}${size}px ${FONT_STACK}`;
+}
+
+/** Letter-spacing where the canvas supports it (Chrome, recent Safari); a no-op elsewhere. */
+function setTracking(ctx: CanvasRenderingContext2D, px: number): void {
+  const target = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
+  if ('letterSpacing' in target) target.letterSpacing = `${px}px`;
 }
 
 export interface ShareImageOptions {
@@ -65,14 +82,17 @@ interface Block {
   draw(ctx: CanvasRenderingContext2D, y: number): void;
 }
 
-function measurer(ctx: CanvasRenderingContext2D, fontSpec: string): MeasureText {
+function measurer(ctx: CanvasRenderingContext2D, fontSpec: string, tracking = 0): MeasureText {
   return (text: string) => {
     ctx.font = fontSpec;
-    return ctx.measureText(text).width;
+    setTracking(ctx, tracking);
+    const width = ctx.measureText(text).width;
+    setTracking(ctx, 0);
+    return width;
   };
 }
 
-function drawRoundedRect(
+function roundedRectPath(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
@@ -88,142 +108,220 @@ function drawRoundedRect(
   ctx.arcTo(x, y + height, x, y, r);
   ctx.arcTo(x, y, x + width, y, r);
   ctx.closePath();
+}
+
+function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  roundedRectPath(ctx, x, y, width, height, radius);
   ctx.fill();
+}
+
+function strokeRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  roundedRectPath(ctx, x, y, width, height, radius);
+  ctx.stroke();
 }
 
 // ---------------------------------------------------------------------------
 // Block builders
 // ---------------------------------------------------------------------------
 
+/**
+ * Match-card header: league, team, VS, opponent, date, version — in that reading order,
+ * centred, with the team name as the largest thing on the image.
+ */
 function buildHeaderBlock(ctx: CanvasRenderingContext2D, layout: ShareLayout): Block {
   const inner = WIDTH - PAD * 2;
-  const titleLines = wrapText(layout.header.title, inner, measurer(ctx, font(15, 'bold')));
-  const teamLines = wrapText(layout.header.teamName, inner, measurer(ctx, font(30, 'bold')));
-  const opponentLines = layout.header.opponentName
-    ? wrapText(layout.header.opponentName, inner, measurer(ctx, font(24, 'bold')))
+  const { header } = layout;
+  const titleLines = wrapText(header.title.toUpperCase(), inner, measurer(ctx, font(14, 'heavy'), 2.5));
+  const teamLines = header.teamName ? wrapText(header.teamName, inner, measurer(ctx, font(38, 'heavy'))) : [];
+  const opponentLines = header.opponentName
+    ? wrapText(header.opponentName, inner, measurer(ctx, font(28, 'heavy')))
     : [];
+  const dateText = header.dateText.replace(/\//g, '.');
 
-  const titleH = titleLines.length * 21;
-  const teamH = teamLines.length * 38;
-  const vsH = opponentLines.length > 0 ? 22 : 0;
-  const opponentH = opponentLines.length * 32;
-  const dateH = layout.header.dateText ? 26 : 0;
-  const versionH = layout.header.versionText ? 24 : 0;
-  const height = 10 + titleH + teamH + vsH + opponentH + dateH + versionH + 16;
+  const titleH = titleLines.length * 20;
+  const teamH = teamLines.length * 46;
+  const vsH = opponentLines.length > 0 ? 34 : 0;
+  const opponentH = opponentLines.length * 36;
+  const dateH = dateText ? 30 : 0;
+  const versionH = header.versionText ? 40 : 0;
+  const height = 18 + titleH + 10 + teamH + vsH + opponentH + dateH + versionH + 34;
 
   return {
     height,
     draw(target, top) {
-      let y = top + 10;
-
+      let y = top + 18;
       target.textAlign = 'center';
+
       target.fillStyle = COLORS.accent;
-      target.font = font(15, 'bold');
+      target.font = font(14, 'heavy');
+      setTracking(target, 2.5);
       for (const line of titleLines) {
         target.fillText(line, WIDTH / 2, y);
-        y += 21;
+        y += 20;
       }
+      setTracking(target, 0);
+      y += 10;
 
       target.fillStyle = COLORS.text;
-      target.font = font(30, 'bold');
+      target.font = font(38, 'heavy');
       for (const line of teamLines) {
         target.fillText(line, WIDTH / 2, y);
-        y += 38;
+        y += 46;
       }
 
       if (opponentLines.length > 0) {
-        target.fillStyle = COLORS.dim;
-        target.font = font(14, 'bold');
-        target.fillText('vs', WIDTH / 2, y + 3);
-        y += 22;
+        // "VS" as a small outlined plate between the two team names.
+        target.font = font(13, 'heavy');
+        setTracking(target, 2);
+        const vsWidth = 52;
+        target.strokeStyle = COLORS.lineStrong;
+        target.lineWidth = 1.5;
+        strokeRoundedRect(target, (WIDTH - vsWidth) / 2, y + 4, vsWidth, 22, 6);
+        target.fillStyle = COLORS.secondary;
+        target.fillText('VS', WIDTH / 2 + 1, y + 8);
+        setTracking(target, 0);
+        y += 34;
 
         target.fillStyle = COLORS.text;
-        target.font = font(24, 'bold');
+        target.font = font(28, 'heavy');
         for (const line of opponentLines) {
           target.fillText(line, WIDTH / 2, y);
-          y += 32;
+          y += 36;
         }
       }
 
-      if (layout.header.dateText) {
-        target.fillStyle = COLORS.muted;
-        target.font = font(17);
-        target.fillText(layout.header.dateText, WIDTH / 2, y + 2);
-        y += 26;
+      if (dateText) {
+        target.fillStyle = COLORS.secondary;
+        target.font = font(18, 'bold');
+        setTracking(target, 1.5);
+        target.fillText(dateText, WIDTH / 2, y + 4);
+        setTracking(target, 0);
+        y += 30;
       }
 
-      // Version badge: small and muted so it never competes with the order itself, but
-      // always present once an order has been finalized (追加要件 §6).
-      if (layout.header.versionText) {
-        const isDraft = layout.header.versionText.includes('未確定');
-        target.font = font(13, 'bold');
-        const label = layout.header.versionText;
+      // Version badge: always present once an order has a state, coloured by state, and
+      // labelled in text so it never relies on colour (追加要件 §6).
+      if (header.versionText) {
+        const tone = header.versionTone === 'none' ? COLORS.secondary : COLORS.tone[header.versionTone];
+        const label =
+          header.versionTone === 'updated' ? header.versionText.replace('更新版', 'UPDATED') : header.versionText;
+        target.font = font(15, 'heavy');
+        setTracking(target, 1.5);
         const textWidth = target.measureText(label).width;
-        const padX = 10;
-        const boxWidth = textWidth + padX * 2;
+        const dot = 8;
+        const boxWidth = textWidth + 22 + dot + 10;
         const boxX = (WIDTH - boxWidth) / 2;
-        target.fillStyle = isDraft ? COLORS.draftBadge : COLORS.badge;
-        drawRoundedRect(target, boxX, y + 2, boxWidth, 22, 11);
-        target.fillStyle = isDraft ? COLORS.draftText : COLORS.accent;
-        target.fillText(label, WIDTH / 2, y + 7);
-        y += 24;
+        target.fillStyle = COLORS.panel;
+        drawRoundedRect(target, boxX, y + 8, boxWidth, 30, 15);
+        target.strokeStyle = tone;
+        target.lineWidth = 1.5;
+        strokeRoundedRect(target, boxX, y + 8, boxWidth, 30, 15);
+        target.fillStyle = tone;
+        target.beginPath();
+        target.arc(boxX + 14 + dot / 2, y + 23, dot / 2, 0, Math.PI * 2);
+        target.fill();
+        target.textAlign = 'left';
+        target.fillText(label, boxX + 14 + dot + 8, y + 15);
+        target.textAlign = 'center';
+        setTracking(target, 0);
+        y += 40;
       }
 
-      target.textAlign = 'left';
+      // Section rule: ── ORDER ──
+      const ruleY = top + height - 14;
+      target.font = font(12, 'heavy');
+      setTracking(target, 3);
+      const label = 'ORDER';
+      const labelWidth = target.measureText(label).width + 24;
       target.strokeStyle = COLORS.line;
       target.lineWidth = 1;
       target.beginPath();
-      target.moveTo(PAD, top + height - 8);
-      target.lineTo(WIDTH - PAD, top + height - 8);
+      target.moveTo(PAD, ruleY);
+      target.lineTo((WIDTH - labelWidth) / 2, ruleY);
+      target.moveTo((WIDTH + labelWidth) / 2, ruleY);
+      target.lineTo(WIDTH - PAD, ruleY);
       target.stroke();
+      target.fillStyle = COLORS.muted;
+      target.fillText(label, WIDTH / 2 + 1.5, ruleY - 7);
+      setTracking(target, 0);
+      target.textAlign = 'left';
     },
   };
 }
 
-function buildGameBlock(
-  ctx: CanvasRenderingContext2D,
-  row: ShareLayout['games'][number],
-  index: number,
-): Block {
-  const badgeWidth = 54;
-  const textLeft = PAD + badgeWidth + 14;
-  const textWidth = WIDTH - PAD - textLeft - 12;
+/** One game: big number panel on the left, game name, then each player on a line. */
+function buildGameBlock(ctx: CanvasRenderingContext2D, row: ShareLayout['games'][number]): Block {
+  const numberWidth = 78;
+  const textLeft = PAD + numberWidth + 16;
+  const textWidth = WIDTH - PAD - textLeft - 14;
 
-  const nameLines = wrapText(row.gameName, textWidth, measurer(ctx, font(18)));
+  const nameLines = wrapText(row.gameName.toUpperCase(), textWidth, measurer(ctx, font(15, 'heavy'), 1.2));
   // Large, bold player names: this is the one line a member actually reads (要件 §3).
-  const playerLines = wrapText(row.players, textWidth, measurer(ctx, font(26, 'bold')));
+  const playerLines = row.playerNames.flatMap((name) =>
+    wrapText(name, textWidth, measurer(ctx, font(27, 'heavy'))),
+  );
 
-  const contentH = nameLines.length * 24 + 4 + playerLines.length * 34;
-  const height = Math.max(76, contentH + 24) + 8;
+  const contentH = nameLines.length * 20 + 6 + playerLines.length * 35;
+  const cardHeight = Math.max(92, contentH + 30);
+  const height = cardHeight + 10;
+  const number = row.no.replace(/^G/, '').padStart(2, '0');
 
   return {
     height,
     draw(target, top) {
-      const cardHeight = height - 8;
-      target.fillStyle = index % 2 === 0 ? COLORS.card : COLORS.cardAlt;
-      drawRoundedRect(target, PAD, top, WIDTH - PAD * 2, cardHeight, 12);
+      target.fillStyle = COLORS.card;
+      drawRoundedRect(target, PAD, top, WIDTH - PAD * 2, cardHeight, 14);
 
-      target.fillStyle = COLORS.badge;
-      drawRoundedRect(target, PAD + 12, top + 14, badgeWidth - 12, 34, 9);
+      // Number panel, clipped to the card's rounded corners.
+      target.save();
+      roundedRectPath(target, PAD, top, WIDTH - PAD * 2, cardHeight, 14);
+      target.clip();
+      target.fillStyle = COLORS.numberPanel;
+      target.fillRect(PAD, top, numberWidth, cardHeight);
       target.fillStyle = COLORS.accent;
-      target.font = font(19, 'bold');
+      target.fillRect(PAD, top, 4, cardHeight);
+      target.restore();
+
       target.textAlign = 'center';
-      target.fillText(row.no, PAD + 12 + (badgeWidth - 12) / 2, top + 22);
+      target.fillStyle = COLORS.muted;
+      target.font = font(10, 'heavy');
+      setTracking(target, 2);
+      target.fillText('GAME', PAD + numberWidth / 2 + 3, top + cardHeight / 2 - 26);
+      setTracking(target, 0);
+      target.fillStyle = COLORS.text;
+      target.font = font(34, 'heavy');
+      target.fillText(number, PAD + numberWidth / 2 + 2, top + cardHeight / 2 - 12);
       target.textAlign = 'left';
 
       let y = top + (cardHeight - contentH) / 2;
-      target.fillStyle = COLORS.muted;
-      target.font = font(18);
+      target.fillStyle = COLORS.secondary;
+      target.font = font(15, 'heavy');
+      setTracking(target, 1.2);
       for (const line of nameLines) {
         target.fillText(line, textLeft, y);
-        y += 24;
+        y += 20;
       }
-      y += 4;
+      setTracking(target, 0);
+      y += 6;
       target.fillStyle = COLORS.text;
-      target.font = font(26, 'bold');
+      target.font = font(27, 'heavy');
       for (const line of playerLines) {
         target.fillText(line, textLeft, y);
-        y += 34;
+        y += 35;
       }
     },
   };
@@ -231,47 +329,70 @@ function buildGameBlock(
 
 function buildSectionLabel(label: string): Block {
   return {
-    height: 38,
+    height: 46,
     draw(target, top) {
-      target.fillStyle = COLORS.dim;
-      target.font = font(14, 'bold');
-      target.fillText(label, PAD, top + 14);
+      target.fillStyle = COLORS.accent;
+      target.fillRect(PAD, top + 18, 4, 16);
+      target.fillStyle = COLORS.secondary;
+      target.font = font(14, 'heavy');
+      setTracking(target, 2);
+      target.fillText(label, PAD + 14, top + 18);
+      setTracking(target, 0);
     },
   };
 }
 
-function buildTallyBlock(
+/**
+ * Detail variant: appearances as a two-column grid, the count as the largest figure.
+ * Two per row keeps a typical five-to-eight-player detail image on a single page.
+ */
+function buildTallyRowBlock(
   ctx: CanvasRenderingContext2D,
-  row: ShareLayout['tally'][number],
-  index: number,
+  cells: readonly ShareLayout['tally'][number][],
 ): Block {
-  const right = `${row.rating}  今回${row.count}  Season${row.seasonTotal}`;
-  const rightWidth = measurer(ctx, font(17))(right);
-  // Keep a clear gutter between the name and the figures so a long name never collides
-  // with them (要件 §13).
-  const nameWidth = WIDTH - PAD * 2 - rightWidth - 52;
-  const nameLines = wrapText(row.name, Math.max(80, nameWidth), measurer(ctx, font(19, 'bold')));
-  const height = Math.max(44, nameLines.length * 26 + 18);
+  const gap = 10;
+  const cellWidth = (WIDTH - PAD * 2 - gap) / 2;
+  const countWidth = 56;
+  const nameWidth = cellWidth - countWidth - 28;
+  const layouts = cells.map((cell) => ({
+    cell,
+    nameLines: wrapText(cell.name, Math.max(60, nameWidth), measurer(ctx, font(19, 'heavy'))),
+  }));
+  const lines = Math.max(...layouts.map((entry) => entry.nameLines.length));
+  const cardHeight = Math.max(70, lines * 25 + 44);
+  const height = cardHeight + 8;
 
   return {
     height,
     draw(target, top) {
-      target.fillStyle = index % 2 === 0 ? COLORS.card : COLORS.cardAlt;
-      drawRoundedRect(target, PAD, top, WIDTH - PAD * 2, height - 4, 9);
+      layouts.forEach(({ cell, nameLines }, index) => {
+        const x = PAD + index * (cellWidth + gap);
+        target.fillStyle = COLORS.card;
+        drawRoundedRect(target, x, top, cellWidth, cardHeight, 10);
 
-      let y = top + (height - 4 - nameLines.length * 26) / 2 + 3;
-      target.fillStyle = COLORS.text;
-      target.font = font(19, 'bold');
-      for (const line of nameLines) {
-        target.fillText(line, PAD + 14, y);
-        y += 26;
-      }
+        let y = top + 12;
+        target.fillStyle = COLORS.text;
+        target.font = font(19, 'heavy');
+        for (const line of nameLines) {
+          target.fillText(line, x + 14, y);
+          y += 25;
+        }
+        target.fillStyle = COLORS.secondary;
+        target.font = font(13, 'bold');
+        target.fillText(`${cell.rating} ・ シーズン ${cell.seasonTotal}`, x + 14, y + 3);
 
-      target.fillStyle = COLORS.muted;
-      target.font = font(17);
-      target.textAlign = 'right';
-      target.fillText(right, WIDTH - PAD - 14, top + (height - 4) / 2 - 9);
-      target.textAlign = 'left';
+        const right = x + cellWidth - 14;
+        target.textAlign = 'right';
+        target.fillStyle = COLORS.text;
+        target.font = font(32, 'heavy');
+        target.fillText(String(cell.count), right, top + cardHeight / 2 - 24);
+        target.fillStyle = COLORS.muted;
+        target.font = font(10, 'heavy');
+        setTracking(target, 1.5);
+        target.fillText('GAMES', right + 1.5, top + cardHeight / 2 + 12);
+        setTracking(target, 0);
+        target.textAlign = 'left';
+      });
     },
   };
 }
@@ -279,17 +400,36 @@ function buildTallyBlock(
 function buildNoteBlock(ctx: CanvasRenderingContext2D, text: string): Block {
   const lines = wrapText(text, WIDTH - PAD * 2, measurer(ctx, font(14)));
   return {
-    height: lines.length * 20 + 6,
+    height: lines.length * 20 + 8,
     draw(target, top) {
-      target.fillStyle = COLORS.dim;
+      target.fillStyle = COLORS.muted;
       target.font = font(14);
-      let y = top;
+      let y = top + 4;
       for (const line of lines) {
         target.fillText(line, PAD, y);
         y += 20;
       }
     },
   };
+}
+
+/** Background shared by every page: graphite, a cyan top rule and faint dartboard rings. */
+function drawBackdrop(ctx: CanvasRenderingContext2D, height: number): void {
+  ctx.fillStyle = COLORS.background;
+  ctx.fillRect(0, 0, WIDTH, height);
+
+  ctx.save();
+  ctx.strokeStyle = COLORS.rings;
+  ctx.lineWidth = 2;
+  for (let radius = 34; radius <= 300; radius += 26) {
+    ctx.beginPath();
+    ctx.arc(WIDTH + 24, -24, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = COLORS.accent;
+  ctx.fillRect(0, 0, WIDTH, 5);
 }
 
 // ---------------------------------------------------------------------------
@@ -319,12 +459,14 @@ export function renderShareImages(
   if (!probe || !probeCtx) return [];
 
   const headerBlock = buildHeaderBlock(probeCtx, layout);
-  const blocks: Block[] = layout.games.map((row, index) => buildGameBlock(probeCtx, row, index));
+  const blocks: Block[] = layout.games.map((row) => buildGameBlock(probeCtx, row));
 
   if (layout.variant === 'detail') {
     if (layout.tally.length > 0) {
-      blocks.push(buildSectionLabel('出場回数'));
-      layout.tally.forEach((row, index) => blocks.push(buildTallyBlock(probeCtx, row, index)));
+      blocks.push(buildSectionLabel('APPEARANCES  出場回数'));
+      for (let index = 0; index < layout.tally.length; index += 2) {
+        blocks.push(buildTallyRowBlock(probeCtx, layout.tally.slice(index, index + 2)));
+      }
     }
     if (layout.orderTypeLabel) {
       blocks.push(buildNoteBlock(probeCtx, `オーダータイプ: ${layout.orderTypeLabel}`));
@@ -332,7 +474,7 @@ export function renderShareImages(
     for (const note of layout.notes) blocks.push(buildNoteBlock(probeCtx, note));
   }
 
-  const footerHeight = 30;
+  const footerHeight = 40;
   const maxPageHeight = options.maxPageHeight ?? MAX_PAGE_HEIGHT;
   const contentBudget = Math.max(
     120,
@@ -359,8 +501,7 @@ export function renderShareImages(
     ctx.scale(scale, scale);
     ctx.textBaseline = 'top';
 
-    ctx.fillStyle = COLORS.background;
-    ctx.fillRect(0, 0, WIDTH, logicalHeight);
+    drawBackdrop(ctx, logicalHeight);
 
     let y = PAD;
     headerBlock.draw(ctx, y);
@@ -371,11 +512,17 @@ export function renderShareImages(
       y += blocks[index].height;
     }
 
+    // Footer: a quiet wordmark, and the page count when the order spans pages.
+    const footerY = logicalHeight - PAD - 16;
+    ctx.fillStyle = COLORS.muted;
+    ctx.font = font(11, 'heavy');
+    setTracking(ctx, 2);
+    ctx.fillText('DARTS LEAGUE ORDER', PAD, footerY);
+    setTracking(ctx, 0);
     if (pages.length > 1) {
-      ctx.fillStyle = COLORS.dim;
-      ctx.font = font(14, 'bold');
+      ctx.font = font(14, 'heavy');
       ctx.textAlign = 'right';
-      ctx.fillText(`${pageIndex + 1} / ${pages.length}`, WIDTH - PAD, logicalHeight - PAD - 10);
+      ctx.fillText(`${pageIndex + 1} / ${pages.length}`, WIDTH - PAD, footerY - 2);
       ctx.textAlign = 'left';
     }
 

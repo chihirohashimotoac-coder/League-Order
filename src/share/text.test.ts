@@ -237,7 +237,7 @@ describe('§13 coverage: shapes, languages and sizes', () => {
     const unrated = jpRoster().map((entry) => player({ id: entry.id, name: entry.name }));
     const gameDefs = sampleFormatGames();
     const text = renderDetailText(gameDefs, unrated, solutionFor(unrated, gameDefs), fullMatch);
-    expect(text).toContain('R-');
+    expect(text).toContain('Rt.—');
     expect(text).not.toContain('R0');
   });
 });

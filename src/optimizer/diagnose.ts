@@ -361,7 +361,7 @@ export function analyseRelaxations(input: OrderInput, budgetMs = 400): Diagnosti
       describe: '連続出場制限を Soft にする',
       suggestion: {
         kind: 'relaxConsecutive',
-        message: '最大連続出場を Hard から Soft に変更すると生成できます。',
+        message: '最大連続出場の扱いを「絶対条件」から「できるだけ考慮」に変更すると生成できます。',
       },
       apply: (base) => ({ ...base, settings: { ...base.settings, consecutiveMode: 'soft' } }),
     });

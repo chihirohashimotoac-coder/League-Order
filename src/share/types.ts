@@ -52,6 +52,8 @@ export interface ShareHeader {
   dateText: string;
   /** e.g. `ORDER v2 · 更新版`, or `未確定 (DRAFT)`. Empty when not applicable. */
   versionText: string;
+  /** Drives the badge colour on the image: amber draft, green v1, orange update. */
+  versionTone: 'draft' | 'finalized' | 'updated' | 'none';
 }
 
 export interface ShareGameRow {
@@ -60,11 +62,13 @@ export interface ShareGameRow {
   gameName: string;
   /** Players joined for display, e.g. `ちひろ / かいり`. */
   players: string;
+  /** The same players one per entry, for layouts that stack them. */
+  playerNames: string[];
 }
 
 export interface ShareTallyRow {
   name: string;
-  /** `R14`, `R14*` (imputed) or `R-` when no rating exists at all. */
+  /** `Rt.14`, `Rt.14*` (imputed) or `Rt.—` when no rating exists at all. */
   rating: string;
   count: number;
   seasonTotal: number;

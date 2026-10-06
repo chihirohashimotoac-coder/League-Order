@@ -82,6 +82,11 @@ export interface Team {
   /** League this team plays in. Used on shared orders; purely descriptive. */
   leagueName?: string;
   note?: string;
+  /**
+   * True for the bundled sample team, so the UI can label it as demo data and nobody
+   * mistakes it for a real roster. Absent on every team a captain creates.
+   */
+  demo?: boolean;
   createdAt: number;
 }
 

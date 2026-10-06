@@ -231,7 +231,7 @@ function buildWarnings(
     warnings.push({
       severity: 'warning',
       code: 'SPREAD_OVER_ONE',
-      message: `出場回数の最大差が ${evaluation.fairness.spread} です。Hard制約 (出場不可・最大出場回数・ロック) により完全な均等化ができていません。`,
+      message: `出場回数の最大差が ${evaluation.fairness.spread} です。絶対条件 (出場不可・最大出場回数・ロック) により完全な均等化ができていません。`,
     });
   }
   if (evaluation.consecutiveExcessTotal > 0) {
@@ -406,7 +406,7 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
         {
           code: 'SEARCH_EXHAUSTED',
           message:
-            'すべての Hard 制約を満たすオーダーが見つかりませんでした。制約を自動的に破ることはしません。',
+            'すべての絶対条件を満たすオーダーが見つかりませんでした。制約を自動的に破ることはしません。',
           suggestions:
             suggestions.length > 0
               ? suggestions

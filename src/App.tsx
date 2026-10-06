@@ -24,10 +24,11 @@ import {
   type UndoableAction,
   type UndoableState,
 } from './state/orderSession';
-import { BACK_TARGETS, PAGE_TITLES, TABS, type Page } from './navigation';
+import { BACK_TARGETS, PAGE_TITLES, TAB_FOR_PAGE, TABS, type Page } from './navigation';
 import { onUpdateAvailable } from './pwa';
-import { useToast } from './components/ui';
-import { HomePage } from './pages/HomePage';
+import { ConfirmDialog, EmptyState, STATE_META, StatusBadge, useToast } from './components/ui';
+import { Icon } from './components/icons';
+import { HomePage, type WorkingOrderSummary } from './pages/HomePage';
 import { PlayersPage } from './pages/PlayersPage';
 import { PairsPage } from './pages/PairsPage';
 import { FormatsPage } from './pages/FormatsPage';
@@ -35,6 +36,7 @@ import { SetupPage, type SetupDraft } from './pages/SetupPage';
 import { ResultPage } from './pages/ResultPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { WelcomePage } from './pages/WelcomePage';
 
 /**
  * Application shell.
@@ -42,6 +44,10 @@ import { SettingsPage } from './pages/SettingsPage';
  * Owns navigation, the order session (with its undo history) and the optimizer runner.
  * The runner lives here rather than in a page so that generation survives navigating
  * between SETUP and RESULT.
+ *
+ * `record` is the persisted order the working copy belongs to. It is what makes a
+ * re-generation from SETUP a *revision* of that order (UPDATED → v2) rather than a new
+ * draft: it is only cleared when the captain explicitly starts a new order.
  */
 export function App(): React.JSX.Element {
   const store = useAppStore();
@@ -49,6 +55,8 @@ export function App(): React.JSX.Element {
   const [page, setPage] = useState<Page>('home');
   const [session, setSession] = useState<UndoableState | null>(null);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  /** The input of the attempt the diagnostics describe (it never replaces the order's own). */
+  const [diagnosticInput, setDiagnosticInput] = useState<OrderInput | null>(null);
   const [generating, setGenerating] = useState(false);
   const runnerRef = useRef<OrderRunner | null>(null);
 
@@ -57,6 +65,7 @@ export function App(): React.JSX.Element {
   /** The persisted order record, once the captain has saved or finalized it. */
   const [record, setRecord] = useState<SavedOrder | null>(null);
   const [applyUpdate, setApplyUpdate] = useState<(() => void) | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   // A new build is never applied automatically — the captain decides when.
   useEffect(() => onUpdateAvailable((apply) => setApplyUpdate(() => apply)), []);
@@ -69,9 +78,44 @@ export function App(): React.JSX.Element {
     };
   }, []);
 
-  // Keep the setup draft in step with the roster and the saved settings.
+  const hasTeams = store.teams.length > 0;
+
+  // The working order belongs to the team it was made for. Switching (or deleting) the
+  // active team detaches it: otherwise SETUP re-syncs to the new team's roster while
+  // `record` still points at the old team's order, and re-generating would write one
+  // team's line-up into the other team's history.
+  const workingTeam = useRef<string | null>(null);
   useEffect(() => {
     if (!store.ready) return;
+    const previous = workingTeam.current;
+    workingTeam.current = store.activeTeamId;
+    if (previous !== null && previous !== store.activeTeamId) {
+      setSession(null);
+      setRecord(null);
+      setDiagnostics([]);
+    }
+  }, [store.ready, store.activeTeamId]);
+
+  // Every screen opens at its top; keeping the previous screen's scroll offset made HOME
+  // open mid-page with the main action scrolled out of view.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [page]);
+
+  // "Delete everything" returns to the first-run state, so nothing from the old data may
+  // linger in the working copy.
+  useEffect(() => {
+    if (!store.ready || hasTeams) return;
+    setSession(null);
+    setRecord(null);
+    setDiagnostics([]);
+    setDraft(null);
+    setPage('home');
+  }, [store.ready, hasTeams]);
+
+  // Keep the setup draft in step with the roster and the saved settings.
+  useEffect(() => {
+    if (!store.ready || !hasTeams) return;
     setDraft((current) => {
       const formatId =
         current && store.teamFormats.some((format) => format.id === current.formatId)
@@ -85,7 +129,7 @@ export function App(): React.JSX.Element {
         settings: current?.settings ?? store.settings.optimizer,
       };
     });
-  }, [store.ready, store.teamPlayers, store.teamFormats, store.settings]);
+  }, [store.ready, hasTeams, store.teamPlayers, store.teamFormats, store.settings]);
 
   /**
    * Keeps the match header in step with the active team (see `syncMatchWithTeam`).
@@ -125,11 +169,14 @@ export function App(): React.JSX.Element {
         } else {
           setSession((current) => {
             // Keep the previous order visible so the captain does not lose their work;
-            // the diagnostics explain why the new attempt failed.
-            const base = current ?? createUndoable(input);
-            return undoableReducer(base, { type: 'setInput', input });
+            // the diagnostics explain why the new attempt failed. Its input stays too:
+            // pairing the old line-up with the failed attempt's conditions would let a
+            // later save store a combination that was never generated together.
+            if (current?.present.current) return current;
+            return undoableReducer(current ?? createUndoable(input), { type: 'setInput', input });
           });
           setDiagnostics(result.diagnostics);
+          setDiagnosticInput(input);
           setPage('result');
           toast.show('条件を満たすオーダーがありません。理由を表示します。', 'error');
         }
@@ -142,6 +189,14 @@ export function App(): React.JSX.Element {
     [toast],
   );
 
+  /**
+   * Generation from SETUP.
+   *
+   * When the working copy belongs to a saved order (`record`), this is a revision of that
+   * order: the record is kept, so the lifecycle compares the new line-up with the last
+   * finalized version and shows UPDATED → "再確定 v2". A new order is started explicitly
+   * (`startNewOrder`), never as a side effect of pressing generate.
+   */
   const handleGenerate = useCallback(
     (input: OrderInput) => {
       store.saveSettings({
@@ -149,12 +204,46 @@ export function App(): React.JSX.Element {
         lastPreset: input.preset,
         optimizer: input.settings,
       });
-      // Generating from SETUP starts a new order: it is a fresh draft, not a revision of
-      // whatever was previously finalized.
-      setRecord(null);
+      // Never revise another team's order with this team's input.
+      if (record && record.teamId !== input.teamId) setRecord(null);
       void run(input);
     },
-    [run, store],
+    [run, store, record],
+  );
+
+  /** Drops the working copy so the next generation is a brand-new order. */
+  const resetWorkingOrder = useCallback(() => {
+    setSession(null);
+    setRecord(null);
+    setDiagnostics([]);
+  }, []);
+
+  /**
+   * True when the working copy holds anything not yet in storage: an order never saved,
+   * or a saved order edited or re-generated since. `persist` stores the session's own
+   * input and solution objects, so identity is exactly "unchanged since the last save".
+   * The match header is compared by value on the fields the fingerprint reads: it is
+   * rebuilt by the team-sync effect, so its identity says nothing. Every record in the
+   * session has one (`persist` writes it; `openSavedOrder` fills it in for old records).
+   */
+  const unsaved =
+    !!session?.present.current &&
+    (!record ||
+      record.solution !== session.present.current ||
+      record.input !== session.present.input ||
+      !sameMatch(record.match ?? match, match));
+
+  const startNewOrder = useCallback(
+    (force = false) => {
+      // Work that only exists in this session is never dropped without asking.
+      if (!force && unsaved) {
+        setConfirmDiscard(true);
+        return;
+      }
+      resetWorkingOrder();
+      setPage('setup');
+    },
+    [unsaved, resetWorkingOrder],
   );
 
   /**
@@ -190,13 +279,26 @@ export function App(): React.JSX.Element {
       setSession(restored);
       // A saved order carries the match it was played for, so re-sharing it later
       // reproduces the same header, and its versions so the lifecycle resumes correctly.
-      if (order.match) setMatch(order.match);
-      setRecord(order);
+      // Orders saved before the match header existed have none: the header in use when
+      // they are opened becomes their baseline, so later edits still count as unsaved.
+      const baseline = order.match ?? match;
+      setMatch(baseline);
+      setRecord(order.match ? order : { ...order, match: baseline });
+      // SETUP edits this order from now on: restore the conditions it was generated
+      // with, so going back and re-generating revises *this* order's line-up.
+      setDraft({
+        formatId: store.teamFormats.some((format) => format.id === order.input.formatId)
+          ? order.input.formatId
+          : (store.teamFormats[0]?.id ?? ''),
+        participants: syncParticipants(order.input.participants, store.teamPlayers),
+        preset: order.input.preset,
+        settings: order.input.settings,
+      });
       setDiagnostics([]);
       setPage('result');
       toast.show('履歴から読み込みました', 'ok');
     },
-    [toast],
+    [toast, store.teamFormats, store.teamPlayers, match],
   );
 
   const games = useMemo(() => {
@@ -319,14 +421,11 @@ export function App(): React.JSX.Element {
     toast.show(result.message, result.ok ? 'ok' : 'error');
   }, [record, store, toast]);
 
-  const hasActionBar =
-    page === 'setup' || page === 'result' || page === 'players' || page === 'formats';
-
   if (!store.ready) {
     return (
       <div className="app">
         <main className="app-main">
-          <div className="empty-state">
+          <div className="loading">
             <span className="spinner" aria-hidden="true" />
             <p>読み込み中…</p>
           </div>
@@ -335,7 +434,21 @@ export function App(): React.JSX.Element {
     );
   }
 
+  if (!hasTeams) return <WelcomePage />;
+
+  const latest = latestVersion(record?.versions ?? []);
+  const working: WorkingOrderSummary | null = solution
+    ? { lifecycle, version: latest?.version ?? 0, label: solution.meta.label, saved: !unsaved }
+    : null;
+
+  const hasActionBar =
+    page === 'setup' || page === 'result' || page === 'players' || page === 'formats';
+  const wide = page === 'home' || page === 'result';
   const backTarget = BACK_TARGETS[page];
+  const activeTab = TAB_FOR_PAGE[page] ?? page;
+  const teamName = store.activeTeam?.name ?? 'チーム未設定';
+  const title = page === 'home' ? (store.activeTeam?.name ?? PAGE_TITLES.home) : PAGE_TITLES[page];
+  const stateMeta = STATE_META[lifecycle];
 
   return (
     <div className="app">
@@ -343,33 +456,54 @@ export function App(): React.JSX.Element {
         {backTarget ? (
           <button
             type="button"
-            className="btn icon ghost"
+            className="btn icon ghost header-back"
             onClick={() => setPage(backTarget)}
             aria-label="戻る"
           >
-            ‹
+            <Icon name="chevronLeft" size={24} />
           </button>
-        ) : null}
+        ) : (
+          <span className="brand-mark" aria-hidden="true">
+            <Icon name="target" size={20} />
+          </span>
+        )}
         <span className="header-titles">
-          <h1>{PAGE_TITLES[page]}</h1>
-          <span className="subtitle">{store.activeTeam?.name ?? 'チーム未設定'}</span>
+          <span className="kicker">
+            LEAGUE ORDER
+            {page !== 'home' ? <span className="team"> / {teamName}</span> : null}
+          </span>
+          <h1>{title}</h1>
         </span>
-        {page === 'result' && session?.present.current ? (
-          <span className="badge accent">{session.present.current.score.display}</span>
+        {page === 'result' && solution ? (
+          <StatusBadge tone={stateMeta.tone} icon={stateMeta.icon}>
+            {lifecycle === 'DRAFT' ? 'DRAFT' : `v${latest?.version ?? 1}`}
+          </StatusBadge>
         ) : null}
+        {page === 'home' && store.activeTeam?.demo ? <span className="demo-badge">DEMO</span> : null}
       </header>
 
-      <main className={hasActionBar ? 'app-main has-action-bar' : 'app-main'}>
+      <main
+        className={['app-main', wide ? 'wide' : '', hasActionBar ? 'has-action-bar' : '']
+          .filter(Boolean)
+          .join(' ')}
+      >
         {applyUpdate ? (
           <div className="notice info">
-            <span aria-hidden="true">↻</span>
+            <Icon name="refresh" size={18} />
             <span className="grow small-text">新しいバージョンがあります。</span>
             <button type="button" className="btn small primary" onClick={applyUpdate}>
               更新
             </button>
           </div>
         ) : null}
-        {page === 'home' ? <HomePage onNavigate={setPage} /> : null}
+        {page === 'home' ? (
+          <HomePage
+            onNavigate={setPage}
+            onNewOrder={() => startNewOrder()}
+            working={working}
+            onResume={() => setPage('result')}
+          />
+        ) : null}
         {page === 'players' ? <PlayersPage /> : null}
         {page === 'pairs' ? <PairsPage /> : null}
         {page === 'formats' ? <FormatsPage /> : null}
@@ -381,6 +515,14 @@ export function App(): React.JSX.Element {
             onMatchChange={setMatch}
             onGenerate={handleGenerate}
             generating={generating}
+            editing={
+              record
+                ? { title: record.title, latestVersion: latest?.version ?? null }
+                : null
+            }
+            // Detaching drops the working copy, so it asks first exactly like a new order.
+            onDetach={() => startNewOrder()}
+            onNavigate={setPage}
           />
         ) : null}
         {page === 'result' ? (
@@ -390,6 +532,7 @@ export function App(): React.JSX.Element {
               dispatch={dispatch}
               games={games}
               diagnostics={diagnostics}
+              diagnosticInput={diagnosticInput}
               generating={generating}
               match={match}
               onMatchChange={setMatch}
@@ -404,14 +547,22 @@ export function App(): React.JSX.Element {
               onWithdrawSeason={handleWithdrawSeason}
             />
           ) : (
-            <div className="empty-state">
-              まだオーダーがありません。
-              <br />
-              「オーダー」タブから生成してください。
-            </div>
+            <EmptyState
+              kicker="NO ORDER YET"
+              title="まだオーダーがありません"
+              action={
+                <button type="button" className="btn primary" onClick={() => setPage('setup')}>
+                  オーダーを作る
+                </button>
+              }
+            >
+              条件を設定して、最初のオーダーを生成してください。
+            </EmptyState>
           )
         ) : null}
-        {page === 'history' ? <HistoryPage onOpen={openSavedOrder} /> : null}
+        {page === 'history' ? (
+          <HistoryPage onOpen={openSavedOrder} onNewOrder={() => startNewOrder()} />
+        ) : null}
         {page === 'settings' ? <SettingsPage /> : null}
       </main>
 
@@ -426,15 +577,39 @@ export function App(): React.JSX.Element {
               // on, and the header's back arrow still leads to the setup.
               setPage(tab.page === 'setup' && session?.present.current ? 'result' : tab.page)
             }
-            aria-current={page === tab.page ? 'page' : undefined}
+            aria-current={activeTab === tab.page ? 'page' : undefined}
           >
             <span className="tab-icon" aria-hidden="true">
-              {tab.icon}
+              <Icon name={tab.icon} size={21} />
             </span>
             <span className="tab-label">{tab.label}</span>
           </button>
         ))}
       </nav>
+
+      {confirmDiscard ? (
+        <ConfirmDialog
+          title="新しいオーダーを作る"
+          message="作業中のオーダーに保存されていない変更があります。破棄して新しいオーダーを作りますか？ 残す場合は結果画面で保存または確定してください。"
+          confirmLabel="破棄して作成"
+          destructive
+          onCancel={() => setConfirmDiscard(false)}
+          onConfirm={() => {
+            setConfirmDiscard(false);
+            startNewOrder(true);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** Same header as far as a shared order is concerned (the fields `orderFingerprint` reads). */
+function sameMatch(a: MatchInfo, b: MatchInfo): boolean {
+  return (
+    a.leagueName.trim() === b.leagueName.trim() &&
+    a.teamName.trim() === b.teamName.trim() &&
+    a.opponentName.trim() === b.opponentName.trim() &&
+    a.matchDate.trim() === b.matchDate.trim()
   );
 }

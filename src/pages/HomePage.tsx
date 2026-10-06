@@ -1,111 +1,215 @@
 import { useState } from 'react';
-import type { Team } from '../domain/types';
+import type { OrderLifecycleState, Team } from '../domain/types';
 import { createId } from '../utils/id';
 import { totalSlots } from '../domain/games/format';
 import { useAppStore } from '../state/appStore';
-import { Card, ConfirmDialog, Field, Sheet, useToast } from '../components/ui';
+import {
+  Card,
+  ConfirmDialog,
+  Field,
+  STATE_META,
+  Sheet,
+  StatusBadge,
+  useToast,
+} from '../components/ui';
+import { Icon, type IconName } from '../components/icons';
 import type { Page } from '../navigation';
 
-/** HOME screen (spec §26): entry points plus team management. */
-export function HomePage({ onNavigate }: { onNavigate: (page: Page) => void }): React.JSX.Element {
+/** What HOME needs to know about the order currently open in this session. */
+export interface WorkingOrderSummary {
+  lifecycle: OrderLifecycleState;
+  /** Latest finalized version, or 0. */
+  version: number;
+  label: string;
+  saved: boolean;
+}
+
+/**
+ * HOME — the face of the app.
+ *
+ * One dominant action (new order), the active team as a scoreboard, then the rest in
+ * decreasing weight: members and formats as tiles, pairs / history / settings as rows.
+ */
+export function HomePage({
+  onNavigate,
+  onNewOrder,
+  working,
+  onResume,
+}: {
+  onNavigate: (page: Page) => void;
+  onNewOrder: () => void;
+  working: WorkingOrderSummary | null;
+  onResume: () => void;
+}): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
   const [teamSheet, setTeamSheet] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Team | null>(null);
+  const [confirmLeaveDemo, setConfirmLeaveDemo] = useState(false);
+  const [confirmSwitch, setConfirmSwitch] = useState<Team | null>(null);
+
+  // Switching teams detaches the working order (it belongs to the old team), so unsaved
+  // work there is confirmed first, exactly like starting a new order.
+  const switchTeam = (target: Team): void => {
+    store.setActiveTeam(target.id);
+    setTeamSheet(false);
+    toast.show(`${target.name} に切り替えました`, 'ok');
+  };
 
   const format = store.teamFormats[0];
+  const team = store.activeTeam;
+
+  const tertiary: { page: Page; icon: IconName; title: string; meta: string }[] = [
+    {
+      page: 'pairs',
+      icon: 'pair',
+      title: 'ペア相性',
+      meta: `${store.teamPairs.length} 件設定済み`,
+    },
+    { page: 'history', icon: 'history', title: '履歴', meta: `${store.teamOrders.length} 件のオーダー` },
+    { page: 'settings', icon: 'settings', title: '設定 / バックアップ', meta: '重み調整・JSON 入出力' },
+  ];
 
   return (
     <>
       {store.storageNotice ? (
         <div className="notice warn">
-          <span aria-hidden="true">△</span>
+          <Icon name="alert" size={18} />
           <span className="small-text">{store.storageNotice}</span>
         </div>
       ) : null}
 
-      <Card>
-        <div className="row between" style={{ marginBottom: 10 }}>
-          <div>
-            <p className="tiny dim" style={{ margin: 0 }}>
-              チーム
-            </p>
-            <strong style={{ fontSize: 18 }}>{store.activeTeam?.name ?? '未設定'}</strong>
-          </div>
-          <button type="button" className="btn small" onClick={() => setTeamSheet(true)}>
-            切替 / 管理
+      {team?.demo ? (
+        <div className="demo-banner" data-testid="demo-banner">
+          <span className="demo-badge">DEMO</span>
+          <span className="grow">
+            <strong>サンプルデータ</strong>
+            <span className="muted"> ・ 実在のチームではありません</span>
+          </span>
+          <button type="button" className="btn small" onClick={() => setConfirmLeaveDemo(true)}>
+            自分のチームで始める
           </button>
         </div>
-        <div className="metrics">
-          <div className="metric">
-            <span className="k">メンバー</span>
-            <span className="v">{store.teamPlayers.length}</span>
-          </div>
-          <div className="metric">
-            <span className="k">フォーマット</span>
-            <span className="v">{store.teamFormats.length}</span>
-          </div>
-          <div className="metric">
-            <span className="k">履歴</span>
-            <span className="v">{store.teamOrders.length}</span>
-          </div>
-        </div>
-      </Card>
-
-      <button
-        type="button"
-        className="btn primary"
-        style={{ width: '100%', minHeight: 58, fontSize: 17, marginBottom: 12 }}
-        onClick={() => onNavigate('setup')}
-      >
-        新規オーダーを作成
-      </button>
-
-      <Card flush>
-        <ul className="list">
-          {(
-            [
-              ['players', 'メンバー管理', `${store.teamPlayers.length} 名 ・ Rating 任意`],
-              ['pairs', 'ペア相性', `${store.teamPairs.length} 件設定済み ・ 禁止ペアは Hard 制約`],
-              [
-                'formats',
-                'ゲームフォーマット',
-                format ? `${format.name} ほか ${store.teamFormats.length} 件` : '未登録',
-              ],
-              ['history', '過去オーダー', `${store.teamOrders.length} 件`],
-              ['settings', '設定 / バックアップ', 'ウェイト調整・JSON 入出力'],
-            ] as [Page, string, string][]
-          ).map(([page, title, meta]) => (
-            <li key={page}>
-              <button type="button" className="list-row" onClick={() => onNavigate(page)}>
-                <span className="grow">
-                  <span className="title">{title}</span>
-                  <span className="meta">{meta}</span>
-                </span>
-                <span className="chevron" aria-hidden="true">
-                  ›
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
-      {format ? (
-        <Card title="現在のフォーマット">
-          <ol style={{ margin: 0, paddingLeft: 20 }}>
-            {format.games.map((game) => (
-              <li key={game.id} className="small-text">
-                {game.name} <span className="dim">({game.playerCount}名)</span>
-              </li>
-            ))}
-          </ol>
-          <p className="tiny dim" style={{ marginBottom: 0, marginTop: 8 }}>
-            総枠 {totalSlots(format.games)}
-          </p>
-        </Card>
       ) : null}
+
+      <div className="home-grid">
+        <div>
+          <section className="hero" aria-labelledby="hero-title">
+            <span className="kicker">LEAGUE ORDER</span>
+            <h2 className="hero-title" id="hero-title">
+              試合のオーダーを、
+              <br />
+              速く・公平に・強く。
+            </h2>
+            <div className="hero-actions">
+              <button type="button" className="btn primary xl" onClick={onNewOrder}>
+                <Icon name="plus" size={22} strokeWidth={2.6} />
+                新しいオーダーを作る
+              </button>
+              {working ? (
+                <button type="button" className="resume-card" onClick={onResume}>
+                  <Icon name="target" />
+                  <span className="grow">
+                    <span className="title">作業中のオーダーを開く</span>
+                    <span className="meta">{working.label}</span>
+                  </span>
+                  <StatusBadge tone={STATE_META[working.lifecycle].tone} icon={STATE_META[working.lifecycle].icon}>
+                    {working.lifecycle === 'DRAFT' ? 'DRAFT' : `v${working.version}`}
+                  </StatusBadge>
+                </button>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="card team-card" aria-label="アクティブなチーム">
+            <div className="team-card-top">
+              <span className="grow">
+                <span className="kicker">ACTIVE TEAM</span>
+                <span className="team-name">{team?.name ?? '未設定'}</span>
+                {team?.leagueName ? <span className="team-league">{team.leagueName}</span> : null}
+              </span>
+              <button type="button" className="btn small" onClick={() => setTeamSheet(true)}>
+                切替 / 管理
+              </button>
+            </div>
+            <div className="scoreboard">
+              <div>
+                <span className="k">PLAYERS</span>
+                <span className="v">{store.teamPlayers.length}</span>
+              </div>
+              <div>
+                <span className="k">FORMATS</span>
+                <span className="v">{store.teamFormats.length}</span>
+              </div>
+              <div>
+                <span className="k">ORDERS</span>
+                <span className="v">{store.teamOrders.length}</span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div>
+          <div className="quick-grid">
+            <button type="button" className="quick-tile" onClick={() => onNavigate('players')}>
+              <span className="tile-icon" aria-hidden="true">
+                <Icon name="users" />
+              </span>
+              <span>
+                <span className="title">メンバー</span>
+                <span className="meta">{store.teamPlayers.length} 名 ・ Rating 任意</span>
+              </span>
+            </button>
+            <button type="button" className="quick-tile" onClick={() => onNavigate('formats')}>
+              <span className="tile-icon" aria-hidden="true">
+                <Icon name="format" />
+              </span>
+              <span>
+                <span className="title">フォーマット</span>
+                <span className="meta">{store.teamFormats.length} 件</span>
+              </span>
+            </button>
+          </div>
+
+          <Card flush>
+            <ul className="list">
+              {tertiary.map((entry) => (
+                <li key={entry.page}>
+                  <button type="button" className="list-row" onClick={() => onNavigate(entry.page)}>
+                    <span className="lead" aria-hidden="true">
+                      <Icon name={entry.icon} size={18} />
+                    </span>
+                    <span className="grow">
+                      <span className="title">{entry.title}</span>
+                      <span className="meta">{entry.meta}</span>
+                    </span>
+                    <Icon name="chevronRight" size={18} className="chevron" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </Card>
+
+          {format ? (
+            <Card
+              title={format.name}
+              kicker="LINEUP"
+              action={<span className="badge">総枠 {totalSlots(format.games)}</span>}
+            >
+              <ol className="lineup-preview">
+                {format.games.map((game) => (
+                  <li key={game.id}>
+                    <span className="no">{String(game.order).padStart(2, '0')}</span>
+                    <span>{game.name}</span>
+                    <span className="badge">{game.playerCount}名</span>
+                  </li>
+                ))}
+              </ol>
+            </Card>
+          ) : null}
+        </div>
+      </div>
 
       {teamSheet ? (
         <Sheet
@@ -119,38 +223,46 @@ export function HomePage({ onNavigate }: { onNavigate: (page: Page) => void }): 
                 setEditingTeam({ id: createId('team'), name: '', createdAt: Date.now() })
               }
             >
-              ＋ チームを追加
+              <Icon name="plus" size={18} />
+              チームを追加
             </button>
           }
         >
           <ul className="list">
-            {store.teams.map((team) => (
-              <li key={team.id}>
-                <div className="row" style={{ padding: '6px 0', gap: 8 }}>
+            {store.teams.map((entry) => (
+              <li key={entry.id}>
+                <div className="row" style={{ gap: 8 }}>
                   <button
                     type="button"
                     className="list-row grow"
                     onClick={() => {
-                      store.setActiveTeam(team.id);
-                      setTeamSheet(false);
-                      toast.show(`${team.name} に切り替えました`, 'ok');
+                      if (entry.id === store.activeTeamId) {
+                        setTeamSheet(false);
+                        return;
+                      }
+                      if (working && !working.saved) {
+                        setConfirmSwitch(entry);
+                        return;
+                      }
+                      switchTeam(entry);
                     }}
                   >
                     <span className="grow">
                       <span className="title">
-                        {team.name}
-                        {team.id === store.activeTeamId ? (
-                          <span className="badge accent" style={{ marginLeft: 6 }}>
+                        {entry.name}{' '}
+                        {entry.id === store.activeTeamId ? (
+                          <StatusBadge tone="accent" icon="check">
                             使用中
-                          </span>
-                        ) : null}
+                          </StatusBadge>
+                        ) : null}{' '}
+                        {entry.demo ? <span className="demo-badge">DEMO</span> : null}
                       </span>
                       <span className="meta">
-                        {store.players.filter((player) => player.teamId === team.id).length} 名
+                        {store.players.filter((player) => player.teamId === entry.id).length} 名
                       </span>
                     </span>
                   </button>
-                  <button type="button" className="btn small" onClick={() => setEditingTeam(team)}>
+                  <button type="button" className="btn small" onClick={() => setEditingTeam(entry)}>
                     編集
                   </button>
                 </div>
@@ -163,14 +275,14 @@ export function HomePage({ onNavigate }: { onNavigate: (page: Page) => void }): 
       {editingTeam ? (
         <TeamEditor
           team={editingTeam}
-          canDelete={store.teams.length > 1 && store.teams.some((team) => team.id === editingTeam.id)}
+          canDelete={store.teams.length > 1 && store.teams.some((entry) => entry.id === editingTeam.id)}
           onClose={() => setEditingTeam(null)}
-          onSave={(team) => {
-            if (!team.name.trim()) {
+          onSave={(next) => {
+            if (!next.name.trim()) {
               toast.show('チーム名を入力してください', 'error');
               return;
             }
-            store.saveTeam(team);
+            store.saveTeam(next);
             setEditingTeam(null);
             toast.show('保存しました', 'ok');
           }}
@@ -193,6 +305,44 @@ export function HomePage({ onNavigate }: { onNavigate: (page: Page) => void }): 
             toast.show('削除しました', 'ok');
             setConfirmDelete(null);
             setTeamSheet(false);
+          }}
+        />
+      ) : null}
+
+      {confirmSwitch ? (
+        <ConfirmDialog
+          title="チームを切り替える"
+          message={`作業中のオーダーに保存されていない変更があります。${confirmSwitch.name} に切り替えると破棄されます。残す場合は結果画面で保存または確定してください。`}
+          confirmLabel="破棄して切り替える"
+          destructive
+          onCancel={() => setConfirmSwitch(null)}
+          onConfirm={() => {
+            const target = confirmSwitch;
+            setConfirmSwitch(null);
+            switchTeam(target);
+          }}
+        />
+      ) : null}
+
+      {confirmLeaveDemo ? (
+        <ConfirmDialog
+          title="自分のチームで始める"
+          message={
+            store.teams.some((entry) => !entry.demo)
+              ? 'サンプルのチームと、そのメンバー・フォーマット・履歴を削除します。ほかのチームはそのまま残ります。'
+              : 'サンプルのチーム・メンバー・フォーマット・履歴をすべて削除し、最初の画面に戻ります。'
+          }
+          confirmLabel="サンプルを削除"
+          destructive
+          onCancel={() => setConfirmLeaveDemo(false)}
+          onConfirm={() => {
+            setConfirmLeaveDemo(false);
+            // Only the sample goes. A team the captain created next to it keeps all of its
+            // data and becomes the active team; with no team left, the app returns to the
+            // first-run screen.
+            for (const entry of store.teams.filter((candidate) => candidate.demo)) {
+              store.deleteTeam(entry.id);
+            }
           }}
         />
       ) : null}
@@ -236,7 +386,7 @@ function TeamEditor({
           type="text"
           value={draft.name}
           onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-          placeholder="例: チーム A"
+          placeholder="例: KALAVINKA"
         />
       </Field>
       <Field label="リーグ名 (任意)" hint="共有するオーダーの見出しに使われます。">

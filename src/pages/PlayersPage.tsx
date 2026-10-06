@@ -3,7 +3,17 @@ import type { Player, SkillLevel } from '../domain/types';
 import { GAME_KIND_LABELS, SKILL_KINDS } from '../domain/types';
 import { createId } from '../utils/id';
 import { useAppStore } from '../state/appStore';
-import { Card, ConfirmDialog, EmptyState, Field, Sheet, Stepper, useToast } from '../components/ui';
+import {
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  Field,
+  Sheet,
+  Stepper,
+  formatRating,
+  useToast,
+} from '../components/ui';
+import { Icon } from '../components/icons';
 
 /**
  * PLAYERS screen (spec §3, §26).
@@ -53,17 +63,15 @@ export function PlayersPage(): React.JSX.Element {
             placeholder="名前で絞り込み"
           />
         </Field>
-        <p className="tiny dim" style={{ margin: 0 }}>
-          {store.teamPlayers.length} 名登録 / Rating 未入力{' '}
+        <p className="tiny muted" style={{ margin: 0 }}>
+          {store.teamPlayers.length} 名登録 ・ Rating 未入力{' '}
           {store.teamPlayers.filter((player) => player.rating === null).length} 名
         </p>
       </Card>
 
       <Card flush>
         {filtered.length === 0 ? (
-          <EmptyState>
-            メンバーがまだいません。
-            <br />
+          <EmptyState kicker="NO PLAYERS" title="メンバーがまだいません" icon="users">
             下の「メンバーを追加」から登録してください。
           </EmptyState>
         ) : (
@@ -71,20 +79,21 @@ export function PlayersPage(): React.JSX.Element {
             {filtered.map((player) => (
               <li key={player.id}>
                 <button type="button" className="list-row" onClick={() => setEditing(player)}>
+                  <span className="lead" aria-hidden="true">
+                    {Array.from(player.name || '?')[0]}
+                  </span>
                   <span className="grow">
-                    <span className="title">
-                      {player.name || '(名称未設定)'}
-                      {player.archived ? <span className="badge" style={{ marginLeft: 6 }}>休止</span> : null}
-                    </span>
+                    <span className="title">{player.name || '(名称未設定)'}</span>
                     <span className="meta">
-                      {player.rating === null ? 'Rating 未入力' : `Rating ${player.rating}`} ・ Season{' '}
-                      {player.seasonAppearances} 回
+                      シーズン {player.seasonAppearances} 回
                       {Object.keys(player.skills).length > 0 ? ' ・ 適性設定あり' : ''}
+                      {player.archived ? ' ・ 休止中' : ''}
                     </span>
                   </span>
-                  <span className="chevron" aria-hidden="true">
-                    ›
+                  <span className={player.rating === null ? 'side rt unknown' : 'side rt'}>
+                    {formatRating(player.rating)}
                   </span>
+                  <Icon name="chevronRight" size={18} className="chevron" />
                 </button>
               </li>
             ))}
@@ -94,7 +103,8 @@ export function PlayersPage(): React.JSX.Element {
 
       <div className="action-bar">
         <button type="button" className="btn primary" onClick={startNew}>
-          ＋ メンバーを追加
+          <Icon name="plus" size={20} strokeWidth={2.6} />
+          メンバーを追加
         </button>
       </div>
 
@@ -190,14 +200,14 @@ function PlayerEditor({
           type="text"
           value={draft.name}
           onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-          placeholder="例: 青木"
+          placeholder="例: ちひろ"
           autoComplete="off"
         />
       </Field>
 
       <Field
         label="Rating (任意)"
-        hint="空欄のままで構いません。未入力は 0 ではなく「Unknown」として扱い、参加者の中央値で評価します。"
+        hint="空欄のままで構いません。未入力は 0 ではなく「不明」として扱い、参加者の中央値で評価します。"
       >
         <input
           type="number"
@@ -205,7 +215,7 @@ function PlayerEditor({
           step="0.01"
           value={ratingText}
           onChange={(event) => commitRating(event.target.value)}
-          placeholder="未入力 = Unknown"
+          placeholder="未入力 = 不明"
         />
       </Field>
 
@@ -259,12 +269,11 @@ function PlayerEditor({
         />
       </Field>
 
-      <label className="row" style={{ gap: 10, minHeight: 44 }}>
+      <label className="check-row">
         <input
           type="checkbox"
           checked={draft.archived}
           onChange={(event) => setDraft({ ...draft, archived: event.target.checked })}
-          style={{ width: 22, height: 22, minHeight: 22 }}
         />
         <span className="small-text">休止中 (既定で参加者に含めない)</span>
       </label>

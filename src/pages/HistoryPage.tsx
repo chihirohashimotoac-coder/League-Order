@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import type { OrderVersion, SavedOrder } from '../domain/types';
+import type {
+  GameAssignment,
+  GameSlotDef,
+  OrderVersion,
+  SavedOrder,
+  SeasonCommitStatus,
+} from '../domain/types';
 import { createMatchInfo } from '../domain/types';
 import { sortedGames } from '../domain/games/format';
 import { diffVersions, latestVersion } from '../domain/orders/lifecycle';
@@ -12,7 +18,8 @@ import {
 } from '../share';
 import { SEASON_COMMITTED_DELETE_MESSAGE, useAppStore } from '../state/appStore';
 import { VersionDiff } from '../components/VersionDiff';
-import { Card, ConfirmDialog, EmptyState, Sheet, useToast } from '../components/ui';
+import { Card, ConfirmDialog, EmptyState, Sheet, StatusBadge, useToast } from '../components/ui';
+import { Icon } from '../components/icons';
 
 /**
  * HISTORY screen (spec §26, 追加要件 §15).
@@ -20,7 +27,13 @@ import { Card, ConfirmDialog, EmptyState, Sheet, useToast } from '../components/
  * Shows each saved order's latest version, when it was finalized and whether the season
  * totals reflect it — and lets any past version be opened exactly as it was shared.
  */
-export function HistoryPage({ onOpen }: { onOpen: (order: SavedOrder) => void }): React.JSX.Element {
+export function HistoryPage({
+  onOpen,
+  onNewOrder,
+}: {
+  onOpen: (order: SavedOrder) => void;
+  onNewOrder: () => void;
+}): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
   const [preview, setPreview] = useState<SavedOrder | null>(null);
@@ -33,10 +46,17 @@ export function HistoryPage({ onOpen }: { onOpen: (order: SavedOrder) => void })
   if (store.teamOrders.length === 0) {
     return (
       <Card>
-        <EmptyState>
-          保存されたオーダーがありません。
-          <br />
-          オーダー結果画面の「オーダーを確定」または「下書きを保存」で記録できます。
+        <EmptyState
+          kicker="NO ORDERS"
+          title="保存されたオーダーがありません。"
+          icon="history"
+          action={
+            <button type="button" className="btn primary" onClick={onNewOrder}>
+              オーダーを作る
+            </button>
+          }
+        >
+          オーダーを確定するか「下書きを保存」すると、ここに記録されます。
         </EmptyState>
       </Card>
     );
@@ -57,31 +77,29 @@ export function HistoryPage({ onOpen }: { onOpen: (order: SavedOrder) => void })
             const season = statusOf(order);
             return (
               <li key={order.id}>
-                <button type="button" className="list-row" onClick={() => setPreview(order)}>
+                <button type="button" className="list-row history-row" onClick={() => setPreview(order)}>
                   <span className="grow">
-                    <span className="title">
-                      {order.title}
-                      {latest ? (
-                        <span className="badge accent" style={{ marginLeft: 6 }}>
-                          v{latest.version}
-                        </span>
-                      ) : (
-                        <span className="badge warn" style={{ marginLeft: 6 }}>
-                          未確定
-                        </span>
-                      )}
-                    </span>
+                    <span className="title">{order.title}</span>
                     <span className="meta">
                       {latest
                         ? `確定 ${new Date(latest.finalizedAt).toLocaleString('ja-JP')}`
                         : `保存 ${new Date(order.updatedAt).toLocaleString('ja-JP')}`}
-                      {' ・ '}
-                      {SEASON_STATUS_LABELS[season]}
+                      {order.match?.opponentName ? ` ・ vs ${order.match.opponentName}` : ''}
+                    </span>
+                    <span className="badges">
+                      {latest ? (
+                        <StatusBadge tone="finalized" icon="checkCircle">
+                          v{latest.version} 確定
+                        </StatusBadge>
+                      ) : (
+                        <StatusBadge tone="draft" icon="edit">
+                          未確定
+                        </StatusBadge>
+                      )}
+                      <SeasonStatusBadge status={season} />
                     </span>
                   </span>
-                  <span className="chevron" aria-hidden="true">
-                    ›
-                  </span>
+                  <Icon name="chevronRight" size={18} className="chevron" />
                 </button>
               </li>
             );
@@ -113,6 +131,7 @@ export function HistoryPage({ onOpen }: { onOpen: (order: SavedOrder) => void })
         >
           <HistoryDetail
             order={preview}
+            seasonStatus={statusOf(preview)}
             seasonLabel={SEASON_STATUS_LABELS[statusOf(preview)]}
             onOpenVersion={(version) => setVersionView({ order: preview, version })}
           />
@@ -221,10 +240,12 @@ export function HistoryPage({ onOpen }: { onOpen: (order: SavedOrder) => void })
 
 function HistoryDetail({
   order,
+  seasonStatus,
   seasonLabel,
   onOpenVersion,
 }: {
   order: SavedOrder;
+  seasonStatus: SeasonCommitStatus;
   seasonLabel: string;
   onOpenVersion: (version: OrderVersion) => void;
 }): React.JSX.Element {
@@ -234,61 +255,37 @@ function HistoryDetail({
 
   return (
     <>
-      <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
-        <span className={latest ? 'badge accent' : 'badge warn'}>
-          {latest ? `最新 v${latest.version}` : '未確定'}
-        </span>
-        <span className="badge">{seasonLabel}</span>
+      <div className="row wrap" style={{ gap: 6, marginBottom: 12 }}>
+        {latest ? (
+          <StatusBadge tone="finalized" icon="checkCircle">
+            最新 v{latest.version}
+          </StatusBadge>
+        ) : (
+          <StatusBadge tone="draft" icon="edit">
+            未確定
+          </StatusBadge>
+        )}
+        <SeasonStatusBadge status={seasonStatus} label={seasonLabel} />
         <span className="badge">{order.versions.length} 版</span>
       </div>
 
-      <div className="table-scroll">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Format</th>
-              <th>Player</th>
-            </tr>
-          </thead>
-          <tbody>
-            {games.map((game) => {
-              const assignment = order.solution.assignments.find((entry) => entry.gameId === game.id);
-              return (
-                <tr key={game.id}>
-                  <td className="num">{game.order}</td>
-                  <td>{game.name}</td>
-                  <td>
-                    {assignment?.playerIds.map((id) => nameById.get(id) ?? id).join(' / ') ?? '-'}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <MiniOrder games={games} assignments={order.solution.assignments} nameById={nameById} />
 
       {order.versions.length > 0 ? (
         <>
-          <h3 className="card-title" style={{ marginTop: 16 }}>
-            確定履歴
-          </h3>
+          <h3 className="sub-head">確定履歴</h3>
           <ul className="version-list">
             {[...order.versions].reverse().map((version) => (
               <li key={version.version}>
                 <button type="button" onClick={() => onOpenVersion(version)}>
-                  <span className="badge accent">v{version.version}</span>
+                  <span className="badge">v{version.version}</span>
                   <span className="grow">
-                    <span className="title" style={{ display: 'block', fontSize: 14 }}>
-                      {new Date(version.finalizedAt).toLocaleString('ja-JP')}
-                    </span>
+                    <span className="title">{new Date(version.finalizedAt).toLocaleString('ja-JP')}</span>
                     <span className="meta">
                       {version.label} ・ {version.games.length} ゲーム
                     </span>
                   </span>
-                  <span className="chevron" aria-hidden="true">
-                    ›
-                  </span>
+                  <Icon name="chevronRight" size={18} className="dim" />
                 </button>
               </li>
             ))}
@@ -316,43 +313,17 @@ function VersionDetail({
 
   return (
     <Sheet title={`v${version.version} の内容`} onClose={onClose}>
-      <p className="tiny dim" style={{ marginTop: 0 }}>
+      <p className="tiny muted" style={{ marginTop: 0 }}>
         {new Date(version.finalizedAt).toLocaleString('ja-JP')} に確定 ・ {version.label}
         <br />
         確定時点の内容です。その後のメンバー名やフォーマットの変更は反映されません。
       </p>
 
-      <div className="table-scroll">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Format</th>
-              <th>Player</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedGames(version.games).map((game) => {
-              const assignment = version.assignments.find((entry) => entry.gameId === game.id);
-              return (
-                <tr key={game.id}>
-                  <td className="num">{game.order}</td>
-                  <td>{game.name}</td>
-                  <td>
-                    {assignment?.playerIds.map((id) => nameById.get(id) ?? id).join(' / ') ?? '-'}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <MiniOrder games={sortedGames(version.games)} assignments={version.assignments} nameById={nameById} />
 
       {diff ? (
         <>
-          <h3 className="card-title" style={{ marginTop: 16 }}>
-            v{version.version - 1} からの変更
-          </h3>
+          <h3 className="sub-head">v{version.version - 1} からの変更</h3>
           <VersionDiff
             diff={diff}
             beforeLabel={`v${version.version - 1}`}
@@ -380,5 +351,63 @@ function VersionDetail({
         この版をテキストでコピー
       </button>
     </Sheet>
+  );
+}
+
+/** Read-only line-up, one row per game. */
+function MiniOrder({
+  games,
+  assignments,
+  nameById,
+}: {
+  games: readonly GameSlotDef[];
+  assignments: readonly GameAssignment[];
+  nameById: Map<string, string>;
+}): React.JSX.Element {
+  return (
+    <ol className="mini-order">
+      {games.map((game) => {
+        const assignment = assignments.find((entry) => entry.gameId === game.id);
+        return (
+          <li key={game.id}>
+            <span className="no">{String(game.order).padStart(2, '0')}</span>
+            <span className="body">
+              <span className="g">{game.name}</span>
+              <span className="p">
+                {assignment?.playerIds.map((id) => nameById.get(id) ?? id).join(' / ') ?? '-'}
+              </span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function SeasonStatusBadge({
+  status,
+  label = SEASON_STATUS_LABELS[status],
+}: {
+  status: SeasonCommitStatus;
+  label?: string;
+}): React.JSX.Element {
+  if (status === 'current') {
+    return (
+      <StatusBadge tone="season" icon="season">
+        {label}
+      </StatusBadge>
+    );
+  }
+  if (status === 'outdated') {
+    return (
+      <StatusBadge tone="updated" icon="alert">
+        {label}
+      </StatusBadge>
+    );
+  }
+  return (
+    <StatusBadge tone="neutral" icon="season">
+      {label}
+    </StatusBadge>
   );
 }

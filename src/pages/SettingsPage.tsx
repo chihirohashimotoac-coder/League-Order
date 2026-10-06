@@ -43,7 +43,7 @@ export function SettingsPage(): React.JSX.Element {
 
   return (
     <>
-      <Card title="保存とバックアップ">
+      <Card title="保存とバックアップ" kicker="DATA">
         <p className="small-text muted" style={{ marginTop: 0 }}>
           保存先: {store.backendKind === 'indexeddb' ? 'IndexedDB' : store.backendKind === 'localstorage' ? 'localStorage' : 'メモリ (非永続)'}
         </p>
@@ -79,8 +79,8 @@ export function SettingsPage(): React.JSX.Element {
         />
       </Card>
 
-      <Card title="カスタムウェイト">
-        <p className="tiny dim" style={{ marginTop: 0 }}>
+      <Card title="カスタムウェイト" kicker="WEIGHTS">
+        <p className="tiny muted" style={{ marginTop: 0 }}>
           プリセット「カスタム」を選んだときに使用します。0 にするとその項目を無視します。
         </p>
         {WEIGHT_LABELS.map(({ key, label, hint }) => (
@@ -101,9 +101,9 @@ export function SettingsPage(): React.JSX.Element {
                   customWeights: { ...settings.customWeights, [key]: Number(event.target.value) },
                 })
               }
-              style={{ width: '100%', minHeight: 36 }}
+              style={{ width: '100%', minHeight: 44 }}
             />
-            <span className="tiny dim">{hint}</span>
+            <span className="tiny muted">{hint}</span>
           </div>
         ))}
         <button
@@ -115,11 +115,11 @@ export function SettingsPage(): React.JSX.Element {
         </button>
       </Card>
 
-      <Card title="最適化エンジン">
+      <Card title="最適化エンジン" kicker="ENGINE">
         <div className="field">
           <span>探索時間の上限 (ミリ秒)</span>
           <div className="row between">
-            <span className="tiny dim">短いほど速く、長いほど高品質</span>
+            <span className="tiny muted">短いほど速く、長いほど高品質</span>
             <Stepper
               label="探索時間の上限"
               value={settings.optimizer.timeLimitMs / 100}
@@ -136,7 +136,7 @@ export function SettingsPage(): React.JSX.Element {
         <div className="field">
           <span>Beam 幅</span>
           <div className="row between">
-            <span className="tiny dim">候補保持数。大きいほど高品質・低速</span>
+            <span className="tiny muted">候補保持数。大きいほど高品質・低速</span>
             <Stepper
               label="Beam 幅"
               value={settings.optimizer.beamWidth}
@@ -173,12 +173,12 @@ export function SettingsPage(): React.JSX.Element {
         </button>
       </Card>
 
-      <Card title="このアプリについて">
+      <Card title="このアプリについて" kicker="ABOUT">
         <p className="small-text muted" style={{ marginTop: 0 }}>
           Darts League Order Optimizer — オフライン対応の PWA です。ネットワークが無くても、登録済みデータの参照・オーダー生成・編集ができます。
         </p>
-        <p className="tiny dim" style={{ marginBottom: 0 }}>
-          Rating 未入力は 0 として扱わず、参加者の既知 Rating の中央値を暫定値として評価します。出場不可・最大出場回数・ロック・禁止ペアは Hard 制約であり、違反する配置は生成しません。
+        <p className="tiny muted" style={{ marginBottom: 0 }}>
+          Rating 未入力は 0 として扱わず、参加者の既知 Rating の中央値を暫定値として評価します。出場不可・最大出場回数・ロック・禁止ペアは絶対条件であり、違反する配置は生成しません。
         </p>
       </Card>
 
@@ -203,7 +203,7 @@ export function SettingsPage(): React.JSX.Element {
       {confirmReset ? (
         <ConfirmDialog
           title="全データを削除"
-          message="すべてのチーム・メンバー・フォーマット・ペア設定・履歴を削除します。この操作は取り消せません。必要なら先に JSON エクスポートしてください。"
+          message="すべてのチーム・メンバー・フォーマット・ペア設定・履歴を削除し、最初の画面に戻ります。この操作は取り消せません。必要なら先に JSON エクスポートしてください。"
           confirmLabel="削除する"
           destructive
           onCancel={() => setConfirmReset(false)}
@@ -219,7 +219,7 @@ export function SettingsPage(): React.JSX.Element {
                 settings: { ...settings, activeTeamId: null },
               })
               .then(() => {
-                toast.show('削除しました。再読み込みで初期データが作成されます。', 'ok');
+                toast.show('すべてのデータを削除しました', 'ok');
                 setConfirmReset(false);
               });
           }}

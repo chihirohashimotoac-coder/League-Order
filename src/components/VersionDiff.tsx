@@ -29,14 +29,14 @@ export function VersionDiff({
 
   return (
     <>
-      <p className="tiny dim" style={{ marginTop: 0 }}>
+      <p className="tiny muted" style={{ marginTop: 0 }}>
         {beforeLabel} → {afterLabel} ・ 変更 {diff.changes.length} 件
       </p>
       <ul className="diff-list">
         {rows.map((row) => (
           <li key={row.gameId} className={row.kind === 'unchanged' ? 'unchanged' : undefined}>
             <div className="row" style={{ gap: 8, marginBottom: 4 }}>
-              <span className="badge accent">G{row.order}</span>
+              <span className="badge">G{row.order}</span>
               <strong className="grow small-text">{row.gameName}</strong>
               {row.kind === 'added' ? <span className="badge ok">追加</span> : null}
               {row.kind === 'removed' ? <span className="badge danger">削除</span> : null}
