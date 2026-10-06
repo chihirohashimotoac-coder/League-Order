@@ -84,7 +84,9 @@ export function PairsPage(): React.JSX.Element {
   if (players.length < 2) {
     return (
       <Card>
-        <EmptyState>ペア相性を設定するには 2 名以上のメンバー登録が必要です。</EmptyState>
+        <EmptyState kicker="PAIRS" title="メンバーが足りません" icon="pair">
+          ペア相性を設定するには 2 名以上のメンバー登録が必要です。
+        </EmptyState>
       </Card>
     );
   }
@@ -116,12 +118,11 @@ export function PairsPage(): React.JSX.Element {
             </select>
           </Field>
         </div>
-        <label className="row" style={{ gap: 10, minHeight: 44 }}>
+        <label className="check-row">
           <input
             type="checkbox"
             checked={onlySet}
             onChange={(event) => setOnlySet(event.target.checked)}
-            style={{ width: 22, height: 22, minHeight: 22 }}
           />
           <span className="small-text">設定済みのペアだけ表示 ({store.teamPairs.length} 件)</span>
         </label>
@@ -129,9 +130,7 @@ export function PairsPage(): React.JSX.Element {
 
       {visible.length === 0 ? (
         <Card>
-          <EmptyState>
-            表示するペアがありません。
-            <br />
+          <EmptyState kicker="NO PAIRS" title="表示するペアがありません" icon="pair">
             「設定済みのペアだけ表示」を外すと全組み合わせが出ます。
           </EmptyState>
         </Card>
@@ -149,7 +148,7 @@ export function PairsPage(): React.JSX.Element {
               </strong>
               <span className={`badge ${AFFINITY_TONE[affinity]}`}>{PAIR_AFFINITY_LABELS[affinity]}</span>
             </div>
-            <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
+            <div className="chip-row" style={{ marginBottom: 10 }}>
               {PAIR_AFFINITIES.map((candidate) => (
                 <button
                   type="button"
@@ -159,7 +158,7 @@ export function PairsPage(): React.JSX.Element {
                   onClick={() => {
                     update(combination.a, combination.b, { affinity: candidate });
                     if (candidate === 'FORBIDDEN') {
-                      toast.show('禁止ペアは Hard 制約です。同じゲームには絶対に配置されません。', 'ok');
+                      toast.show('禁止ペアは絶対条件です。同じゲームには絶対に配置されません。', 'ok');
                     }
                   }}
                 >
@@ -168,7 +167,7 @@ export function PairsPage(): React.JSX.Element {
               ))}
             </div>
             <div className="row between">
-              <span className="tiny dim">過去に組んだ回数 (新ペア試行プリセットで使用)</span>
+              <span className="small-text secondary">過去に組んだ回数 (新ペア試行で使用)</span>
               <Stepper
                 label="過去に組んだ回数"
                 value={pair?.pastTogetherCount ?? 0}
@@ -181,8 +180,8 @@ export function PairsPage(): React.JSX.Element {
         );
       })}
 
-      <p className="tiny dim" style={{ padding: '0 4px 8px' }}>
-        「禁止」のみ Hard 制約 (絶対に同じゲームへ配置しません)。他の 4 段階はスコアへの加点・減点です。
+      <p className="tiny muted" style={{ padding: '0 4px 8px' }}>
+        「禁止」のみ絶対条件 (同じゲームへ絶対に配置しません)。他の 4 段階は「できるだけ考慮」する加点・減点です。
       </p>
     </>
   );

@@ -8,7 +8,8 @@ import { ToastProvider } from '../components/ui';
 import { createUndoable, undoableReducer, type UndoableState } from '../state/orderSession';
 import { generateOrder } from '../optimizer/generateOrder';
 import { orderInput, sampleFormatGames, sampleRoster } from '../test/factories';
-import { createMatchInfo } from '../domain/types';
+import { createMatchInfo, type OrderLifecycleState, type SavedOrder } from '../domain/types';
+import { createVersion } from '../domain/orders/lifecycle';
 import 'fake-indexeddb/auto';
 
 /**
@@ -30,13 +31,32 @@ beforeAll(() => {
 
 function Harness({
   onState,
+  lifecycle = 'DRAFT',
 }: {
   onState?: (state: UndoableState) => void;
+  lifecycle?: OrderLifecycleState;
 }): React.JSX.Element {
   const games = sampleFormatGames();
   const input = orderInput(sampleRoster(), games);
   const result = generateOrder(input);
   if (!result.ok) throw new Error('fixture should be satisfiable');
+  const match = createMatchInfo('テストチーム');
+  // A finalized v1 for the FINALIZED / UPDATED cases; the page reads only its versions.
+  const record: SavedOrder | null =
+    lifecycle === 'DRAFT'
+      ? null
+      : {
+          id: 'ord_test',
+          teamId: input.teamId,
+          title: 'test',
+          createdAt: 0,
+          updatedAt: 0,
+          input,
+          solution: result.candidates[0],
+          match,
+          versions: [createVersion(input, result.candidates[0], match, [], 0)],
+          seasonApplied: false,
+        };
 
   const [session, dispatch] = useReducer(
     undoableReducer,
@@ -51,12 +71,12 @@ function Harness({
       games={games}
       diagnostics={[]}
       generating={false}
-      match={createMatchInfo('テストチーム')}
+      match={match}
       onMatchChange={() => undefined}
       onRegenerate={() => undefined}
       onReoptimise={() => undefined}
-      record={null}
-      lifecycle="DRAFT"
+      record={record}
+      lifecycle={lifecycle}
       seasonStatus="none"
       onFinalize={() => undefined}
       onSaveDraft={() => undefined}
@@ -66,26 +86,35 @@ function Harness({
   );
 }
 
-function renderResult(onState?: (state: UndoableState) => void) {
+function renderResult(onState?: (state: UndoableState) => void, lifecycle?: OrderLifecycleState) {
   return render(
     <ToastProvider>
       <AppStoreProvider>
-        <Harness onState={onState} />
+        <Harness onState={onState} lifecycle={lifecycle} />
       </AppStoreProvider>
     </ToastProvider>,
   );
 }
 
+/** The fixed action bar's primary (filled) button. */
+function primaryAction(container: HTMLElement): HTMLElement {
+  const button = container.querySelector<HTMLElement>('.action-bar .btn.primary');
+  if (!button) throw new Error('no primary action');
+  return button;
+}
+
 describe('ResultPage', () => {
-  it('renders every game, the tally table and the reasons', async () => {
+  it('renders every game, the appearance summary and the reasons', async () => {
     renderResult();
     const games = sampleFormatGames();
 
     for (const game of games) {
       expect(screen.getAllByText(game.name).length).toBeGreaterThan(0);
     }
-    expect(screen.getByText('集計')).toBeDefined();
+    expect(screen.getByText('出場回数')).toBeDefined();
+    // Analysis is collapsed but still present.
     expect(screen.getByText('生成理由')).toBeDefined();
+    expect(screen.getByText('詳細分析')).toBeDefined();
     // One select per slot.
     const totalSlots = games.reduce((acc, game) => acc + game.playerCount, 0);
     expect(screen.getAllByRole('combobox')).toHaveLength(totalSlots);
@@ -112,7 +141,9 @@ describe('ResultPage', () => {
     const user = userEvent.setup();
     renderResult();
     await user.selectOptions(screen.getByLabelText('Game 1 Singles 501 のスロット 1'), '');
-    expect(screen.getByText('Hard制約に違反しています')).toBeDefined();
+    expect(screen.getByText('絶対条件に違反しています')).toBeDefined();
+    // A line-up that breaks an absolute condition cannot be finalized.
+    expect((screen.getByRole('button', { name: /オーダーを確定/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('undoes a manual change (spec §16)', async () => {
@@ -154,7 +185,7 @@ describe('ResultPage', () => {
       latest = state;
     });
 
-    const tabs = screen.queryAllByRole('button', { name: /^[A-C]:/ });
+    const tabs = screen.queryAllByRole('button', { name: /^候補 [A-C]:/ });
     if (tabs.length < 2) return;
     await user.click(tabs[1]);
     expect(latest!.present.selectedCandidate).toBe(1);
@@ -162,9 +193,31 @@ describe('ResultPage', () => {
 
   it('renders the appearance tally for every participant', () => {
     renderResult();
-    const table = screen.getByRole('table');
+    const list = screen.getByRole('list', { name: '選手ごとの出場回数' });
     for (const p of sampleRoster()) {
-      expect(within(table).getByText(p.name)).toBeDefined();
+      expect(within(list).getByText(p.name)).toBeDefined();
     }
+  });
+
+  it('makes finalizing the primary action of a draft (§28)', () => {
+    const { container } = renderResult(undefined, 'DRAFT');
+    expect(primaryAction(container).textContent).toContain('オーダーを確定 v1');
+    // Sharing a draft is still possible, but never the primary action.
+    expect(screen.getByRole('button', { name: /^共有$/ }).classList.contains('primary')).toBe(false);
+  });
+
+  it('makes re-finalizing the primary action of an updated order (§29)', () => {
+    const { container } = renderResult(undefined, 'UPDATED');
+    expect(primaryAction(container).textContent).toContain('再確定 v2');
+    expect(screen.getByRole('button', { name: '変更点を確認' })).toBeDefined();
+    expect(screen.getByRole('button', { name: /^共有$/ }).classList.contains('primary')).toBe(false);
+  });
+
+  it('makes sharing the primary action once finalized (§30)', () => {
+    const { container } = renderResult(undefined, 'FINALIZED');
+    expect(primaryAction(container).textContent).toContain('共有');
+    expect(screen.queryByRole('button', { name: /オーダーを確定|再確定/ })).toBeNull();
+    // Exactly one share entry point.
+    expect(screen.getAllByRole('button', { name: /^共有$/ })).toHaveLength(1);
   });
 });

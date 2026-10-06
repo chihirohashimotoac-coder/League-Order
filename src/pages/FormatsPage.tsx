@@ -5,6 +5,7 @@ import { impliedPlayerCount, renumber, totalSlots, validateFormat } from '../dom
 import { createId } from '../utils/id';
 import { useAppStore } from '../state/appStore';
 import { Card, ConfirmDialog, EmptyState, Field, Sheet, Stepper, useToast } from '../components/ui';
+import { Icon } from '../components/icons';
 
 /**
  * FORMAT screen (spec §4).
@@ -49,13 +50,18 @@ export function FormatsPage(): React.JSX.Element {
     <>
       <Card flush>
         {store.teamFormats.length === 0 ? (
-          <EmptyState>フォーマットがありません。下のボタンから作成してください。</EmptyState>
+          <EmptyState kicker="NO FORMATS" title="フォーマットがありません" icon="format">
+            下のボタンから作成してください。
+          </EmptyState>
         ) : (
           <ul className="list">
             {store.teamFormats.map((format) => (
               <li key={format.id}>
                 <div className="row" style={{ paddingRight: 10 }}>
                   <button type="button" className="list-row grow" onClick={() => setEditing(format)}>
+                    <span className="lead" aria-hidden="true">
+                      <Icon name="format" size={18} />
+                    </span>
                     <span className="grow">
                       <span className="title">{format.name}</span>
                       <span className="meta">
@@ -63,9 +69,7 @@ export function FormatsPage(): React.JSX.Element {
                         {format.teamId === null ? ' ・ 共有' : ''}
                       </span>
                     </span>
-                    <span className="chevron" aria-hidden="true">
-                      ›
-                    </span>
+                    <Icon name="chevronRight" size={18} className="chevron" />
                   </button>
                   <button
                     type="button"
@@ -84,7 +88,8 @@ export function FormatsPage(): React.JSX.Element {
 
       <div className="action-bar">
         <button type="button" className="btn primary" onClick={startNew}>
-          ＋ フォーマットを作成
+          <Icon name="plus" size={20} strokeWidth={2.6} />
+          フォーマットを作成
         </button>
       </div>
 
@@ -198,24 +203,28 @@ function FormatEditor({
         />
       </Field>
 
-      <p className="tiny dim">
+      <p className="tiny muted">
         総枠 {totalSlots(draft.games)} / {draft.games.length} ゲーム
       </p>
 
       {draft.games.map((game, index) => (
-        <div className="order-game" key={game.id}>
+        <div className="order-game format-game" key={game.id} style={{ marginBottom: 10 }}>
           <div className="order-game-head">
-            <span className="no">{index + 1}</span>
-            <input
-              className="grow"
-              type="text"
-              value={game.name}
-              onChange={(event) => updateGame(index, { name: event.target.value })}
-              aria-label={`ゲーム ${index + 1} の名称`}
-            />
+            <span className="no" aria-hidden="true">
+              <small>GAME</small>
+              <b>{String(index + 1).padStart(2, '0')}</b>
+            </span>
+            <span className="head-text">
+              <input
+                type="text"
+                value={game.name}
+                onChange={(event) => updateGame(index, { name: event.target.value })}
+                aria-label={`ゲーム ${index + 1} の名称`}
+              />
+            </span>
           </div>
           <div style={{ padding: '10px 12px' }}>
-            <div className="row wrap" style={{ gap: 5, marginBottom: 10 }}>
+            <div className="chip-row" style={{ marginBottom: 10 }}>
               {GAME_KINDS.map((kind) => (
                 <button
                   type="button"
@@ -229,7 +238,7 @@ function FormatEditor({
               ))}
             </div>
             <div className="row between">
-              <span className="tiny dim">必要人数</span>
+              <span className="small-text secondary">必要人数</span>
               <Stepper
                 label={`ゲーム ${index + 1} の必要人数`}
                 value={game.playerCount}
@@ -299,7 +308,8 @@ function FormatEditor({
           ])
         }
       >
-        ＋ ゲームを追加
+        <Icon name="plus" size={18} />
+        ゲームを追加
       </button>
     </Sheet>
   );

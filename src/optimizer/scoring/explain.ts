@@ -226,13 +226,13 @@ export function buildExplanation(
       gameViolations.length > 0
         ? {
             key: 'constraint',
-            label: 'Hard制約違反',
+            label: '絶対条件違反',
             detail: gameViolations.map((violation) => violation.message).join(' '),
             tone: 'negative',
           }
         : {
             key: 'constraint',
-            label: 'Hard制約',
+            label: '絶対条件',
             detail: `出場不可・出場可能範囲・最大出場回数・禁止ペアのいずれにも違反していません (${names.join(' / ')})。`,
             tone: 'positive',
           },
@@ -249,7 +249,7 @@ export function buildExplanation(
   if (violations.length > 0) {
     overall.push({
       key: 'constraint',
-      label: 'Hard制約違反',
+      label: '絶対条件違反',
       detail:
         globalViolations.length > 0
           ? globalViolations.map((violation) => violation.message).join(' ')
@@ -266,7 +266,7 @@ export function buildExplanation(
       detail:
         evaluation.fairness.excess === 0
           ? `${ctx.totalSlots}枠を${ctx.playerCount}名へ、算術上もっとも均等に配分しました (最大差 ${evaluation.fairness.spread})。`
-          : `理想配分からの超過 ${round(evaluation.fairness.excess, 2)} (最大差 ${evaluation.fairness.spread})。Hard制約のため完全均等にはできません。`,
+          : `理想配分からの超過 ${round(evaluation.fairness.excess, 2)} (最大差 ${evaluation.fairness.spread})。絶対条件のため完全均等にはできません。`,
       tone: evaluation.fairness.excess === 0 ? 'positive' : 'neutral',
     },
     {

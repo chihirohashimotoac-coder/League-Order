@@ -114,6 +114,13 @@ export interface AppStore extends AppData {
   /** Withdraws an order's season contribution entirely. */
   withdrawSeason(orderId: OrderId): SeasonCommitResult;
   replaceEverything(snapshot: Snapshot): Promise<void>;
+  /** First run: installs the sample team (labelled as demo data). */
+  loadSample(): Promise<void>;
+  /**
+   * First run: creates the captain's own team with its roster and first format in one
+   * step, and makes it the active team.
+   */
+  createTeamSetup(team: Team, players: readonly Player[], format: LeagueFormat): Promise<void>;
   mergeEverything(snapshot: Snapshot): Promise<void>;
   snapshot(): Snapshot;
 }
@@ -176,12 +183,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
     void (async () => {
       const repository = await Repository.open();
       repositoryRef.current = repository;
-      let snapshot = await repository.loadAll();
-      if (snapshot.teams.length === 0) {
-        // First run: seed a usable example so "generate" works straight away.
-        snapshot = buildSeed();
-        await repository.replaceAll(snapshot);
-      }
+      // No seeding here: an empty database is the first-run state, where the captain
+      // chooses between their own team and the sample (see `loadSample`). Seeding
+      // silently made the demo roster look like real data, and "delete everything" could
+      // never get back to a clean start.
+      const snapshot = await repository.loadAll();
       if (cancelled) return;
       setBackendKind(repository.backendKind);
       setData(snapshot);
@@ -486,6 +492,41 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
         setData(incoming);
         try {
           await repositoryRef.current?.replaceAll(incoming);
+        } catch (error) {
+          setWriteFailed(true);
+          toast.show(WRITE_FAILURE_NOTICE, 'error');
+          throw error;
+        }
+      },
+
+      loadSample: async () => {
+        const sample = buildSeed();
+        setData(sample);
+        try {
+          await repositoryRef.current?.replaceAll(sample);
+        } catch (error) {
+          setWriteFailed(true);
+          toast.show(WRITE_FAILURE_NOTICE, 'error');
+          throw error;
+        }
+      },
+
+      createTeamSetup: async (team, players, format) => {
+        const settings = { ...data.settings, activeTeamId: team.id };
+        setData((current) => ({
+          ...current,
+          teams: upsert(current.teams, team),
+          players: players.reduce((acc, player) => upsert(acc, player), current.players),
+          formats: upsert(current.formats, format),
+          settings: { ...current.settings, activeTeamId: team.id },
+        }));
+        const repository = repositoryRef.current;
+        if (!repository) return;
+        try {
+          await repository.saveTeam(team);
+          await repository.savePlayers(players);
+          await repository.saveFormat(format);
+          await repository.saveSettings(settings);
         } catch (error) {
           setWriteFailed(true);
           toast.show(WRITE_FAILURE_NOTICE, 'error');

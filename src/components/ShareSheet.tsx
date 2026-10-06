@@ -28,14 +28,16 @@ import {
   type ShareVersionInfo,
 } from '../share';
 import { MatchInfoFields } from './MatchInfoFields';
-import { Sheet, useToast } from './ui';
+import { Segmented, Sheet, useToast } from './ui';
+import { Icon } from './icons';
 
 /**
  * SHARE screen (要件 §1–§7).
  *
  * Three tabs — image, text and per-player — over one shared layout model, so every form
- * says the same thing. The three primary actions (standard share / save image / copy
- * text) sit in a fixed row at the bottom of the sheet, within thumb reach.
+ * says the same thing. The actions sit in the sheet's sticky footer, within thumb reach:
+ * one dominant "share to LINE etc." (the OS share sheet), with save-image and copy-text
+ * as secondaries.
  *
  * It reads a finished `OrderSolution` and never calls the optimizer.
  */
@@ -70,6 +72,8 @@ export function ShareSheet({
   onMatchChange,
   lifecycle,
   versions,
+  onFinalize,
+  nextVersion,
   onClose,
 }: {
   games: GameSlotDef[];
@@ -80,6 +84,10 @@ export function ShareSheet({
   /** Lifecycle of the order being shared; drives the version badge and draft warning. */
   lifecycle: OrderLifecycleState;
   versions: OrderVersion[];
+  /** Finalizes from inside the sheet; omitted when there is nothing to finalize. */
+  onFinalize?: () => void;
+  /** The version a finalization would produce. */
+  nextVersion: number;
   onClose: () => void;
 }): React.JSX.Element {
   const toast = useToast();
@@ -208,12 +216,52 @@ export function ShareSheet({
     });
   };
 
+  const finalizeLabel = lifecycle === 'DRAFT' ? 'オーダーを確定' : '再確定';
+
+  const actions = (
+    <div className="share-actions">
+      {capabilities.webShare ? (
+        <button type="button" className="btn primary" disabled={busy} onClick={handleStandardShare}>
+          <Icon name="share" />
+          LINE等へ共有
+        </button>
+      ) : null}
+      <div className="secondary-row">
+        {tab === 'image' ? (
+          <button
+            type="button"
+            className={capabilities.webShare ? 'btn' : 'btn primary'}
+            disabled={busy || images.length === 0}
+            onClick={handleSaveImage}
+          >
+            <Icon name="download" size={18} />
+            画像を保存
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={capabilities.webShare || tab === 'image' ? 'btn' : 'btn primary'}
+          disabled={busy}
+          onClick={handleCopyText}
+        >
+          <Icon name="copy" size={18} />
+          テキストをコピー
+        </button>
+      </div>
+      {!capabilities.webShare ? (
+        <p className="fallback-note">
+          この環境は端末標準の共有メニューに対応していないため、画像の保存とテキストのコピーで共有してください。
+        </p>
+      ) : null}
+    </div>
+  );
+
   return (
-    <Sheet title="共有" onClose={onClose}>
+    <Sheet title="共有" onClose={onClose} footer={actions}>
       {lifecycle !== 'FINALIZED' ? (
-        <div className="notice warn" data-testid="share-draft-warning">
-          <span aria-hidden="true">△</span>
-          <span className="small-text">
+        <div className={lifecycle === 'DRAFT' ? 'notice warn' : 'notice updated'} data-testid="share-draft-warning">
+          <Icon name="alert" size={18} />
+          <span className="grow small-text">
             <strong>
               {lifecycle === 'DRAFT'
                 ? 'このオーダーはまだ確定されていません'
@@ -221,28 +269,39 @@ export function ShareSheet({
             </strong>
             <br />
             {lifecycle === 'DRAFT'
-              ? 'プレビューと共有は可能ですが、確定するとバージョンが付き、メンバーがどれを最新版か判断できます。'
-              : 'このまま共有するとメンバーが見る版がどれか分からなくなります。先に再確定することをおすすめします。'}
+              ? '共有物には「未確定」と表示されます。確定するとバージョンが付き、どれが最新版か分かります。'
+              : 'このまま共有するとメンバーが見る版がどれか分からなくなります。先に再確定してください。'}
+            {onFinalize ? (
+              <button
+                type="button"
+                className="btn small accent-outline"
+                style={{ marginTop: 8 }}
+                onClick={onFinalize}
+              >
+                <Icon name="check" size={16} strokeWidth={2.8} />
+                {finalizeLabel} v{nextVersion} してから共有
+              </button>
+            ) : null}
           </span>
         </div>
       ) : null}
 
-      <div className="share-tabs" role="tablist" aria-label="共有形式">
+      <div className="segmented share-tabs" role="tablist" aria-label="共有形式">
         {(
           [
-            ['image', '画像'],
-            ['text', 'テキスト'],
-            ['player', 'プレイヤー別'],
-          ] as [ShareTab, string][]
-        ).map(([key, label]) => (
+            ['image', '画像', 'image'],
+            ['text', 'テキスト', 'text'],
+            ['player', 'プレイヤー別', 'player'],
+          ] as const
+        ).map(([key, label, icon]) => (
           <button
             type="button"
             key={key}
             role="tab"
-            className="share-tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
           >
+            <Icon name={icon} size={16} />
             {label}
           </button>
         ))}
@@ -250,29 +309,25 @@ export function ShareSheet({
 
       <details className="match-edit" open={editMatch} onToggle={(event) => setEditMatch(event.currentTarget.open)}>
         <summary>
-          <span className="grow">
-            試合情報
-            <span className="dim tiny" style={{ marginLeft: 8 }}>
+          <Icon name="calendar" size={18} />
+          <span className="grow" style={{ minWidth: 0 }}>
+            <span className="summary-title">試合情報</span>
+            <span className="match-summary">
               {[match.leagueName, [match.teamName, match.opponentName].filter(Boolean).join(' vs '), match.matchDate]
                 .filter(Boolean)
                 .join(' ・ ') || '未入力'}
             </span>
           </span>
-          <span aria-hidden="true">✎</span>
+          <Icon name="edit" size={16} />
         </summary>
-        <div style={{ paddingTop: 10 }}>
+        <div>
           <MatchInfoFields value={match} onChange={onMatchChange} />
         </div>
       </details>
 
       {tab === 'image' ? (
         <>
-          <Segmented
-            label="画像の種類"
-            options={IMAGE_VARIANTS}
-            value={variant}
-            onChange={setVariant}
-          />
+          <Segmented label="画像の種類" options={IMAGE_VARIANTS} value={variant} onChange={setVariant} />
           {images.length === 0 ? (
             <p className="notice warn small-text">
               この環境では画像を生成できませんでした。「テキスト」タブをご利用ください。
@@ -280,28 +335,33 @@ export function ShareSheet({
           ) : (
             <>
               {images.length > 1 ? (
-                <p className="tiny dim" style={{ marginTop: 0 }}>
+                <p className="tiny muted" style={{ marginTop: 0 }}>
                   ゲーム数が多いため {images.length} 枚に分割しました (文字は縮小していません)。
                 </p>
               ) : null}
-              <div className="share-previews">
-                {images.map((image) => (
-                  <figure key={image.page}>
-                    <img
-                      className="share-preview"
-                      src={image.dataUrl}
-                      alt={`オーダー画像 ${image.page} / ${image.pageCount}`}
-                    />
-                    {images.length > 1 ? (
-                      <figcaption className="tiny dim">
-                        {image.page} / {image.pageCount}
-                      </figcaption>
-                    ) : null}
-                  </figure>
-                ))}
+              <div className="share-stage">
+                <div className="share-previews">
+                  {images.map((image) => (
+                    <figure key={image.page}>
+                      <img
+                        className="share-preview"
+                        src={image.dataUrl}
+                        alt={`オーダー画像 ${image.page} / ${image.pageCount}`}
+                      />
+                      {images.length > 1 ? (
+                        <figcaption className="tiny muted">
+                          {image.page} / {image.pageCount}
+                        </figcaption>
+                      ) : null}
+                    </figure>
+                  ))}
+                </div>
               </div>
-              <p className="tiny dim">
-                PNG {images[0].width} × {images[0].height}px
+              <p className="share-meta">
+                <span>PNG</span>
+                <span>
+                  {images[0].width} × {images[0].height}px
+                </span>
               </p>
             </>
           )}
@@ -310,16 +370,26 @@ export function ShareSheet({
 
       {tab === 'text' ? (
         <>
-          <Segmented label="テキスト形式" options={textFormats} value={textFormat} onChange={setTextFormat} />
+          <div className="field">
+            <span>テキスト形式</span>
+            <div className="chip-row" role="group" aria-label="テキスト形式">
+              {textFormats.map((option) => (
+                <button
+                  type="button"
+                  key={option.key}
+                  className="chip"
+                  aria-pressed={textFormat === option.key}
+                  onClick={() => setTextFormat(option.key)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <span className="hint">{textFormats.find((option) => option.key === textFormat)?.hint}</span>
+          </div>
           <label className="field">
             <span className="visually-hidden">共有テキスト</span>
-            <textarea
-              readOnly
-              value={text}
-              rows={14}
-              aria-label="共有テキスト"
-              style={{ fontFamily: 'ui-monospace, monospace', fontSize: 13 }}
-            />
+            <textarea className="share-text" readOnly value={text} rows={14} aria-label="共有テキスト" />
           </label>
           <button
             type="button"
@@ -329,6 +399,7 @@ export function ShareSheet({
               toast.show('テキストを保存しました', 'ok');
             }}
           >
+            <Icon name="download" size={16} />
             テキストをファイル保存
           </button>
         </>
@@ -336,7 +407,7 @@ export function ShareSheet({
 
       {tab === 'player' ? (
         <>
-          <p className="tiny dim" style={{ marginTop: 0 }}>
+          <p className="tiny muted" style={{ marginTop: 0 }}>
             各メンバーが自分の出場ゲームだけを確認できます。
           </p>
           <div className="player-chips" role="group" aria-label="プレイヤーの選択">
@@ -356,6 +427,7 @@ export function ShareSheet({
 
           {activeSchedule ? (
             <div className="player-schedule">
+              <span className="kicker">PLAYER ・ {activeSchedule.entries.length} GAMES</span>
               <h3>{activeSchedule.name}</h3>
               {activeSchedule.entries.length === 0 ? (
                 <p className="muted small-text">出場なし</p>
@@ -363,12 +435,12 @@ export function ShareSheet({
                 <ul>
                   {activeSchedule.entries.map((entry, index) => (
                     <li key={index}>
-                      <span className="badge accent">{entry.no}</span>
+                      <span className="g-no">{entry.no}</span>
                       <span className="grow">
                         <strong>{entry.gameName}</strong>
                         {entry.partners.length > 0 ? (
-                          <span className="dim tiny" style={{ display: 'block' }}>
-                            Partner: {entry.partners.join(' / ')}
+                          <span className="muted tiny" style={{ display: 'block' }}>
+                            ペア: {entry.partners.join(' / ')}
                           </span>
                         ) : null}
                       </span>
@@ -389,70 +461,12 @@ export function ShareSheet({
               })
             }
           >
+            <Icon name="copy" size={16} />
             全員分をコピー
           </button>
         </>
-      ) : null}
-
-      <div className="share-actions">
-        {capabilities.webShare ? (
-          <button type="button" className="btn primary grow" disabled={busy} onClick={handleStandardShare}>
-            {tab === 'image' && capabilities.files ? '標準共有 (画像)' : '標準共有'}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className={capabilities.webShare ? 'btn grow' : 'btn primary grow'}
-          disabled={busy || (tab === 'image' && images.length === 0)}
-          onClick={tab === 'image' ? handleSaveImage : handleCopyText}
-        >
-          {tab === 'image' ? '画像を保存' : 'テキストをコピー'}
-        </button>
-        {tab === 'image' ? (
-          <button type="button" className="btn grow" disabled={busy} onClick={handleCopyText}>
-            テキストをコピー
-          </button>
-        ) : null}
-      </div>
-
-      {!capabilities.webShare ? (
-        <p className="tiny dim" style={{ margin: '8px 0 0' }}>
-          この環境は端末標準の共有メニューに対応していないため、画像の保存とテキストのコピーで共有してください。
-        </p>
       ) : null}
     </Sheet>
   );
 }
 
-function Segmented<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: readonly { key: T; label: string; hint: string }[];
-  value: T;
-  onChange: (next: T) => void;
-}): React.JSX.Element {
-  const active = options.find((option) => option.key === value);
-  return (
-    <div className="field">
-      <span>{label}</span>
-      <div className="row wrap" style={{ gap: 6 }}>
-        {options.map((option) => (
-          <button
-            type="button"
-            key={option.key}
-            className="chip"
-            aria-pressed={value === option.key}
-            onClick={() => onChange(option.key)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-      {active ? <span className="hint">{active.hint}</span> : null}
-    </div>
-  );
-}

@@ -10,7 +10,7 @@ import type {
   PresetKey,
 } from '../domain/types';
 import { GAME_KIND_LABELS, PRESET_KEYS, PRESET_LABELS } from '../domain/types';
-import { PRESETS, scopeForPreset, weightsForPreset } from '../domain/orders/presets';
+import { scopeForPreset, weightsForPreset } from '../domain/orders/presets';
 import { totalSlots } from '../domain/games/format';
 import {
   createParticipantConfig,
@@ -19,14 +19,26 @@ import {
 } from '../domain/orders/participants';
 import { useAppStore } from '../state/appStore';
 import { MatchInfoFields } from '../components/MatchInfoFields';
-import { Card, EmptyState, Field, Sheet, Stepper, useToast } from '../components/ui';
+import {
+  Card,
+  EmptyState,
+  Field,
+  Metric,
+  SectionHeader,
+  Sheet,
+  Stepper,
+  formatRating,
+  useToast,
+} from '../components/ui';
+import { Icon, type IconName } from '../components/icons';
+import type { Page } from '../navigation';
 
 /**
  * ORDER SETUP screen (spec §5–§8, §11, §26).
  *
- * The day-of controls live here: who is present, who cannot play what, who arrives late
- * or leaves early, and the generation policy. Everything a captain changes at the venue
- * is one or two taps deep.
+ * Ordered by what a captain decides first at the venue: the format, who is here, the
+ * policy — then the optional match header and the advanced constraint modes. Every
+ * day-of change is one or two taps deep.
  */
 export interface SetupDraft {
   formatId: FormatId;
@@ -35,6 +47,16 @@ export interface SetupDraft {
   settings: OptimizerSettings;
 }
 
+/** Presentation for the policy cards; the weights themselves live in the domain. */
+const PRESET_CARDS: Record<PresetKey, { icon: IconName; summary: string }> = {
+  WIN_FIRST: { icon: 'trophy', summary: '戦力を最優先' },
+  BALANCED: { icon: 'scale', summary: '勝利と公平性を両立' },
+  FAIRNESS_FIRST: { icon: 'equal', summary: '出場回数を均等化' },
+  DEVELOPMENT: { icon: 'sprout', summary: '出場の少ない選手を優先' },
+  NEW_PAIR: { icon: 'pair', summary: '新しいペアを試す' },
+  CUSTOM: { icon: 'sliders', summary: '設定画面の重みを使用' },
+};
+
 export function SetupPage({
   draft,
   onDraftChange,
@@ -42,6 +64,7 @@ export function SetupPage({
   onMatchChange,
   onGenerate,
   generating,
+  onNavigate,
 }: {
   draft: SetupDraft;
   onDraftChange: (next: SetupDraft) => void;
@@ -49,6 +72,7 @@ export function SetupPage({
   onMatchChange: (next: MatchInfo) => void;
   onGenerate: (input: OrderInput) => void;
   generating: boolean;
+  onNavigate: (page: Page) => void;
 }): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
@@ -110,29 +134,43 @@ export function SetupPage({
   };
 
   if (store.teamPlayers.length === 0 || store.teamFormats.length === 0) {
+    const noPlayers = store.teamPlayers.length === 0;
     return (
       <Card>
-        <EmptyState>
-          {store.teamPlayers.length === 0 ? 'メンバーが登録されていません。' : 'フォーマットがありません。'}
-          <br />
-          先に「メンバー」「フォーマット」を登録してください。
+        <EmptyState
+          kicker="SETUP REQUIRED"
+          title={noPlayers ? 'メンバーが登録されていません' : 'フォーマットがありません'}
+          icon={noPlayers ? 'users' : 'format'}
+          action={
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => onNavigate(noPlayers ? 'players' : 'formats')}
+            >
+              {noPlayers ? 'メンバーを登録' : 'フォーマットを作成'}
+            </button>
+          }
+        >
+          オーダーを作るには、メンバーとフォーマットが必要です。
         </EmptyState>
       </Card>
     );
   }
 
   const idealPerPlayer = included.length > 0 ? slots / included.length : 0;
+  const matchSummary =
+    [
+      match.opponentName ? `vs ${match.opponentName}` : '',
+      match.matchDate,
+      match.leagueName,
+    ]
+      .filter(Boolean)
+      .join(' ・ ') || '対戦相手・試合日を入力';
 
   return (
     <>
-      <Card title="試合情報">
-        <p className="tiny dim" style={{ marginTop: 0 }}>
-          共有する画像とテキストの見出しに使います。空欄でも生成できます。
-        </p>
-        <MatchInfoFields value={match} onChange={onMatchChange} />
-      </Card>
-
-      <Card title="フォーマット">
+      <SectionHeader index={1} kicker="FORMAT" title="フォーマット" />
+      <Card>
         <Field label="使用するフォーマット">
           <select
             value={format?.id ?? ''}
@@ -146,23 +184,16 @@ export function SetupPage({
           </select>
         </Field>
         <div className="metrics">
-          <div className="metric">
-            <span className="k">総枠</span>
-            <span className="v">{slots}</span>
-          </div>
-          <div className="metric">
-            <span className="k">参加者</span>
-            <span className="v">{included.length}</span>
-          </div>
-          <div className="metric">
-            <span className="k">1人あたり</span>
-            <span className="v">{included.length > 0 ? idealPerPlayer.toFixed(1) : '-'}</span>
-          </div>
+          <Metric label="総枠" value={slots} />
+          <Metric label="参加者" value={included.length} unit="名" />
+          <Metric label="1人あたり" value={included.length > 0 ? idealPerPlayer.toFixed(1) : '—'} />
         </div>
       </Card>
 
-      <Card
-        title={`参加者 (${included.length} / ${store.teamPlayers.length})`}
+      <SectionHeader
+        index={2}
+        kicker="PLAYERS"
+        title={`参加者 ${included.length} / ${store.teamPlayers.length}`}
         action={
           <div className="row" style={{ gap: 6 }}>
             <button
@@ -191,90 +222,110 @@ export function SetupPage({
             </button>
           </div>
         }
-        flush
-      >
-        <ul className="list">
-          {store.teamPlayers.map((player) => {
-            const config = configById.get(player.id) ?? createParticipantConfig(player.id, false);
-            const restrictions = describeRestrictions(config, games);
-            return (
-              <li key={player.id}>
-                <div className="row" style={{ padding: '8px 12px', gap: 10 }}>
+      />
+      <ul className="participants">
+        {store.teamPlayers.map((player) => {
+          const config = configById.get(player.id) ?? createParticipantConfig(player.id, false);
+          const restrictions = describeRestrictions(config, games);
+          return (
+            <li key={player.id} className={config.include ? 'participant' : 'participant is-out'}>
+              {/* The whole row toggles participation; the conditions button sits outside
+                  the label so it never toggles by accident. */}
+              <label className="p-main">
+                <span className="p-check">
                   <input
                     type="checkbox"
                     checked={config.include}
                     onChange={(event) => updateConfig(player.id, { include: event.target.checked })}
                     aria-label={`${player.name} を参加者に含める`}
-                    style={{ width: 24, height: 24, minHeight: 24, flex: 'none' }}
                   />
-                  <span className="grow" style={{ minWidth: 0 }}>
-                    <span className="title" style={{ display: 'block' }}>
-                      {player.name}
-                      {player.rating === null ? (
-                        <span className="badge" style={{ marginLeft: 6 }}>
-                          R未入力
-                        </span>
-                      ) : (
-                        <span className="dim tiny" style={{ marginLeft: 6 }}>
-                          R{player.rating}
-                        </span>
-                      )}
-                    </span>
-                    <span className="meta">
-                      {restrictions.length > 0 ? restrictions.join(' ・ ') : '制約なし'}
+                  <span className="box" aria-hidden="true">
+                    <Icon name="check" size={16} strokeWidth={3} />
+                  </span>
+                </span>
+                <span className="p-text">
+                  <span className="p-name">
+                    <strong>{player.name}</strong>
+                    <span className={player.rating === null ? 'rt unknown' : 'rt'}>
+                      {formatRating(player.rating)}
                     </span>
                   </span>
-                  <button
-                    type="button"
-                    className="btn small"
-                    onClick={() => setDetailFor(player)}
-                    disabled={!config.include}
-                  >
-                    条件
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </Card>
+                  <span className={restrictions.length > 0 && config.include ? 'p-meta has-conditions' : 'p-meta'}>
+                    {restrictions.length > 0 ? restrictions.join(' ・ ') : '条件なし'}
+                  </span>
+                </span>
+              </label>
+              <span className="p-cond">
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => setDetailFor(player)}
+                  disabled={!config.include}
+                >
+                  条件
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
 
-      <Card title="プリセット">
-        <div className="row wrap" style={{ gap: 6 }}>
-          {PRESET_KEYS.filter((key) => key !== 'CUSTOM').map((key) => (
+      <SectionHeader index={3} kicker="STRATEGY" title="方針" />
+      <div className="preset-grid" role="radiogroup" aria-label="プリセット">
+        {PRESET_KEYS.map((key) => {
+          const card = PRESET_CARDS[key];
+          const selected = draft.preset === key;
+          return (
             <button
               type="button"
               key={key}
-              className="chip"
-              aria-pressed={draft.preset === key}
+              role="radio"
+              aria-checked={selected}
+              className="preset"
               onClick={() => applyPreset(key)}
             >
-              {PRESET_LABELS[key]}
+              <span className="p-head">
+                <Icon name={card.icon} size={18} />
+                {PRESET_LABELS[key]}
+                {selected ? <Icon name="check" size={18} strokeWidth={2.6} className="p-check-mark" /> : null}
+              </span>
+              <span className="p-desc">{card.summary}</span>
             </button>
-          ))}
-          <button
-            type="button"
-            className="chip"
-            aria-pressed={draft.preset === 'CUSTOM'}
-            onClick={() => applyPreset('CUSTOM')}
-          >
-            カスタム
-          </button>
+          );
+        })}
+      </div>
+
+      <SectionHeader index={4} kicker="MATCH" title="試合情報" />
+      <details className="disclosure">
+        <summary>
+          <Icon name="calendar" />
+          <span className="grow" style={{ minWidth: 0 }}>
+            <span className="summary-title">試合情報 (任意)</span>
+            <span className="match-summary">{matchSummary}</span>
+          </span>
+          <Icon name="chevronDown" className="chev" />
+        </summary>
+        <div className="disclosure-body" style={{ paddingTop: 14 }}>
+          <p className="tiny muted" style={{ marginTop: 0 }}>
+            共有する画像とテキストの見出しに使います。空欄でも生成できます。
+          </p>
+          <MatchInfoFields value={match} onChange={onMatchChange} />
         </div>
-        <p className="tiny dim" style={{ marginBottom: 0, marginTop: 8 }}>
-          {draft.preset === 'CUSTOM'
-            ? '設定画面で調整した重みを使用します。'
-            : PRESETS[draft.preset].description}
-        </p>
-        <button
-          type="button"
-          className="btn small ghost"
-          style={{ marginTop: 10 }}
-          onClick={() => setShowPolicy(true)}
-        >
-          公平性の範囲・制約モードを調整
-        </button>
-      </Card>
+      </details>
+
+      <button type="button" className="disclosure list-row" onClick={() => setShowPolicy(true)}>
+        <Icon name="sliders" />
+        <span className="grow">
+          <span className="title" style={{ fontSize: 15.5 }}>
+            詳細条件
+          </span>
+          <span className="meta">
+            公平性 {draft.settings.fairnessScope === 'season' ? 'シーズン込み' : '今回のみ'} ・ 連続{' '}
+            {draft.settings.consecutiveMode === 'hard' ? '絶対条件' : 'できるだけ考慮'}
+          </span>
+        </span>
+        <Icon name="chevronRight" size={18} className="chevron" />
+      </button>
 
       <div className="action-bar">
         <button
@@ -291,7 +342,10 @@ export function SetupPage({
               <span className="spinner" aria-hidden="true" /> 生成中…
             </>
           ) : (
-            'オーダーを生成'
+            <>
+              <Icon name="target" />
+              オーダーを生成
+            </>
           )}
         </button>
       </div>
@@ -313,7 +367,7 @@ export function SetupPage({
         : null}
 
       {showPolicy ? (
-        <Sheet title="公平性と制約モード" onClose={() => setShowPolicy(false)}>
+        <Sheet title="詳細条件" onClose={() => setShowPolicy(false)}>
           <Field
             label="公平性の評価範囲"
             hint="「シーズン込み」にすると、累計出場が少ない選手が優先されます。"
@@ -337,7 +391,7 @@ export function SetupPage({
 
           <Field
             label="最大連続出場の扱い"
-            hint="Hard にすると絶対に超えません。少人数チームでは解が無くなることがあります。"
+            hint="絶対条件にすると必ず守ります。少人数チームでは生成できなくなることがあります。"
           >
             <select
               value={draft.settings.consecutiveMode}
@@ -351,12 +405,12 @@ export function SetupPage({
                 })
               }
             >
-              <option value="soft">Soft (できる限り避ける)</option>
-              <option value="hard">Hard (絶対に超えない)</option>
+              <option value="soft">できるだけ考慮 (避けられない時は超える)</option>
+              <option value="hard">絶対条件 (絶対に超えない)</option>
             </select>
           </Field>
 
-          <Field label="最小出場回数の扱い" hint="既定は Hard です。満たせない場合は理由を表示します。">
+          <Field label="最小出場回数の扱い" hint="既定は絶対条件です。満たせない場合は理由を表示します。">
             <select
               value={draft.settings.minAppearanceMode}
               onChange={(event) =>
@@ -369,8 +423,8 @@ export function SetupPage({
                 })
               }
             >
-              <option value="hard">Hard (必ず満たす)</option>
-              <option value="soft">Soft (できる限り満たす)</option>
+              <option value="hard">絶対条件 (必ず満たす)</option>
+              <option value="soft">できるだけ考慮</option>
             </select>
           </Field>
 
@@ -400,7 +454,10 @@ function describeRestrictions(
   if (!config.include) return ['不参加'];
   if (config.excludedGameIds.length > 0) {
     const names = config.excludedGameIds
-      .map((id) => games.find((game) => game.id === id)?.name ?? id)
+      .map((id) => {
+        const game = games.find((entry) => entry.id === id);
+        return game ? `G${game.order}` : id;
+      })
       .join(', ');
     notes.push(`不可: ${names}`);
   }
@@ -414,7 +471,7 @@ function describeRestrictions(
   if (config.maxAppearances !== undefined) notes.push(`最大${config.maxAppearances}`);
   if (config.maxConsecutive !== undefined) notes.push(`連続≤${config.maxConsecutive}`);
   if (config.ratingOverride !== undefined) {
-    notes.push(`R上書き ${config.ratingOverride ?? '未入力'}`);
+    notes.push(`今回 ${formatRating(config.ratingOverride)}`);
   }
   return notes;
 }
@@ -441,9 +498,9 @@ function ParticipantDetail({
 
   return (
     <Sheet title={`${player.name} の出場条件`} onClose={onClose}>
-      <div className="field">
-        <span>出場できないゲーム (Hard制約)</span>
-        <div className="row wrap" style={{ gap: 5 }}>
+      <div className="sheet-section">
+        <span className="kicker">絶対条件 ・ 出場できないゲーム</span>
+        <div className="chip-row">
           {games.map((game) => (
             <button
               type="button"
@@ -464,9 +521,9 @@ function ParticipantDetail({
         </div>
       </div>
 
-      <div className="field">
-        <span>出場できないゲーム種別 (Hard制約)</span>
-        <div className="row wrap" style={{ gap: 5 }}>
+      <div className="sheet-section">
+        <span className="kicker">絶対条件 ・ 出場できない種別</span>
+        <div className="chip-row">
           {kinds.map((kind) => (
             <button
               type="button"
@@ -487,9 +544,9 @@ function ParticipantDetail({
         </div>
       </div>
 
-      <div className="field">
-        <span>出場可能範囲 (遅刻・早退)</span>
-        <div className="row wrap" style={{ gap: 6, marginBottom: 8 }}>
+      <div className="sheet-section">
+        <span className="kicker">出場可能範囲 (遅刻・早退)</span>
+        <div className="chip-row" style={{ marginBottom: 10 }}>
           <button type="button" className="chip" onClick={() => onChange({ window: undefined })}>
             制限なし
           </button>
@@ -508,40 +565,38 @@ function ParticipantDetail({
             後半のみ
           </button>
         </div>
-        <div className="row" style={{ gap: 8 }}>
-          <label className="grow">
-            <span className="tiny dim">最初に出られる Game</span>
-            <Stepper
-              label="最初に出られるゲーム"
-              value={config.window?.fromOrder ?? 1}
-              min={1}
-              max={gameCount}
-              onChange={(next) =>
-                onChange({ window: { ...config.window, fromOrder: next === 1 ? undefined : next } })
-              }
-            />
-          </label>
-          <label className="grow">
-            <span className="tiny dim">最後に出られる Game</span>
-            <Stepper
-              label="最後に出られるゲーム"
-              value={config.window?.toOrder ?? gameCount}
-              min={1}
-              max={gameCount}
-              onChange={(next) =>
-                onChange({
-                  window: { ...config.window, toOrder: next === gameCount ? undefined : next },
-                })
-              }
-            />
-          </label>
+        <div className="row between" style={{ marginBottom: 8 }}>
+          <span className="small-text secondary">最初に出られる Game</span>
+          <Stepper
+            label="最初に出られるゲーム"
+            value={config.window?.fromOrder ?? 1}
+            min={1}
+            max={gameCount}
+            onChange={(next) =>
+              onChange({ window: { ...config.window, fromOrder: next === 1 ? undefined : next } })
+            }
+          />
+        </div>
+        <div className="row between">
+          <span className="small-text secondary">最後に出られる Game</span>
+          <Stepper
+            label="最後に出られるゲーム"
+            value={config.window?.toOrder ?? gameCount}
+            min={1}
+            max={gameCount}
+            onChange={(next) =>
+              onChange({
+                window: { ...config.window, toOrder: next === gameCount ? undefined : next },
+              })
+            }
+          />
         </div>
       </div>
 
-      <div className="field">
-        <span>出場回数</span>
+      <div className="sheet-section">
+        <span className="kicker">出場回数</span>
         <div className="row between" style={{ marginBottom: 8 }}>
-          <span className="tiny dim">最小 (0 = 指定なし)</span>
+          <span className="small-text secondary">最小 (0 = 指定なし)</span>
           <Stepper
             label="最小出場回数"
             value={min}
@@ -550,8 +605,8 @@ function ParticipantDetail({
             onChange={(next) => onChange({ minAppearances: next === 0 ? undefined : next })}
           />
         </div>
-        <div className="row between">
-          <span className="tiny dim">最大</span>
+        <div className="row between" style={{ marginBottom: 8 }}>
+          <span className="small-text secondary">最大</span>
           <Stepper
             label="最大出場回数"
             value={max}
@@ -560,12 +615,8 @@ function ParticipantDetail({
             onChange={(next) => onChange({ maxAppearances: next >= gameCount ? undefined : next })}
           />
         </div>
-      </div>
-
-      <div className="field">
-        <span>最大連続出場 (個別指定)</span>
         <div className="row between">
-          <span className="tiny dim">既定 {defaultMaxConsecutive} 試合</span>
+          <span className="small-text secondary">最大連続出場 (既定 {defaultMaxConsecutive})</span>
           <Stepper
             label="最大連続出場"
             value={config.maxConsecutive ?? defaultMaxConsecutive}
@@ -596,7 +647,7 @@ function ParticipantDetail({
             const parsed = Number(text);
             if (Number.isFinite(parsed)) onChange({ ratingOverride: parsed });
           }}
-          placeholder={player.rating === null ? '未入力 (Unknown)' : String(player.rating)}
+          placeholder={player.rating === null ? '未入力 (不明)' : String(player.rating)}
         />
       </Field>
     </Sheet>
