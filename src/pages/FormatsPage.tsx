@@ -1,10 +1,25 @@
 import { useState } from 'react';
-import type { GameKind, GameSlotDef, LeagueFormat } from '../domain/types';
-import { GAME_KIND_LABELS, GAME_KINDS } from '../domain/types';
+import type { DartsDiscipline, GameKind, GameSlotDef, LeagueFormat } from '../domain/types';
+import {
+  DARTS_DISCIPLINE_LABELS,
+  FORMAT_KIND_CHIP_LABELS,
+  GAME_KINDS,
+  formatDiscipline,
+} from '../domain/types';
+import { DISCIPLINE_STRENGTH_WEIGHTS, describeStrengthWeights } from '../domain/players/strength';
 import { impliedPlayerCount, renumber, totalSlots, validateFormat } from '../domain/games/format';
 import { createId } from '../utils/id';
 import { useAppStore } from '../state/appStore';
-import { Card, ConfirmDialog, EmptyState, Field, Sheet, Stepper, useToast } from '../components/ui';
+import {
+  Card,
+  ConfirmDialog,
+  DisciplineBadge,
+  EmptyState,
+  Field,
+  Sheet,
+  Stepper,
+  useToast,
+} from '../components/ui';
 import { Icon } from '../components/icons';
 
 /**
@@ -12,6 +27,9 @@ import { Icon } from '../components/icons';
  *
  * A game carries one or more kinds, which is what lets "Doubles 501" score both the
  * Doubles and the 501 aptitude and be blocked by either exclusion.
+ *
+ * The format also says whether the league is soft or steel darts. That lives here, not
+ * on the team, because one team can play in both kinds of league.
  */
 export function FormatsPage(): React.JSX.Element {
   const store = useAppStore();
@@ -28,6 +46,7 @@ export function FormatsPage(): React.JSX.Element {
       id: createId('fmt'),
       teamId: store.activeTeamId,
       name: '新しいフォーマット',
+      discipline: 'UNSPECIFIED',
       games: [
         { id: createId('gm'), order: 1, name: 'Singles 501', kinds: ['SINGLES', 'G501'], playerCount: 1 },
       ],
@@ -64,6 +83,7 @@ export function FormatsPage(): React.JSX.Element {
                     </span>
                     <span className="grow">
                       <span className="title">{format.name}</span>
+                      <DisciplineBadge discipline={formatDiscipline(format)} />
                       <span className="meta">
                         {format.games.length} ゲーム / 総枠 {totalSlots(format.games)}
                         {format.teamId === null ? ' ・ 共有' : ''}
@@ -203,6 +223,11 @@ function FormatEditor({
         />
       </Field>
 
+      <DisciplinePicker
+        value={formatDiscipline(draft)}
+        onChange={(discipline) => setDraft({ ...draft, discipline })}
+      />
+
       <p className="tiny muted">
         総枠 {totalSlots(draft.games)} / {draft.games.length} ゲーム
       </p>
@@ -232,8 +257,9 @@ function FormatEditor({
                   className="chip"
                   aria-pressed={game.kinds.includes(kind)}
                   onClick={() => toggleKind(index, kind)}
+                  title={kind === 'G501' ? '01 ゲーム (301 / 501 / 701 など)' : undefined}
                 >
-                  {GAME_KIND_LABELS[kind]}
+                  {FORMAT_KIND_CHIP_LABELS[kind]}
                 </button>
               ))}
             </div>
@@ -312,5 +338,37 @@ function FormatEditor({
         ゲームを追加
       </button>
     </Sheet>
+  );
+}
+
+/**
+ * Soft / steel selector. A format saved before the choice existed shows "未設定" until
+ * the captain picks one; nothing is inferred from its name.
+ */
+function DisciplinePicker({
+  value,
+  onChange,
+}: {
+  value: DartsDiscipline;
+  onChange: (next: DartsDiscipline) => void;
+}): React.JSX.Element {
+  const blend = describeStrengthWeights(DISCIPLINE_STRENGTH_WEIGHTS[value]);
+  return (
+    <div className="field">
+      <span id="discipline-label">ダーツ種別</span>
+      <div className="segmented discipline-picker" role="group" aria-labelledby="discipline-label">
+        {(['SOFT', 'STEEL'] as const).map((key) => (
+          <button type="button" key={key} aria-pressed={value === key} onClick={() => onChange(key)}>
+            {value === key ? <Icon name="check" size={16} strokeWidth={3} /> : null}
+            {DARTS_DISCIPLINE_LABELS[key]}
+          </button>
+        ))}
+      </div>
+      <span className="hint">
+        {value === 'UNSPECIFIED'
+          ? `未設定 ・ 戦力評価は ${blend} で行います。Soft / Steel を選ぶと配分が変わります。`
+          : `戦力評価 ${blend}`}
+      </span>
+    </div>
   );
 }

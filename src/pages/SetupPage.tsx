@@ -9,7 +9,7 @@ import type {
   Player,
   PresetKey,
 } from '../domain/types';
-import { GAME_KIND_LABELS, PRESET_KEYS, PRESET_LABELS } from '../domain/types';
+import { GAME_KIND_LABELS, PRESET_KEYS, PRESET_LABELS, formatDiscipline } from '../domain/types';
 import { scopeForPreset, weightsForPreset } from '../domain/orders/presets';
 import { totalSlots } from '../domain/games/format';
 import {
@@ -27,9 +27,16 @@ import {
   SectionHeader,
   Sheet,
   Stepper,
+  DisciplineBadge,
   formatRating,
+  formatStrengthLine,
   useToast,
 } from '../components/ui';
+import {
+  describeStrengthWeights,
+  playerPpr,
+  resolveStrength,
+} from '../domain/players/strength';
 import { Icon, type IconName } from '../components/icons';
 import type { Page } from '../navigation';
 
@@ -95,6 +102,13 @@ export function SetupPage({
   );
 
   const included = draft.participants.filter((config) => config.include);
+  const discipline = formatDiscipline(format);
+  // The same resolution the optimizer runs, so the blend shown here is the one used.
+  const strengthBlend = useMemo(
+    () =>
+      describeStrengthWeights(resolveStrength(discipline, store.teamPlayers, draft.participants).weights),
+    [discipline, store.teamPlayers, draft.participants],
+  );
 
   const updateConfig = (playerId: string, change: Partial<ParticipantConfig>): void => {
     onDraftChange({
@@ -136,6 +150,8 @@ export function SetupPage({
       preset: draft.preset,
       weights: weightsForPreset(draft.preset, store.settings.customWeights),
       settings: draft.settings,
+      // Snapshot: a later edit to the format's discipline must not re-score this order.
+      discipline: formatDiscipline(format),
     };
   };
 
@@ -208,6 +224,21 @@ export function SetupPage({
             ))}
           </select>
         </Field>
+        <div className="strength-basis" data-testid="setup-strength-basis">
+          <DisciplineBadge discipline={discipline} />
+          <span className="grow">
+            <span className="basis-title">
+              {strengthBlend ? `戦力評価 ${strengthBlend}` : '戦力評価なし'}
+            </span>
+            <span className="basis-note">
+              {strengthBlend
+                ? discipline === 'UNSPECIFIED'
+                  ? 'ダーツ種別が未設定のため Rating と PPR を同じ比重で評価します。'
+                  : '未入力の値は 0 ではなく参加者の中央値で評価します。'
+                : '参加者の Rating・PPR に差が無いため、適性と公平性で生成します。'}
+            </span>
+          </span>
+        </div>
         <div className="metrics">
           <Metric label="総枠" value={slots} />
           <Metric label="参加者" value={included.length} unit="名" />
@@ -271,8 +302,12 @@ export function SetupPage({
                 <span className="p-text">
                   <span className="p-name">
                     <strong>{player.name}</strong>
-                    <span className={player.rating === null ? 'rt unknown' : 'rt'}>
-                      {formatRating(player.rating)}
+                    <span
+                      className={
+                        player.rating === null && playerPpr(player) === null ? 'rt unknown' : 'rt'
+                      }
+                    >
+                      {formatStrengthLine(player)}
                     </span>
                   </span>
                   <span className={restrictions.length > 0 && config.include ? 'p-meta has-conditions' : 'p-meta'}>

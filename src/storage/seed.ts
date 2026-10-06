@@ -28,6 +28,7 @@ export function buildSeed(): Snapshot {
     teamId: team.id,
     name: entry.name,
     rating: entry.rating,
+    ppr: null,
     skills: entry.skills,
     seasonAppearances: 0,
     seasonAppearancesByKind: {},
@@ -99,6 +100,7 @@ export function formatFromTemplate(template: FormatTemplate, teamId: TeamId, now
     id: createId('fmt'),
     teamId,
     name: template.name,
+    discipline: 'UNSPECIFIED',
     games: template.games.map((game, index) => ({
       id: createId('gm'),
       order: index + 1,

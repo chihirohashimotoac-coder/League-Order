@@ -16,7 +16,7 @@ import type { PreparedContext } from '../prepare';
 export interface Combo {
   /** Player indices, ascending. */
   members: number[];
-  /** Mean normalised rating of the members. */
+  /** Mean composite strength (Rating / PPR blend, 0..1) of the members. */
   strength: number;
   /** Mean game aptitude of the members. */
   gameFit: number;
@@ -55,7 +55,7 @@ function binomial(n: number, k: number): number {
 /** Builds the scored descriptor for an arbitrary member set (also used by the local
  * search, which explores member sets that are not in the pre-built candidate lists). */
 export function describeCombo(ctx: PreparedContext, gameIndex: number, members: number[]): Combo {
-  const strength = mean(members.map((pi) => ctx.normRating[pi]));
+  const strength = mean(members.map((pi) => ctx.strength[pi]));
   const gameFit = mean(members.map((pi) => ctx.gameFit[gameIndex][pi]));
 
   let pairFit = 0.5;
@@ -146,7 +146,7 @@ function sampleDiverse(
   required: readonly number[],
 ): number[][] {
   const merit = (pi: number): number =>
-    ctx.weights.strength * ctx.normRating[pi] + ctx.weights.gameFit * ctx.gameFit[gameIndex][pi];
+    ctx.weights.strength * ctx.strength[pi] + ctx.weights.gameFit * ctx.gameFit[gameIndex][pi];
 
   const byMerit = [...pool].sort((a, b) => merit(b) - merit(a) || a - b);
   const seen = new Set<string>();

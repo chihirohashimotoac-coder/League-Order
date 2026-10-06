@@ -267,15 +267,21 @@ describe('hard constraints', () => {
 // ---------------------------------------------------------------------------
 
 describe('fairness', () => {
-  it('spreads appearances evenly even under the win-first preset', () => {
+  it('keeps win-first within one extra game of an even split, and spreads balanced evenly', () => {
+    // Win-first may hand its strongest player one extra game (vNext: "強い選手の出場増加を
+    // 許容する"), but the convex part of the fairness score stops it from going further.
+    // The hard max-appearance cap is the full game count here, so only the fairness
+    // weight keeps the two strongest players from taking every slot.
     const input = orderInput(sampleRoster(), sampleFormatGames(), { preset: 'WIN_FIRST' });
     const [best] = expectOk(generateOrder(input));
-    // The hard max-appearance cap is the full game count here, so only the fairness
-    // weight prevents the two strongest players from taking every slot.
-    expect(best.metrics.appearanceSpread).toBeLessThanOrEqual(1);
+    expect(best.metrics.appearanceSpread).toBeLessThanOrEqual(2);
     const counts = [...countsOf(best).values()];
     expect(Math.max(...counts)).toBeLessThanOrEqual(3);
+    expect(Math.min(...counts)).toBeGreaterThanOrEqual(1);
     expect(counts).toHaveLength(5);
+
+    const balanced = expectOk(generateOrder(orderInput(sampleRoster(), sampleFormatGames())))[0];
+    expect(balanced.metrics.appearanceSpread).toBeLessThanOrEqual(1);
   });
 
   it('never leaves a participant on the bench when the slots allow everyone to play', () => {
@@ -354,13 +360,18 @@ describe('rating handling', () => {
     expect(countsOf(best).get('p1') ?? 0).toBeLessThan(3);
   });
 
-  it('still divides a roomier schedule evenly under win-first', () => {
-    // 6 slots over 3 players: the marginal strength gained by over-using the ace no
-    // longer outweighs the fairness loss, so the result is 2/2/2.
-    const input = orderInput(strengthRoster(), singles(6), { preset: 'WIN_FIRST' });
-    const [best] = expectOk(generateOrder(input));
-    expect([...countsOf(best).values()].sort()).toEqual([2, 2, 2]);
-    expect(best.metrics.appearanceSpread).toBe(0);
+  it('lets the ace take at most one extra game of a roomier schedule under win-first', () => {
+    // 6 slots over 3 players. Win-first may give the ace a third game (3/2/1) — never a
+    // fourth, and never benches anyone — while the balanced preset still splits 2/2/2.
+    const win = expectOk(generateOrder(orderInput(strengthRoster(), singles(6), { preset: 'WIN_FIRST' })))[0];
+    const winCounts = [...countsOf(win).values()];
+    expect(Math.max(...winCounts)).toBeLessThanOrEqual(3);
+    expect(Math.min(...winCounts)).toBeGreaterThanOrEqual(1);
+    expect(countsOf(win).get('p1') ?? 0).toBeGreaterThanOrEqual(countsOf(win).get('p3') ?? 0);
+
+    const balanced = expectOk(generateOrder(orderInput(strengthRoster(), singles(6), { preset: 'BALANCED' })))[0];
+    expect([...countsOf(balanced).values()].sort()).toEqual([2, 2, 2]);
+    expect(balanced.metrics.appearanceSpread).toBe(0);
   });
 
   it('does not treat an unknown rating as 0', () => {

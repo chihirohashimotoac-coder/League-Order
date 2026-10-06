@@ -5,6 +5,7 @@ import type {
   OrderMetrics,
   OrderSolution,
   OrderWarning,
+  PlayerId,
   PlayerTally,
   PresetKey,
   ScoreBreakdown,
@@ -200,6 +201,8 @@ function buildTallies(ctx: PreparedContext, evaluation: Evaluation): PlayerTally
       seasonTotal: player.seasonAppearances + evaluation.counts[pi],
       effectiveRating: ctx.ratings.effective.get(playerId) ?? null,
       ratingImputed: ctx.ratings.imputed.has(playerId),
+      effectivePpr: ctx.pprs.effective.get(playerId) ?? null,
+      pprImputed: ctx.pprs.imputed.has(playerId),
       maxConsecutive: maxRun,
       countByKind,
     };
@@ -215,7 +218,11 @@ function buildMetrics(ctx: PreparedContext, evaluation: Evaluation): OrderMetric
     fairnessExcess: round(evaluation.fairness.excess, 4),
     maxConsecutive: evaluation.maxConsecutive,
     averageRating: evaluation.averageRating === null ? null : round(evaluation.averageRating, 2),
+    averagePpr: evaluation.averagePpr === null ? null : round(evaluation.averagePpr, 2),
     hasImputedRating: ctx.ratings.imputed.size > 0,
+    strengthWeights: { ...ctx.strengthWeights },
+    discipline: ctx.discipline,
+    maxRoleConcentration: evaluation.roleFairness.maxConcentration,
   };
 }
 
@@ -231,7 +238,7 @@ function buildWarnings(
     warnings.push({
       severity: 'warning',
       code: 'SPREAD_OVER_ONE',
-      message: `出場回数の最大差が ${evaluation.fairness.spread} です。絶対条件 (出場不可・最大出場回数・ロック) により完全な均等化ができていません。`,
+      message: `出場回数の最大差が ${evaluation.fairness.spread} です。絶対条件 (出場不可・最大出場回数・ロック)、または方針の重み付け (勝利優先の戦力重視など) により完全な均等化はしていません。`,
     });
   }
   if (evaluation.consecutiveExcessTotal > 0) {
@@ -241,18 +248,31 @@ function buildWarnings(
       message: `最大連続出場の上限超過が ${evaluation.consecutiveExcessTotal} 箇所あります (設定は Soft のため配置は有効です)。`,
     });
   }
-  if (ctx.ratings.knownCount === 0) {
+  const { rating: ratingShare, ppr: pprShare } = ctx.strengthWeights;
+  if (ratingShare + pprShare <= 0) {
     warnings.push({
       severity: 'info',
       code: 'NO_RATING',
-      message: 'Rating が 1 名も入力されていないため、戦力評価は使用していません (適性と公平性で生成しました)。',
+      message:
+        ctx.ratings.knownCount === 0 && ctx.pprs.knownCount === 0
+          ? 'Rating・PPR が 1 名も入力されていないため、戦力評価は使用していません (適性と公平性で生成しました)。'
+          : 'Rating・PPR が参加者全員で同じ値のため、戦力に差が付かず戦力評価は使用していません (適性と公平性で生成しました)。',
     });
-  } else if (ctx.ratings.imputed.size > 0) {
-    warnings.push({
-      severity: 'info',
-      code: 'RATING_IMPUTED',
-      message: `Rating 未入力 ${ctx.ratings.imputed.size} 名は 0 ではなく参加者の中央値で評価しています。`,
-    });
+  } else {
+    if (ratingShare > 0 && ctx.ratings.imputed.size > 0) {
+      warnings.push({
+        severity: 'info',
+        code: 'RATING_IMPUTED',
+        message: `Rating 未入力 ${ctx.ratings.imputed.size} 名は 0 ではなく参加者の中央値で評価しています。`,
+      });
+    }
+    if (pprShare > 0 && ctx.pprs.imputed.size > 0) {
+      warnings.push({
+        severity: 'info',
+        code: 'PPR_IMPUTED',
+        message: `PPR 未入力 ${ctx.pprs.imputed.size} 名は 0 ではなく参加者の中央値で評価しています。`,
+      });
+    }
   }
   for (let pi = 0; pi < ctx.playerCount; pi += 1) {
     if (
@@ -287,6 +307,7 @@ function roundScore(breakdown: ScoreBreakdown): ScoreBreakdown {
     gameFit: round(breakdown.gameFit),
     pairFit: round(breakdown.pairFit),
     fairness: round(breakdown.fairness),
+    roleFairness: breakdown.roleFairness === undefined ? undefined : round(breakdown.roleFairness),
     novelty: round(breakdown.novelty),
     consecutivePenalty: round(breakdown.consecutivePenalty),
     seasonImbalance: round(breakdown.seasonImbalance),
@@ -324,6 +345,33 @@ function assembleSolution(
     warnings: buildWarnings(ctx, outcome.evaluation, candidates, outcome.meta),
     meta: outcome.meta,
   };
+}
+
+/**
+ * When an already-shown line-up scores at least as well under this run's weights as the
+ * run's own result, the preset's optimum *is* that line-up: the run only produced a
+ * different order because shown line-ups are excluded. Returns the earliest such label.
+ */
+function bestShownLineUp(
+  ctx: PreparedContext,
+  shown: readonly { label: string; members: PlayerId[][] }[],
+  achieved: number,
+): string | undefined {
+  for (const entry of shown) {
+    const selection: Combo[] = [];
+    let valid = entry.members.length === ctx.gameCount;
+    for (let gi = 0; valid && gi < ctx.gameCount; gi += 1) {
+      const members = entry.members[gi].map((id) => ctx.playerIndex.get(id));
+      if (members.some((pi) => pi === undefined)) {
+        valid = false;
+        break;
+      }
+      selection.push(describeCombo(ctx, gi, (members as number[]).sort((a, b) => a - b)));
+    }
+    if (!valid) continue;
+    if (evaluateSelection(ctx, selection).breakdown.total >= achieved - 1e-9) return entry.label;
+  }
+  return undefined;
 }
 
 function signature(assignments: readonly GameAssignment[]): string {
@@ -371,6 +419,8 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
   const solutions: OrderSolution[] = [];
   const seen = new Set<string>();
   const excluded = new Set<string>();
+  /** Earlier candidates as player-id line-ups, to recognise a preset that agrees with one. */
+  const shown: { label: string; members: PlayerId[][] }[] = [];
 
   for (const run of runs) {
     const runInput: OrderInput = { ...input, weights: run.weights };
@@ -388,12 +438,18 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
       excluded,
     );
     if (!outcome) continue;
+    const sameAs = bestShownLineUp(ctx, shown, outcome.evaluation.breakdown.total);
+    if (sameAs) outcome.meta = { ...outcome.meta, alternativeTo: sameAs };
     const solution = assembleSolution(ctx, bctx, candidates, outcome, referenceCtx);
     if (!solution) continue;
     const key = signature(solution.assignments);
     if (seen.has(key)) continue;
     seen.add(key);
     excluded.add(selectionSignature(ctx, outcome.selection));
+    shown.push({
+      label: run.label,
+      members: outcome.selection.map((combo) => combo.members.map((pi) => ctx.playerIds[pi])),
+    });
     solutions.push(solution);
   }
 

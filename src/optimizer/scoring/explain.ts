@@ -6,6 +6,9 @@ import type {
 } from '../../domain/types';
 import { GAME_KIND_LABELS, PAIR_AFFINITY_LABELS } from '../../domain/types';
 import { runLengths } from '../../domain/orders/consecutive';
+import { roleFairShare } from '../../domain/orders/roleFairness';
+import { DARTS_DISCIPLINE_TAGS } from '../../domain/types';
+import { describeStrengthWeights } from '../../domain/players/strength';
 import { round } from '../../utils/math';
 import type { Combo } from '../candidates/combinations';
 import type { HardViolation } from '../constraints/validate';
@@ -71,46 +74,7 @@ export function buildExplanation(
     const names = combo.members.map((pi) => ctx.players[pi].name);
 
     // --- Strength -----------------------------------------------------------
-    const ratingValues = combo.members.map((pi) => ctx.ratings.effective.get(ctx.playerIds[pi]));
-    const usable = ratingValues.filter((value): value is number => value !== null && value !== undefined);
-    const anyImputed = combo.members.some((pi) => ctx.ratings.imputed.has(ctx.playerIds[pi]));
-    if (usable.length > 0) {
-      const total = usable.reduce((acc, value) => acc + value, 0);
-      const average = total / usable.length;
-      const parts = combo.members.map((pi, index) => {
-        const value = ratingValues[index];
-        const imputed = ctx.ratings.imputed.has(ctx.playerIds[pi]);
-        if (value === null || value === undefined) return `${ctx.players[pi].name} Rating未入力`;
-        return `${ctx.players[pi].name} ${formatRating(value)}${imputed ? '(暫定)' : ''}`;
-      });
-      factors.push({
-        key: 'strength',
-        label: 'Rating',
-        value: round(combo.strength),
-        detail:
-          combo.members.length === 1
-            ? parts[0]
-            : `合計 ${formatRating(total)} / 平均 ${average.toFixed(1)} — ${parts.join(' , ')}`,
-        tone: toneFor(combo.strength),
-      });
-      if (anyImputed) {
-        factors.push({
-          key: 'strength',
-          label: 'Rating未入力',
-          detail: `Rating 未入力の選手は 0 ではなく参加者の中央値 ${
-            ctx.ratings.imputationValue === null ? '—' : formatRating(ctx.ratings.imputationValue)
-          } を暫定値として評価しています。`,
-          tone: 'neutral',
-        });
-      }
-    } else {
-      factors.push({
-        key: 'strength',
-        label: 'Rating',
-        detail: '参加者に Rating 入力が無いため、Rating は評価に使用していません。',
-        tone: 'neutral',
-      });
-    }
+    factors.push(...strengthFactors(ctx, combo));
 
     // --- Game aptitude -----------------------------------------------------
     const kindLabels = game.kinds.map((kind) => GAME_KIND_LABELS[kind]).join(' / ');
@@ -184,6 +148,25 @@ export function buildExplanation(
       detail: `${fairnessParts.join(' , ')} / 全体の最大出場差 ${evaluation.fairness.spread}`,
       tone: evaluation.fairness.excess === 0 ? 'positive' : 'neutral',
     });
+
+    // --- Role fairness ------------------------------------------------------
+    const groupIndex = ctx.roleOfGame[gi];
+    const group = ctx.roleGroups[groupIndex];
+    if (group && group.gameIndices.length > 1) {
+      const share = roleFairShare(group, ctx.playerCount);
+      const roleLabel = GAME_KIND_LABELS[group.role];
+      const parts = combo.members.map((pi) => {
+        const count = evaluation.roleCounts[groupIndex]?.[pi] ?? 0;
+        return `${ctx.players[pi].name} ${count}回`;
+      });
+      const over = combo.members.some((pi) => (evaluation.roleCounts[groupIndex]?.[pi] ?? 0) > share);
+      factors.push({
+        key: 'roleFairness',
+        label: `${roleLabel} の分担`,
+        detail: `${roleLabel} 全${group.gameIndices.length}試合のうち ${parts.join(' , ')} (均等なら1人${share}回まで)`,
+        tone: over ? 'neutral' : 'positive',
+      });
+    }
 
     // --- Consecutive appearances -------------------------------------------
     const consecutiveNotes: string[] = [];
@@ -266,19 +249,14 @@ export function buildExplanation(
       detail:
         evaluation.fairness.excess === 0
           ? `${ctx.totalSlots}枠を${ctx.playerCount}名へ、算術上もっとも均等に配分しました (最大差 ${evaluation.fairness.spread})。`
-          : `理想配分からの超過 ${round(evaluation.fairness.excess, 2)} (最大差 ${evaluation.fairness.spread})。絶対条件のため完全均等にはできません。`,
+          : `理想配分からの超過 ${round(evaluation.fairness.excess, 2)} (最大差 ${evaluation.fairness.spread})。絶対条件、または方針の重み付け (戦力優先など) により完全な均等にはしていません。`,
       tone: evaluation.fairness.excess === 0 ? 'positive' : 'neutral',
     },
     {
       key: 'strength',
       label: '戦力 (Strength)',
       value: round(evaluation.strengthRaw),
-      detail:
-        evaluation.averageRating === null
-          ? 'Rating 入力が無いため戦力評価は使用していません。'
-          : `出場枠の平均 Rating ${evaluation.averageRating.toFixed(2)}${
-              ctx.ratings.imputed.size > 0 ? ` (未入力 ${ctx.ratings.imputed.size} 名は中央値で代替)` : ''
-            }`,
+      detail: overallStrengthDetail(ctx, evaluation),
       tone: toneFor(evaluation.strengthRaw),
     },
     {
@@ -289,6 +267,26 @@ export function buildExplanation(
       tone: toneFor(evaluation.gameFitRaw),
     },
   );
+
+  const roleNotes = ctx.roleGroups
+    .map((group, index) => ({ group, counts: evaluation.roleCounts[index] ?? [] }))
+    .filter(({ group }) => group.gameIndices.length > 1)
+    .map(({ group, counts }) => {
+      const most = Math.max(0, ...counts);
+      const who = counts
+        .map((count, pi) => (count === most && most > 0 ? ctx.players[pi].name : null))
+        .filter((name): name is string => name !== null);
+      return `${GAME_KIND_LABELS[group.role]} ${group.gameIndices.length}試合: 最多 ${most}回 (${who.join('・')}) / 均等なら${roleFairShare(group, ctx.playerCount)}回`;
+    });
+  if (roleNotes.length > 0) {
+    overall.push({
+      key: 'roleFairness',
+      label: '役割の分散 (Singles 等の集中度)',
+      value: round(evaluation.roleFairness.score),
+      detail: roleNotes.join(' ・ '),
+      tone: evaluation.roleFairness.totalExcess === 0 ? 'positive' : evaluation.roleFairness.score >= 0.6 ? 'neutral' : 'negative',
+    });
+  }
 
   if (ctx.multiPlayerGameCount > 0) {
     overall.push({
@@ -322,4 +320,118 @@ export function buildExplanation(
   }
 
   return { games, overall };
+}
+
+// ---------------------------------------------------------------------------
+// Strength
+// ---------------------------------------------------------------------------
+
+function formatPprValue(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
+}
+
+/**
+ * The basis line shown wherever strength is explained: "戦力評価 Rating 70% / PPR 30%
+ * (SOFT)". `null` when neither metric is used.
+ */
+export function strengthBasis(ctx: PreparedContext): string | null {
+  const blend = describeStrengthWeights(ctx.strengthWeights);
+  if (!blend) return null;
+  const tag = ctx.discipline === 'UNSPECIFIED' ? 'ダーツ種別未設定' : DARTS_DISCIPLINE_TAGS[ctx.discipline];
+  return `戦力評価 ${blend} (${tag})`;
+}
+
+/**
+ * Per-game strength reasons. Each metric that actually carries weight is quoted per
+ * player, with imputed values marked as provisional — never as if they were entered.
+ */
+function strengthFactors(ctx: PreparedContext, combo: Combo): ExplanationFactor[] {
+  const factors: ExplanationFactor[] = [];
+  const basis = strengthBasis(ctx);
+  if (!basis) {
+    factors.push({
+      key: 'strength',
+      label: '戦力',
+      detail:
+        'Rating・PPR の入力が無い (または参加者全員が同じ値の) ため、戦力は評価に使用していません。',
+      tone: 'neutral',
+    });
+    return factors;
+  }
+
+  const useRating = ctx.strengthWeights.rating > 0;
+  const usePpr = ctx.strengthWeights.ppr > 0;
+  const parts = combo.members.map((pi) => {
+    const id = ctx.playerIds[pi];
+    const pieces: string[] = [];
+    if (useRating) {
+      const value = ctx.ratings.effective.get(id);
+      pieces.push(
+        value === null || value === undefined
+          ? 'Rating未入力'
+          : `Rt.${formatRating(value)}${ctx.ratings.imputed.has(id) ? '(暫定)' : ''}`,
+      );
+    }
+    if (usePpr) {
+      const value = ctx.pprs.effective.get(id);
+      pieces.push(
+        value === null || value === undefined
+          ? 'PPR未入力'
+          : `PPR ${formatPprValue(value)}${ctx.pprs.imputed.has(id) ? '(暫定)' : ''}`,
+      );
+    }
+    return `${ctx.players[pi].name} ${pieces.join(' / ')}`;
+  });
+  factors.push({
+    key: 'strength',
+    label: useRating && !usePpr ? 'Rating' : usePpr && !useRating ? 'PPR' : '戦力',
+    value: round(combo.strength),
+    detail: `${parts.join(' , ')} — ${basis} で ${(combo.strength * 100).toFixed(0)}%`,
+    tone: toneFor(combo.strength),
+  });
+
+  const ratingImputed = useRating && combo.members.some((pi) => ctx.ratings.imputed.has(ctx.playerIds[pi]));
+  const pprImputed = usePpr && combo.members.some((pi) => ctx.pprs.imputed.has(ctx.playerIds[pi]));
+  if (ratingImputed) {
+    factors.push({
+      key: 'strength',
+      label: 'Rating未入力',
+      detail: `Rating 未入力の選手は 0 ではなく参加者の中央値 ${
+        ctx.ratings.imputationValue === null ? '—' : formatRating(ctx.ratings.imputationValue)
+      } を暫定値として評価しています。`,
+      tone: 'neutral',
+    });
+  }
+  if (pprImputed) {
+    factors.push({
+      key: 'strength',
+      label: 'PPR未入力',
+      detail: `PPR 未入力の選手は 0 ではなく参加者の中央値 ${
+        ctx.pprs.imputationValue === null ? '—' : formatPprValue(ctx.pprs.imputationValue)
+      } を暫定値として評価しています。`,
+      tone: 'neutral',
+    });
+  }
+  return factors;
+}
+
+function overallStrengthDetail(ctx: PreparedContext, evaluation: Evaluation): string {
+  const basis = strengthBasis(ctx);
+  if (!basis) return 'Rating・PPR に差が無いため戦力評価は使用していません。';
+  const parts: string[] = [basis];
+  if (ctx.strengthWeights.rating > 0 && evaluation.averageRating !== null) {
+    parts.push(
+      `出場枠の平均 Rating ${evaluation.averageRating.toFixed(2)}${
+        ctx.ratings.imputed.size > 0 ? ` (未入力 ${ctx.ratings.imputed.size} 名は中央値で代替)` : ''
+      }`,
+    );
+  }
+  if (ctx.strengthWeights.ppr > 0 && evaluation.averagePpr !== null) {
+    parts.push(
+      `平均 PPR ${evaluation.averagePpr.toFixed(2)}${
+        ctx.pprs.imputed.size > 0 ? ` (未入力 ${ctx.pprs.imputed.size} 名は中央値で代替)` : ''
+      }`,
+    );
+  }
+  return parts.join(' ・ ');
 }

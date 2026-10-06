@@ -22,6 +22,47 @@ export type PairId = string;
  */
 export type Rating = number | null;
 
+/**
+ * A PPR (points per round) average.
+ *
+ * Like {@link Rating}, `null` means **Unknown** and is never read as `0`. The
+ * theoretical maximum is 180 (three treble-20s every round).
+ */
+export type Ppr = number | null;
+
+/** Inclusive bounds accepted for a PPR average. */
+export const PPR_MIN = 0;
+export const PPR_MAX = 180;
+
+/**
+ * Which kind of darts a league is played in.
+ *
+ * Stored on the format, not the team: one team can enter a soft league and a steel
+ * league at the same time. `UNSPECIFIED` is what every format created before the field
+ * existed reads back as — it is never guessed from the format's name.
+ */
+export const DARTS_DISCIPLINES = ['SOFT', 'STEEL', 'UNSPECIFIED'] as const;
+
+export type DartsDiscipline = (typeof DARTS_DISCIPLINES)[number];
+
+export const DARTS_DISCIPLINE_LABELS: Record<DartsDiscipline, string> = {
+  SOFT: 'Soft Darts',
+  STEEL: 'Steel Darts',
+  UNSPECIFIED: '未設定',
+};
+
+/** Short badge text (`SOFT` / `STEEL` / `未設定`). */
+export const DARTS_DISCIPLINE_TAGS: Record<DartsDiscipline, string> = {
+  SOFT: 'SOFT',
+  STEEL: 'STEEL',
+  UNSPECIFIED: '未設定',
+};
+
+/** Reads a stored value back as a discipline; anything unknown is `UNSPECIFIED`. */
+export function asDiscipline(value: unknown): DartsDiscipline {
+  return value === 'SOFT' || value === 'STEEL' ? value : 'UNSPECIFIED';
+}
+
 /** Game aptitude on a 1..5 scale. `undefined` means "not specified" (neutral), not 0. */
 export type SkillLevel = 1 | 2 | 3 | 4 | 5;
 
@@ -49,6 +90,25 @@ export const GAME_KIND_LABELS: Record<GameKind, string> = {
   CUSTOM: 'Custom',
 };
 
+/**
+ * Labels for the kind toggles in the format editor.
+ *
+ * The 01 game is shown as `01` there (the family name, which covers 301 / 501 / 701),
+ * while the stored identifier stays `G501` so saved data and game names are untouched.
+ */
+export const FORMAT_KIND_CHIP_LABELS: Record<GameKind, string> = {
+  ...GAME_KIND_LABELS,
+  G501: '01',
+};
+
+/**
+ * Kinds that describe how many players share a game — the "role" a player fills.
+ * `G501` / `CRICKET` describe the game played, not the role, and are never one.
+ */
+export const STRUCTURAL_KINDS = ['SINGLES', 'DOUBLES', 'TRIOS', 'GALLON', 'TEAM'] as const;
+
+export type StructuralKind = (typeof STRUCTURAL_KINDS)[number];
+
 /** Kinds for which a per-player aptitude can be stored and scored. */
 export const SKILL_KINDS: readonly GameKind[] = [
   'G501',
@@ -66,6 +126,12 @@ export interface Player {
   name: string;
   /** `null` = Unknown rating. */
   rating: Rating;
+  /**
+   * PPR average. `null` = Unknown. Players stored before the field existed are read
+   * back with `null` (see `domain/normalise.ts`); scoring also treats a missing value
+   * as `null`, never as `0`.
+   */
+  ppr: Ppr;
   skills: PlayerSkills;
   note?: string;
   /** Season-cumulative appearance count. */
@@ -131,8 +197,17 @@ export interface LeagueFormat {
   teamId: TeamId | null;
   name: string;
   note?: string;
+  /**
+   * Soft or steel. Formats stored before the field existed are read back as
+   * `UNSPECIFIED` (see `domain/normalise.ts`); it is never guessed.
+   */
+  discipline: DartsDiscipline;
   games: GameSlotDef[];
   createdAt: number;
+}
+
+export function formatDiscipline(format: Pick<LeagueFormat, 'discipline'> | null | undefined): DartsDiscipline {
+  return asDiscipline(format?.discipline);
 }
 
 export const PAIR_AFFINITIES = [
@@ -243,6 +318,11 @@ export interface ScoreWeights {
   gameFit: number;
   pairFit: number;
   fairness: number;
+  /**
+   * Spread of each structural role (Singles, Doubles, …) across players. Weights stored
+   * before it existed are completed by `normaliseWeights()`.
+   */
+  roleFairness: number;
   novelty: number;
   consecutive: number;
   season: number;
@@ -272,6 +352,12 @@ export interface OrderInput {
   preset: PresetKey;
   weights: ScoreWeights;
   settings: OptimizerSettings;
+  /**
+   * Snapshot of the format's discipline at generation time, so a saved order is scored
+   * the same way after the format is edited. Orders saved before it existed read back
+   * as `UNSPECIFIED`.
+   */
+  discipline: DartsDiscipline;
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +377,7 @@ export type ExplanationKey =
   | 'gameFit'
   | 'pairFit'
   | 'fairness'
+  | 'roleFairness'
   | 'novelty'
   | 'consecutive'
   | 'season'
@@ -329,6 +416,10 @@ export interface PlayerTally {
   effectiveRating: number | null;
   /** True when `effectiveRating` was imputed because the stored rating is Unknown. */
   ratingImputed: boolean;
+  /** Effective PPR used for scoring. Absent on orders saved before PPR existed. */
+  effectivePpr?: number | null;
+  /** True when `effectivePpr` was imputed because the stored PPR is Unknown. */
+  pprImputed?: boolean;
   /** Longest run of consecutive games for this player. */
   maxConsecutive: number;
   countByKind: Partial<Record<GameKind, number>>;
@@ -339,6 +430,8 @@ export interface ScoreBreakdown {
   gameFit: number;
   pairFit: number;
   fairness: number;
+  /** Absent on solutions saved before role fairness existed. */
+  roleFairness?: number;
   novelty: number;
   consecutivePenalty: number;
   seasonImbalance: number;
@@ -359,8 +452,28 @@ export interface OrderMetrics {
   maxConsecutive: number;
   /** Mean effective rating across all filled slots. */
   averageRating: number | null;
+  /** Mean effective PPR across all filled slots. Absent on old solutions. */
+  averagePpr?: number | null;
   /** True when at least one participant's rating was imputed. */
   hasImputedRating: boolean;
+  /**
+   * The share of Rating and PPR in the strength term actually used (each 0..1, summing
+   * to 1, or both 0 when neither carried any information). Absent on old solutions.
+   */
+  strengthWeights?: StrengthWeights;
+  /** Discipline the order was scored for. Absent on old solutions. */
+  discipline?: DartsDiscipline;
+  /**
+   * Largest number of games one player plays inside any one structural role
+   * (e.g. 3 = somebody plays three of the Singles). Absent on old solutions.
+   */
+  maxRoleConcentration?: number;
+}
+
+/** Composition of the strength term: how much Rating and PPR each contribute. */
+export interface StrengthWeights {
+  rating: number;
+  ppr: number;
 }
 
 export interface OrderWarning {
@@ -381,6 +494,12 @@ export interface SolutionMeta {
   /** Candidate label shown in the comparison UI. */
   label: string;
   presetKey: PresetKey;
+  /**
+   * Set when this preset's own optimum is a line-up already shown as an earlier
+   * candidate (named here): the candidate is then the preset's best *different* order,
+   * and the UI says so rather than presenting a near-copy as the preset's choice.
+   */
+  alternativeTo?: string;
 }
 
 export interface OrderSolution {
@@ -491,6 +610,8 @@ export interface OrderVersion {
   /** Order type (preset label) that produced it. */
   label: string;
   hasImputedRating: boolean;
+  /** Discipline the version was generated for. Absent on versions made before it existed. */
+  discipline?: DartsDiscipline;
 }
 
 /**

@@ -13,6 +13,7 @@ import type {
   PlayerTally,
 } from '../types';
 import { sortedGames } from '../games/format';
+import { asDiscipline } from '../types';
 
 /**
  * Order lifecycle: finalization, versioning and change detection (追加要件 §2–§5, §8, §9).
@@ -158,6 +159,8 @@ export function createVersion(
     appearances: appearancesFromTallies(solution.tallies),
     label: solution.meta.label,
     hasImputedRating: solution.metrics.hasImputedRating,
+    // What "strong" meant when this version was generated (soft / steel).
+    discipline: asDiscipline(input.discipline),
   };
 }
 

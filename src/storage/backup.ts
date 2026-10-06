@@ -9,6 +9,9 @@ import type {
 } from '../domain/types';
 import { GAME_KINDS, PAIR_AFFINITIES } from '../domain/types';
 import { mergeDefined } from '../utils/merge';
+import { asDiscipline } from '../domain/types';
+import { normaliseSavedOrder } from '../domain/normalise';
+import { parsePprInput } from '../domain/players/strength';
 import { DEFAULT_SETTINGS, type Snapshot } from './repository';
 
 /**
@@ -60,6 +63,13 @@ function asNumber(value: unknown, fallback = 0): number {
 
 function asRating(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** A PPR from a backup: a number within 0..180, otherwise Unknown (never 0). */
+function asBackupPpr(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const parsed = parsePprInput(String(value));
+  return parsed.ok ? parsed.value : null;
 }
 
 function asBoolean(value: unknown, fallback = false): boolean {
@@ -142,6 +152,8 @@ export function parseBackup(raw: string): ImportResult {
       teamId: asString(row.teamId),
       name: asString(row.name, '名称未設定'),
       rating: asRating(row.rating),
+      // Backups written before PPR existed have no `ppr`: Unknown, never 0.
+      ppr: asBackupPpr(row.ppr),
       skills: parseSkills(row.skills),
       note: typeof row.note === 'string' ? row.note : undefined,
       seasonAppearances: Math.max(0, Math.round(asNumber(row.seasonAppearances, 0))),
@@ -158,6 +170,8 @@ export function parseBackup(raw: string): ImportResult {
       teamId: typeof row.teamId === 'string' ? row.teamId : null,
       name: asString(row.name, '名称未設定フォーマット'),
       note: typeof row.note === 'string' ? row.note : undefined,
+      // Never guessed from the name: an old backup's format is UNSPECIFIED.
+      discipline: asDiscipline(row.discipline),
       games: (Array.isArray(row.games) ? row.games : [])
         .filter(isRecord)
         .map((game, index) => ({
@@ -199,12 +213,14 @@ export function parseBackup(raw: string): ImportResult {
   const orders: SavedOrder[] = (Array.isArray(data.orders) ? data.orders : [])
     .filter(isRecord)
     .filter((row) => typeof row.id === 'string' && isRecord(row.input) && isRecord(row.solution))
-    .map((row) => ({
-      ...(row as unknown as SavedOrder),
-      // Backups written before versioning existed carry no versions: those orders are
-      // read back as drafts rather than being rejected.
-      versions: Array.isArray(row.versions) ? (row.versions as SavedOrder['versions']) : [],
-    }));
+    .map((row) =>
+      normaliseSavedOrder({
+        ...(row as unknown as SavedOrder),
+        // Backups written before versioning existed carry no versions: those orders are
+        // read back as drafts rather than being rejected.
+        versions: Array.isArray(row.versions) ? (row.versions as SavedOrder['versions']) : [],
+      }),
+    );
 
   const seasonCommits: SeasonCommit[] = (Array.isArray(data.seasonCommits) ? data.seasonCommits : [])
     .filter(isRecord)

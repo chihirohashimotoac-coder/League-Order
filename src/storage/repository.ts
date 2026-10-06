@@ -9,6 +9,7 @@ import type {
 } from '../domain/types';
 import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../domain/orders/presets';
 import { mergeDefined } from '../utils/merge';
+import { normaliseFormat, normalisePlayer, normaliseSavedOrder } from '../domain/normalise';
 import { openBackend, type BackendKind, type StorageBackend } from './db';
 
 /**
@@ -78,15 +79,15 @@ export class Repository {
         }
       : DEFAULT_SETTINGS;
 
+    // Records written by older builds are upgraded on read (PPR → Unknown, discipline →
+    // UNSPECIFIED, …). Nothing is written back: the stored data stays exactly as it was.
     return {
       teams: teams.sort((a, b) => a.createdAt - b.createdAt),
-      players,
-      formats,
+      players: players.map(normalisePlayer),
+      formats: formats.map(normaliseFormat),
       pairs,
       // Orders written by a build without versioning are read back as drafts.
-      orders: orders
-        .map((order) => ({ ...order, versions: order.versions ?? [] }))
-        .sort((a, b) => b.createdAt - a.createdAt),
+      orders: orders.map(normaliseSavedOrder).sort((a, b) => b.createdAt - a.createdAt),
       seasonCommits,
       settings,
     };

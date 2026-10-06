@@ -116,6 +116,7 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
         name: entry.name.trim(),
         // Empty means Unknown, never 0.
         rating: entry.rating.trim() !== '' && Number.isFinite(parsed) ? parsed : null,
+        ppr: null,
         skills: {},
         seasonAppearances: 0,
         seasonAppearancesByKind: {},
