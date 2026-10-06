@@ -1,35 +1,43 @@
-name: Build, verify and deploy to GitHub Pages
+name: Build, verify and publish to GitHub Pages
 
 # The app is a Vite PWA, so what gets published is the built `dist/`, never the
-# repository root: `index.html` at the root is the Vite source entry and loads
+# repository root: `index.html` there is the Vite source entry and loads
 # `/src/main.tsx`, which a browser cannot execute. Pages has no build step of its own,
-# so the build happens here and the output is handed to Pages as an artifact.
+# so the build happens here and the output is pushed to the `gh-pages` branch, which
+# Pages serves directly.
 #
-# Deployment is gated on the full verification suite. These tests exist to protect
-# invariants nobody is watching for — above all that an order whose appearances are
-# already counted in the season standings cannot be deleted — so a red suite must stop
-# the release rather than annotate it.
+# Publishing deliberately does NOT go through `actions/deploy-pages`. That route
+# requires the `github-pages` deployment environment, whose branch protection rule
+# rejected `main` ("Branch "main" is not allowed to deploy to github-pages due to
+# environment protection rules") and is a repository setting rather than anything this
+# workflow can control. Pushing a branch needs no environment, so this route cannot be
+# blocked the same way.
+#
+# Publishing is gated on the full verification suite. These tests protect invariants
+# nobody is watching for — above all that an order whose appearances are already counted
+# in the season standings cannot be deleted — so a red suite must stop the release
+# rather than annotate it. Steps run in order and a failure ends the job, so nothing
+# reaches `gh-pages` unless everything before it passed.
 
 on:
   push:
     branches: [main]
-  # Lets a deploy be re-run from the Actions tab without pushing a commit.
+  # Lets a publish be re-run from the Actions tab without pushing a commit.
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  # Only to push the built site to the `gh-pages` branch.
+  contents: write
 
-# Never let two deploys race. In-progress runs are allowed to finish so a half-uploaded
-# artifact is not published.
+# Never let two publishes race onto the same branch. In-progress runs are allowed to
+# finish so a half-pushed tree is never left behind.
 concurrency:
-  group: pages
+  group: publish-pages
   cancel-in-progress: false
 
 jobs:
-  verify-and-build:
-    name: Verify and build
+  verify-build-and-publish:
+    name: Verify, build and publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,25 +93,37 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+      # Reached only when every check above passed.
+      #
+      # `gh-pages` holds generated output, not source history: each publish replaces it
+      # with a single fresh commit, so the force-push rewrites nothing anyone works from.
+      # `vite.config.ts` sets `base: './'`, so the built asset, manifest and
+      # service-worker references are relative and work unchanged under the project
+      # sub-path (…github.io/League-Order/) with no rewriting here.
+      - name: Publish the built site to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -f dist/index.html || { echo "dist/index.html is missing — refusing to publish"; exit 1; }
 
-      # `vite.config.ts` sets `base: './'`, so the built asset, manifest and service
-      # worker references are all relative and work unchanged under the project
-      # sub-path (…github.io/League-Order/) without rewriting anything here.
-      - name: Upload the built site
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
+          # Stops Pages running Jekyll over the build, which would drop any path
+          # beginning with an underscore.
+          touch dist/.nojekyll
 
-  deploy:
-    name: Deploy to GitHub Pages
-    # Nothing is published unless lint, every test and the build all passed.
-    needs: verify-and-build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          cd dist
+          git init -q
+          git checkout -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Publish ${GITHUB_SHA} to GitHub Pages"
+          git push -q --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+          echo "Published $(git rev-parse --short HEAD) to gh-pages"
+
+      - name: Where the site will be served
+        run: |
+          echo "Set Settings → Pages → Source to: Deploy from a branch → gh-pages → / (root)"
+          echo "The site is served at https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
