@@ -132,14 +132,14 @@ describe('buildShareLayout', () => {
 
     const row = layout.tally.find((entry) => entry.name === '千葉')!;
     expect(row.rating).toMatch(/\*$/);
-    expect(row.rating).not.toBe('R0');
+    expect(row.rating).not.toBe('Rt.0');
     expect(layout.notes.join(' ')).toContain('中央値');
   });
 
-  it('shows R- for every player when no rating is registered at all', () => {
+  it('shows Rt.— for every player when no rating is registered at all', () => {
     const unrated = sampleRoster().map((entry) => player({ id: entry.id, name: entry.name }));
     const layout = buildShareLayout(gameDefs, unrated, solutionFor(unrated, gameDefs), match(), 'detail');
-    expect(layout.tally.every((row) => row.rating === 'R-')).toBe(true);
+    expect(layout.tally.every((row) => row.rating === 'Rt.—')).toBe(true);
   });
 });
 

@@ -59,11 +59,11 @@ function ratingLabel(
   playerId: PlayerId,
 ): string {
   const tally = solution.tallies.find((entry) => entry.playerId === playerId);
-  if (!tally || tally.effectiveRating === null) return 'R-';
+  if (!tally || tally.effectiveRating === null) return 'Rt.—';
   const value = Number.isInteger(tally.effectiveRating)
     ? String(tally.effectiveRating)
     : tally.effectiveRating.toFixed(1);
-  return `R${value}${tally.ratingImputed ? '*' : ''}`;
+  return `Rt.${value}${tally.ratingImputed ? '*' : ''}`;
 }
 
 export function buildGameRows(
@@ -75,10 +75,12 @@ export function buildGameRows(
   const byGame = new Map(solution.assignments.map((entry) => [entry.gameId, entry]));
   return sortedGames(games).map((game) => {
     const assignment = byGame.get(game.id);
+    const playerNames = assignment ? assignment.playerIds.map(nameOf) : ['(未配置)'];
     return {
       no: `G${game.order}`,
       gameName: game.name,
-      players: assignment ? assignment.playerIds.map(nameOf).join(' / ') : '(未配置)',
+      players: playerNames.join(' / '),
+      playerNames,
     };
   });
 }
@@ -133,6 +135,7 @@ export function buildShareLayout(
       opponentName: match.opponentName.trim(),
       dateText: formatMatchDate(match.matchDate),
       versionText: versionText(version),
+      versionTone: versionTone(version),
     },
     games: buildGameRows(games, players, solution),
     tally,
@@ -157,6 +160,13 @@ export function versionText(version?: ShareVersionInfo): string {
   if (version.draft) return '未確定 (DRAFT)';
   if (version.version <= 0) return '';
   return version.isUpdate ? `ORDER v${version.version} · 更新版` : `ORDER v${version.version}`;
+}
+
+export function versionTone(version?: ShareVersionInfo): ShareLayout['header']['versionTone'] {
+  if (!version) return 'none';
+  if (version.draft) return 'draft';
+  if (version.version <= 0) return 'none';
+  return version.isUpdate ? 'updated' : 'finalized';
 }
 
 /** Turns a finalized snapshot into something the share renderers can read. */
