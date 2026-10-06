@@ -667,5 +667,32 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
     await expect(page.getByRole('dialog', { name: '新しいオーダーを作る' })).toContainText('保存されていない変更');
   });
+
+  test('asks before switching teams while the open order has unsaved work', async ({ page }) => {
+    await openApp(page);
+    await generate(page); // a draft that was never saved
+
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: 'チームを追加' }).click();
+    await page.getByLabel('チーム名').fill('Bチーム');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await page.locator('.sheet .list-row').filter({ hasText: 'Bチーム' }).click();
+
+    // Asked first; cancelling keeps the team and the order.
+    const dialog = page.getByRole('dialog', { name: 'チームを切り替える' });
+    await expect(dialog).toContainText('保存されていない変更');
+    await dialog.getByRole('button', { name: 'キャンセル' }).click();
+    await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: '作業中のオーダーを開く' })).toBeVisible();
+
+    // Confirming switches and drops it.
+    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.locator('.sheet .list-row').filter({ hasText: 'Bチーム' }).click();
+    await page.getByRole('button', { name: '破棄して切り替える' }).click();
+    await expect(page.getByRole('heading', { name: 'Bチーム', level: 1 })).toBeVisible();
+    await expect(page.getByRole('button', { name: '作業中のオーダーを開く' })).toHaveCount(0);
+  });
 });
 

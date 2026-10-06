@@ -47,6 +47,15 @@ export function HomePage({
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Team | null>(null);
   const [confirmLeaveDemo, setConfirmLeaveDemo] = useState(false);
+  const [confirmSwitch, setConfirmSwitch] = useState<Team | null>(null);
+
+  // Switching teams detaches the working order (it belongs to the old team), so unsaved
+  // work there is confirmed first, exactly like starting a new order.
+  const switchTeam = (target: Team): void => {
+    store.setActiveTeam(target.id);
+    setTeamSheet(false);
+    toast.show(`${target.name} に切り替えました`, 'ok');
+  };
 
   const format = store.teamFormats[0];
   const team = store.activeTeam;
@@ -227,9 +236,15 @@ export function HomePage({
                     type="button"
                     className="list-row grow"
                     onClick={() => {
-                      store.setActiveTeam(entry.id);
-                      setTeamSheet(false);
-                      toast.show(`${entry.name} に切り替えました`, 'ok');
+                      if (entry.id === store.activeTeamId) {
+                        setTeamSheet(false);
+                        return;
+                      }
+                      if (working && !working.saved) {
+                        setConfirmSwitch(entry);
+                        return;
+                      }
+                      switchTeam(entry);
                     }}
                   >
                     <span className="grow">
@@ -290,6 +305,21 @@ export function HomePage({
             toast.show('削除しました', 'ok');
             setConfirmDelete(null);
             setTeamSheet(false);
+          }}
+        />
+      ) : null}
+
+      {confirmSwitch ? (
+        <ConfirmDialog
+          title="チームを切り替える"
+          message={`作業中のオーダーに保存されていない変更があります。${confirmSwitch.name} に切り替えると破棄されます。残す場合は結果画面で保存または確定してください。`}
+          confirmLabel="破棄して切り替える"
+          destructive
+          onCancel={() => setConfirmSwitch(null)}
+          onConfirm={() => {
+            const target = confirmSwitch;
+            setConfirmSwitch(null);
+            switchTeam(target);
           }}
         />
       ) : null}
