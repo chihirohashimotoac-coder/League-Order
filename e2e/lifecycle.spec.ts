@@ -598,4 +598,22 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
+
+  test('asks before discarding an unsaved change to the match header', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // Change the opponent from the share sheet: the order becomes UPDATED.
+    await page.getByRole('button', { name: '共有', exact: true }).click();
+    await page.locator('details.match-edit > summary').click();
+    await page.getByLabel('対戦相手 (任意)').fill('Team Z');
+    await page.getByRole('button', { name: '閉じる' }).click();
+    await expect(stateBanner(page)).toContainText('再確定が必要');
+
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await expect(page.getByRole('dialog', { name: '新しいオーダーを作る' })).toContainText('保存されていない変更');
+  });
 });
+

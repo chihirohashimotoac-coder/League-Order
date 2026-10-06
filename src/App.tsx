@@ -222,12 +222,16 @@ export function App(): React.JSX.Element {
    * True when the working copy holds anything not yet in storage: an order never saved,
    * or a saved order edited or re-generated since. `persist` stores the session's own
    * input and solution objects, so identity is exactly "unchanged since the last save".
+   * The match header is compared by value on the fields the fingerprint reads: it is
+   * rebuilt by the team-sync effect, so its identity says nothing, and records written
+   * before the header existed have none to compare against.
    */
   const unsaved =
     !!session?.present.current &&
     (!record ||
       record.solution !== session.present.current ||
-      record.input !== session.present.input);
+      record.input !== session.present.input ||
+      (record.match !== undefined && !sameMatch(record.match, match)));
 
   const startNewOrder = useCallback(
     (force = false) => {
@@ -593,5 +597,15 @@ export function App(): React.JSX.Element {
         />
       ) : null}
     </div>
+  );
+}
+
+/** Same header as far as a shared order is concerned (the fields `orderFingerprint` reads). */
+function sameMatch(a: MatchInfo, b: MatchInfo): boolean {
+  return (
+    a.leagueName.trim() === b.leagueName.trim() &&
+    a.teamName.trim() === b.teamName.trim() &&
+    a.opponentName.trim() === b.opponentName.trim() &&
+    a.matchDate.trim() === b.matchDate.trim()
   );
 }
