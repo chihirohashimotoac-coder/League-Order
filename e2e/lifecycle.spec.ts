@@ -10,7 +10,9 @@ import { expect, test, type Page } from '@playwright/test';
 
 async function openApp(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Darts Order' })).toBeVisible();
+  // First run offers "own team" or "sample"; these tests work on the labelled sample.
+  await page.getByRole('button', { name: 'サンプルで試す' }).click();
+  await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 }
 
 function tab(page: Page, name: string) {
@@ -18,7 +20,7 @@ function tab(page: Page, name: string) {
 }
 
 async function generate(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await page.getByRole('button', { name: 'オーダーを生成' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -110,7 +112,7 @@ async function seasonTotals(page: Page): Promise<Record<string, number>> {
   );
   const totals: Record<string, number> = {};
   for (const row of rows) {
-    const match = /Season (\d+) 回/.exec(row.meta);
+    const match = /シーズン (\d+) 回/.exec(row.meta);
     totals[row.name.replace(/\s+/g, '')] = match ? Number(match[1]) : 0;
   }
   return totals;
@@ -121,7 +123,7 @@ test.describe('order state model (追加要件 §2, §8)', () => {
     await openApp(page);
     await generate(page);
     await expect(stateBanner(page)).toContainText('未確定');
-    await expect(page.getByRole('button', { name: 'オーダーを確定 (v1)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'オーダーを確定 v1' })).toBeVisible();
   });
 
   test('finalizing produces v1, editing flips to UPDATED, re-finalizing produces v2', async ({ page }) => {
@@ -134,7 +136,7 @@ test.describe('order state model (追加要件 §2, §8)', () => {
 
     await changeFirstSlot(page);
     await expect(stateBanner(page)).toContainText('再確定が必要');
-    await expect(page.getByRole('button', { name: '再確定 (v2)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '再確定 v2' })).toBeVisible();
 
     await finalize(page);
     await expect(stateBanner(page)).toContainText('確定済み');
@@ -142,7 +144,7 @@ test.describe('order state model (追加要件 §2, §8)', () => {
 
     // And a third round.
     await changeFirstSlot(page);
-    await expect(page.getByRole('button', { name: '再確定 (v3)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '再確定 v3' })).toBeVisible();
     await finalize(page);
     await expect(stateBanner(page)).toContainText('v3');
   });
@@ -177,7 +179,7 @@ test.describe('order state model (追加要件 §2, §8)', () => {
     await openApp(page);
     await generate(page);
     await page.locator('.slot select').first().selectOption('');
-    await expect(page.getByText('Hard制約に違反しています')).toBeVisible();
+    await expect(page.getByText('絶対条件に違反しています')).toBeVisible();
     await expect(page.getByRole('button', { name: /オーダーを確定|再確定/ })).toBeDisabled();
   });
 });
@@ -411,8 +413,8 @@ test.describe('history and immutable snapshots (追加要件 §5, §15)', () => 
     const dialog = page.getByRole('dialog', { name: 'v1 の内容' });
     await expect(dialog).toBeVisible();
     // The snapshot still shows the name it was finalized under.
-    await expect(dialog.locator('table.data')).toContainText(original);
-    await expect(dialog.locator('table.data')).not.toContainText('改名後の選手');
+    await expect(dialog.locator('.mini-order')).toContainText(original);
+    await expect(dialog.locator('.mini-order')).not.toContainText('改名後の選手');
   });
 
   test('a finalized order and its versions survive a reload', async ({ page }) => {

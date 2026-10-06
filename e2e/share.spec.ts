@@ -10,11 +10,13 @@ import { expect, test, type Page } from '@playwright/test';
 
 async function openApp(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Darts Order' })).toBeVisible();
+  // First run offers "own team" or "sample"; these tests work on the labelled sample.
+  await page.getByRole('button', { name: 'サンプルで試す' }).click();
+  await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 }
 
 async function generate(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await page.getByRole('button', { name: 'オーダーを生成' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -29,10 +31,17 @@ async function fillMatchInfo(
   page: Page,
   values: { league?: string; opponent?: string; date?: string },
 ): Promise<void> {
-  await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await openMatchFields(page);
   if (values.league !== undefined) await page.getByLabel('リーグ名 (任意)').fill(values.league);
   if (values.opponent !== undefined) await page.getByLabel('対戦相手 (任意)').fill(values.opponent);
   if (values.date !== undefined) await page.getByLabel('試合日 (任意)').fill(values.date);
+}
+
+/** Match info is optional, so SETUP keeps it folded until the captain opens it. */
+async function openMatchFields(page: Page): Promise<void> {
+  await page.locator('details.disclosure > summary').filter({ hasText: '試合情報' }).click();
+  await expect(page.getByLabel('対戦相手 (任意)')).toBeVisible();
 }
 
 /** A backup containing a 20-game format, used to exercise the long-order path. */
@@ -139,7 +148,7 @@ test.describe('share screen', () => {
     await page.getByRole('tab', { name: 'テキスト' }).click();
     const text = await page.getByLabel('共有テキスト').inputValue();
     expect(text).toContain('🎯 10/8 秋季リーグ');
-    expect(text).toContain('マイチーム vs Team B');
+    expect(text).toContain('サンプルチーム vs Team B');
   });
 
   test('generates LINE, simple and detail text (追加要件 §6)', async ({ page }) => {
@@ -201,7 +210,7 @@ test.describe('share screen', () => {
     const entries = schedule.locator('li');
     await expect(entries.first()).toBeVisible();
     // A player is never listed as their own partner.
-    await expect(schedule).not.toContainText(`Partner: ${name}`);
+    await expect(schedule).not.toContainText(`ペア: ${name}`);
     await expect(entries.first()).toContainText(/Game \d/);
   });
 
@@ -242,7 +251,7 @@ test.describe('Web Share API', () => {
     await generate(page);
     await openShare(page);
 
-    await expect(page.getByRole('button', { name: /標準共有/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /LINE等へ共有/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '画像を保存' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'テキストをコピー' })).toBeVisible();
     await expect(page.getByText('端末標準の共有メニューに対応していない', { exact: false })).toBeVisible();
@@ -267,7 +276,7 @@ test.describe('Web Share API', () => {
     await generate(page);
     await openShare(page);
 
-    const shareButton = page.getByRole('button', { name: /標準共有/ });
+    const shareButton = page.getByRole('button', { name: /LINE等へ共有/ });
     await expect(shareButton).toBeVisible();
     await shareButton.click();
 
@@ -296,7 +305,7 @@ test.describe('Web Share API', () => {
     await openApp(page);
     await generate(page);
     await openShare(page);
-    await page.getByRole('button', { name: /標準共有/ }).click();
+    await page.getByRole('button', { name: /LINE等へ共有/ }).click();
 
     await expect(page.getByText('共有を中止しました')).toBeVisible();
     // The sheet stays open so the captain can try another route.
@@ -336,12 +345,13 @@ test.describe('long orders and Japanese text', () => {
   test('renders long Japanese names without clipping the layout (追加要件 §11, §13)', async ({ page }) => {
     await openApp(page);
     await page.locator('.tab-bar').getByRole('button', { name: 'メンバー', exact: true }).click();
-    await page.getByRole('button', { name: '＋ メンバーを追加' }).click();
+    await page.getByRole('button', { name: 'メンバーを追加' }).click();
     await page.getByLabel('名前 (必須)').fill('ながいなまえのせんしゅさんです');
     await page.getByRole('button', { name: '保存', exact: true }).click();
     await expect(page.locator('.list-row').filter({ hasText: 'ながいなまえのせんしゅさんです' })).toHaveCount(1);
 
     await page.locator('.tab-bar').getByRole('button', { name: 'オーダー', exact: true }).click();
+    await openMatchFields(page);
     await page.getByLabel('対戦相手 (任意)').fill('とてもながいあいてチームのなまえ');
     await page.getByRole('button', { name: 'オーダーを生成' }).click();
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -387,7 +397,7 @@ test.describe('offline sharing (追加要件 §12)', () => {
 
     await context.setOffline(true);
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Darts Order' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 
     await generate(page);
     await openShare(page);

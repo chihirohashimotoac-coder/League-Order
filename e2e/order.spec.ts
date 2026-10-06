@@ -3,8 +3,8 @@ import { expect, test, type Page } from '@playwright/test';
 /**
  * End-to-end coverage of the captain's actual workflow in a real browser.
  *
- * The app seeds a usable example on first run (one team, the five players from spec §38
- * and a six-game Singles/Doubles/Trios format), so these tests start from that and
+ * The first-run screen offers a sample (one team, the five players from spec §38 and a
+ * six-game Singles/Doubles/Trios format), so these tests start from that and
  * exercise generation, locking, manual editing, undo, partial re-optimisation, sharing,
  * persistence across a reload and offline operation.
  */
@@ -13,12 +13,15 @@ import { expect, test, type Page } from '@playwright/test';
  * Opens the app on a clean slate.
  *
  * Playwright gives each test its own browser context, so IndexedDB is already empty and
- * the app seeds its first-run example. Nothing must clear storage on every navigation —
- * that would also wipe it on the reloads these tests rely on.
+ * the app shows its first-run screen; the tests load the labelled sample from there.
+ * Nothing must clear storage on every navigation — that would also wipe it on the
+ * reloads these tests rely on.
  */
 async function openFresh(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Darts Order' })).toBeVisible();
+  // First run offers "own team" or "sample"; these tests work on the labelled sample.
+  await page.getByRole('button', { name: 'サンプルで試す' }).click();
+  await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 }
 
 /** Taps a bottom-tab-bar entry. Scoped so the name cannot collide with page content. */
@@ -27,7 +30,7 @@ function tab(page: Page, name: string) {
 }
 
 async function generate(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await page.getByRole('button', { name: 'オーダーを生成' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -35,12 +38,13 @@ async function generate(page: Page): Promise<void> {
 }
 
 test.describe('order generation workflow', () => {
-  test('seeds an example team and format on first run', async ({ page }) => {
+  test('loads the sample team, clearly labelled as demo data', async ({ page }) => {
     await openFresh(page);
-    await expect(page.getByRole('strong').filter({ hasText: 'マイチーム' })).toBeVisible();
+    await expect(page.getByTestId('demo-banner')).toContainText('サンプルデータ');
+    await expect(page.locator('.app-header .demo-badge')).toHaveText('DEMO');
     await expect(page.getByText('標準6ゲーム (Singles/Doubles/Trios)')).toBeVisible();
 
-    // The seeded roster from spec §38 is listed on the members screen.
+    // The sample roster from spec §38 is listed on the members screen.
     await tab(page, 'メンバー').click();
     for (const name of ['青木', '馬場', '千葉', '土井', '遠藤']) {
       await expect(page.locator('.list-row').filter({ hasText: name })).toHaveCount(1);
@@ -55,10 +59,9 @@ test.describe('order generation workflow', () => {
     const selects = page.locator('.slot select');
     await expect(selects).toHaveCount(10);
 
-    // Nobody is left empty, and the tally shows 2 for everyone.
-    const tally = page.locator('table.data').first();
+    // Nobody is left empty, and the appearance summary shows 2 for everyone.
     for (const name of ['青木', '馬場', '千葉', '土井', '遠藤']) {
-      await expect(tally.getByRole('row').filter({ hasText: name })).toContainText('2');
+      await expect(page.locator('.tally-row').filter({ hasText: name }).locator('.t-count b')).toHaveText('2');
     }
     await expect(page.getByText('最大出場差', { exact: true })).toBeVisible();
     // 10 slots over 5 players divides evenly, so the spread must be 0.
@@ -67,15 +70,19 @@ test.describe('order generation workflow', () => {
     ).toHaveText('0');
   });
 
-  test('shows the reasons for each game', async ({ page }) => {
+  test('keeps the reasons for each game in the collapsed analysis', async ({ page }) => {
     await openFresh(page);
     await generate(page);
 
+    // Analysis is out of the way by default (§33) but one tap away.
+    await expect(page.getByRole('heading', { name: '生成理由' })).toBeHidden();
+    await page.getByText('詳細分析', { exact: true }).click();
     await expect(page.getByRole('heading', { name: '生成理由' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '技術情報' })).toBeVisible();
     const first = page.locator('details.reason-game').first();
     await first.locator('summary').click();
     await expect(first).toContainText('Rating');
-    await expect(first).toContainText('Hard制約');
+    await expect(first).toContainText('絶対条件');
   });
 
   test('manual edit re-evaluates live and undo restores it', async ({ page }) => {
@@ -102,7 +109,7 @@ test.describe('order generation workflow', () => {
     await openFresh(page);
     await generate(page);
     await page.locator('.slot select').first().selectOption('');
-    await expect(page.getByText('Hard制約に違反しています')).toBeVisible();
+    await expect(page.getByText('絶対条件に違反しています')).toBeVisible();
   });
 
   test('locking a slot disables it and survives re-optimisation', async ({ page }) => {
@@ -145,7 +152,7 @@ test.describe('order generation workflow', () => {
 
   test('explains why an impossible configuration cannot be generated (spec §31)', async ({ page }) => {
     await openFresh(page);
-    await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
 
     // Leave only two players available: Trios then becomes impossible.
     await page.getByRole('button', { name: '解除' }).click();
@@ -160,7 +167,7 @@ test.describe('order generation workflow', () => {
 
   test('restricts a late arrival to the second half', async ({ page }) => {
     await openFresh(page);
-    await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
 
     // Open 遠藤's conditions and limit them to the second half.
     const row = page.locator('li').filter({ hasText: '遠藤' }).first();
@@ -204,11 +211,111 @@ test.describe('order generation workflow', () => {
   });
 });
 
+test.describe('first run (§50-§53)', () => {
+  test('offers the captain their own team or the sample, and creates nothing by itself', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: /Darts League Order/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: '自分のチームを作る' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'サンプルで試す' })).toBeVisible();
+
+    // Nothing was seeded behind the captain's back: a reload lands on the same choice.
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'サンプルで試す' })).toBeVisible();
+    await expect(page.locator('.tab-bar')).toHaveCount(0);
+  });
+
+  test('builds the captain’s own team without any sample data', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: '自分のチームを作る' }).click();
+
+    await page.getByLabel('チーム名').fill('KALAVINKA');
+    await page.getByRole('button', { name: '次へ' }).click();
+
+    const roster: [string, string][] = [
+      ['シンタロー', '14'],
+      ['ちひろ', '14'],
+      ['かいり', ''],
+    ];
+    for (const [index, [name, rating]] of roster.entries()) {
+      if (index > 0) await page.getByRole('button', { name: 'メンバーを追加' }).click();
+      await page.getByLabel(`メンバー ${index + 1} の名前`).fill(name);
+      if (rating) await page.getByLabel(`メンバー ${index + 1} の Rating`).fill(rating);
+    }
+    await page.getByRole('button', { name: '次へ' }).click();
+    await page.getByRole('radio', { name: /シングルス4ゲーム/ }).click();
+    await page.getByRole('button', { name: 'チームを作成' }).click();
+
+    await expect(page.getByRole('heading', { name: 'KALAVINKA', level: 1 })).toBeVisible();
+    await expect(page.getByTestId('demo-banner')).toHaveCount(0);
+
+    await tab(page, 'メンバー').click();
+    await expect(page.locator('.list-row')).toHaveCount(3);
+    // An empty rating is Unknown, never 0.
+    await expect(page.locator('.list-row').filter({ hasText: 'かいり' })).toContainText('Rt. —');
+    for (const sample of ['青木', '馬場']) {
+      await expect(page.locator('.list-row').filter({ hasText: sample })).toHaveCount(0);
+    }
+
+    await tab(page, 'フォーマット').click();
+    await expect(page.locator('.list-row')).toHaveCount(1);
+    await expect(page.locator('.list-row')).toContainText('シングルス4ゲーム');
+
+    // And it survives a reload as a real team.
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'KALAVINKA', level: 1 })).toBeVisible();
+  });
+
+  test('deleting everything returns to the first-run choice, not to demo data', async ({ page }) => {
+    await openFresh(page);
+    await page.getByRole('button', { name: /設定 \/ バックアップ/ }).click();
+    await page.getByRole('button', { name: '全データ削除' }).click();
+    await page.getByRole('button', { name: '削除する' }).click();
+
+    await expect(page.getByRole('button', { name: 'サンプルで試す' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'サンプルで試す' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toHaveCount(0);
+  });
+
+  test('leaving the demo removes the sample and starts over', async ({ page }) => {
+    await openFresh(page);
+    await page.getByTestId('demo-banner').getByRole('button', { name: '自分のチームで始める' }).click();
+    await page.getByRole('button', { name: 'サンプルを削除' }).click();
+    await expect(page.getByRole('button', { name: '自分のチームを作る' })).toBeVisible();
+  });
+});
+
+test.describe('participant rows (§18, §57)', () => {
+  test('tapping anywhere on a row toggles participation; 条件 does not', async ({ page }) => {
+    await openFresh(page);
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+
+    const checkbox = page.getByLabel('土井 を参加者に含める');
+    const row = page.locator('li.participant').filter({ has: checkbox });
+    await expect(checkbox).toBeChecked();
+
+    // Tap the name, not the checkbox.
+    await row.locator('.p-name strong').click();
+    await expect(checkbox).not.toBeChecked();
+    await expect(row).toHaveClass(/is-out/);
+    await expect(row.getByRole('button', { name: '条件' })).toBeDisabled();
+
+    await row.locator('.p-meta').click();
+    await expect(checkbox).toBeChecked();
+
+    // The conditions button opens its sheet without toggling the row.
+    await row.getByRole('button', { name: '条件' }).click();
+    await expect(page.getByRole('dialog', { name: /土井/ })).toBeVisible();
+    await page.getByRole('button', { name: '閉じる' }).click();
+    await expect(checkbox).toBeChecked();
+  });
+});
+
 test.describe('persistence and offline', () => {
   test('keeps a new player across a reload (IndexedDB)', async ({ page }) => {
     await openFresh(page);
     await tab(page, 'メンバー').click();
-    await page.getByRole('button', { name: '＋ メンバーを追加' }).click();
+    await page.getByRole('button', { name: 'メンバーを追加' }).click();
 
     await page.getByLabel('名前 (必須)').fill('新人テスト');
     // Leave Rating empty on purpose: it must persist as Unknown, not 0.
@@ -216,14 +323,14 @@ test.describe('persistence and offline', () => {
 
     const row = page.locator('.list-row').filter({ hasText: '新人テスト' });
     await expect(row).toHaveCount(1);
-    await expect(row).toContainText('Rating 未入力');
+    await expect(row).toContainText('Rt. —');
 
     await page.reload();
     await tab(page, 'メンバー').click();
     const reloaded = page.locator('.list-row').filter({ hasText: '新人テスト' });
     await expect(reloaded).toHaveCount(1);
-    await expect(reloaded).toContainText('Rating 未入力');
-    await expect(reloaded).not.toContainText('Rating 0');
+    await expect(reloaded).toContainText('Rt. —');
+    await expect(reloaded).not.toContainText('Rt.0');
   });
 
   test('saves an order to history and reopens it', async ({ page }) => {
@@ -271,7 +378,7 @@ test.describe('persistence and offline', () => {
 
     await context.setOffline(true);
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Darts Order' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 
     // The whole workflow must still run with no network at all.
     await generate(page);

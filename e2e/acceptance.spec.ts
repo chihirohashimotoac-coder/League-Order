@@ -15,7 +15,9 @@ import { expect, test, type Page } from '@playwright/test';
 
 async function openFresh(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Darts Order' })).toBeVisible();
+  // First run offers "own team" or "sample"; these tests work on the labelled sample.
+  await page.getByRole('button', { name: 'サンプルで試す' }).click();
+  await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 }
 
 function tab(page: Page, name: string) {
@@ -25,7 +27,7 @@ function tab(page: Page, name: string) {
 async function generate(page: Page): Promise<void> {
   // "New order" lives on the home screen; these tests reach it from wherever they are.
   await goTab(page, 'ホーム');
-  await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await page.getByRole('button', { name: 'オーダーを生成' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -91,7 +93,7 @@ async function seasonTotals(page: Page): Promise<Record<string, number>> {
   );
   const totals: Record<string, number> = {};
   for (const row of rows) {
-    const match = /Season (\d+) 回/.exec(row.meta);
+    const match = /シーズン (\d+) 回/.exec(row.meta);
     totals[row.name.replace(/\s+/g, '')] = match ? Number(match[1]) : 0;
   }
   return totals;
@@ -271,13 +273,13 @@ test.describe('double actions do not write twice (追加要件 §23)', () => {
 
   test('double-tapping generate leaves one usable order', async ({ page }) => {
     await openFresh(page);
-    await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
     const generateButton = page.getByRole('button', { name: 'オーダーを生成' });
     await generateButton.click({ clickCount: 2, delay: 0 });
 
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     await expect(page.locator('.order-game')).toHaveCount(6);
-    await expect(page.getByText('Hard制約に違反しています')).toHaveCount(0);
+    await expect(page.getByText('絶対条件に違反しています')).toHaveCount(0);
   });
 });
 
@@ -353,9 +355,48 @@ test.describe('layout holds at phone widths (追加要件 §18)', () => {
       const heights = await page
         .locator('.action-bar button, .tab-bar button')
         .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
-      for (const height of heights) expect(height).toBeGreaterThanOrEqual(40);
+      for (const height of heights) expect(height).toBeGreaterThanOrEqual(44);
+
+      // No tab label and no primary action label is cut off with an ellipsis.
+      const clipped = await page
+        .locator('.tab-bar .tab-label, .action-bar .btn-label')
+        .evaluateAll((nodes) =>
+          nodes.filter((node) => node.scrollWidth > node.clientWidth + 1).map((node) => node.textContent),
+        );
+      expect(clipped).toEqual([]);
+
+      // Every control on the result screen is at least 44px tall (§56).
+      const small = await page
+        .locator('main button:visible, main select:visible')
+        .evaluateAll((nodes) =>
+          nodes
+            .map((node) => {
+              // A slot's <select> is laid over its card, so the card is the target.
+              const target = node.closest('.slot-field') ?? node;
+              const box = target.getBoundingClientRect();
+              return { text: (node.textContent ?? '').trim().slice(0, 20), h: box.height, w: box.width };
+            })
+            .filter((box) => box.h < 44 || box.w < 44),
+        );
+      expect(small).toEqual([]);
     });
   }
+
+  test('no screen scrolls sideways at 320px', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await openFresh(page);
+    const sideways = () =>
+      page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+    for (const name of ['ホーム', 'メンバー', 'フォーマット', 'オーダー', '履歴']) {
+      await goTab(page, name);
+      expect(await sideways(), name).toBeLessThanOrEqual(1);
+    }
+    for (const label of ['ペア相性', '設定 / バックアップ']) {
+      await openFromHome(page, label);
+      expect(await sideways(), label).toBeLessThanOrEqual(1);
+    }
+  });
 
   test('a dialog stays inside the viewport at 320px', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
@@ -395,7 +436,7 @@ test.describe('realistic league flow (追加要件 §19-§21)', () => {
 
     // 6-7. Today's participants, with 遠藤 barred from the Trios game.
     await goTab(page, 'ホーム');
-    await page.getByRole('button', { name: '新規オーダーを作成' }).click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
 
     await page
@@ -408,7 +449,7 @@ test.describe('realistic league flow (追加要件 §19-§21)', () => {
     await detail.getByRole('button', { name: 'Trios', exact: true }).click();
     await page.getByRole('button', { name: '閉じる' }).click();
     await expect(
-      page.locator('li').filter({ has: page.getByLabel('遠藤 を参加者に含める') }).locator('.meta'),
+      page.locator('li').filter({ has: page.getByLabel('遠藤 を参加者に含める') }).locator('.p-meta'),
     ).toContainText('Trios');
 
     // 8. Generate.
@@ -635,7 +676,7 @@ test.describe('the full loop works offline (追加要件 §22)', () => {
 
     await context.setOffline(true);
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Darts Order' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 
     // 4. Generate.
     await generate(page);
