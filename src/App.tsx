@@ -55,6 +55,8 @@ export function App(): React.JSX.Element {
   const [page, setPage] = useState<Page>('home');
   const [session, setSession] = useState<UndoableState | null>(null);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  /** The input of the attempt the diagnostics describe (it never replaces the order's own). */
+  const [diagnosticInput, setDiagnosticInput] = useState<OrderInput | null>(null);
   const [generating, setGenerating] = useState(false);
   const runnerRef = useRef<OrderRunner | null>(null);
 
@@ -167,11 +169,14 @@ export function App(): React.JSX.Element {
         } else {
           setSession((current) => {
             // Keep the previous order visible so the captain does not lose their work;
-            // the diagnostics explain why the new attempt failed.
-            const base = current ?? createUndoable(input);
-            return undoableReducer(base, { type: 'setInput', input });
+            // the diagnostics explain why the new attempt failed. Its input stays too:
+            // pairing the old line-up with the failed attempt's conditions would let a
+            // later save store a combination that was never generated together.
+            if (current?.present.current) return current;
+            return undoableReducer(current ?? createUndoable(input), { type: 'setInput', input });
           });
           setDiagnostics(result.diagnostics);
+          setDiagnosticInput(input);
           setPage('result');
           toast.show('条件を満たすオーダーがありません。理由を表示します。', 'error');
         }
@@ -213,18 +218,28 @@ export function App(): React.JSX.Element {
     setDiagnostics([]);
   }, []);
 
+  /**
+   * True when the working copy holds anything not yet in storage: an order never saved,
+   * or a saved order edited or re-generated since. `persist` stores the session's own
+   * input and solution objects, so identity is exactly "unchanged since the last save".
+   */
+  const unsaved =
+    !!session?.present.current &&
+    (!record ||
+      record.solution !== session.present.current ||
+      record.input !== session.present.input);
+
   const startNewOrder = useCallback(
     (force = false) => {
-      // An order that was never saved only exists in this session; do not drop it
-      // without asking.
-      if (!force && session?.present.current && !record) {
+      // Work that only exists in this session is never dropped without asking.
+      if (!force && unsaved) {
         setConfirmDiscard(true);
         return;
       }
       resetWorkingOrder();
       setPage('setup');
     },
-    [session, record, resetWorkingOrder],
+    [unsaved, resetWorkingOrder],
   );
 
   /**
@@ -416,7 +431,7 @@ export function App(): React.JSX.Element {
 
   const latest = latestVersion(record?.versions ?? []);
   const working: WorkingOrderSummary | null = solution
-    ? { lifecycle, version: latest?.version ?? 0, label: solution.meta.label, saved: record !== null }
+    ? { lifecycle, version: latest?.version ?? 0, label: solution.meta.label, saved: !unsaved }
     : null;
 
   const hasActionBar =
@@ -509,6 +524,7 @@ export function App(): React.JSX.Element {
               dispatch={dispatch}
               games={games}
               diagnostics={diagnostics}
+              diagnosticInput={diagnosticInput}
               generating={generating}
               match={match}
               onMatchChange={setMatch}
@@ -566,7 +582,7 @@ export function App(): React.JSX.Element {
       {confirmDiscard ? (
         <ConfirmDialog
           title="新しいオーダーを作る"
-          message="作業中のオーダーは保存されていません。破棄して新しいオーダーを作りますか？ 残す場合は結果画面で「下書きを保存」してください。"
+          message="作業中のオーダーに保存されていない変更があります。破棄して新しいオーダーを作りますか？ 残す場合は結果画面で保存または確定してください。"
           confirmLabel="破棄して作成"
           destructive
           onCancel={() => setConfirmDiscard(false)}

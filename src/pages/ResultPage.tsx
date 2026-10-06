@@ -4,6 +4,7 @@ import type {
   GameKind,
   GameSlotDef,
   MatchInfo,
+  OrderInput,
   OrderLifecycleState,
   OrderSolution,
   Player,
@@ -55,6 +56,7 @@ export function ResultPage({
   dispatch,
   games,
   diagnostics,
+  diagnosticInput = null,
   generating,
   match,
   onMatchChange,
@@ -72,6 +74,8 @@ export function ResultPage({
   dispatch: (action: UndoableAction) => void;
   games: GameSlotDef[];
   diagnostics: Diagnostic[];
+  /** The failed attempt's input, for naming its games and players. */
+  diagnosticInput?: OrderInput | null;
   generating: boolean;
   match: MatchInfo;
   onMatchChange: (next: MatchInfo) => void;
@@ -98,9 +102,14 @@ export function ResultPage({
   const players = state.input.players;
   const playerById = useMemo(() => new Map(players.map((player) => [player.id, player])), [players]);
   const nameById = useMemo(() => new Map(players.map((player) => [player.id, player.name])), [players]);
+  const diagnosticGames = useMemo(
+    () => (diagnosticInput ? sortedGames(diagnosticInput.games) : ordered),
+    [diagnosticInput, ordered],
+  );
+  const diagnosticPlayers = diagnosticInput?.players ?? players;
 
   if (diagnostics.length > 0 && !solution) {
-    return <DiagnosticsPanel diagnostics={diagnostics} games={ordered} players={players} />;
+    return <DiagnosticsPanel diagnostics={diagnostics} games={diagnosticGames} players={diagnosticPlayers} />;
   }
 
   if (!solution) {
@@ -144,7 +153,12 @@ export function ResultPage({
       <div className="result-grid">
         <div className="result-main">
           {diagnostics.length > 0 ? (
-            <DiagnosticsPanel diagnostics={diagnostics} games={ordered} players={players} keptPrevious />
+            <DiagnosticsPanel
+              diagnostics={diagnostics}
+              games={diagnosticGames}
+              players={diagnosticPlayers}
+              keptPrevious
+            />
           ) : null}
           <OrderStateBanner
             lifecycle={lifecycle}

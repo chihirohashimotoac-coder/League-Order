@@ -26,7 +26,7 @@ async function generate(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 }
 
-const stateBanner = (page: Page) => page.locator('.state-banner');
+const stateBanner = (page: Page) => page.getByRole('region', { name: 'オーダーの状態' });
 
 /**
  * Finalizes, and waits until the app says it is done.
@@ -51,7 +51,7 @@ async function finalize(page: Page): Promise<void> {
 
 /** The version number in the state banner, or 0 while the order is still a draft. */
 async function versionBadge(page: Page): Promise<number> {
-  const banner = page.locator('.state-banner .state-title');
+  const banner = page.locator('[aria-label="オーダーの状態"] .state-title');
   if ((await banner.count()) === 0) return 0;
   const match = /v(\d+)/.exec(await banner.innerText());
   return match ? Number(match[1]) : 0;
@@ -545,5 +545,57 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await page.locator('.list-row').first().click();
     await expect(page.getByText('1 版')).toBeVisible();
     await expect(page.locator('.mini-order')).not.toContainText('ビーさん');
+  });
+
+  test('a failed re-generation keeps the saved order and the conditions it came from', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // Make the conditions impossible (two players cannot fill a Trios) and try again.
+    await page.getByRole('button', { name: '戻る' }).click();
+    await page.getByRole('button', { name: '解除' }).click();
+    await page.getByLabel('青木 を参加者に含める').check();
+    await page.getByLabel('馬場 を参加者に含める').check();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(page.getByText('オーダーを生成できませんでした')).toBeVisible();
+
+    // v1 is still what is shown, unchanged, and saving it keeps v1's own conditions.
+    await expect(stateBanner(page)).toContainText('確定済み');
+    await page.getByRole('button', { name: /変更を保存|下書きを保存/ }).click();
+    await tab(page, '履歴').click();
+    await page.locator('.list-row').first().click();
+    await page.getByRole('button', { name: 'このオーダーを開いて編集' }).click();
+    await page.getByRole('button', { name: '戻る' }).click();
+    await expect(page.getByLabel('遠藤 を参加者に含める')).toBeChecked();
+    await expect(page.getByLabel('土井 を参加者に含める')).toBeChecked();
+  });
+
+  test('asks before discarding unsaved edits to a saved order', async ({ page }) => {
+    await openApp(page);
+    await generate(page);
+    await finalize(page);
+
+    // Saved and unchanged: a new order starts without a question.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '作業中のオーダーを開く' }).click();
+    await changeFirstSlot(page);
+    await expect(stateBanner(page)).toContainText('再確定が必要');
+
+    // Edited since the last save: the captain is asked first, and cancelling keeps it.
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    const dialog = page.getByRole('dialog', { name: '新しいオーダーを作る' });
+    await expect(dialog).toContainText('保存されていない変更');
+    await dialog.getByRole('button', { name: 'キャンセル' }).click();
+    await page.getByRole('button', { name: '作業中のオーダーを開く' }).click();
+    await expect(stateBanner(page)).toContainText('再確定が必要');
+
+    // Once re-finalized, nothing is pending and no question is asked.
+    await finalize(page);
+    await tab(page, 'ホーム').click();
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 });

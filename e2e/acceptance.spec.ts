@@ -53,7 +53,7 @@ async function finalize(page: Page): Promise<void> {
 
 /** The version number in the state banner, or 0 while the order is still a draft. */
 async function versionBadge(page: Page): Promise<number> {
-  const banner = page.locator('.state-banner .state-title');
+  const banner = page.locator('[aria-label="オーダーの状態"] .state-title');
   if ((await banner.count()) === 0) return 0;
   const match = /v(\d+)/.exec(await banner.innerText());
   return match ? Number(match[1]) : 0;
@@ -65,7 +65,7 @@ async function commitSeason(page: Page): Promise<void> {
   await expect(page.getByText(/シーズン累計へ反映しました|既に反映済み/)).toBeVisible();
 }
 
-const stateBanner = (page: Page) => page.locator('.state-banner');
+const stateBanner = (page: Page) => page.getByRole('region', { name: 'オーダーの状態' });
 
 /** Taps a tab, after dismissing any open sheet whose backdrop would swallow the tap. */
 async function goTab(page: Page, name: string): Promise<void> {
