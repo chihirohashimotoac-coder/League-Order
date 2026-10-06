@@ -201,8 +201,13 @@ function buildTallies(ctx: PreparedContext, evaluation: Evaluation): PlayerTally
       seasonTotal: player.seasonAppearances + evaluation.counts[pi],
       effectiveRating: ctx.ratings.effective.get(playerId) ?? null,
       ratingImputed: ctx.ratings.imputed.has(playerId),
-      effectivePpr: ctx.pprs.effective.get(playerId) ?? null,
-      pprImputed: ctx.pprs.imputed.has(playerId),
+      // An imputed PPR is only reported when PPR actually took part in scoring; otherwise
+      // the median would be shown next to players who never entered one.
+      effectivePpr:
+        ctx.strengthWeights.ppr > 0 || !ctx.pprs.imputed.has(playerId)
+          ? (ctx.pprs.effective.get(playerId) ?? null)
+          : null,
+      pprImputed: ctx.strengthWeights.ppr > 0 && ctx.pprs.imputed.has(playerId),
       maxConsecutive: maxRun,
       countByKind,
     };
