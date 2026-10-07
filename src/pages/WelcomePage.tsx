@@ -5,6 +5,7 @@ import { FORMAT_TEMPLATES, formatFromTemplate } from '../storage/seed';
 import { useAppStore } from '../state/appStore';
 import { Field, useToast } from '../components/ui';
 import { Icon } from '../components/icons';
+import { N01TeamWizard } from '../components/n01/N01TeamWizard';
 
 /**
  * FIRST RUN.
@@ -18,6 +19,7 @@ export function WelcomePage(): React.JSX.Element {
   const toast = useToast();
   const [mode, setMode] = useState<'welcome' | 'setup'>('welcome');
   const [busy, setBusy] = useState(false);
+  const [n01Open, setN01Open] = useState(false);
 
   if (mode === 'setup') return <Onboarding onCancel={() => setMode('welcome')} />;
 
@@ -39,7 +41,12 @@ export function WelcomePage(): React.JSX.Element {
       </div>
 
       <div className="welcome-actions">
-        <button type="button" className="btn primary xl" onClick={() => setMode('setup')}>
+        <button type="button" className="btn primary xl" onClick={() => setN01Open(true)}>
+          <Icon name="refresh" size={22} />
+          n01から作成
+        </button>
+        <p className="note">n01 のリーグとチームを選ぶだけで、メンバー・PPR・フォーマットを取り込みます。</p>
+        <button type="button" className="btn xl" onClick={() => setMode('setup')}>
           <Icon name="users" size={22} />
           自分のチームを作る
         </button>
@@ -60,6 +67,9 @@ export function WelcomePage(): React.JSX.Element {
         </button>
         <p className="note">サンプルは「DEMO」と表示され、あとからまとめて削除できます。データはこの端末の中だけに保存されます。</p>
       </div>
+      {n01Open ? (
+        <N01TeamWizard mode={{ kind: 'create' }} onClose={() => setN01Open(false)} onDone={() => setN01Open(false)} />
+      ) : null}
     </main>
   );
 }

@@ -50,7 +50,13 @@ npm test             # Vitest (ユニット / 統合 / コンポーネント)
 npm run test:e2e     # Playwright (実ブラウザ・モバイル + デスクトップ)
 npm run verify       # lint + test + build
 npx tsx scripts/sample.ts   # 仕様 §38 のサンプル検証を出力
+npm run backtest     # 推定勝率モデル / 対戦相手最適化の backtest レポート (フィクスチャ、決定的)
+npm run verify:n01   # n01 公開 Read API のライブ契約確認 (任意・要ネットワーク、CI 対象外)
 ```
+
+n01 連携のテストはすべてフィクスチャ (ATDO / TDO / TDA 形のシミュレーション) で動き、
+ライブの n01 には接続しません。設計と制約は `docs/N01_MASTER_DESIGN.md`、
+予測モデルと限界は `docs/PREDICTION_MODEL.md`、対戦相手最適化は `docs/OPPONENT_OPTIMIZER.md` を参照してください。
 
 ---
 
@@ -75,6 +81,9 @@ src/
     canvas.ts     Canvas 2D による PNG 生成
     webShare.ts   Web Share API・クリップボード・ダウンロード
   storage/        IndexedDB / フォールバック / Repository / JSON バックアップ
+  integrations/n01/  n01 公開 Read API (GET のみ・認証なし) と同期計画   ← React / Storage / optimizer 非依存
+  domain/n01/     n01 のバインディング・名簿照合・鮮度・相手分析・次戦オーダー (純関数)
+  domain/prediction/  推定勝率モデル・対戦相手コンテキスト・backtest (純関数)
   utils/          汎用ヘルパー
 ```
 

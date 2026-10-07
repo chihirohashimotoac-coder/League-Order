@@ -32,12 +32,13 @@ import {
   formatStrengthLine,
   useToast,
 } from '../components/ui';
-import {
-  describeStrengthWeights,
-  playerPpr,
-  resolveStrength,
-} from '../domain/players/strength';
+import { describeStrengthWeights, resolveStrength } from '../domain/players/strength';
 import { Icon, type IconName } from '../components/icons';
+import { effectivePpr, withEffectivePpr } from '../domain/n01/effectivePpr';
+import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
+import { buildOpponentContext } from '../domain/prediction/opponentContext';
+import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
+import { freshness } from '../domain/n01/freshness';
 import type { Page } from '../navigation';
 
 /**
@@ -56,6 +57,7 @@ export interface SetupDraft {
 
 /** Presentation for the policy cards; the weights themselves live in the domain. */
 const PRESET_CARDS: Record<PresetKey, { icon: IconName; summary: string }> = {
+  OPPONENT_OPTIMIZED: { icon: 'target', summary: '相手の予測に対して推定勝率を最大化' },
   WIN_FIRST: { icon: 'trophy', summary: '戦力を最優先' },
   BALANCED: { icon: 'scale', summary: '勝利と公平性を両立' },
   FAIRNESS_FIRST: { icon: 'equal', summary: '出場回数を均等化' },
@@ -103,11 +105,34 @@ export function SetupPage({
 
   const included = draft.participants.filter((config) => config.include);
   const discipline = formatDiscipline(format);
+  // n01-linked players carry their PPR from n01 (or the manual fallback): the order input
+  // snapshots that effective value, so a saved order keeps the PPR it was made with.
+  const effectivePlayers = useMemo(() => store.teamPlayers.map(withEffectivePpr), [store.teamPlayers]);
+
+  // Opponent data for the next match (n01 teams only). The context is built against the
+  // format chosen here and travels inside the order, so the saved order can always be
+  // re-evaluated exactly as it was generated.
+  const intel = store.activeTeam?.n01
+    ? (store.n01CacheFor(store.activeTeam.id).find(
+        (record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel',
+      ) ?? null)
+    : null;
+  const opponent = useMemo(
+    () => (intel && format ? buildOpponentContext({ snapshot: intel, games: format.games, players: effectivePlayers }) : null),
+    [intel, format, effectivePlayers],
+  );
+  const n01Team = !!store.activeTeam?.n01;
+  // No opponent at all → the preset is not offered. An opponent whose data cannot be
+  // used here → offered, labelled 対戦データ不足, and generated as 勝利優先.
+  const hasOpponent = !!intel?.opponent && !!intel.nextMatch;
+  const visiblePresets = PRESET_KEYS.filter(
+    (key) => key !== 'OPPONENT_OPTIMIZED' || hasOpponent || draft.preset === 'OPPONENT_OPTIMIZED',
+  );
   // The same resolution the optimizer runs, so the blend shown here is the one used.
   const strengthBlend = useMemo(
     () =>
-      describeStrengthWeights(resolveStrength(discipline, store.teamPlayers, draft.participants).weights),
-    [discipline, store.teamPlayers, draft.participants],
+      describeStrengthWeights(resolveStrength(discipline, effectivePlayers, draft.participants).weights),
+    [discipline, effectivePlayers, draft.participants],
   );
 
   const updateConfig = (playerId: string, change: Partial<ParticipantConfig>): void => {
@@ -143,7 +168,7 @@ export function SetupPage({
       teamId: store.activeTeamId ?? '',
       formatId: format.id,
       games: format.games,
-      players: store.teamPlayers,
+      players: effectivePlayers,
       participants: draft.participants,
       pairs: store.teamPairs,
       locks: [],
@@ -152,6 +177,7 @@ export function SetupPage({
       settings: draft.settings,
       // Snapshot: a later edit to the format's discipline must not re-score this order.
       discipline: formatDiscipline(format),
+      ...(opponent ? { opponent } : {}),
     };
   };
 
@@ -304,10 +330,10 @@ export function SetupPage({
                     <strong>{player.name}</strong>
                     <span
                       className={
-                        player.rating === null && playerPpr(player) === null ? 'rt unknown' : 'rt'
+                        player.rating === null && effectivePpr(player).value === null ? 'rt unknown' : 'rt'
                       }
                     >
-                      {formatStrengthLine(player)}
+                      {formatStrengthLine(withEffectivePpr(player))}
                     </span>
                   </span>
                   <span className={restrictions.length > 0 && config.include ? 'p-meta has-conditions' : 'p-meta'}>
@@ -331,8 +357,29 @@ export function SetupPage({
       </ul>
 
       <SectionHeader index={3} kicker="STRATEGY" title="方針" />
+      {n01Team && (hasOpponent || draft.preset === 'OPPONENT_OPTIMIZED') ? (
+        <div className="opponent-basis" data-testid="setup-opponent">
+          <Icon name="target" size={18} />
+          <span className="grow">
+            {opponent ? (
+              <>
+                <span className="basis-title">次戦: vs {opponent.opponentName}{opponent.matchDate ? ` (${Number(opponent.matchDate.slice(5, 7))}/${Number(opponent.matchDate.slice(8, 10))})` : ''}</span>
+                <span className="basis-note">
+                  相手の出場予測を使えます ・ データの信頼度 {CONFIDENCE_LABELS[opponent.confidence]}
+                  {intel ? ` ・ ${freshness(intel.generatedAt, Date.now()).label}のデータ` : ''}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="basis-title">対戦データ不足</span>
+                <span className="basis-note">次戦の相手データがないため、対戦相手最適化は通常の勝利優先で生成します。n01 を再同期してください。</span>
+              </>
+            )}
+          </span>
+        </div>
+      ) : null}
       <div className="preset-grid" role="radiogroup" aria-label="プリセット">
-        {PRESET_KEYS.map((key) => {
+        {visiblePresets.map((key) => {
           const card = PRESET_CARDS[key];
           const selected = draft.preset === key;
           return (
@@ -349,7 +396,9 @@ export function SetupPage({
                 {PRESET_LABELS[key]}
                 {selected ? <Icon name="check" size={18} strokeWidth={2.6} className="p-check-mark" /> : null}
               </span>
-              <span className="p-desc">{card.summary}</span>
+              <span className="p-desc">
+                {key === 'OPPONENT_OPTIMIZED' && !opponent ? '対戦データ不足 (勝利優先で生成)' : card.summary}
+              </span>
             </button>
           );
         })}

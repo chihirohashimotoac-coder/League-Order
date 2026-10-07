@@ -23,6 +23,10 @@ import {
   minAppearancesFor,
 } from '../domain/orders/participants';
 import { checkEligibility } from './constraints/eligibility';
+import type { SolutionMeta } from '../domain/types';
+import type { OpponentContext, OpponentGameContext } from '../domain/prediction/opponentContext';
+import { PAIR_AFFINITY_PPR_BONUS } from '../domain/prediction/teamMatchup';
+import { CONFIDENCE_WEIGHT_FACTOR, PRESETS } from '../domain/orders/presets';
 
 /**
  * Immutable, index-based view of an order input, built once per generation run.
@@ -91,6 +95,44 @@ export interface PreparedContext {
   input: OrderInput;
   /** Locks that cannot be satisfied (player not eligible / unknown / duplicated). */
   invalidLocks: { lock: LockEntry; reason: string }[];
+  /** Opponent data of the order (docs/OPPONENT_OPTIMIZER.md), or `null`. */
+  opponent: OpponentContext | null;
+  /** `opponentGames[gameIndex]`: the opponent side's distribution, or `null` for that game. */
+  opponentGames: (OpponentGameContext | null)[];
+  /** Predicted strength (PPR points) per player index, used by the opponent term. */
+  predictionStrength: number[];
+  /** `pairBonusPpr[a][b]`: the pair-affinity bonus the prediction model applies. */
+  pairBonusPpr: number[][];
+  /** How the opponent weight was applied (set only when the weights ask for it). */
+  opponentPlan: SolutionMeta['opponent'];
+}
+
+/**
+ * The weights a run actually optimises (docs/OPPONENT_OPTIMIZER.md §3).
+ *
+ * With opponent data the opponent weight is scaled by the data's confidence and the rest
+ * is handed to strength, so an uncertain prediction never steers the whole order. With no
+ * usable opponent data the run is a plain 勝利優先 (win-first) run, and says so.
+ */
+export function opponentWeights(
+  weights: ScoreWeights,
+  opponent: OpponentContext | null,
+  usableGames: number,
+): { weights: ScoreWeights; plan: SolutionMeta['opponent'] } {
+  const base = weights.opponentWin ?? 0;
+  if (base <= 0) return { weights: { ...weights, opponentWin: 0 }, plan: undefined };
+  if (!opponent || usableGames === 0) {
+    return {
+      weights: { ...PRESETS.WIN_FIRST.weights, opponentWin: 0 },
+      plan: { mode: 'fallback', baseWeight: base, effectiveWeight: 0, confidence: null },
+    };
+  }
+  const factor = CONFIDENCE_WEIGHT_FACTOR[opponent.confidence];
+  const effective = base * factor;
+  return {
+    weights: { ...weights, opponentWin: effective, strength: weights.strength + (base - effective) },
+    plan: { mode: factor < 1 ? 'reduced' : 'applied', baseWeight: base, effectiveWeight: effective, confidence: opponent.confidence },
+  };
 }
 
 function buildMatrix<T>(rows: number, cols: number, value: T): T[][] {
@@ -225,6 +267,27 @@ export function prepare(rawInput: OrderInput): PreparedContext {
 
   const multiPlayerGameCount = games.filter((game) => game.playerCount >= 2).length;
 
+  // Opponent data: only games whose opponent slot has the same head count are usable.
+  const opponent = input.opponent && input.opponent.version === 1 ? input.opponent : null;
+  const opponentGames = games.map((game) => {
+    const entry = opponent?.games[game.id];
+    return entry && entry.numPart === game.playerCount && entry.sides.length > 0 ? entry : null;
+  });
+  const predictionStrength = players.map(
+    (player) => opponent?.players[player.id]?.strength ?? opponent?.leagueMeanPpr ?? 0,
+  );
+  const pairBonusPpr = buildMatrix(n, n, 0);
+  for (let a = 0; a < n; a += 1) {
+    for (let b = a + 1; b < n; b += 1) {
+      const affinity = pairs.affinity(playerIds[a], playerIds[b]);
+      const bonus = affinity === 'FORBIDDEN' ? 0 : PAIR_AFFINITY_PPR_BONUS[affinity];
+      pairBonusPpr[a][b] = bonus;
+      pairBonusPpr[b][a] = bonus;
+    }
+  }
+  const usable = opponentGames.filter((entry) => entry !== null).length;
+  const { weights, plan: opponentPlan } = opponentWeights(input.weights, opponent, usable);
+
   return {
     games,
     gameCount: g,
@@ -258,9 +321,14 @@ export function prepare(rawInput: OrderInput): PreparedContext {
     multiPlayerGameCount,
     locksByGame,
     requiredByGame,
-    weights: input.weights,
-    effectiveSeasonWeight: useSeasonFairness ? 0 : input.weights.season,
+    weights,
+    effectiveSeasonWeight: useSeasonFairness ? 0 : weights.season,
     input,
     invalidLocks,
+    opponent: usable > 0 ? opponent : null,
+    opponentGames,
+    predictionStrength,
+    pairBonusPpr,
+    opponentPlan,
   };
 }

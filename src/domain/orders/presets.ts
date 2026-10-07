@@ -22,6 +22,21 @@ export interface PresetDefinition {
 }
 
 export const PRESETS: Record<Exclude<PresetKey, 'CUSTOM'>, PresetDefinition> = {
+  /**
+   * Maximises the estimated chance of winning the match against the predicted opponent
+   * (docs/OPPONENT_OPTIMIZER.md). Fairness, role spread and consecutive runs are kept at
+   * the バランス level as soft terms — the estimated win probability replaces most of the
+   * raw strength term, not the fairness — so the search never "wins" by giving the
+   * strongest player every game while others sit out. Only offered with opponent data;
+   * without it the run falls back to 勝利優先.
+   */
+  OPPONENT_OPTIMIZED: {
+    key: 'OPPONENT_OPTIMIZED',
+    label: '対戦相手最適化',
+    description: '次戦の相手の出場予測に対して、推定 Match 勝率が最も高くなるオーダーを探します。公平性・連続出場も考慮します。',
+    weights: { strength: 0.3, gameFit: 0.45, pairFit: 0.35, fairness: 0.9, roleFairness: 0.3, novelty: 0, consecutive: 0.5, season: 0.05, opponentWin: 2.4 },
+    scope: 'today',
+  },
   WIN_FIRST: {
     key: 'WIN_FIRST',
     label: '勝利優先',
@@ -88,3 +103,38 @@ export const CANDIDATE_PRESETS: Exclude<PresetKey, 'CUSTOM'>[] = [
   'BALANCED',
   'FAIRNESS_FIRST',
 ];
+
+/** Candidates compared when the opponent-optimised preset is chosen (MASTER SPEC Phase 4 §7). */
+export const OPPONENT_CANDIDATE_PRESETS: Exclude<PresetKey, 'CUSTOM'>[] = [
+  'OPPONENT_OPTIMIZED',
+  'WIN_FIRST',
+  'BALANCED',
+  'FAIRNESS_FIRST',
+];
+
+/**
+ * How much of the opponent weight is kept for a given data confidence (Phase 4 §8):
+ * an uncertain prediction never gets to steer the whole order.
+ */
+export const CONFIDENCE_WEIGHT_FACTOR: Record<'HIGH' | 'MEDIUM' | 'LOW', number> = {
+  HIGH: 1,
+  MEDIUM: 0.7,
+  LOW: 0.35,
+};
+
+/**
+ * Risk attitude for opponent optimisation (Phase 4 §5). Only NEUTRAL is used today; the
+ * others exist so the ranking can be switched without touching the search.
+ *
+ * - NEUTRAL: P(win) + ½ P(draw)
+ * - CONSERVATIVE: P(not losing)
+ * - AGGRESSIVE: P(win) only
+ */
+export type OpponentRiskMode = 'CONSERVATIVE' | 'NEUTRAL' | 'AGGRESSIVE';
+export const DEFAULT_RISK_MODE: OpponentRiskMode = 'NEUTRAL';
+
+export function riskValue(outcome: { win: number; draw: number }, mode: OpponentRiskMode = DEFAULT_RISK_MODE): number {
+  if (mode === 'AGGRESSIVE') return outcome.win;
+  if (mode === 'CONSERVATIVE') return outcome.win + outcome.draw;
+  return outcome.win + 0.5 * outcome.draw;
+}

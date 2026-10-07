@@ -17,6 +17,7 @@ import type { PreparedContext } from '../prepare';
  *         + w_novelty     * PairNovelty
  *         - w_consecutive * ConsecutivePenalty
  *         - w_season      * SeasonImbalance
+ *         + w_opponent    * OpponentWin   (opponent-optimised preset only)
  *
  * Every component is normalised to 0..1 first, so the weights are directly
  * comparable. This is the single source of truth for scoring: the search, the
@@ -46,6 +47,8 @@ export interface Evaluation {
   gameFitRaw: number;
   pairFitRaw: number;
   noveltyRaw: number;
+  /** Mean estimated game win probability (0.5 per game without opponent data). */
+  opponentRaw: number;
 }
 
 /** Appearance counts and per-player game indices for a selection. */
@@ -69,7 +72,7 @@ export function tallySelection(
 
 export function positiveWeightSum(ctx: PreparedContext): number {
   const w = ctx.weights;
-  return w.strength + w.gameFit + w.pairFit + w.fairness + w.roleFairness + w.novelty;
+  return w.strength + w.gameFit + w.pairFit + w.fairness + w.roleFairness + w.novelty + (w.opponentWin ?? 0);
 }
 
 export function negativeWeightSum(ctx: PreparedContext): number {
@@ -97,6 +100,7 @@ export function evaluateSelection(
   const multi = selection.filter((_, gi) => ctx.games[gi].playerCount >= 2);
   const pairFitRaw = multi.length === 0 ? 0.5 : mean(multi.map((c) => c.pairFit));
   const noveltyRaw = multi.length === 0 ? 0.5 : mean(multi.map((c) => c.novelty));
+  const opponentRaw = selection.length === 0 ? 0.5 : mean(selection.map((c) => c.oppWin));
 
   const fairness = evaluateFairness(ctx.fairnessBaseline, counts);
   const seasonFairness = evaluateFairness(ctx.seasonBaseline, counts);
@@ -119,7 +123,8 @@ export function evaluateSelection(
     w.pairFit * pairFitRaw +
     w.fairness * fairness.score +
     w.roleFairness * roleFairness.score +
-    w.novelty * noveltyRaw -
+    w.novelty * noveltyRaw +
+    (w.opponentWin ?? 0) * opponentRaw -
     w.consecutive * consecutivePenalty -
     ctx.effectiveSeasonWeight * seasonImbalance;
 
@@ -146,6 +151,7 @@ export function evaluateSelection(
     novelty: noveltyRaw,
     consecutivePenalty,
     seasonImbalance,
+    opponentWin: ctx.opponent ? opponentRaw : undefined,
     total,
     display: toDisplayScore(ctx, total),
   };
@@ -166,6 +172,7 @@ export function evaluateSelection(
     gameFitRaw,
     pairFitRaw,
     noveltyRaw,
+    opponentRaw,
   };
 }
 

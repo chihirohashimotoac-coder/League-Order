@@ -20,6 +20,7 @@ import type {
   Team,
   TeamId,
 } from '../domain/types';
+import type { N01CacheRecord } from '../domain/n01/types';
 import { planSeasonCommit, planSeasonWithdrawal } from '../domain/orders/seasonLedger';
 import { Repository, type Snapshot } from '../storage/repository';
 import type { BackendKind } from '../storage/db';
@@ -43,6 +44,18 @@ export interface AppData {
   orders: SavedOrder[];
   seasonCommits: SeasonCommit[];
   settings: AppSettings;
+  /** Cached n01 data (derived, re-fetchable; not part of backups). */
+  n01Cache: N01CacheRecord[];
+}
+
+/** Records an n01 sync writes in one batch (see `integrations/n01/sync.ts`). */
+export interface N01SyncWrite {
+  team: Team;
+  players: readonly Player[];
+  format: LeagueFormat | null;
+  cache: readonly N01CacheRecord[];
+  /** Cache records this sync makes obsolete (removed in the same batch). */
+  removeCache?: readonly string[];
 }
 
 /**
@@ -122,6 +135,18 @@ export interface AppStore extends AppData {
    * step, and makes it the active team.
    */
   createTeamSetup(team: Team, players: readonly Player[], format: LeagueFormat): Promise<void>;
+  /**
+   * Stores the result of an n01 sync (team binding, players, managed format, cache) as one
+   * batch, and only then shows it. `activate` makes the team the active one (new teams).
+   */
+  applyN01Sync(write: N01SyncWrite, options?: { activate?: boolean }): Promise<void>;
+  /** Cached n01 records of a team. */
+  n01CacheFor(teamId: TeamId): N01CacheRecord[];
+  /**
+   * When a sync of the team last succeeded *in this app session* (not persisted). Only
+   * this may be called "最新": a cache read back after a restart is just old data.
+   */
+  n01SessionSyncAt(teamId: TeamId): number | null;
   mergeEverything(snapshot: Snapshot): Promise<void>;
   snapshot(): Snapshot;
 }
@@ -135,6 +160,7 @@ const EMPTY: AppData = {
   pairs: [],
   orders: [],
   seasonCommits: [],
+  n01Cache: [],
   settings: {
     activeTeamId: null,
     optimizer: {
@@ -158,6 +184,7 @@ const EMPTY: AppData = {
       consecutive: 0.5,
       season: 0.25,
     },
+    n01: { autoSync: true, historyDepth: 2, showPredictions: true },
   },
 };
 
@@ -177,6 +204,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
   const [backendKind, setBackendKind] = useState<BackendKind | null>(null);
   /** Set once a write has actually failed, so a lost save is never silent (spec §24). */
   const [writeFailed, setWriteFailed] = useState(false);
+  const [sessionSyncs, setSessionSyncs] = useState<Record<TeamId, number>>({});
   const repositoryRef = useRef<Repository | null>(null);
   const toast = useToast();
 
@@ -189,10 +217,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
       // chooses between their own team and the sample (see `loadSample`). Seeding
       // silently made the demo roster look like real data, and "delete everything" could
       // never get back to a clean start.
-      const snapshot = await repository.loadAll();
+      const [snapshot, n01Cache] = await Promise.all([
+        repository.loadAll(),
+        // The cache is a convenience: a failure to read it must never stop the app.
+        repository.loadN01Cache().catch(() => [] as N01CacheRecord[]),
+      ]);
       if (cancelled) return;
       setBackendKind(repository.backendKind);
-      setData(snapshot);
+      setData({ ...snapshot, n01Cache });
       setReady(true);
     })();
     return () => {
@@ -344,6 +376,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
             pairs: current.pairs.filter((pair) => pair.teamId !== teamId),
             orders: current.orders.filter((order) => order.teamId !== teamId),
             seasonCommits: current.seasonCommits.filter((commit) => commit.teamId !== teamId),
+            n01Cache: current.n01Cache.filter((record) => record.teamId !== teamId),
             settings:
               current.settings.activeTeamId === teamId
                 ? { ...current.settings, activeTeamId: teams[0]?.id ?? null }
@@ -521,7 +554,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
       },
 
       replaceEverything: async (incoming) => {
-        setData(incoming);
+        // A replace clears every store, the n01 cache included (it is re-fetchable).
+        setData({ ...incoming, n01Cache: [] });
         try {
           await repositoryRef.current?.replaceAll(incoming);
         } catch (error) {
@@ -533,7 +567,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
 
       loadSample: async () => {
         const sample = buildSeed();
-        setData(sample);
+        setData({ ...sample, n01Cache: [] });
         try {
           await repositoryRef.current?.replaceAll(sample);
         } catch (error) {
@@ -566,6 +600,39 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
         }
       },
 
+      applyN01Sync: async (change, options = {}) => {
+        const settings = options.activate ? { ...data.settings, activeTeamId: change.team.id } : undefined;
+        const repository = repositoryRef.current;
+        if (repository) {
+          try {
+            await repository.applyN01Sync({ ...change, settings });
+          } catch (error) {
+            setWriteFailed(true);
+            toast.show(WRITE_FAILURE_NOTICE, 'error');
+            throw error;
+          }
+        }
+        setData((current) => ({
+          ...current,
+          teams: upsert(current.teams, change.team),
+          players: change.players.reduce((acc, player) => upsert(acc, player), current.players),
+          formats: change.format ? upsert(current.formats, change.format) : current.formats,
+          n01Cache: change.cache.reduce(
+            (acc, record) => upsert(acc, record),
+            current.n01Cache.filter((record) => !change.removeCache?.includes(record.id)),
+          ),
+          settings: options.activate
+            ? { ...current.settings, activeTeamId: change.team.id }
+            : current.settings,
+        }));
+        const fetchedAt = change.cache.find((record) => record.kind === 'sync')?.fetchedAt;
+        if (fetchedAt !== undefined) setSessionSyncs((current) => ({ ...current, [change.team.id]: fetchedAt }));
+      },
+
+      n01SessionSyncAt: (teamId) => sessionSyncs[teamId] ?? null,
+
+      n01CacheFor: (teamId) => data.n01Cache.filter((record) => record.teamId === teamId),
+
       mergeEverything: async (incoming) => {
         setData((current) => ({
           teams: incoming.teams.reduce((acc, team) => upsert(acc, team), current.teams),
@@ -578,6 +645,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
             current.seasonCommits,
           ),
           settings: current.settings,
+          n01Cache: current.n01Cache,
         }));
         try {
           await repositoryRef.current?.mergeAll(incoming);
@@ -590,7 +658,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
 
       snapshot,
     };
-  }, [data, ready, backendKind, writeFailed, write, toast]);
+  }, [data, ready, backendKind, writeFailed, write, toast, sessionSyncs]);
 
   return <AppStoreContext.Provider value={store}>{children}</AppStoreContext.Provider>;
 }

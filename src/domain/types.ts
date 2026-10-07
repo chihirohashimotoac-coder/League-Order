@@ -6,6 +6,17 @@
  * (see docs/DESIGN.md §12).
  */
 
+import type {
+  N01FormatSource,
+  N01GameMeta,
+  N01PlayerBinding,
+  N01TeamBinding,
+  PprSource,
+} from './n01/types';
+import type { OpponentContext } from './prediction/opponentContext';
+import type { MatchPrediction } from './prediction/predictOrder';
+import type { ConfidenceLevel } from './prediction/confidence';
+
 export type TeamId = string;
 export type PlayerId = string;
 export type GameId = string;
@@ -140,6 +151,17 @@ export interface Player {
   seasonAppearancesByKind: Partial<Record<GameKind, number>>;
   archived: boolean;
   createdAt: number;
+  /**
+   * Where the roster entry comes from on n01 (docs/N01_MASTER_DESIGN.md §2). Absent on
+   * players created by hand. A sync rewrites only this record and the name — never the
+   * Rating, aptitudes, notes or season counts.
+   */
+  n01?: N01PlayerBinding;
+  /**
+   * Which PPR the optimizer uses. Absent means the default: `n01` for a linked player,
+   * `manual` otherwise (see `domain/n01/effectivePpr.ts`).
+   */
+  pprSource?: PprSource;
 }
 
 export interface Team {
@@ -154,6 +176,8 @@ export interface Team {
    */
   demo?: boolean;
   createdAt: number;
+  /** Present when the team is linked to an n01 league team. */
+  n01?: N01TeamBinding;
 }
 
 /**
@@ -189,6 +213,8 @@ export interface GameSlotDef {
   kinds: GameKind[];
   /** Required number of players for this game. */
   playerCount: number;
+  /** What n01 says about the game, on formats managed by n01. */
+  n01?: N01GameMeta;
 }
 
 export interface LeagueFormat {
@@ -204,6 +230,11 @@ export interface LeagueFormat {
   discipline: DartsDiscipline;
   games: GameSlotDef[];
   createdAt: number;
+  /**
+   * Set on formats that n01 manages: they are rewritten by each sync and are read-only
+   * in the editor ("copy to a manual format" makes an editable one).
+   */
+  source?: N01FormatSource;
 }
 
 export function formatDiscipline(format: Pick<LeagueFormat, 'discipline'> | null | undefined): DartsDiscipline {
@@ -294,6 +325,7 @@ export type FairnessScope = 'today' | 'season';
 export type ConstraintMode = 'hard' | 'soft';
 
 export const PRESET_KEYS = [
+  'OPPONENT_OPTIMIZED',
   'WIN_FIRST',
   'BALANCED',
   'FAIRNESS_FIRST',
@@ -305,6 +337,7 @@ export const PRESET_KEYS = [
 export type PresetKey = (typeof PRESET_KEYS)[number];
 
 export const PRESET_LABELS: Record<PresetKey, string> = {
+  OPPONENT_OPTIMIZED: '対戦相手最適化',
   WIN_FIRST: '勝利優先',
   BALANCED: 'バランス',
   FAIRNESS_FIRST: '公平性優先',
@@ -326,6 +359,12 @@ export interface ScoreWeights {
   novelty: number;
   consecutive: number;
   season: number;
+  /**
+   * Estimated chance of winning each game against the predicted opponent line-ups
+   * (docs/OPPONENT_OPTIMIZER.md). Only the opponent-optimised preset uses it; absent or
+   * 0 everywhere else, which leaves every other preset exactly as it was.
+   */
+  opponentWin?: number;
 }
 
 export interface OptimizerSettings {
@@ -358,6 +397,12 @@ export interface OrderInput {
    * as `UNSPECIFIED`.
    */
   discipline: DartsDiscipline;
+  /**
+   * The opponent the order is made against (Phase 4): our players' predicted strengths
+   * and, per game, the distribution of the opponent side. Self-contained, so a saved
+   * order can always be re-evaluated as it was generated. Absent = no opponent data.
+   */
+  opponent?: OpponentContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -382,7 +427,8 @@ export type ExplanationKey =
   | 'consecutive'
   | 'season'
   | 'constraint'
-  | 'lock';
+  | 'lock'
+  | 'opponent';
 
 export interface ExplanationFactor {
   key: ExplanationKey;
@@ -435,6 +481,8 @@ export interface ScoreBreakdown {
   novelty: number;
   consecutivePenalty: number;
   seasonImbalance: number;
+  /** Mean estimated game win probability against the opponent (opponent-aware runs). */
+  opponentWin?: number;
   /** Raw weighted sum. */
   total: number;
   /** `total` mapped linearly onto 0..100 for display. */
@@ -500,6 +548,14 @@ export interface SolutionMeta {
    * and the UI says so rather than presenting a near-copy as the preset's choice.
    */
   alternativeTo?: string;
+  /** How opponent data was used by this run (opponent-optimised preset only). */
+  opponent?: {
+    /** `applied` at full weight, `reduced` for weaker data, `fallback` when there was none. */
+    mode: 'applied' | 'reduced' | 'fallback';
+    baseWeight: number;
+    effectiveWeight: number;
+    confidence: ConfidenceLevel | null;
+  };
 }
 
 export interface OrderSolution {
@@ -510,6 +566,11 @@ export interface OrderSolution {
   explanation: OrderExplanation;
   warnings: OrderWarning[];
   meta: SolutionMeta;
+  /**
+   * Estimated match outcome against the opponent (推定勝率), when the order input carries
+   * opponent data. A model estimate, never a certainty.
+   */
+  prediction?: MatchPrediction;
 }
 
 // ---------------------------------------------------------------------------
@@ -653,9 +714,27 @@ export interface SavedOrder {
   seasonApplied: boolean;
 }
 
+/** n01 integration preferences (MASTER SPEC Phase 5 §10). Kept deliberately small. */
+export interface N01Settings {
+  /** Sync with n01 before building the next match's order. */
+  autoSync: boolean;
+  /** Previous seasons read for history (current + this many). */
+  historyDepth: number;
+  /** Show estimated win probabilities on the result screen. */
+  showPredictions: boolean;
+}
+
+export const DEFAULT_N01_SETTINGS: N01Settings = {
+  autoSync: true,
+  historyDepth: 2,
+  showPredictions: true,
+};
+
 export interface AppSettings {
   activeTeamId: TeamId | null;
   optimizer: OptimizerSettings;
   lastPreset: PresetKey;
   customWeights: ScoreWeights;
+  /** Absent on settings stored before the n01 integration; read back with the defaults. */
+  n01?: N01Settings;
 }

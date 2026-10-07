@@ -21,6 +21,7 @@ export interface BoundContext {
   suffixMaxGameFit: number[];
   suffixMaxPair: number[];
   suffixMaxNovelty: number[];
+  suffixMaxOppWin: number[];
   /** `remainingEligible[gi][pi]` = games at index >= gi for which `pi` is eligible. */
   remainingEligible: Int32Array[];
   /** Minimum achievable SSD for the fairness basis over the whole order. */
@@ -51,6 +52,7 @@ export interface SearchState {
   sumGameFit: number;
   sumPair: number;
   sumNovelty: number;
+  sumOppWin: number;
 }
 
 export function createState(ctx: PreparedContext): SearchState {
@@ -64,6 +66,7 @@ export function createState(ctx: PreparedContext): SearchState {
     sumGameFit: 0,
     sumPair: 0,
     sumNovelty: 0,
+    sumOppWin: 0,
   };
 }
 
@@ -78,6 +81,7 @@ export function cloneState(state: SearchState): SearchState {
     sumGameFit: state.sumGameFit,
     sumPair: state.sumPair,
     sumNovelty: state.sumNovelty,
+    sumOppWin: state.sumOppWin,
   };
 }
 
@@ -91,6 +95,7 @@ export function buildBoundContext(
   const suffixMaxGameFit = new Array<number>(g + 1).fill(0);
   const suffixMaxPair = new Array<number>(g + 1).fill(0);
   const suffixMaxNovelty = new Array<number>(g + 1).fill(0);
+  const suffixMaxOppWin = new Array<number>(g + 1).fill(0);
 
   for (let gi = g - 1; gi >= 0; gi -= 1) {
     const isPairGame = ctx.games[gi].playerCount >= 2;
@@ -99,6 +104,7 @@ export function buildBoundContext(
     suffixMaxGameFit[gi] = suffixMaxGameFit[gi + 1] + candidates[gi].maxGameFit;
     suffixMaxPair[gi] = suffixMaxPair[gi + 1] + (isPairGame ? candidates[gi].maxPairFit : 0);
     suffixMaxNovelty[gi] = suffixMaxNovelty[gi + 1] + (isPairGame ? candidates[gi].maxNovelty : 0);
+    suffixMaxOppWin[gi] = suffixMaxOppWin[gi + 1] + candidates[gi].maxOppWin;
   }
 
   const remainingEligible: Int32Array[] = [];
@@ -123,6 +129,7 @@ export function buildBoundContext(
     suffixMaxGameFit,
     suffixMaxPair,
     suffixMaxNovelty,
+    suffixMaxOppWin,
     remainingEligible,
     globalMinSsd: minimalSsd(ctx.fairnessBaseline, ctx.totalSlots),
     globalSeasonMinSsd: minimalSsd(ctx.seasonBaseline, ctx.totalSlots),
@@ -138,7 +145,8 @@ export function buildBoundContext(
  * Optimistic (never pessimistic) estimate of the best total score reachable from a
  * partial state where games `0..gi-1` are assigned.
  *
- * - strength / gameFit / pairFit / novelty: the per-game maxima of the remaining games.
+ * - strength / gameFit / pairFit / novelty / opponent win: the per-game maxima of the
+ *   remaining games.
  * - fairness / season balance / role fairness: the water-filled distribution of the
  *   remaining slots (per role, for role fairness), which ignores eligibility and caps
  *   and is therefore always at least as good as any real completion.
@@ -194,8 +202,10 @@ export function upperBound(
   }
 
   const consecPenalty = 1 - 1 / (1 + state.consecExcess);
+  const opponentWin = (state.sumOppWin + bctx.suffixMaxOppWin[gi]) / g;
 
   return (
+    (w.opponentWin ?? 0) * opponentWin +
     w.strength * strength +
     w.gameFit * gameFit +
     w.pairFit * pairFit +
@@ -238,7 +248,7 @@ export interface PlaceUndo {
   prevLastGame: number[];
   prevRunLen: number[];
   prevExcess: number;
-  prevSums: [number, number, number, number];
+  prevSums: [number, number, number, number, number];
 }
 
 /** Applies a combo to the state, returning the information needed to undo it. */
@@ -247,7 +257,7 @@ export function applyCombo(
   gi: number,
   state: SearchState,
   members: readonly number[],
-  combo: { strength: number; gameFit: number; pairFit: number; novelty: number },
+  combo: { strength: number; gameFit: number; pairFit: number; novelty: number; oppWin: number },
 ): PlaceUndo {
   const undo: PlaceUndo = {
     members,
@@ -255,7 +265,7 @@ export function applyCombo(
     prevLastGame: members.map((pi) => state.lastGame[pi]),
     prevRunLen: members.map((pi) => state.runLen[pi]),
     prevExcess: state.consecExcess,
-    prevSums: [state.sumStrength, state.sumGameFit, state.sumPair, state.sumNovelty],
+    prevSums: [state.sumStrength, state.sumGameFit, state.sumPair, state.sumNovelty, state.sumOppWin],
   };
 
   const role = state.roleCounts[ctx.roleOfGame[gi]];
@@ -273,6 +283,7 @@ export function applyCombo(
 
   state.sumStrength += combo.strength;
   state.sumGameFit += combo.gameFit;
+  state.sumOppWin += combo.oppWin;
   if (ctx.games[gi].playerCount >= 2) {
     state.sumPair += combo.pairFit;
     state.sumNovelty += combo.novelty;
@@ -289,7 +300,7 @@ export function undoCombo(state: SearchState, undo: PlaceUndo): void {
     state.runLen[pi] = undo.prevRunLen[index];
   });
   state.consecExcess = undo.prevExcess;
-  [state.sumStrength, state.sumGameFit, state.sumPair, state.sumNovelty] = undo.prevSums;
+  [state.sumStrength, state.sumGameFit, state.sumPair, state.sumNovelty, state.sumOppWin] = undo.prevSums;
 }
 
 /**

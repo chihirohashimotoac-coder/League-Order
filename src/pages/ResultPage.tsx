@@ -44,6 +44,11 @@ import {
   formatRating,
 } from '../components/ui';
 import { Icon } from '../components/icons';
+import { OpponentPanel } from '../components/n01/OpponentPanel';
+import { useAppStore } from '../state/appStore';
+import type { GamePrediction } from '../domain/prediction/predictOrder';
+import { formatProbability } from '../domain/prediction/predictOrder';
+import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
 
 /**
  * ORDER RESULT screen (spec §14–§22, §26).
@@ -96,6 +101,8 @@ export function ResultPage({
   const [confirmSeason, setConfirmSeason] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
+  // Estimates can be hidden in the settings; they are never shown on shared images anyway.
+  const showPredictions = useAppStore().settings.n01?.showPredictions !== false;
 
   const state = session.present;
   const solution = state.current;
@@ -176,8 +183,11 @@ export function ResultPage({
               candidates={state.candidates}
               selected={state.edited ? -1 : state.selectedCandidate}
               onSelect={(index) => dispatch({ type: 'selectCandidate', index })}
+              showPredictions={showPredictions}
             />
           ) : null}
+
+          {showPredictions ? <OpponentPanel solution={solution} candidates={state.candidates} games={ordered} /> : null}
 
           <StrengthBasis solution={solution} />
 
@@ -230,6 +240,7 @@ export function ResultPage({
                   players={players}
                   playerById={playerById}
                   isLocked={(slot) => locks.has(lockKey(game.id, slot))}
+                  prediction={showPredictions ? solution.prediction?.games.find((entry) => entry.gameId === game.id) : undefined}
                   isEdited={(slot, playerId) => base !== undefined && base[slot] !== playerId}
                   gameLocked={gameLocked}
                   violating={violatingGames.has(game.id)}
@@ -519,14 +530,16 @@ function CandidateGrid({
   candidates,
   selected,
   onSelect,
+  showPredictions,
 }: {
   candidates: OrderSolution[];
   /** -1 while the order has been edited by hand (no candidate matches it). */
   selected: number;
   onSelect: (index: number) => void;
+  showPredictions: boolean;
 }): React.JSX.Element {
   return (
-    <div className="candidate-grid" role="group" aria-label="候補の比較">
+    <div className={`candidate-grid count-${candidates.length}`} role="group" aria-label="候補の比較">
       {candidates.map((candidate, index) => {
         const letter = String.fromCharCode(65 + index);
         return (
@@ -535,7 +548,9 @@ function CandidateGrid({
             key={`${candidate.meta.label}-${index}`}
             className="candidate-tab"
             aria-pressed={selected === index}
-            aria-label={`候補 ${letter}: ${candidate.meta.label} (総合 ${candidate.score.display})${
+            aria-label={`候補 ${letter}: ${candidate.meta.label} (総合 ${candidate.score.display}${
+              showPredictions && candidate.prediction ? `、推定勝率 ${formatProbability(candidate.prediction.win)}` : ''
+            })${
               candidate.meta.alternativeTo ? ` ${candidate.meta.alternativeTo}と同じ最適解のため次点` : ''
             }`}
             onClick={() => onSelect(index)}
@@ -549,6 +564,17 @@ function CandidateGrid({
               {candidate.score.display}
             </span>
             <dl>
+              {showPredictions && candidate.prediction ? (
+                <>
+                  <dt>推定勝率</dt>
+                  <dd>
+                    {formatProbability(candidate.prediction.win)}
+                    <span className="c-conf"> ({CONFIDENCE_LABELS[candidate.prediction.confidence]})</span>
+                  </dd>
+                  <dt>期待勝数</dt>
+                  <dd>{candidate.prediction.expectedGames.toFixed(1)}</dd>
+                </>
+              ) : null}
               <dt>出場差</dt>
               <dd>{candidate.metrics.appearanceSpread}</dd>
               {candidate.metrics.maxRoleConcentration !== undefined ? (
@@ -616,6 +642,7 @@ function GameCard({
   playerIds,
   players,
   playerById,
+  prediction,
   isLocked,
   isEdited,
   gameLocked,
@@ -628,6 +655,8 @@ function GameCard({
   playerIds: readonly string[];
   players: Player[];
   playerById: Map<string, Player>;
+  /** 推定ゲーム勝率 for this game, when the order has opponent data. */
+  prediction?: GamePrediction;
   isLocked: (slot: number) => boolean;
   isEdited: (slot: number, playerId: string) => boolean;
   gameLocked: boolean;
@@ -660,6 +689,11 @@ function GameCard({
               </span>
             ))}
             <span className="tag count">{game.playerCount}名</span>
+            {prediction ? (
+              <span className="tag predict" title={prediction.reasons.join(' ・ ')}>
+                推定 {formatProbability(prediction.probability)} ・ {CONFIDENCE_LABELS[prediction.confidence]}
+              </span>
+            ) : null}
           </span>
         </span>
         <span className="head-actions">

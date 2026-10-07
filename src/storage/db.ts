@@ -20,6 +20,8 @@ export const STORE_NAMES = [
   'orders',
   'seasonCommits',
   'settings',
+  // Cached n01 data (docs/N01_MASTER_DESIGN.md §5): derived, re-fetchable, never exported.
+  'n01Cache',
 ] as const;
 
 export type StoreName = (typeof STORE_NAMES)[number];
@@ -30,6 +32,13 @@ export interface Identified {
 
 export type BackendKind = 'indexeddb' | 'localstorage' | 'memory';
 
+/** One store's part of a batch: records to put and ids to remove. */
+export interface BatchOperation {
+  store: StoreName;
+  put?: readonly Identified[];
+  remove?: readonly string[];
+}
+
 export interface StorageBackend {
   readonly kind: BackendKind;
   getAll<T extends Identified>(store: StoreName): Promise<T[]>;
@@ -39,12 +48,19 @@ export interface StorageBackend {
   remove(store: StoreName, id: string): Promise<void>;
   clear(store: StoreName): Promise<void>;
   clearAll(): Promise<void>;
+  /**
+   * Applies writes to several stores as one unit. On IndexedDB this is a single
+   * transaction: either every write lands or none does, so a sync can never leave a team
+   * pointing at a format that was not saved.
+   */
+  writeBatch(operations: readonly BatchOperation[]): Promise<void>;
 }
 
 const DB_NAME = 'darts-league-order';
-// v2 added the `seasonCommits` store. The upgrade handler creates any store that is
-// missing, so an existing v1 database is upgraded in place with its data intact.
-const DB_VERSION = 2;
+// v2 added the `seasonCommits` store, v3 the `n01Cache` store. The upgrade handler
+// creates any store that is missing, so an existing database is upgraded in place with
+// its data intact.
+const DB_VERSION = 3;
 
 function promisify<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -115,6 +131,31 @@ class IndexedDbBackend implements StorageBackend {
   async clearAll(): Promise<void> {
     for (const store of STORE_NAMES) await this.clear(store);
   }
+
+  async writeBatch(operations: readonly BatchOperation[]): Promise<void> {
+    const stores = [...new Set(operations.map((operation) => operation.store))];
+    if (stores.length === 0) return;
+    const transaction = this.db.transaction(stores, 'readwrite');
+    const done = new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB write failed'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB write aborted'));
+    });
+    try {
+      for (const operation of operations) {
+        const target = transaction.objectStore(operation.store);
+        for (const id of operation.remove ?? []) target.delete(id);
+        for (const value of operation.put ?? []) target.put(value);
+      }
+    } catch (error) {
+      // `put` throws synchronously for a record it cannot key. The writes queued before it
+      // would otherwise still commit, so the whole transaction is aborted explicitly.
+      transaction.abort();
+      await done.catch(() => undefined);
+      throw error;
+    }
+    await done;
+  }
 }
 
 /** Shared implementation for the two synchronous fallbacks. */
@@ -159,6 +200,24 @@ abstract class MapBackend implements StorageBackend {
 
   async clearAll(): Promise<void> {
     for (const store of STORE_NAMES) await this.clear(store);
+  }
+
+  async writeBatch(operations: readonly BatchOperation[]): Promise<void> {
+    // Synchronous stores: compute every new store state first, then write them all, so a
+    // failure while computing leaves nothing half-applied.
+    const next = new Map<StoreName, Identified[]>();
+    for (const operation of operations) {
+      const current = next.get(operation.store) ?? this.read(operation.store);
+      const removed = new Set(operation.remove ?? []);
+      const kept = current.filter((entry) => !removed.has(entry.id));
+      for (const value of operation.put ?? []) {
+        const index = kept.findIndex((entry) => entry.id === value.id);
+        if (index >= 0) kept[index] = value;
+        else kept.push(value);
+      }
+      next.set(operation.store, kept);
+    }
+    for (const [store, values] of next) this.write(store, values);
   }
 }
 

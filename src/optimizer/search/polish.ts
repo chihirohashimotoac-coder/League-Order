@@ -31,7 +31,7 @@ export interface PolishResult {
   passes: number;
 }
 
-function hardFeasible(ctx: PreparedContext, selection: readonly Combo[]): boolean {
+export function hardFeasible(ctx: PreparedContext, selection: readonly Combo[]): boolean {
   const counts = new Array<number>(ctx.playerCount).fill(0);
   const appearances: number[][] = Array.from({ length: ctx.playerCount }, () => []);
 

@@ -7,11 +7,19 @@ import type {
   SeasonCommit,
   Team,
 } from '../domain/types';
-import { GAME_KINDS, PAIR_AFFINITIES } from '../domain/types';
+import { DEFAULT_N01_SETTINGS, GAME_KINDS, PAIR_AFFINITIES } from '../domain/types';
+import { clampHistoryDepth } from '../domain/n01/recency';
 import { mergeDefined } from '../utils/merge';
 import { asDiscipline } from '../domain/types';
 import { normaliseSavedOrder } from '../domain/normalise';
 import { parsePprInput } from '../domain/players/strength';
+import {
+  parseFormatSource,
+  parseGameMeta,
+  parsePlayerBinding,
+  parsePprSource,
+  parseTeamBinding,
+} from '../domain/n01/parse';
 import { DEFAULT_SETTINGS, type Snapshot } from './repository';
 
 /**
@@ -113,6 +121,15 @@ function isUsableOrder(row: Record<string, unknown>): boolean {
   );
 }
 
+function parseN01Settings(value: unknown): NonNullable<AppSettings['n01']> {
+  const row = isRecord(value) ? value : {};
+  return {
+    autoSync: asBoolean(row.autoSync, DEFAULT_N01_SETTINGS.autoSync),
+    historyDepth: clampHistoryDepth(row.historyDepth),
+    showPredictions: asBoolean(row.showPredictions, DEFAULT_N01_SETTINGS.showPredictions),
+  };
+}
+
 /**
  * Parses and validates a backup file.
  * Returns every problem found rather than failing on the first one.
@@ -155,6 +172,8 @@ export function parseBackup(raw: string): ImportResult {
       note: typeof row.note === 'string' ? row.note : undefined,
       demo: row.demo === true ? true : undefined,
       createdAt: asNumber(row.createdAt, Date.now()),
+      // n01 link (docs/N01_DATA_MODEL.md §4): kept only when complete.
+      n01: parseTeamBinding(row.n01),
     }))
     .filter((team) => team.id !== '');
 
@@ -175,6 +194,8 @@ export function parseBackup(raw: string): ImportResult {
       seasonAppearancesByKind: parseKindCounts(row.seasonAppearancesByKind),
       archived: asBoolean(row.archived),
       createdAt: asNumber(row.createdAt, Date.now()),
+      n01: parsePlayerBinding(row.n01),
+      pprSource: parsePprSource(row.pprSource),
     }))
     .filter((player) => player.id !== '');
 
@@ -199,9 +220,11 @@ export function parseBackup(raw: string): ImportResult {
             )
             .slice(),
           playerCount: Math.max(1, Math.round(asNumber(game.playerCount, 1))),
+          n01: parseGameMeta(game.n01),
         }))
         .map((game) => (game.kinds.length === 0 ? { ...game, kinds: ['CUSTOM' as const] } : game)),
       createdAt: asNumber(row.createdAt, Date.now()),
+      source: parseFormatSource(row.source),
     }))
     .filter((format) => format.id !== '');
 
@@ -281,6 +304,7 @@ export function parseBackup(raw: string): ImportResult {
         ? (settingsRow.customWeights as Partial<AppSettings['customWeights']>)
         : undefined,
     ),
+    n01: parseN01Settings(settingsRow.n01),
   };
 
   if (teams.length === 0) errors.push('チームが 1 件も含まれていません。');
