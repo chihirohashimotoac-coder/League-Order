@@ -43,6 +43,11 @@ export interface RosterSyncInput {
    * player id, or `null` to add the n01 player as a new player.
    */
   explicit?: ReadonlyMap<string, string | null>;
+  /**
+   * n01's stats could not be read this sync: a matched player keeps the stats of the
+   * local player it was matched with (by whichever rule above), instead of losing them.
+   */
+  retainStats?: boolean;
 }
 
 export interface RosterChange {
@@ -177,7 +182,11 @@ export function planRosterSync(input: RosterSyncInput): RosterSyncResult {
   let created = 0;
   for (const source of input.source) {
     const existing = matched.get(source.oid) ?? null;
-    const binding = bindingFor(source, tournamentId, now);
+    const binding = bindingFor(
+      input.retainStats ? { ...source, stats: existing?.n01?.stats ?? null } : source,
+      tournamentId,
+      now,
+    );
     if (!existing) {
       const player: Player = {
         id: input.newId(),

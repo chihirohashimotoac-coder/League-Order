@@ -175,6 +175,7 @@ function epochOf(value: unknown): number | null {
   }
   const t = nonEmpty(value);
   if (!t) return null;
+  if (/^\d{9,13}$/u.test(t)) return epochOf(Number(t));
   const iso = parseDateText(t, 0);
   if (!iso) return null;
   return Date.parse(`${iso}T00:00:00Z`);
@@ -204,7 +205,8 @@ export function parseLeagueTournaments(raw: unknown, leagueId: string): N01Leagu
       tournamentId,
       title: nonEmpty(first(row, ['title', 't_title', 'name'])) ?? tournamentId,
       status: num(row.status),
-      startedAt: epochOf(first(row, ['start_date', 'startdate', 'date', 'start_time', 'created'])),
+      // `t_date` is n01's competition date; the list itself is in creation order.
+      startedAt: epochOf(first(row, ['t_date', 'start_date', 'startdate', 'date', 'start_time', 'created'])),
       listIndex: index,
     };
   });

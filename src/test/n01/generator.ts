@@ -33,7 +33,7 @@ export interface FixtureTeamSpec {
 export interface FixtureSeasonSpec {
   tournamentId: string;
   title: string;
-  status: 20 | 30 | 40;
+  status: 20 | 25 | 30 | 40;
   startDate: string;
   schedule: RawSlot[];
   gameSettings?: { round: number; schedule: RawSlot[] }[];
@@ -188,11 +188,13 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
   dataset.set(requestKey('league/tournament/list', { lgid: spec.leagueId }), {
     lgid: spec.leagueId,
     title: spec.title,
-    list: spec.seasons.map((season) => ({
+    // n01 lists tournaments in creation order (oldest first here) and dates them with
+    // `t_date`; the legacy shape is newest first with `start_date`.
+    list: (spec.shape === 'n01' ? [...spec.seasons].reverse() : spec.seasons).map((season) => ({
       tdid: season.tournamentId,
       title: season.title,
       status: season.status,
-      start_date: season.startDate,
+      ...(spec.shape === 'n01' ? { t_date: season.startDate } : { start_date: season.startDate }),
     })),
   });
 

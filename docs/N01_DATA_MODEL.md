@@ -22,7 +22,7 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 | 操作 | パラメータ | 読むフィールド |
 |---|---|---|
 | `league/list` | `keyword` | `{ result: 0, list: [{ lgid, title }] }` |
-| `league/tournament/list` | `lgid` | `title`, `list[].tdid`, `title`, `status`, `start_date` |
+| `league/tournament/list` | `lgid` | `title`, `list[].tdid`, `title`, `status` (20 受付 / 25 組み合わせ作成中 / 30 開催中 / 40 終了)、`t_date` (開催日。当初形は `start_date`)。一覧は**作成順**なので、Season の新旧は `t_date` で決める |
 | `tournament/get` | `tdid` | (`{ result: 0, tournament: {…} }` の `tournament`) `title`, `lgid`, `status`, `softdarts`, `entry_list[].tpid/name`, `lg_table[division][]` (tpid の配列。`"empty"` は bye でチームではない)、`lg_title[division]` (無ければ `Division N`)、`lg_setting.schedule[]`, `lg_setting.game_setting[].round/schedule[]` (`round` = Division 番号)、`lg_result` (キー `<division>_<lsid>`、例 `0_rqbd` → `rqbd` に正規化し Division は別に保持)。当初形の `lg_table[].lg_title/list[].tpid` と素の `lsid` キーも読む |
 | `team/player/list` | `tdid`, `tpid` | `list[].opid`, `oid`, `tpid`, `oname` |
 | `tournament/stats` | `tdid`, `kind=player_stats_list` (団体戦で個人行を得る) | `player_stats_list[]`: `opid`, `tpid`, `oname`, `score`, `darts`, `leg`, `winLeg`, `match`, `f9Score`, `f9Darts`, `highOut`, `best`, `ton00`, `ton40`, `ton70`, `ton80` (`set` / `winSet` / `worst` は未使用)。当初形の snake_case (`legs`, `win_legs`, `first9_score`, `best_leg`, `ton` …) も読む。PPR = `score / darts × 3`、欠損は `null` |
@@ -45,16 +45,17 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 | 応答 | 取得できない (404 / 読めない形) | オフライン / タイムアウト |
 |---|---|---|
 | `tournament/get`, `team/player/list` | 同期失敗 (`schema` / `notFound`)、何も保存しない | 同期失敗、前回データはそのまま |
-| `tournament/stats` | **同期は続行**。PPR は前回値のまま (完全一致の選手のみ)、初回なら `null`。変更要約に「n01 の成績データを取得できなかったため…」 | 同期失敗 (成績だけ欠けた中途半端な保存はしない) |
+| `tournament/stats` | **同期は続行**。PPR は前回値のまま (名簿の照合で対応付いた選手。`opid` が無く Season をまたいで名前で対応付いた選手も含む)、初回なら `null`。変更要約に「n01 の成績データを取得できなかったため…」 | 同期失敗 (成績だけ欠けた中途半端な保存はしない) |
 | `league/schedule/get` | 次戦なし (`notes` に記録)、勝利優先で生成 | 同上 |
 | 過去 Season の各応答 | その Season を除外 (`notes`) | 同上 |
 | 相手の名簿・オーダー (次戦の分析) | 名簿・形式・PPR は保存し、**前回の分析は削除**する (古い相手を最新として使わない)。次戦は勝利優先で生成、変更要約に注記 | 同上 |
 
 ### 1.2 時刻・日付
 
-- `start_date` / `date` は `YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY年M月D日`、または月日のみ (`10/8`) を解釈する。
+- `t_date` / `start_date` / `date` は `YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY年M月D日`、月日のみ (`10/8`)、またはエポック (秒 / ミリ秒、数値文字列も可) を解釈する。
   月日のみの場合は注入された現在時刻に最も近い年を採る。解釈できない日付は `null` (推測しない)。
-- `start_date` が無い場合、`league/tournament/list` は **n01 の並び順 = 新しい順** と仮定する (要ライブ検証)。
+- `league/tournament/list` の並びは作成順で開催順とは限らないため、Season は `t_date` の新しい順に並べる。
+  日付が無い Season に限り n01 の並び順を使う。
 
 ## 2. 正規化型 (`src/integrations/n01/types.ts`)
 

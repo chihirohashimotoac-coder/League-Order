@@ -7,15 +7,16 @@ import { N01_STATUS } from './types';
  * Re-run on every sync, because the "current season" is a moving target:
  *
  *   1. tournaments in progress (status 30),
- *   2. otherwise tournaments open for entry (status 20),
- *   3. otherwise the latest finished tournament (status 40).
+ *   2. otherwise tournaments building their bracket (status 25),
+ *   3. otherwise tournaments open for entry (status 20),
+ *   4. otherwise the latest finished tournament (status 40).
  *
  * The title is never parsed ("2026 3rd" says nothing reliable). When a priority group
  * holds more than one tournament, the caller narrows it by team membership, and only if
  * that still leaves several does the captain choose.
  */
 
-/** Newest first: by start date when n01 gives one, otherwise by n01's own list order. */
+/** Newest first: by competition date (`t_date`) when n01 gives one, otherwise by list order. */
 export function newestFirst(list: readonly N01TournamentSummary[]): N01TournamentSummary[] {
   return [...list].sort((a, b) => {
     if (a.startedAt !== null && b.startedAt !== null && a.startedAt !== b.startedAt) {
@@ -23,7 +24,7 @@ export function newestFirst(list: readonly N01TournamentSummary[]): N01Tournamen
     }
     if (a.startedAt !== null && b.startedAt === null) return -1;
     if (a.startedAt === null && b.startedAt !== null) return 1;
-    // n01 lists tournaments newest first.
+    // Undated: n01's list order is all there is.
     return a.listIndex - b.listIndex;
   });
 }
@@ -35,9 +36,10 @@ export function newestFirst(list: readonly N01TournamentSummary[]): N01Tournamen
 export function seasonPriorityGroups(list: readonly N01TournamentSummary[]): N01TournamentSummary[][] {
   const ordered = newestFirst(list);
   const running = ordered.filter((t) => t.status === N01_STATUS.RUNNING);
+  const bracket = ordered.filter((t) => t.status === N01_STATUS.BRACKET);
   const open = ordered.filter((t) => t.status === N01_STATUS.OPEN);
   const finished = ordered.filter((t) => t.status === N01_STATUS.FINISHED).slice(0, 1);
-  return [running, open, finished].filter((group) => group.length > 0);
+  return [running, bracket, open, finished].filter((group) => group.length > 0);
 }
 
 /**

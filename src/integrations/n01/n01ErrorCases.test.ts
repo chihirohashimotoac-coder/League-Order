@@ -88,6 +88,37 @@ describe('n01 error cases (Phase 6 §6)', () => {
     expect(fresh.players.every((player) => player.ppr === null)).toBe(true);
   });
 
+  it('missing stats across a season change: a player matched by name (no opid) keeps the previous PPR too', async () => {
+    // TDA スターズ: last season (Summer, St2u) synced with stats, the new season (Winter, St3w) without.
+    const TDA = 'lg_Ev9v_7379';
+    const summer = await fetchTeamData(client(), { leagueId: TDA, leagueTitle: 'TDA', tournamentId: 't_TAsu_8000', teamTpid: 'St2u' }, () => FIXTURE_NOW);
+    const first = planN01Sync({ team: TEAM, localPlayers: [], existingFormat: null, data: summer, now: FIXTURE_NOW, newId: ids('w') });
+    const anonymous = first.players.find((player) => player.name === '匿名 太郎')!;
+    expect(anonymous.n01).toMatchObject({ opid: null, lastSeenTournamentId: 't_TAsu_8000' });
+    expect(anonymous.n01?.stats?.ppr).toEqual(expect.any(Number));
+
+    const missing = (request: N01Request) =>
+      request.operation === 'tournament/stats' ? new N01Error('notFound', 'n01 にデータが見つかりませんでした。', request.operation, 404) : undefined;
+    const winter = await fetchTeamData(
+      client({ override: missing }),
+      { leagueId: TDA, leagueTitle: 'TDA', tournamentId: 't_TAop_8101', teamTpid: 'St3w' },
+      () => FIXTURE_NOW,
+    );
+    expect(winter.statsUnavailable).toBe(true);
+    const plan = planN01Sync({ team: first.team, localPlayers: first.players, existingFormat: first.format, data: winter, now: FIXTURE_NOW, newId: ids('x') });
+    // The oid is new this season, so the roster matched 匿名 太郎 by unique name …
+    expect(plan.roster.added.map((entry) => entry.name)).not.toContain('匿名 太郎');
+    const moved = plan.players.find((player) => player.id === anonymous.id)!;
+    expect(moved.n01).toMatchObject({ opid: null, lastSeenTournamentId: 't_TAop_8101' });
+    // … and the stats come from that same match: nobody who carried over lost a PPR.
+    expect(moved.n01?.stats).toEqual(anonymous.n01?.stats);
+    for (const player of first.players) {
+      const next = plan.players.find((candidate) => candidate.id === player.id);
+      if (next) expect(next.n01?.stats).toEqual(player.n01?.stats);
+    }
+    expect(plan.changes.pprChanged).toEqual([]);
+  });
+
   it('missing stats: the retained PPR still reaches the prediction, not the league mean', async () => {
     const first = await syncKalavinka();
     const missing = (request: N01Request) =>

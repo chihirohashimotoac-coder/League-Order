@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { N01Client } from './client';
 import { N01_API_BASE_URL, buildUrl, type N01Request } from './endpoints';
-import { parseLeagueSearch, parseStats, parseTournament } from './validation';
-import { fetchTeamData, planN01Sync, resolveLinkedTeam, type N01TeamSelection } from './sync';
+import { parseLeagueSearch, parseLeagueTournaments, parseStats, parseTournament } from './validation';
+import { browseLeague, fetchTeamData, planN01Sync, resolveLinkedTeam, type N01TeamSelection } from './sync';
+import { previousSeasons, seasonPriorityGroups } from './seasonResolver';
 import { buildIntelligenceSnapshot, fetchIntelligence } from './intelligence';
 import { resolveNextMatch } from './scheduleResolver';
 import { divisionLabel } from '../../domain/n01/division';
@@ -10,7 +11,7 @@ import { eligiblePlayers } from '../../domain/n01/nextMatch';
 import { buildOpponentContext } from '../../domain/prediction/opponentContext';
 import { createFixtureTransport, type FixtureTransportOptions } from '../../test/n01/transport';
 import { generateLeague } from '../../test/n01/generator';
-import { FIXTURE_NOW, atdoSpec, fixtureLeagues } from '../../test/n01/leagues';
+import { FIXTURE_NOW, atdoSpec, fixtureLeagues, tdaSpec } from '../../test/n01/leagues';
 import { jstNoon } from '../../test/n01/replay';
 
 /**
@@ -306,5 +307,77 @@ describe('tournament/stats: n01 field names (camelCase) first, older aliases kep
     const withoutF9 = await contextFor(true);
     const strengths = (context: typeof full.context) => Object.values(context.players).map((entry) => entry.strength);
     expect(strengths(withoutF9.context)).not.toEqual(strengths(full.context));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Tournament list: t_date, creation order, status 25
+// ---------------------------------------------------------------------------
+
+const tids = (list: readonly { tournamentId: string }[]) => list.map((t) => t.tournamentId);
+
+describe('league/tournament/list: seasons dated by t_date, listed in creation order', () => {
+  it('the latest season is the latest t_date, not the last one created', () => {
+    // The spring season was registered after the autumn one, but before winter's.
+    const parsed = parseLeagueTournaments(
+      {
+        result: 0,
+        list: [
+          { tdid: 't_aut', title: '2025 秋', status: 40, t_date: '2025-09-04' },
+          { tdid: 't_spr', title: '2026 春', status: 40, t_date: '2026-04-02' },
+          { tdid: 't_win', title: '2025 冬', status: 40, t_date: '2025-12-04' },
+        ],
+      },
+      'lg_x',
+    );
+    expect(parsed.tournaments.map((t) => t.startedAt)).toEqual(
+      ['2025-09-04', '2026-04-02', '2025-12-04'].map((day) => Date.parse(`${day}T00:00:00Z`)),
+    );
+    expect(seasonPriorityGroups(parsed.tournaments).map(tids)).toEqual([['t_spr']]);
+    expect(tids(previousSeasons(parsed.tournaments, 't_spr', 2))).toEqual(['t_win', 't_aut']);
+  });
+
+  it('t_date as epoch seconds, number or string, reads the same', () => {
+    const seconds = Date.parse('2026-04-02T00:00:00Z') / 1000;
+    const parsed = parseLeagueTournaments({ result: 0, list: [{ tdid: 'a', t_date: seconds }, { tdid: 'b', t_date: String(seconds) }] }, 'lg_x');
+    expect(parsed.tournaments.map((t) => t.startedAt)).toEqual([seconds * 1000, seconds * 1000]);
+  });
+
+  it('ATDO fixture (oldest first, as created): current and previous seasons come out by date', async () => {
+    const list = await client().leagueTournaments(ATDO);
+    const newestFirst = tids(atdoSpec().seasons);
+    expect(tids(list.tournaments)).toEqual([...newestFirst].reverse());
+    expect(seasonPriorityGroups(list.tournaments).map(tids)[0]).toEqual(['t_ABvC_5234']);
+    expect(tids(previousSeasons(list.tournaments, 't_ABvC_5234', 9))).toEqual(newestFirst.slice(1));
+  });
+});
+
+describe('status 25 (building the bracket) is the current season', () => {
+  const TDA = 'lg_Ev9v_7379';
+  // TDA with its new season past entries and into bracket building.
+  const bracket = generateLeague({
+    ...tdaSpec(),
+    seasons: tdaSpec().seasons.map((season) => (season.tournamentId === 't_TAop_8101' ? { ...season, status: 25 as const } : season)),
+  });
+  const c = () => new N01Client(createFixtureTransport({ datasets: [bracket.dataset] }), { now: () => FIXTURE_NOW });
+
+  it('ranks after running and before open and finished seasons', () => {
+    const t = (tournamentId: string, status: number, day: number) => ({ tournamentId, title: tournamentId, status, startedAt: day, listIndex: 0 });
+    const list = [t('done', 40, 1), t('entries', 20, 3), t('bracket', 25, 2)];
+    expect(seasonPriorityGroups(list).map(tids)).toEqual([['bracket'], ['entries'], ['done']]);
+    expect(seasonPriorityGroups([...list, t('live', 30, 0)]).map(tids)[0]).toEqual(['live']);
+  });
+
+  it('a new link picks the bracket-building season, not the last finished one', async () => {
+    const browse = await browseLeague(c(), TDA);
+    expect(browse.candidates.map((t) => [t.tournamentId, t.status])).toEqual([['t_TAop_8101', 25]]);
+  });
+
+  it('a team linked while entries were open is still found once the bracket is being built', async () => {
+    const selection = { leagueId: TDA, leagueTitle: 'TDA', tournamentId: 't_TAop_8101', teamTpid: 'St3w' };
+    const data = await fetchTeamData(client(), selection, () => FIXTURE_NOW);
+    expect(data.tournament.status).toBe(20);
+    const plan = planN01Sync({ team: { id: 'team_st', name: 'スターズ', createdAt: 0 }, localPlayers: [], existingFormat: null, data, now: FIXTURE_NOW, newId: ids('b') });
+    expect(await resolveLinkedTeam(c(), plan.team.n01!)).toEqual({ kind: 'ok', selection });
   });
 });

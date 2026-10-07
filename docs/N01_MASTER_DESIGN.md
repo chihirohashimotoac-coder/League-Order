@@ -106,7 +106,8 @@ Phase 0 ではスクリプトを「出力しない型検査」に修正する (�
 
 ### 3.2 Season (Tournament)
 毎同期で `league/tournament/list` から再解決する:
-`status 30 (開催中)` → `status 20 (受付/準備)` → `status 40 (終了) の最新`。
+`status 30 (開催中)` → `status 25 (組み合わせ作成中)` → `status 20 (受付/準備)` → `status 40 (終了) の最新`。
+Season の新旧は `t_date` (開催日) で判断する (`league/tournament/list` の並びは作成順のため)。
 同順位が複数ならチーム所属 (entry_list にチームの同一性が一致するもの) で絞る。それでも複数ならユーザーが選ぶ。
 タイトル文字列からは判断しない。
 **時間を遡らない**: 連携済みチームが前回同期した Season より古い Season にしか見つからない場合
@@ -301,7 +302,7 @@ HOME の NEXT MATCH カード → [次戦のオーダーを作る] の 1 操作�
 | 1.0 | Phase 0: アーキテクチャ固定 |
 | 1.1 | Phase 4: 対戦相手最適化の公平性の重みをバランス水準へ改訂 (fairness 0.3 では退化解になることをテストで確認したため) |
 | 1.2 | Phase 6: 成績 (stats) の欠落を同期失敗にしない (PPR は前回値)、連携チームを古い Season へ戻さない (§3.2)、4 案比較をスマホで 2 × 2 表示 |
-| 1.3 | レビュー対応: API オリジン `push.n01darts.com/api/v1`、実 n01 の応答形 (`lg_table` / `lg_title`、`lg_result` キー正規化、`league/list`、stats camelCase、日程・オーダー行) に対応 |
+| 1.3 | レビュー対応: API オリジン `push.n01darts.com/api/v1`、実 n01 の応答形 (`lg_table` / `lg_title`、`lg_result` キー正規化、`league/list`、stats camelCase、日程・オーダー行、`format` の `startScore` / `subTitle`) に対応。Season の新旧を `t_date` で判断 (一覧は作成順)、`status 25` (組み合わせ作成中) を現 Season の候補に追加、成績欠落時の PPR 保持を名簿照合の結果に合わせる (名前で対応付いた選手も保持) |
 
 ## 13. Phase 6 検証の対応表
 

@@ -1,5 +1,5 @@
 import type { LeagueFormat, Player, Team } from '../../domain/types';
-import type { N01PlayerBinding, N01SyncSnapshot, N01TeamBinding } from '../../domain/n01/types';
+import type { N01SyncSnapshot, N01TeamBinding } from '../../domain/n01/types';
 import { syncSnapshotId } from '../../domain/n01/types';
 import { planRosterSync, type RosterSyncResult } from '../../domain/n01/roster';
 import { emptyChangeSummary, type N01ChangeSummary } from '../../domain/n01/changes';
@@ -298,18 +298,10 @@ export function planN01Sync(input: N01SyncPlanInput): N01SyncPlan {
   });
 
   const tournamentId = data.tournament.tournamentId;
-  let source = rosterSource(data.roster, data.stats, tournamentId, now);
+  const source = rosterSource(data.roster, data.stats, tournamentId, now);
   const changes = emptyChangeSummary(!previous);
   if (data.statsUnavailable) {
-    // Keep each player's last known n01 stats (exact identity only) instead of erasing them.
-    const lastStats = (entry: (typeof source)[number]): N01PlayerBinding['stats'] =>
-      input.localPlayers.find(
-        (player) =>
-          player.n01 &&
-          ((entry.opid !== null && player.n01.opid === entry.opid) ||
-            (player.n01.currentOid === entry.oid && player.n01.lastSeenTournamentId === tournamentId)),
-      )?.n01?.stats ?? null;
-    source = source.map((entry) => ({ ...entry, stats: lastStats(entry) }));
+    // Each matched player keeps its last known n01 stats (planRosterSync `retainStats`).
     changes.notes.push('n01 の成績データを取得できなかったため、PPR は前回の値のままです。');
   }
   let roster: RosterSyncResult;
@@ -327,6 +319,7 @@ export function planN01Sync(input: N01SyncPlanInput): N01SyncPlan {
       now,
       newId: () => input.newId('pl'),
       explicit: input.explicit,
+      retainStats: data.statsUnavailable,
     });
   }
 

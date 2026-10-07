@@ -12,6 +12,8 @@
 export const N01_STATUS = {
   /** Accepting entries / preparing. */
   OPEN: 20,
+  /** Entries closed, building the bracket: the season about to start. */
+  BRACKET: 25,
   /** In progress. */
   RUNNING: 30,
   /** Finished. */
@@ -29,9 +31,9 @@ export interface N01TournamentSummary {
   /** `tdid` */
   tournamentId: string;
   title: string;
-  /** `status` (20 / 30 / 40 …), `null` when absent or not a number. */
+  /** `status` (20 / 25 / 30 / 40 …), `null` when absent or not a number. */
   status: number | null;
-  /** Start date as epoch ms when n01 provides a parsable date, else `null`. */
+  /** Competition date (`t_date`) as epoch ms when n01 provides a parsable one, else `null`. */
   startedAt: number | null;
   /** Position in n01's list (0-based), used for ordering when no date is given. */
   listIndex: number;
