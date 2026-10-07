@@ -7,10 +7,15 @@ import { useAppStore } from '../state/appStore';
 import { Card, ConfirmDialog, Field, Stepper, useToast } from '../components/ui';
 
 const WEIGHT_LABELS: { key: keyof ScoreWeights; label: string; hint: string }[] = [
-  { key: 'strength', label: '戦力 (Rating)', hint: '高いほど Rating の高い選手を優先' },
+  { key: 'strength', label: '戦力 (Rating / PPR)', hint: '高いほど Rating・PPR の高い選手を優先' },
   { key: 'gameFit', label: 'ゲーム適性', hint: '高いほど得意なゲームに配置' },
   { key: 'pairFit', label: 'ペア相性', hint: '高いほど相性の良いペアを優先' },
   { key: 'fairness', label: '出場回数の公平性', hint: '高いほど出場回数を均等化' },
+  {
+    key: 'roleFairness',
+    label: '役割の分散 (Singles 等)',
+    hint: '高いほど Singles・Doubles などを同じ選手に集中させない',
+  },
   { key: 'novelty', label: '新ペア度', hint: '高いほど未経験のペアを優先' },
   { key: 'consecutive', label: '連続出場ペナルティ', hint: '高いほど連続出場を避ける' },
   { key: 'season', label: 'シーズン不均衡ペナルティ', hint: '高いほどシーズン累計を均等化' },

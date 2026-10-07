@@ -1,4 +1,11 @@
-import { excessToPenalty, minimalSsd, waterfill } from '../../domain/orders/fairness';
+import {
+  excessToPenalty,
+  fairnessScore,
+  minimalSsd,
+  minimalSsdFast,
+  waterfill,
+} from '../../domain/orders/fairness';
+import { roleScore } from '../../domain/orders/roleFairness';
 import type { GameCandidates } from '../candidates/combinations';
 import type { PreparedContext } from '../prepare';
 
@@ -24,6 +31,11 @@ export interface BoundContext {
   idealCounts: number[];
   /** Number of games with 2+ players — the basis of the pair terms. */
   pairGameCount: number;
+  /** `suffixRoleSlots[gi][group]` = slots of that role in games at index >= gi. */
+  suffixRoleSlots: Int32Array[];
+  /** Reusable buffers for the bound's water-filling (one search runs on one thread). */
+  scratchTotals: Float64Array;
+  scratchSort: Float64Array;
 }
 
 export interface SearchState {
@@ -32,6 +44,8 @@ export interface SearchState {
   lastGame: Int32Array;
   /** Length of the player's current trailing run of consecutive games. */
   runLen: Int32Array;
+  /** `roleCounts[group][player]`: appearances so far inside each structural role. */
+  roleCounts: Int32Array[];
   consecExcess: number;
   sumStrength: number;
   sumGameFit: number;
@@ -44,6 +58,7 @@ export function createState(ctx: PreparedContext): SearchState {
     counts: new Int32Array(ctx.playerCount),
     lastGame: new Int32Array(ctx.playerCount).fill(-2),
     runLen: new Int32Array(ctx.playerCount),
+    roleCounts: ctx.roleGroups.map(() => new Int32Array(ctx.playerCount)),
     consecExcess: 0,
     sumStrength: 0,
     sumGameFit: 0,
@@ -57,6 +72,7 @@ export function cloneState(state: SearchState): SearchState {
     counts: new Int32Array(state.counts),
     lastGame: new Int32Array(state.lastGame),
     runLen: new Int32Array(state.runLen),
+    roleCounts: state.roleCounts.map((counts) => new Int32Array(counts)),
     consecExcess: state.consecExcess,
     sumStrength: state.sumStrength,
     sumGameFit: state.sumGameFit,
@@ -94,6 +110,13 @@ export function buildBoundContext(
     }
   }
 
+  const suffixRoleSlots: Int32Array[] = [];
+  for (let gi = 0; gi <= g; gi += 1) suffixRoleSlots.push(new Int32Array(ctx.roleGroups.length));
+  for (let gi = g - 1; gi >= 0; gi -= 1) {
+    suffixRoleSlots[gi].set(suffixRoleSlots[gi + 1]);
+    suffixRoleSlots[gi][ctx.roleOfGame[gi]] += ctx.games[gi].playerCount;
+  }
+
   return {
     suffixSlots,
     suffixMaxStrength,
@@ -105,6 +128,9 @@ export function buildBoundContext(
     globalSeasonMinSsd: minimalSsd(ctx.seasonBaseline, ctx.totalSlots),
     idealCounts: waterfill(ctx.fairnessBaseline, ctx.totalSlots),
     pairGameCount: ctx.multiPlayerGameCount,
+    suffixRoleSlots,
+    scratchTotals: new Float64Array(ctx.playerCount),
+    scratchSort: new Float64Array(ctx.playerCount),
   };
 }
 
@@ -113,9 +139,9 @@ export function buildBoundContext(
  * partial state where games `0..gi-1` are assigned.
  *
  * - strength / gameFit / pairFit / novelty: the per-game maxima of the remaining games.
- * - fairness / season balance: the water-filled distribution of the remaining slots,
- *   which ignores eligibility and caps and is therefore always at least as good as
- *   any real completion.
+ * - fairness / season balance / role fairness: the water-filled distribution of the
+ *   remaining slots (per role, for role fairness), which ignores eligibility and caps
+ *   and is therefore always at least as good as any real completion.
  * - consecutive penalty: the already-committed excess, which can only grow, so it is
  *   a valid lower bound on the penalty.
  */
@@ -140,21 +166,31 @@ export function upperBound(
 
   const remaining = bctx.suffixSlots[gi];
 
-  const fairTotals = new Array<number>(ctx.playerCount);
+  const totals = bctx.scratchTotals;
   for (let pi = 0; pi < ctx.playerCount; pi += 1) {
-    fairTotals[pi] = ctx.fairnessBaseline[pi] + state.counts[pi];
+    totals[pi] = ctx.fairnessBaseline[pi] + state.counts[pi];
   }
-  const bestFairSsd = minimalSsd(fairTotals, remaining);
-  const fairness = 1 / (1 + Math.max(0, bestFairSsd - bctx.globalMinSsd) / 2);
+  const bestFairSsd = minimalSsdFast(totals, remaining, bctx.scratchSort);
+  const fairness = fairnessScore(Math.max(0, bestFairSsd - bctx.globalMinSsd), ctx.totalSlots);
 
   let seasonPenalty = 0;
   if (ctx.effectiveSeasonWeight > 0) {
-    const seasonTotals = new Array<number>(ctx.playerCount);
     for (let pi = 0; pi < ctx.playerCount; pi += 1) {
-      seasonTotals[pi] = ctx.seasonBaseline[pi] + state.counts[pi];
+      totals[pi] = ctx.seasonBaseline[pi] + state.counts[pi];
     }
-    const bestSeasonSsd = minimalSsd(seasonTotals, remaining);
+    const bestSeasonSsd = minimalSsdFast(totals, remaining, bctx.scratchSort);
     seasonPenalty = excessToPenalty(Math.max(0, bestSeasonSsd - bctx.globalSeasonMinSsd));
+  }
+
+  let roleFairness = 1;
+  if (w.roleFairness > 0 && ctx.roleGroups.length > 0) {
+    let roleExcess = 0;
+    const remainingByRole = bctx.suffixRoleSlots[gi];
+    for (let k = 0; k < ctx.roleGroups.length; k += 1) {
+      const best = minimalSsdFast(state.roleCounts[k], remainingByRole[k], bctx.scratchSort);
+      roleExcess += Math.max(0, best - ctx.roleGroups[k].minSsd);
+    }
+    roleFairness = roleScore(ctx.roleGroups, roleExcess);
   }
 
   const consecPenalty = 1 - 1 / (1 + state.consecExcess);
@@ -164,6 +200,7 @@ export function upperBound(
     w.gameFit * gameFit +
     w.pairFit * pairFit +
     w.fairness * fairness +
+    w.roleFairness * roleFairness +
     w.novelty * novelty -
     w.consecutive * consecPenalty -
     ctx.effectiveSeasonWeight * seasonPenalty
@@ -196,6 +233,8 @@ export function canPlace(
 
 export interface PlaceUndo {
   members: readonly number[];
+  /** Role group the placement was counted in (`-1` when the format has none). */
+  roleGroup: number;
   prevLastGame: number[];
   prevRunLen: number[];
   prevExcess: number;
@@ -212,14 +251,17 @@ export function applyCombo(
 ): PlaceUndo {
   const undo: PlaceUndo = {
     members,
+    roleGroup: state.roleCounts.length > 0 ? ctx.roleOfGame[gi] : -1,
     prevLastGame: members.map((pi) => state.lastGame[pi]),
     prevRunLen: members.map((pi) => state.runLen[pi]),
     prevExcess: state.consecExcess,
     prevSums: [state.sumStrength, state.sumGameFit, state.sumPair, state.sumNovelty],
   };
 
+  const role = state.roleCounts[ctx.roleOfGame[gi]];
   for (const pi of members) {
     state.counts[pi] += 1;
+    if (role) role[pi] += 1;
     const run = state.lastGame[pi] === gi - 1 ? state.runLen[pi] + 1 : 1;
     state.runLen[pi] = run;
     state.lastGame[pi] = gi;
@@ -239,8 +281,10 @@ export function applyCombo(
 }
 
 export function undoCombo(state: SearchState, undo: PlaceUndo): void {
+  const role = undo.roleGroup >= 0 ? state.roleCounts[undo.roleGroup] : undefined;
   undo.members.forEach((pi, index) => {
     state.counts[pi] -= 1;
+    if (role) role[pi] -= 1;
     state.lastGame[pi] = undo.prevLastGame[index];
     state.runLen[pi] = undo.prevRunLen[index];
   });

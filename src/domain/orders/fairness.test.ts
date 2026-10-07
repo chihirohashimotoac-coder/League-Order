@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   evaluateFairness,
   excessToPenalty,
+  fairnessScore,
   minimalSsd,
+  minimalSsdFast,
   minimalSsdReference,
   sumSquaredDeviation,
   waterfill,
@@ -105,5 +107,45 @@ describe('excessToPenalty', () => {
 describe('sumSquaredDeviation', () => {
   it('is 0 for a constant list', () => {
     expect(sumSquaredDeviation([3, 3, 3])).toBeCloseTo(0, 10);
+  });
+});
+
+describe('fairnessScore (D-21)', () => {
+  it('is exactly 1 at the arithmetic optimum and strictly decreasing', () => {
+    expect(fairnessScore(0, 10)).toBe(1);
+    let previous = 1;
+    for (let excess = 2; excess <= 40; excess += 2) {
+      const value = fairnessScore(excess, 10);
+      expect(value).toBeLessThan(previous);
+      expect(value).toBeGreaterThanOrEqual(0);
+      previous = value;
+    }
+  });
+
+  it('keeps charging for further imbalance instead of saturating', () => {
+    // The old curve 1/(1+e/2) lost 0.5 on the first step and only ~0.1 more for the next
+    // three; the linear part keeps a meaningful price on every further step.
+    const step = (from: number, to: number) => fairnessScore(from, 10) - fairnessScore(to, 10);
+    expect(step(10, 20)).toBeGreaterThan(0.2);
+    expect(step(0, 2)).toBeLessThan(0.5);
+  });
+});
+
+describe('minimalSsdFast', () => {
+  it('matches the reference implementation on a deterministic grid', () => {
+    const scratch = new Float64Array(8);
+    for (let seed = 1; seed <= 300; seed += 1) {
+      const n = 1 + (seed % 8);
+      const baselines = Array.from({ length: n }, (_, i) => ((seed * 7 + i * 13) % 6) + (i % 2));
+      const total = (seed * 5) % 17;
+      const fast = minimalSsdFast(baselines, total, scratch.subarray(0, n));
+      expect(fast).toBeCloseTo(minimalSsdReference(baselines, total), 9);
+      expect(fast).toBeCloseTo(minimalSsd(baselines, total), 9);
+    }
+  });
+
+  it('accepts typed arrays and a total of 0', () => {
+    const scratch = new Float64Array(4);
+    expect(minimalSsdFast(new Int32Array([1, 2, 3, 6]), 0, scratch)).toBeCloseTo(sumSquaredDeviation([1, 2, 3, 6]), 10);
   });
 });

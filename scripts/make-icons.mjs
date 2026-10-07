@@ -11,10 +11,11 @@ import { join } from 'node:path';
 
 const PUBLIC_DIR = join(import.meta.dirname, '..', 'public');
 
-const BG = [11, 17, 25];
-const RING = [56, 189, 248];
-const INNER = [248, 113, 113];
-const CENTER = [238, 244, 251];
+// Light Match Sheet palette: paper background, deep-teal ring, red inner, ink bull.
+const BG = [244, 243, 239];
+const RING = [8, 127, 140];
+const INNER = [190, 47, 42];
+const CENTER = [23, 32, 38];
 
 function crc32(buffer) {
   let crc = ~0;
@@ -89,10 +90,10 @@ writeFileSync(join(PUBLIC_DIR, 'icon-maskable-512.png'), drawIcon(512, { maskabl
 writeFileSync(
   join(PUBLIC_DIR, 'icon.svg'),
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Darts Order">
-  <rect width="64" height="64" rx="12" fill="#0b1119"/>
-  <circle cx="32" cy="32" r="22" fill="none" stroke="#38bdf8" stroke-width="6"/>
-  <circle cx="32" cy="32" r="10" fill="#f87171"/>
-  <circle cx="32" cy="32" r="3.8" fill="#eef4fb"/>
+  <rect width="64" height="64" rx="12" fill="#f4f3ef"/>
+  <circle cx="32" cy="32" r="22" fill="none" stroke="#087f8c" stroke-width="6"/>
+  <circle cx="32" cy="32" r="10" fill="#be2f2a"/>
+  <circle cx="32" cy="32" r="3.8" fill="#172026"/>
 </svg>
 `,
 );

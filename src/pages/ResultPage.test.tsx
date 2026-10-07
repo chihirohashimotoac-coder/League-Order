@@ -220,4 +220,38 @@ describe('ResultPage', () => {
     // Exactly one share entry point.
     expect(screen.getAllByRole('button', { name: /^共有$/ })).toHaveLength(1);
   });
+
+  it('switching candidates changes the game cards, not just the pressed tab', async () => {
+    const user = userEvent.setup();
+    let latest: UndoableState | null = null;
+    renderResult((state) => {
+      latest = state;
+    });
+
+    const tabs = screen.getAllByRole('button', { name: /^候補 [A-Z]/ });
+    expect(tabs.length).toBeGreaterThan(1);
+    const games = sampleFormatGames();
+    const shown: string[] = [];
+    for (const [index, tab] of tabs.entries()) {
+      await user.click(tab);
+      expect(tab.getAttribute('aria-pressed')).toBe('true');
+      const candidate = latest!.present.candidates[index];
+      const expected = games.flatMap(
+        (game) => candidate.assignments.find((entry) => entry.gameId === game.id)!.playerIds,
+      );
+      const values = screen.getAllByRole('combobox').map((select) => (select as HTMLSelectElement).value);
+      // The cards show exactly the selected candidate's line-up.
+      expect(values).toEqual(expected);
+      shown.push(values.join(','));
+    }
+    // Candidates are distinct line-ups, so the cards really changed between them.
+    expect(new Set(shown).size).toBe(tabs.length);
+  });
+
+  it('states what "strong" meant for this order', () => {
+    renderResult();
+    const basis = screen.getByTestId('result-strength-basis');
+    expect(basis.textContent).toContain('戦力評価 Rating 100%');
+    expect(basis.textContent).toContain('未設定');
+  });
 });

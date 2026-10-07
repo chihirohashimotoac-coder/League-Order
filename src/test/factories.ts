@@ -1,4 +1,5 @@
 import type {
+  DartsDiscipline,
   GameKind,
   GameSlotDef,
   LeagueFormat,
@@ -7,6 +8,7 @@ import type {
   PairSetting,
   ParticipantConfig,
   Player,
+  Ppr,
   Rating,
   ScoreWeights,
   SkillLevel,
@@ -33,6 +35,7 @@ export interface PlayerSpec {
   id: string;
   name: string;
   rating?: Rating;
+  ppr?: Ppr;
   skills?: Partial<Record<GameKind, SkillLevel>>;
   seasonAppearances?: number;
 }
@@ -43,6 +46,7 @@ export function player(spec: PlayerSpec): Player {
     teamId: TEAM_ID,
     name: spec.name,
     rating: spec.rating === undefined ? null : spec.rating,
+    ppr: spec.ppr === undefined ? null : spec.ppr,
     skills: spec.skills ?? {},
     seasonAppearances: spec.seasonAppearances ?? 0,
     seasonAppearancesByKind: {},
@@ -68,8 +72,12 @@ export function games(specs: readonly GameSpec[]): GameSlotDef[] {
   }));
 }
 
-export function format(gameDefs: GameSlotDef[], name = 'Test Format'): LeagueFormat {
-  return { id: 'fmt_test', teamId: TEAM_ID, name, games: gameDefs, createdAt: 0 };
+export function format(
+  gameDefs: GameSlotDef[],
+  name = 'Test Format',
+  discipline: DartsDiscipline = 'UNSPECIFIED',
+): LeagueFormat {
+  return { id: 'fmt_test', teamId: TEAM_ID, name, discipline, games: gameDefs, createdAt: 0 };
 }
 
 export function pair(a: string, b: string, affinity: PairAffinity, pastTogetherCount = 0): PairSetting {
@@ -84,6 +92,7 @@ export interface InputOverrides {
   weights?: Partial<ScoreWeights>;
   settings?: Partial<OrderInput['settings']>;
   preset?: OrderInput['preset'];
+  discipline?: DartsDiscipline;
 }
 
 export function orderInput(
@@ -104,6 +113,7 @@ export function orderInput(
     preset,
     weights: { ...baseWeights, ...overrides.weights },
     settings: { ...DEFAULT_OPTIMIZER_SETTINGS, ...overrides.settings },
+    discipline: overrides.discipline ?? 'UNSPECIFIED',
   };
 }
 

@@ -10,16 +10,18 @@ import {
   Field,
   Sheet,
   Stepper,
-  formatRating,
+  formatStrengthLine,
   useToast,
 } from '../components/ui';
+import { parsePprInput, playerPpr } from '../domain/players/strength';
+import { PPR_MAX } from '../domain/types';
 import { Icon } from '../components/icons';
 
 /**
  * PLAYERS screen (spec §3, §26).
  *
- * Rating is optional everywhere: the input accepts an empty value and stores `null`,
- * which the optimizer treats as Unknown — never as 0.
+ * Rating and PPR are optional everywhere: an empty box stores `null`, which the
+ * optimizer treats as Unknown — never as 0.
  */
 export function PlayersPage(): React.JSX.Element {
   const store = useAppStore();
@@ -44,6 +46,7 @@ export function PlayersPage(): React.JSX.Element {
       teamId: store.activeTeamId,
       name: '',
       rating: null,
+      ppr: null,
       skills: {},
       seasonAppearances: 0,
       seasonAppearancesByKind: {},
@@ -65,7 +68,8 @@ export function PlayersPage(): React.JSX.Element {
         </Field>
         <p className="tiny muted" style={{ margin: 0 }}>
           {store.teamPlayers.length} 名登録 ・ Rating 未入力{' '}
-          {store.teamPlayers.filter((player) => player.rating === null).length} 名
+          {store.teamPlayers.filter((player) => player.rating === null).length} 名 ・ PPR 未入力{' '}
+          {store.teamPlayers.filter((player) => playerPpr(player) === null).length} 名
         </p>
       </Card>
 
@@ -84,14 +88,20 @@ export function PlayersPage(): React.JSX.Element {
                   </span>
                   <span className="grow">
                     <span className="title">{player.name || '(名称未設定)'}</span>
+                    <span
+                      className={
+                        player.rating === null && playerPpr(player) === null
+                          ? 'strength-line unknown'
+                          : 'strength-line'
+                      }
+                    >
+                      {formatStrengthLine(player)}
+                    </span>
                     <span className="meta">
                       シーズン {player.seasonAppearances} 回
                       {Object.keys(player.skills).length > 0 ? ' ・ 適性設定あり' : ''}
                       {player.archived ? ' ・ 休止中' : ''}
                     </span>
-                  </span>
-                  <span className={player.rating === null ? 'side rt unknown' : 'side rt'}>
-                    {formatRating(player.rating)}
                   </span>
                   <Icon name="chevronRight" size={18} className="chevron" />
                 </button>
@@ -161,8 +171,18 @@ function PlayerEditor({
   onDelete: () => void;
 }): React.JSX.Element {
   const [draft, setDraft] = useState<Player>(player);
-  // The rating field is kept as text so an empty box can mean "Unknown" rather than 0.
+  // Both strength fields are kept as text so an empty box can mean "Unknown" rather than 0.
   const [ratingText, setRatingText] = useState(player.rating === null ? '' : String(player.rating));
+  const initialPpr = playerPpr(player);
+  const [pprText, setPprText] = useState(initialPpr === null ? '' : String(initialPpr));
+  const pprParsed = parsePprInput(pprText);
+  const pprError = pprParsed.ok ? null : pprParsed.message;
+
+  const save = (): void => {
+    // An invalid PPR is never saved silently as Unknown: the captain sees why instead.
+    if (!pprParsed.ok) return;
+    onSave({ ...draft, ppr: pprParsed.value });
+  };
 
   const commitRating = (text: string): void => {
     setRatingText(text);
@@ -189,7 +209,7 @@ function PlayerEditor({
               削除
             </button>
           ) : null}
-          <button type="button" className="btn primary grow" onClick={() => onSave(draft)}>
+          <button type="button" className="btn primary grow" onClick={save} disabled={pprError !== null}>
             保存
           </button>
         </>
@@ -205,19 +225,42 @@ function PlayerEditor({
         />
       </Field>
 
-      <Field
-        label="Rating (任意)"
-        hint="空欄のままで構いません。未入力は 0 ではなく「不明」として扱い、参加者の中央値で評価します。"
-      >
-        <input
-          type="number"
-          inputMode="decimal"
-          step="0.01"
-          value={ratingText}
-          onChange={(event) => commitRating(event.target.value)}
-          placeholder="未入力 = 不明"
-        />
-      </Field>
+      <div className="field-pair">
+        <Field label="Rating (任意)">
+          <input
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            value={ratingText}
+            onChange={(event) => commitRating(event.target.value)}
+            placeholder="例: 14"
+          />
+        </Field>
+        <label className="field">
+          <span>PPR Average (任意)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min={0}
+            max={PPR_MAX}
+            value={pprText}
+            onChange={(event) => setPprText(event.target.value)}
+            placeholder="例: 72.45"
+            aria-invalid={pprError !== null}
+            aria-describedby={pprError ? 'ppr-error' : undefined}
+          />
+        </label>
+      </div>
+      {pprError ? (
+        <p className="field-error" id="ppr-error" role="alert">
+          {pprError}
+        </p>
+      ) : null}
+      <p className="hint field-pair-hint">
+        どちらも空欄で構いません。未入力は 0 ではなく「不明」として扱い、参加者の中央値で評価します。
+        PPR は 0〜{PPR_MAX} (小数可)。
+      </p>
 
       <div className="field">
         <span>ゲーム適性 (任意・1〜5)</span>

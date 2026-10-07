@@ -152,6 +152,7 @@ const EMPTY: AppData = {
       gameFit: 0.5,
       pairFit: 0.4,
       fairness: 0.9,
+      roleFairness: 0.3,
       novelty: 0.05,
       consecutive: 0.5,
       season: 0.25,

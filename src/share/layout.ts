@@ -59,11 +59,20 @@ function ratingLabel(
   playerId: PlayerId,
 ): string {
   const tally = solution.tallies.find((entry) => entry.playerId === playerId);
-  if (!tally || tally.effectiveRating === null) return 'Rt.—';
-  const value = Number.isInteger(tally.effectiveRating)
-    ? String(tally.effectiveRating)
-    : tally.effectiveRating.toFixed(1);
-  return `Rt.${value}${tally.ratingImputed ? '*' : ''}`;
+  if (!tally) return 'Rt.—';
+  const rating =
+    tally.effectiveRating === null
+      ? 'Rt.—'
+      : `Rt.${
+          Number.isInteger(tally.effectiveRating)
+            ? String(tally.effectiveRating)
+            : tally.effectiveRating.toFixed(1)
+        }${tally.ratingImputed ? '*' : ''}`;
+  // PPR is quoted only when someone entered one; orders saved before PPR have none.
+  const ppr = tally.effectivePpr;
+  if (ppr === undefined || ppr === null) return rating;
+  const pprText = Number.isInteger(ppr) ? String(ppr) : String(Math.round(ppr * 100) / 100);
+  return `${rating} · PPR ${pprText}${tally.pprImputed ? '*' : ''}`;
 }
 
 export function buildGameRows(
@@ -119,8 +128,8 @@ export function buildShareLayout(
 
   const notes: string[] = [];
   if (variant === 'detail') {
-    if (solution.metrics.hasImputedRating) {
-      notes.push('* Rating 未入力の選手は参加者の中央値を暫定値として扱っています');
+    if (solution.metrics.hasImputedRating || solution.tallies.some((entry) => entry.pprImputed)) {
+      notes.push('* Rating / PPR 未入力の選手は参加者の中央値を暫定値として扱っています');
     }
     if (solution.tallies.every((entry) => entry.effectiveRating === null)) {
       notes.push('* Rating は未登録です');

@@ -25,26 +25,29 @@ const MAX_PAGE_HEIGHT = 1400;
 const MAX_PIXELS = 12_000_000;
 
 /**
- * Arena Scoreboard palette — the same tokens as the app (src/styles/app.css). Status
- * colours appear only on the version badge; the order itself is white on graphite so it
- * stays legible when LINE shrinks the image to a thumbnail.
+ * Light Match Sheet palette — the same tokens as the app (src/styles/app.css). Status
+ * colours appear only on the version badge. The order itself is near-black ink on white
+ * cards with ruled edges, which is what stays legible when LINE shrinks the image to a
+ * thumbnail: the cards keep a visible border against the paper background.
  */
 const COLORS = {
-  background: '#0d0f12',
-  panel: '#12161b',
-  card: '#171c22',
-  numberPanel: '#1d242c',
-  line: '#2a323b',
-  lineStrong: '#394652',
-  accent: '#22d3ee',
-  text: '#f4f7fa',
-  secondary: '#b4bec9',
-  muted: '#87929e',
-  rings: 'rgba(34, 211, 238, 0.08)',
+  background: '#f4f3ef',
+  panel: '#ffffff',
+  card: '#ffffff',
+  cardEdge: '#b8c2c9',
+  numberPanel: '#f8f7f3',
+  line: '#d7dde1',
+  lineStrong: '#b8c2c9',
+  accent: '#087f8c',
+  accentText: '#076f7a',
+  text: '#172026',
+  secondary: '#4f5d67',
+  muted: '#5a6670',
+  rings: 'rgba(8, 127, 140, 0.07)',
   tone: {
-    draft: '#fbbf24',
-    finalized: '#34d399',
-    updated: '#fb923c',
+    draft: '#8a5800',
+    finalized: '#1a7443',
+    updated: '#ae4a0c',
   },
 };
 
@@ -166,7 +169,7 @@ function buildHeaderBlock(ctx: CanvasRenderingContext2D, layout: ShareLayout): B
       let y = top + 18;
       target.textAlign = 'center';
 
-      target.fillStyle = COLORS.accent;
+      target.fillStyle = COLORS.accentText;
       target.font = font(14, 'heavy');
       setTracking(target, 2.5);
       for (const line of titleLines) {
@@ -286,7 +289,8 @@ function buildGameBlock(ctx: CanvasRenderingContext2D, row: ShareLayout['games']
       target.fillStyle = COLORS.card;
       drawRoundedRect(target, PAD, top, WIDTH - PAD * 2, cardHeight, 14);
 
-      // Number panel, clipped to the card's rounded corners.
+      // Number column of a score sheet, clipped to the card's rounded corners: paper
+      // panel, a teal edge, and an ink rule between number and names.
       target.save();
       roundedRectPath(target, PAD, top, WIDTH - PAD * 2, cardHeight, 14);
       target.clip();
@@ -294,7 +298,12 @@ function buildGameBlock(ctx: CanvasRenderingContext2D, row: ShareLayout['games']
       target.fillRect(PAD, top, numberWidth, cardHeight);
       target.fillStyle = COLORS.accent;
       target.fillRect(PAD, top, 4, cardHeight);
+      target.fillStyle = COLORS.text;
+      target.fillRect(PAD + numberWidth - 2, top, 2, cardHeight);
       target.restore();
+      target.strokeStyle = COLORS.cardEdge;
+      target.lineWidth = 1.5;
+      strokeRoundedRect(target, PAD, top, WIDTH - PAD * 2, cardHeight, 14);
 
       target.textAlign = 'center';
       target.fillStyle = COLORS.muted;
@@ -369,6 +378,9 @@ function buildTallyRowBlock(
         const x = PAD + index * (cellWidth + gap);
         target.fillStyle = COLORS.card;
         drawRoundedRect(target, x, top, cellWidth, cardHeight, 10);
+        target.strokeStyle = COLORS.cardEdge;
+        target.lineWidth = 1.5;
+        strokeRoundedRect(target, x, top, cellWidth, cardHeight, 10);
 
         let y = top + 12;
         target.fillStyle = COLORS.text;
@@ -413,7 +425,7 @@ function buildNoteBlock(ctx: CanvasRenderingContext2D, text: string): Block {
   };
 }
 
-/** Background shared by every page: graphite, a cyan top rule and faint dartboard rings. */
+/** Background shared by every page: warm paper, a teal top rule and faint dartboard rings. */
 function drawBackdrop(ctx: CanvasRenderingContext2D, height: number): void {
   ctx.fillStyle = COLORS.background;
   ctx.fillRect(0, 0, WIDTH, height);

@@ -9,6 +9,9 @@ import type {
 } from '../domain/types';
 import { GAME_KINDS, PAIR_AFFINITIES } from '../domain/types';
 import { mergeDefined } from '../utils/merge';
+import { asDiscipline } from '../domain/types';
+import { normaliseSavedOrder } from '../domain/normalise';
+import { parsePprInput } from '../domain/players/strength';
 import { DEFAULT_SETTINGS, type Snapshot } from './repository';
 
 /**
@@ -62,6 +65,13 @@ function asRating(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+/** A PPR from a backup: a number within 0..180, otherwise Unknown (never 0). */
+function asBackupPpr(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const parsed = parsePprInput(String(value));
+  return parsed.ok ? parsed.value : null;
+}
+
 function asBoolean(value: unknown, fallback = false): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
@@ -86,6 +96,21 @@ function parseKindCounts(value: unknown): Player['seasonAppearancesByKind'] {
     if (typeof count === 'number' && Number.isFinite(count)) counts[kind] = Math.max(0, Math.round(count));
   }
   return counts;
+}
+
+function hasArrays(value: unknown, keys: readonly string[]): boolean {
+  return isRecord(value) && keys.every((key) => Array.isArray(value[key]));
+}
+
+/** True when a saved order carries the nested arrays the app and the upgrade read. */
+function isUsableOrder(row: Record<string, unknown>): boolean {
+  if (!hasArrays(row.input, ['games', 'players', 'participants'])) return false;
+  if (!hasArrays(row.solution, ['assignments'])) return false;
+  if (row.versions === undefined) return true;
+  return (
+    Array.isArray(row.versions) &&
+    row.versions.every((version) => hasArrays(version, ['games', 'players', 'assignments']))
+  );
 }
 
 /**
@@ -142,6 +167,8 @@ export function parseBackup(raw: string): ImportResult {
       teamId: asString(row.teamId),
       name: asString(row.name, '名称未設定'),
       rating: asRating(row.rating),
+      // Backups written before PPR existed have no `ppr`: Unknown, never 0.
+      ppr: asBackupPpr(row.ppr),
       skills: parseSkills(row.skills),
       note: typeof row.note === 'string' ? row.note : undefined,
       seasonAppearances: Math.max(0, Math.round(asNumber(row.seasonAppearances, 0))),
@@ -158,6 +185,8 @@ export function parseBackup(raw: string): ImportResult {
       teamId: typeof row.teamId === 'string' ? row.teamId : null,
       name: asString(row.name, '名称未設定フォーマット'),
       note: typeof row.note === 'string' ? row.note : undefined,
+      // Never guessed from the name: an old backup's format is UNSPECIFIED.
+      discipline: asDiscipline(row.discipline),
       games: (Array.isArray(row.games) ? row.games : [])
         .filter(isRecord)
         .map((game, index) => ({
@@ -196,15 +225,26 @@ export function parseBackup(raw: string): ImportResult {
     })
     .filter((pair) => pair.id !== '' && pair.a !== '' && pair.b !== '');
 
-  const orders: SavedOrder[] = (Array.isArray(data.orders) ? data.orders : [])
+  const orderRows = (Array.isArray(data.orders) ? data.orders : [])
     .filter(isRecord)
-    .filter((row) => typeof row.id === 'string' && isRecord(row.input) && isRecord(row.solution))
-    .map((row) => ({
-      ...(row as unknown as SavedOrder),
-      // Backups written before versioning existed carry no versions: those orders are
-      // read back as drafts rather than being rejected.
-      versions: Array.isArray(row.versions) ? (row.versions as SavedOrder['versions']) : [],
-    }));
+    .filter((row) => typeof row.id === 'string' && isRecord(row.input) && isRecord(row.solution));
+  // An order whose snapshot lacks the arrays every screen reads cannot be opened, and
+  // upgrading it would throw: it is skipped with a warning instead of failing the import.
+  const usableOrders = orderRows.filter(isUsableOrder);
+  if (usableOrders.length < orderRows.length) {
+    warnings.push(
+      `構造が壊れているオーダー ${orderRows.length - usableOrders.length} 件を読み込みませんでした。`,
+    );
+  }
+  const orders: SavedOrder[] = usableOrders
+    .map((row) =>
+      normaliseSavedOrder({
+        ...(row as unknown as SavedOrder),
+        // Backups written before versioning existed carry no versions: those orders are
+        // read back as drafts rather than being rejected.
+        versions: Array.isArray(row.versions) ? (row.versions as SavedOrder['versions']) : [],
+      }),
+    );
 
   const seasonCommits: SeasonCommit[] = (Array.isArray(data.seasonCommits) ? data.seasonCommits : [])
     .filter(isRecord)

@@ -6,17 +6,26 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5"
     />
-    <meta name="theme-color" content="#0b1119" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="color-scheme" content="light" />
     <meta
       name="description"
       content="ダーツリーグのオーダーを、メンバー・Rating・適性・出場条件・公平性を考慮して自動生成・調整できるオフライン対応アプリ"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Darts Order" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>Darts League Order Optimizer</title>
+    <!-- Paper background before the stylesheet arrives, so a cold start never flashes dark. -->
+    <style>
+      html,
+      body {
+        background: #f4f3ef;
+        color: #172026;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

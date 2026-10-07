@@ -1,6 +1,7 @@
 import type { ScoreBreakdown } from '../../domain/types';
 import { evaluateFairness, excessToPenalty, type FairnessResult } from '../../domain/orders/fairness';
 import { consecutiveExcess, longestRun } from '../../domain/orders/consecutive';
+import { evaluateRoleFairness, type RoleFairnessResult } from '../../domain/orders/roleFairness';
 import { mean } from '../../utils/math';
 import type { Combo } from '../candidates/combinations';
 import type { PreparedContext } from '../prepare';
@@ -12,6 +13,7 @@ import type { PreparedContext } from '../prepare';
  *         + w_gameFit     * GameFit
  *         + w_pairFit     * PairFit
  *         + w_fairness    * Fairness
+ *         + w_role        * RoleFairness
  *         + w_novelty     * PairNovelty
  *         - w_consecutive * ConsecutivePenalty
  *         - w_season      * SeasonImbalance
@@ -28,12 +30,18 @@ export interface Evaluation {
   /** Per-player appearance game indices. */
   appearances: number[][];
   fairness: FairnessResult;
+  /** Spread of each structural role (Singles, Doubles, …) across players. */
+  roleFairness: RoleFairnessResult;
+  /** `roleCounts[group][player]`: appearances inside each role group. */
+  roleCounts: number[][];
   /** Fairness measured on season-inclusive totals (always, regardless of scope). */
   seasonFairness: FairnessResult;
   consecutiveExcessTotal: number;
   maxConsecutive: number;
   /** Mean effective rating across filled slots, or `null` if no rating is known. */
   averageRating: number | null;
+  /** Mean effective PPR across filled slots, or `null` if no PPR is known. */
+  averagePpr: number | null;
   strengthRaw: number;
   gameFitRaw: number;
   pairFitRaw: number;
@@ -44,21 +52,24 @@ export interface Evaluation {
 export function tallySelection(
   ctx: PreparedContext,
   selection: readonly Combo[],
-): { counts: number[]; appearances: number[][] } {
+): { counts: number[]; appearances: number[][]; roleCounts: number[][] } {
   const counts = new Array<number>(ctx.playerCount).fill(0);
   const appearances: number[][] = Array.from({ length: ctx.playerCount }, () => []);
+  const roleCounts = ctx.roleGroups.map(() => new Array<number>(ctx.playerCount).fill(0));
   for (let gi = 0; gi < selection.length; gi += 1) {
+    const role = roleCounts[ctx.roleOfGame[gi]];
     for (const member of selection[gi].members) {
       counts[member] += 1;
       appearances[member].push(gi);
+      if (role) role[member] += 1;
     }
   }
-  return { counts, appearances };
+  return { counts, appearances, roleCounts };
 }
 
 export function positiveWeightSum(ctx: PreparedContext): number {
   const w = ctx.weights;
-  return w.strength + w.gameFit + w.pairFit + w.fairness + w.novelty;
+  return w.strength + w.gameFit + w.pairFit + w.fairness + w.roleFairness + w.novelty;
 }
 
 export function negativeWeightSum(ctx: PreparedContext): number {
@@ -78,7 +89,7 @@ export function evaluateSelection(
   ctx: PreparedContext,
   selection: readonly Combo[],
 ): Evaluation {
-  const { counts, appearances } = tallySelection(ctx, selection);
+  const { counts, appearances, roleCounts } = tallySelection(ctx, selection);
 
   const strengthRaw = selection.length === 0 ? 0 : mean(selection.map((c) => c.strength));
   const gameFitRaw = selection.length === 0 ? 0 : mean(selection.map((c) => c.gameFit));
@@ -89,6 +100,7 @@ export function evaluateSelection(
 
   const fairness = evaluateFairness(ctx.fairnessBaseline, counts);
   const seasonFairness = evaluateFairness(ctx.seasonBaseline, counts);
+  const roleFairness = evaluateRoleFairness(ctx.roleGroups, roleCounts);
 
   let excessTotal = 0;
   let maxConsecutive = 0;
@@ -106,26 +118,31 @@ export function evaluateSelection(
     w.gameFit * gameFitRaw +
     w.pairFit * pairFitRaw +
     w.fairness * fairness.score +
+    w.roleFairness * roleFairness.score +
     w.novelty * noveltyRaw -
     w.consecutive * consecutivePenalty -
     ctx.effectiveSeasonWeight * seasonImbalance;
 
   // Mean effective rating over filled slots (weighted by appearances, which is what a
   // captain reads as "this line-up's average rating").
-  let ratingSum = 0;
-  let ratingSlots = 0;
-  for (let pi = 0; pi < ctx.playerCount; pi += 1) {
-    const value = ctx.ratings.effective.get(ctx.playerIds[pi]);
-    if (value === null || value === undefined) continue;
-    ratingSum += value * counts[pi];
-    ratingSlots += counts[pi];
-  }
+  const slotAverage = (values: Map<string, number | null>): number | null => {
+    let sum = 0;
+    let slots = 0;
+    for (let pi = 0; pi < ctx.playerCount; pi += 1) {
+      const value = values.get(ctx.playerIds[pi]);
+      if (value === null || value === undefined) continue;
+      sum += value * counts[pi];
+      slots += counts[pi];
+    }
+    return slots > 0 ? sum / slots : null;
+  };
 
   const breakdown: ScoreBreakdown = {
     strength: strengthRaw,
     gameFit: gameFitRaw,
     pairFit: pairFitRaw,
     fairness: fairness.score,
+    roleFairness: roleFairness.score,
     novelty: noveltyRaw,
     consecutivePenalty,
     seasonImbalance,
@@ -138,10 +155,13 @@ export function evaluateSelection(
     counts,
     appearances,
     fairness,
+    roleFairness,
+    roleCounts,
     seasonFairness,
     consecutiveExcessTotal: excessTotal,
     maxConsecutive,
-    averageRating: ratingSlots > 0 ? ratingSum / ratingSlots : null,
+    averageRating: slotAverage(ctx.ratings.effective),
+    averagePpr: slotAverage(ctx.pprs.effective),
     strengthRaw,
     gameFitRaw,
     pairFitRaw,

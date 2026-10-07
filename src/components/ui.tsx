@@ -8,7 +8,9 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { OrderLifecycleState } from '../domain/types';
+import type { DartsDiscipline, OrderLifecycleState } from '../domain/types';
+import { DARTS_DISCIPLINE_TAGS } from '../domain/types';
+import { formatPpr } from '../domain/players/strength';
 import { Icon, type IconName } from './icons';
 
 /**
@@ -237,6 +239,12 @@ export function Sheet({
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  // Where the current press started and ended. A `click` is dispatched on the nearest
+  // common ancestor of the press and release targets, so a text selection dragged from an
+  // input out onto the backdrop arrives as a click whose target *is* the backdrop. Only a
+  // press that both started and ended on the backdrop itself is a request to dismiss.
+  const pressStartedOnBackdrop = useRef(false);
+  const pressEndedOnBackdrop = useRef(false);
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
@@ -256,8 +264,27 @@ export function Sheet({
     <div
       className="sheet-backdrop"
       role="presentation"
+      // Nothing here calls preventDefault: native selection, copy / cut / paste and the
+      // context menu inside the sheet behave exactly as they do anywhere else.
+      onPointerDown={(event) => {
+        pressStartedOnBackdrop.current = event.target === event.currentTarget;
+        pressEndedOnBackdrop.current = false;
+      }}
+      onPointerUp={(event) => {
+        pressEndedOnBackdrop.current = event.target === event.currentTarget;
+      }}
+      onPointerCancel={() => {
+        pressStartedOnBackdrop.current = false;
+        pressEndedOnBackdrop.current = false;
+      }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        const dismiss =
+          event.target === event.currentTarget &&
+          pressStartedOnBackdrop.current &&
+          pressEndedOnBackdrop.current;
+        pressStartedOnBackdrop.current = false;
+        pressEndedOnBackdrop.current = false;
+        if (dismiss) onClose();
       }}
     >
       <div
@@ -474,4 +501,27 @@ export function formatRating(rating: number | null | undefined): string {
   if (rating === null || rating === undefined || !Number.isFinite(rating)) return 'Rt. —';
   const text = Number.isInteger(rating) ? String(rating) : rating.toFixed(1);
   return `Rt.${text}`;
+}
+
+/**
+ * One-line strength summary for a player: `Rt.14 · PPR 68.4`, only the value that is
+ * known when the other is not, or `戦力データ未設定` when neither is — never "0".
+ */
+export function formatStrengthLine(player: { rating: number | null; ppr?: number | null }): string {
+  const parts: string[] = [];
+  if (player.rating !== null && Number.isFinite(player.rating)) parts.push(formatRating(player.rating));
+  if (player.ppr !== null && player.ppr !== undefined && Number.isFinite(player.ppr)) {
+    parts.push(formatPpr(player.ppr));
+  }
+  return parts.length > 0 ? parts.join(' · ') : '戦力データ未設定';
+}
+
+/** Discipline badge: `SOFT` / `STEEL` / `未設定`, with an icon so colour is never alone. */
+export function DisciplineBadge({ discipline }: { discipline: DartsDiscipline }): React.JSX.Element {
+  return (
+    <span className={`discipline-badge d-${discipline.toLowerCase()}`}>
+      <Icon name="target" size={12} strokeWidth={2.6} />
+      {DARTS_DISCIPLINE_TAGS[discipline]}
+    </span>
+  );
 }

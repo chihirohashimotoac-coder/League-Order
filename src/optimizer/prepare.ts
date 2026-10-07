@@ -1,4 +1,5 @@
 import type {
+  DartsDiscipline,
   GameSlotDef,
   LockEntry,
   OrderInput,
@@ -6,12 +7,16 @@ import type {
   Player,
   PlayerId,
   ScoreWeights,
+  StrengthWeights,
 } from '../domain/types';
 import { sortedGames, totalSlots } from '../domain/games/format';
 import { buildPairLookup } from '../domain/games/pairKey';
 import { PAIR_AFFINITY_VALUES } from '../domain/types';
 import { playerGameFit } from '../domain/players/skills';
-import { normaliseRating, resolveRatings, type ResolvedRatings } from '../domain/players/rating';
+import type { ResolvedRatings } from '../domain/players/rating';
+import { resolveStrength, type ResolvedMetric, type StrengthModel } from '../domain/players/strength';
+import { buildRoleGroups, type RoleGroup } from '../domain/orders/roleFairness';
+import { normaliseOrderInput } from '../domain/normalise';
 import {
   maxAppearancesFor,
   maxConsecutiveFor,
@@ -39,8 +44,25 @@ export interface PreparedContext {
   eligible: boolean[][];
   eligibleLists: number[][];
   ratings: ResolvedRatings;
+  pprs: ResolvedMetric;
   /** Normalised 0..1 rating per player index. */
   normRating: number[];
+  /** Normalised 0..1 PPR per player index. */
+  normPpr: number[];
+  /**
+   * Composite 0..1 strength per player index: the discipline's blend of `normRating`
+   * and `normPpr` (see `domain/players/strength.ts`). This — not either raw metric —
+   * is what the strength term scores.
+   */
+  strength: number[];
+  /** The blend actually applied (after dropping metrics nobody has). */
+  strengthWeights: StrengthWeights;
+  discipline: DartsDiscipline;
+  strengthModel: StrengthModel;
+  /** Structural roles present in the format (Singles, Doubles, …), for role fairness. */
+  roleGroups: RoleGroup[];
+  /** `roleOfGame[gameIndex]` = index into `roleGroups`. */
+  roleOfGame: number[];
   /** `gameFit[gameIndex][playerIndex]`, 0..1. */
   gameFit: number[][];
   /** `pairValue[a][b]`, 0..1 soft affinity value. */
@@ -75,7 +97,10 @@ function buildMatrix<T>(rows: number, cols: number, value: T): T[][] {
   return Array.from({ length: rows }, () => new Array<T>(cols).fill(value));
 }
 
-export function prepare(input: OrderInput): PreparedContext {
+export function prepare(rawInput: OrderInput): PreparedContext {
+  // Inputs saved by older builds lack PPR, the discipline and the role weight; they are
+  // read as Unknown / UNSPECIFIED / the preset's value rather than breaking the run.
+  const input = normaliseOrderInput(rawInput);
   const games = sortedGames(input.games);
   const playerById = new Map(input.players.map((player) => [player.id, player]));
 
@@ -91,10 +116,17 @@ export function prepare(input: OrderInput): PreparedContext {
   const n = playerIds.length;
   const g = games.length;
 
-  const ratings = resolveRatings(input.players, input.participants);
-  const normRating = players.map((player) =>
-    normaliseRating(ratings.effective.get(player.id) ?? null, ratings),
-  );
+  const strengthModel = resolveStrength(input.discipline, input.players, input.participants);
+  const { ratings, pprs } = strengthModel;
+  const normRating = players.map((player) => strengthModel.normRating.get(player.id) ?? 0.5);
+  const normPpr = players.map((player) => strengthModel.normPpr.get(player.id) ?? 0.5);
+  const strength = players.map((player) => strengthModel.strength.get(player.id) ?? 0.5);
+
+  const roleGroups = buildRoleGroups(games, n);
+  const roleOfGame = new Array<number>(g).fill(0);
+  roleGroups.forEach((group, groupIndex) => {
+    for (const gi of group.gameIndices) roleOfGame[gi] = groupIndex;
+  });
 
   const eligible = buildMatrix(g, n, false);
   const eligibleLists: number[][] = [];
@@ -204,7 +236,15 @@ export function prepare(input: OrderInput): PreparedContext {
     eligible,
     eligibleLists,
     ratings,
+    pprs,
     normRating,
+    normPpr,
+    strength,
+    strengthWeights: strengthModel.weights,
+    discipline: input.discipline,
+    strengthModel,
+    roleGroups,
+    roleOfGame,
     gameFit,
     pairValue,
     pairForbidden,

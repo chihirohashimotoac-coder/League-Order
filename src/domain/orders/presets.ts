@@ -6,6 +6,11 @@ import type { FairnessScope, OptimizerSettings, PresetKey, ScoreWeights } from '
  * `fairness` is deliberately never 0 — even the win-first preset keeps a meaningful
  * fairness pull, which together with the hard max-appearance cap prevents unbounded
  * bias toward the strongest players (spec §11, §32).
+ *
+ * The three compared presets differ in character, not just in degree (追補 v1.3 §V4):
+ * win-first lets a clearly stronger player take one extra game and two Singles; balanced
+ * keeps the totals even and limits Singles concentration; fairness-first minimises the
+ * total spread, role concentration and consecutive runs.
  */
 export interface PresetDefinition {
   key: PresetKey;
@@ -20,36 +25,36 @@ export const PRESETS: Record<Exclude<PresetKey, 'CUSTOM'>, PresetDefinition> = {
   WIN_FIRST: {
     key: 'WIN_FIRST',
     label: '勝利優先',
-    description: 'Rating と適性を最重視。公平性も完全には無視しません。',
-    weights: { strength: 1, gameFit: 0.8, pairFit: 0.35, fairness: 0.4, novelty: 0, consecutive: 0.4, season: 0.1 },
+    description: 'Rating・PPR と適性を最重視。強い選手の +1 試合は許容しますが、Singles の独占や誰かの 0 出場は避けます。',
+    weights: { strength: 1, gameFit: 0.8, pairFit: 0.35, fairness: 0.25, roleFairness: 0.18, novelty: 0, consecutive: 0.35, season: 0.05 },
     scope: 'today',
   },
   BALANCED: {
     key: 'BALANCED',
     label: 'バランス',
-    description: '戦力と出場機会の均等を両立させます。',
-    weights: { strength: 0.6, gameFit: 0.5, pairFit: 0.4, fairness: 0.9, novelty: 0.05, consecutive: 0.5, season: 0.25 },
+    description: '戦力と出場機会の均等を両立させます。Singles などの集中も抑えます。',
+    weights: { strength: 0.6, gameFit: 0.5, pairFit: 0.4, fairness: 0.9, roleFairness: 0.3, novelty: 0.05, consecutive: 0.5, season: 0.25 },
     scope: 'today',
   },
   FAIRNESS_FIRST: {
     key: 'FAIRNESS_FIRST',
     label: '公平性優先',
-    description: '出場回数の均等化を最優先します。',
-    weights: { strength: 0.2, gameFit: 0.2, pairFit: 0.25, fairness: 2, novelty: 0.05, consecutive: 0.6, season: 0.5 },
+    description: '出場回数・役割 (Singles 等) の分担・連続出場の均等化を最優先します。',
+    weights: { strength: 0.15, gameFit: 0.15, pairFit: 0.2, fairness: 2, roleFairness: 1.6, novelty: 0.05, consecutive: 0.9, season: 0.5 },
     scope: 'today',
   },
   DEVELOPMENT: {
     key: 'DEVELOPMENT',
     label: '育成重視',
     description: 'シーズン累計の出場が少ない選手を優先的に起用します。',
-    weights: { strength: 0.15, gameFit: 0.25, pairFit: 0.3, fairness: 1.2, novelty: 0.1, consecutive: 0.5, season: 1.4 },
+    weights: { strength: 0.15, gameFit: 0.25, pairFit: 0.3, fairness: 1.2, roleFairness: 0.6, novelty: 0.1, consecutive: 0.5, season: 1.4 },
     scope: 'season',
   },
   NEW_PAIR: {
     key: 'NEW_PAIR',
     label: '新ペア試行',
     description: '過去に組んだ回数が少ないペアを優先します。',
-    weights: { strength: 0.4, gameFit: 0.4, pairFit: 0.3, fairness: 0.8, novelty: 1.2, consecutive: 0.5, season: 0.2 },
+    weights: { strength: 0.4, gameFit: 0.4, pairFit: 0.3, fairness: 0.8, roleFairness: 0.5, novelty: 1.2, consecutive: 0.5, season: 0.2 },
     scope: 'today',
   },
 };

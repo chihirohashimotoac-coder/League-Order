@@ -83,6 +83,7 @@ async function seededWithOrder(): Promise<{
       preset: 'BALANCED',
       weights: seed.settings.customWeights,
       settings: seed.settings.optimizer,
+      discipline: 'UNSPECIFIED',
     },
     solution: {
       assignments: [],

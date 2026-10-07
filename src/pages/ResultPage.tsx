@@ -12,6 +12,7 @@ import type {
   SeasonCommitStatus,
 } from '../domain/types';
 import { GAME_KIND_LABELS } from '../domain/types';
+import { describeStrengthWeights, formatPpr } from '../domain/players/strength';
 import { sortedGames } from '../domain/games/format';
 import {
   diffVersionWithCurrent,
@@ -33,6 +34,7 @@ import {
   Bar,
   Card,
   ConfirmDialog,
+  DisciplineBadge,
   EmptyState,
   Metric,
   STATE_META,
@@ -176,6 +178,8 @@ export function ResultPage({
               onSelect={(index) => dispatch({ type: 'selectCandidate', index })}
             />
           ) : null}
+
+          <StrengthBasis solution={solution} />
 
           {state.edited ? (
             <div className="notice info">
@@ -531,7 +535,9 @@ function CandidateGrid({
             key={`${candidate.meta.label}-${index}`}
             className="candidate-tab"
             aria-pressed={selected === index}
-            aria-label={`候補 ${letter}: ${candidate.meta.label} (総合 ${candidate.score.display})`}
+            aria-label={`候補 ${letter}: ${candidate.meta.label} (総合 ${candidate.score.display})${
+              candidate.meta.alternativeTo ? ` ${candidate.meta.alternativeTo}と同じ最適解のため次点` : ''
+            }`}
             onClick={() => onSelect(index)}
           >
             <span className="c-head">
@@ -545,11 +551,20 @@ function CandidateGrid({
             <dl>
               <dt>出場差</dt>
               <dd>{candidate.metrics.appearanceSpread}</dd>
+              {candidate.metrics.maxRoleConcentration !== undefined ? (
+                <>
+                  <dt title="同じ役割 (Singles 等) を 1 人が担う最多回数">役割最多</dt>
+                  <dd>{candidate.metrics.maxRoleConcentration}</dd>
+                </>
+              ) : null}
               <dt>連続</dt>
               <dd>{candidate.metrics.maxConsecutive}</dd>
               <dt>平均</dt>
               <dd>{formatRating(candidate.metrics.averageRating)}</dd>
             </dl>
+            {candidate.meta.alternativeTo ? (
+              <span className="c-note">{candidate.meta.alternativeTo}と同じ最適解のため次点</span>
+            ) : null}
             <span className="c-current">
               <Icon name="check" size={13} strokeWidth={3} />
               選択中
@@ -557,6 +572,34 @@ function CandidateGrid({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Strength basis
+// ---------------------------------------------------------------------------
+
+/**
+ * "戦力評価 Rating 70% / PPR 30%": what "strong" meant for this order. Hidden for orders
+ * saved before the blend was recorded, rather than guessing what it was.
+ */
+function StrengthBasis({ solution }: { solution: OrderSolution }): React.JSX.Element | null {
+  const weights = solution.metrics.strengthWeights;
+  const discipline = solution.metrics.discipline;
+  if (!weights || !discipline) return null;
+  const blend = describeStrengthWeights(weights);
+  return (
+    <div className="strength-basis" data-testid="result-strength-basis">
+      <DisciplineBadge discipline={discipline} />
+      <span className="grow">
+        <span className="basis-title">{blend ? `戦力評価 ${blend}` : '戦力評価なし'}</span>
+        <span className="basis-note">
+          {blend
+            ? 'Rating と PPR をそれぞれ参加者内で 0〜1 に正規化してから合成しています。'
+            : 'Rating・PPR に差が無いため、適性と公平性で生成しています。'}
+        </span>
+      </span>
     </div>
   );
 }
@@ -751,6 +794,9 @@ function AppearanceSummary({
         />
         <Metric label="最大連続" value={solution.metrics.maxConsecutive} />
         <Metric label="平均 Rt." value={solution.metrics.averageRating ?? '—'} />
+        {solution.metrics.strengthWeights && solution.metrics.strengthWeights.ppr > 0 ? (
+          <Metric label="平均 PPR" value={solution.metrics.averagePpr ?? '—'} />
+        ) : null}
         <Metric label="総枠" value={solution.metrics.totalSlots} />
       </div>
       <ul className="tally-list" aria-label="選手ごとの出場回数">
@@ -760,7 +806,11 @@ function AppearanceSummary({
               <span className="t-name">{nameById.get(tally.playerId) ?? tally.playerId}</span>
               <span className="t-sub">
                 {formatRating(tally.effectiveRating)}
-                {tally.ratingImputed ? '*' : ''} ・ シーズン {tally.seasonTotal}
+                {tally.ratingImputed ? '*' : ''}
+                {tally.effectivePpr !== undefined && tally.effectivePpr !== null
+                  ? ` · ${formatPpr(tally.effectivePpr)}${tally.pprImputed ? '*' : ''}`
+                  : ''}{' '}
+                ・ シーズン {tally.seasonTotal}
               </span>
             </span>
             <span className="pips" aria-hidden="true">
@@ -775,9 +825,9 @@ function AppearanceSummary({
           </li>
         ))}
       </ul>
-      {solution.metrics.hasImputedRating ? (
+      {solution.metrics.hasImputedRating || solution.tallies.some((tally) => tally.pprImputed) ? (
         <p className="tiny muted" style={{ marginBottom: 0 }}>
-          * Rating 未入力のため、0 ではなく参加者の中央値を暫定値として評価しています。
+          * 未入力のため、0 ではなく参加者の中央値を暫定値として評価しています。
         </p>
       ) : null}
     </Card>
@@ -823,12 +873,16 @@ function AnalysisPanel({
         </div>
         {(
           [
-            ['戦力 (Rating)', solution.score.strength],
+            ['戦力 (Rating / PPR)', solution.score.strength],
             ['ゲーム適性', solution.score.gameFit],
             ['ペア相性', solution.score.pairFit],
             ['出場回数の公平性', solution.score.fairness],
-          ] as const
-        ).map(([label, value]) => (
+            ['役割の分散 (Singles 等)', solution.score.roleFairness],
+          ] as [string, number | undefined][]
+        )
+          // Orders saved before role fairness existed have no value for it: skip, not 0.
+          .filter((entry): entry is [string, number] => entry[1] !== undefined)
+          .map(([label, value]) => (
           <div key={label} className="score-line">
             <div className="row between">
               <span className="secondary">{label}</span>
