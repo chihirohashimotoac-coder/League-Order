@@ -90,7 +90,8 @@ export interface AppStore extends AppData {
 
   setActiveTeam(teamId: TeamId): void;
   saveTeam(team: Team): void;
-  deleteTeam(teamId: TeamId): void;
+  /** Resolves once the deletion is stored, so a confirmed delete cannot come back. */
+  deleteTeam(teamId: TeamId): Promise<void>;
   savePlayer(player: Player): void;
   savePlayers(players: readonly Player[]): void;
   deletePlayer(playerId: string): void;
@@ -300,26 +301,56 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           },
         ),
 
-      deleteTeam: (teamId) =>
-        write(
-          (current) => {
-            const teams = current.teams.filter((team) => team.id !== teamId);
-            return {
-              ...current,
-              teams,
-              players: current.players.filter((player) => player.teamId !== teamId),
-              formats: current.formats.filter((format) => format.teamId !== teamId),
-              pairs: current.pairs.filter((pair) => pair.teamId !== teamId),
-              orders: current.orders.filter((order) => order.teamId !== teamId),
-              seasonCommits: current.seasonCommits.filter((commit) => commit.teamId !== teamId),
-              settings:
-                current.settings.activeTeamId === teamId
-                  ? { ...current.settings, activeTeamId: teams[0]?.id ?? null }
-                  : current.settings,
-            };
-          },
-          (repository) => repository.deleteTeam(teamId),
-        ),
+      /**
+       * Deletes a team and everything scoped to it.
+       *
+       * Unlike the ordinary writes above, this one persists *before* the UI reports the
+       * team gone, and the caller awaits it. Deleting a team is confirmed, destructive
+       * and unrecoverable, so the one thing it must never do is look done and then come
+       * back: with the optimistic path the screen updated immediately while the removal
+       * was still in flight, and reopening the app in that window brought the team back
+       * with all of its data. Paying a few milliseconds here buys a deletion that means
+       * what it says.
+       *
+       * The new active team is saved in the same step. Previously only the in-memory copy
+       * moved, leaving stored settings pointing at a team that no longer existed.
+       */
+      deleteTeam: async (teamId) => {
+        const remaining = data.teams.filter((team) => team.id !== teamId);
+        const settings =
+          data.settings.activeTeamId === teamId
+            ? { ...data.settings, activeTeamId: remaining[0]?.id ?? null }
+            : data.settings;
+
+        const repository = repositoryRef.current;
+        if (repository) {
+          try {
+            await repository.deleteTeam(teamId);
+            await repository.saveSettings(settings);
+          } catch (error) {
+            setWriteFailed(true);
+            toast.show(WRITE_FAILURE_NOTICE, 'error');
+            throw error;
+          }
+        }
+
+        setData((current) => {
+          const teams = current.teams.filter((team) => team.id !== teamId);
+          return {
+            ...current,
+            teams,
+            players: current.players.filter((player) => player.teamId !== teamId),
+            formats: current.formats.filter((format) => format.teamId !== teamId),
+            pairs: current.pairs.filter((pair) => pair.teamId !== teamId),
+            orders: current.orders.filter((order) => order.teamId !== teamId),
+            seasonCommits: current.seasonCommits.filter((commit) => commit.teamId !== teamId),
+            settings:
+              current.settings.activeTeamId === teamId
+                ? { ...current.settings, activeTeamId: teams[0]?.id ?? null }
+                : current.settings,
+          };
+        });
+      },
 
       savePlayer: (player) =>
         write(

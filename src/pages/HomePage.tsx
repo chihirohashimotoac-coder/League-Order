@@ -301,10 +301,13 @@ export function HomePage({
           destructive
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => {
-            store.deleteTeam(confirmDelete.id);
-            toast.show('削除しました', 'ok');
-            setConfirmDelete(null);
-            setTeamSheet(false);
+            // The dialog stays up until the deletion is stored, so "削除しました" is only
+            // ever shown about a deletion that will still be gone after a restart.
+            void store.deleteTeam(confirmDelete.id).then(() => {
+              toast.show('削除しました', 'ok');
+              setConfirmDelete(null);
+              setTeamSheet(false);
+            });
           }}
         />
       ) : null}
@@ -336,13 +339,20 @@ export function HomePage({
           destructive
           onCancel={() => setConfirmLeaveDemo(false)}
           onConfirm={() => {
-            setConfirmLeaveDemo(false);
             // Only the sample goes. A team the captain created next to it keeps all of its
             // data and becomes the active team; with no team left, the app returns to the
             // first-run screen.
-            for (const entry of store.teams.filter((candidate) => candidate.demo)) {
-              store.deleteTeam(entry.id);
-            }
+            //
+            // The dialog closes only once the removal is stored. Closing first showed the
+            // sample as gone while the write was still in flight, so reopening the app in
+            // that window brought the whole sample back.
+            const samples = store.teams.filter((candidate) => candidate.demo);
+            void (async () => {
+              for (const entry of samples) {
+                await store.deleteTeam(entry.id);
+              }
+              setConfirmLeaveDemo(false);
+            })();
           }}
         />
       ) : null}
