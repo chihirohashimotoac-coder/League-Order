@@ -1,3 +1,4 @@
+import { DEFAULT_N01_SETTINGS } from '../domain/types';
 import type {
   AppSettings,
   LeagueFormat,
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   optimizer: DEFAULT_OPTIMIZER_SETTINGS,
   lastPreset: 'BALANCED',
   customWeights: DEFAULT_WEIGHTS,
+  n01: DEFAULT_N01_SETTINGS,
 };
 
 export interface Snapshot {
@@ -77,6 +79,7 @@ export class Repository {
           optimizer: mergeDefined(DEFAULT_OPTIMIZER_SETTINGS, stored.optimizer),
           lastPreset: stored.lastPreset ?? 'BALANCED',
           customWeights: mergeDefined(DEFAULT_WEIGHTS, stored.customWeights),
+          n01: mergeDefined(DEFAULT_N01_SETTINGS, stored.n01),
         }
       : DEFAULT_SETTINGS;
 

@@ -90,3 +90,18 @@ export function describeChanges(summary: N01ChangeSummary): string[] {
   }
   return lines;
 }
+
+/**
+ * The next opponent changed since the last analysis (a new fixture against the same
+ * team is not a change). Nothing is reported on the first analysis.
+ */
+export function opponentChange(
+  previous: { nextMatch: { opponentTeamId: string; opponentName: string } | null } | undefined,
+  next: { nextMatch: { opponentTeamId: string; opponentName: string } | null },
+): N01ChangeSummary['opponent'] {
+  if (!previous) return null;
+  const before = previous.nextMatch;
+  const after = next.nextMatch;
+  if ((before?.opponentTeamId ?? null) === (after?.opponentTeamId ?? null)) return null;
+  return { from: before?.opponentName ?? null, to: after?.opponentName ?? null };
+}

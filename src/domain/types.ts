@@ -681,9 +681,27 @@ export interface SavedOrder {
   seasonApplied: boolean;
 }
 
+/** n01 integration preferences (MASTER SPEC Phase 5 §10). Kept deliberately small. */
+export interface N01Settings {
+  /** Sync with n01 before building the next match's order. */
+  autoSync: boolean;
+  /** Previous seasons read for history (current + this many). */
+  historyDepth: number;
+  /** Show estimated win probabilities on the result screen. */
+  showPredictions: boolean;
+}
+
+export const DEFAULT_N01_SETTINGS: N01Settings = {
+  autoSync: true,
+  historyDepth: 2,
+  showPredictions: true,
+};
+
 export interface AppSettings {
   activeTeamId: TeamId | null;
   optimizer: OptimizerSettings;
   lastPreset: PresetKey;
   customWeights: ScoreWeights;
+  /** Absent on settings stored before the n01 integration; read back with the defaults. */
+  n01?: N01Settings;
 }

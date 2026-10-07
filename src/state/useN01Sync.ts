@@ -11,6 +11,12 @@ import type {
 } from '../integrations/n01/sync';
 import { browseLeague, fetchTeamData, planN01Sync, resolveLinkedTeam } from '../integrations/n01/sync';
 import type { N01LeagueSummary } from '../integrations/n01/types';
+import type { LeagueFormat } from '../domain/types';
+import { DEFAULT_N01_SETTINGS } from '../domain/types';
+import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
+import type { N01CacheRecord } from '../domain/n01/types';
+import { opponentChange } from '../domain/n01/changes';
+import { buildIntelligenceSnapshot, fetchIntelligence } from '../integrations/n01/intelligence';
 import { useAppStore } from './appStore';
 import { useN01Environment } from './n01Environment';
 
@@ -31,8 +37,18 @@ export interface N01SyncActions {
   plan(team: Team, data: N01TeamData, explicit?: ReadonlyMap<string, string | null>): N01SyncPlan;
   /** A brand-new League Order team for an n01 team, named as on n01. */
   newTeam(data: N01TeamData): Team;
+  /**
+   * Next match, opponent and history for a fetched team (Phase 2). Folds an opponent
+   * change into `plan.changes` when a plan is given.
+   */
+  intelligence(
+    teamId: string,
+    data: N01TeamData,
+    format: LeagueFormat,
+    options?: { chosenMatchId?: string; onProgress?: N01ProgressListener; plan?: N01SyncPlan },
+  ): Promise<{ snapshot: N01MatchIntelligenceSnapshot; notes: string[] }>;
   /** Stores a plan (team, players, managed format, cache) as one batch. */
-  apply(plan: N01SyncPlan, options?: { activate?: boolean }): Promise<void>;
+  apply(plan: N01SyncPlan, options?: { activate?: boolean; extraCache?: readonly N01CacheRecord[] }): Promise<void>;
 }
 
 export function useN01Sync(): N01SyncActions {
@@ -55,7 +71,8 @@ export function useN01Sync(): N01SyncActions {
     [env, store.players, store.formats],
   );
 
-  const { applyN01Sync } = store;
+  const { applyN01Sync, n01CacheFor } = store;
+  const historyDepth = store.settings.n01?.historyDepth ?? DEFAULT_N01_SETTINGS.historyDepth;
 
   return useMemo(
     () => ({
@@ -69,9 +86,34 @@ export function useN01Sync(): N01SyncActions {
       },
       plan,
       newTeam: (data) => ({ id: createId('team'), name: data.entry.name, createdAt: env.now() }),
+      intelligence: async (teamId, data, format, options = {}) => {
+        const fetched = await fetchIntelligence(
+          env.createClient(),
+          data,
+          { historyDepth, now: env.now, chosenMatchId: options.chosenMatchId },
+          options.onProgress,
+        );
+        const snapshot = buildIntelligenceSnapshot({ teamId, data, format, fetched, historyDepth, now: env.now() });
+        if (options.plan) {
+          const previous = n01CacheFor(teamId).find(
+            (record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel',
+          );
+          options.plan.changes.opponent = opponentChange(previous, snapshot);
+          options.plan.changes.notes.push(...fetched.notes);
+        }
+        return { snapshot, notes: fetched.notes };
+      },
       apply: (result, options) =>
-        applyN01Sync({ team: result.team, players: result.players, format: result.format, cache: [result.snapshot] }, options),
+        applyN01Sync(
+          {
+            team: result.team,
+            players: result.players,
+            format: result.format,
+            cache: [result.snapshot, ...(options?.extraCache ?? [])],
+          },
+          { activate: options?.activate },
+        ),
     }),
-    [env, plan, applyN01Sync],
+    [env, plan, applyN01Sync, n01CacheFor, historyDepth],
   );
 }

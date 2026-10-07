@@ -7,7 +7,8 @@ import type {
   SeasonCommit,
   Team,
 } from '../domain/types';
-import { GAME_KINDS, PAIR_AFFINITIES } from '../domain/types';
+import { DEFAULT_N01_SETTINGS, GAME_KINDS, PAIR_AFFINITIES } from '../domain/types';
+import { clampHistoryDepth } from '../domain/n01/recency';
 import { mergeDefined } from '../utils/merge';
 import { asDiscipline } from '../domain/types';
 import { normaliseSavedOrder } from '../domain/normalise';
@@ -118,6 +119,15 @@ function isUsableOrder(row: Record<string, unknown>): boolean {
     Array.isArray(row.versions) &&
     row.versions.every((version) => hasArrays(version, ['games', 'players', 'assignments']))
   );
+}
+
+function parseN01Settings(value: unknown): NonNullable<AppSettings['n01']> {
+  const row = isRecord(value) ? value : {};
+  return {
+    autoSync: asBoolean(row.autoSync, DEFAULT_N01_SETTINGS.autoSync),
+    historyDepth: clampHistoryDepth(row.historyDepth),
+    showPredictions: asBoolean(row.showPredictions, DEFAULT_N01_SETTINGS.showPredictions),
+  };
 }
 
 /**
@@ -294,6 +304,7 @@ export function parseBackup(raw: string): ImportResult {
         ? (settingsRow.customWeights as Partial<AppSettings['customWeights']>)
         : undefined,
     ),
+    n01: parseN01Settings(settingsRow.n01),
   };
 
   if (teams.length === 0) errors.push('チームが 1 件も含まれていません。');

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Team } from '../../domain/types';
 import { describeChanges, hasAnyChanges, type N01ChangeSummary } from '../../domain/n01/changes';
 import { formatSyncTime } from '../../domain/n01/freshness';
-import { describeN01Error } from '../../integrations/n01/client';
+import { N01Error, describeN01Error } from '../../integrations/n01/client';
+import type { N01MatchIntelligenceSnapshot } from '../../domain/n01/intelligence';
+import type { N01CacheRecord } from '../../domain/n01/types';
 import type { N01SyncStep, N01TeamSelection } from '../../integrations/n01/sync';
 import { useAppStore } from '../../state/appStore';
 import { useN01Sync } from '../../state/useN01Sync';
@@ -18,14 +20,14 @@ import { SyncProgress, type SyncProgressState } from './SyncProgress';
  * the captain is told when the data they have was last synced — it is never presented
  * as current.
  */
-const STEPS: readonly N01SyncStep[] = ['season', 'team', 'roster', 'ppr', 'format'];
+const STEPS: readonly N01SyncStep[] = ['season', 'team', 'roster', 'ppr', 'format', 'opponent', 'analysis'];
 
 type Phase =
   | { kind: 'running' }
   | { kind: 'season'; options: { tournamentId: string; title: string; teamTpid: string }[] }
   | { kind: 'notFound' }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; changes: N01ChangeSummary };
+  | { kind: 'done'; changes: N01ChangeSummary; nextMatch: N01MatchIntelligenceSnapshot | null };
 
 export function N01SyncSheet({
   team,
@@ -71,9 +73,21 @@ export function N01SyncSheet({
         const data = await sync.fetch(selection, report);
         if (attempt !== run.current) return;
         const plan = sync.plan(team, data);
-        await sync.apply(plan);
+        // The next match is analysed after the roster: if that part fails, the roster,
+        // PPR and format are still brought up to date, and the failure is listed.
+        let intel: N01MatchIntelligenceSnapshot | null = null;
+        try {
+          intel = (await sync.intelligence(team.id, data, plan.format, { onProgress: report, plan })).snapshot;
+        } catch (error) {
+          if (error instanceof N01Error && error.kind === 'aborted') throw error;
+          report('opponent', 'error');
+          plan.changes.notes.push(`次戦の分析データを取得できませんでした (${describeN01Error(error)})`);
+        }
         if (attempt !== run.current) return;
-        setPhase({ kind: 'done', changes: plan.changes });
+        const extraCache: N01CacheRecord[] = intel ? [intel] : [];
+        await sync.apply(plan, { extraCache });
+        if (attempt !== run.current) return;
+        setPhase({ kind: 'done', changes: plan.changes, nextMatch: intel });
         toast.show('n01 と同期しました', 'ok');
       } catch (error) {
         if (attempt === run.current) setPhase({ kind: 'error', message: describeN01Error(error) });
@@ -184,6 +198,7 @@ export function N01SyncSheet({
           <p className="state-line">
             <Icon name="checkCircle" size={18} /> n01 ✓ 最新
           </p>
+          {phase.nextMatch ? <NextMatchLine snapshot={phase.nextMatch} /> : null}
           {hasAnyChanges(phase.changes) ? (
             <ul className="change-list">
               {describeChanges(phase.changes).map((line) => (
@@ -196,5 +211,24 @@ export function N01SyncSheet({
         </div>
       ) : null}
     </Sheet>
+  );
+}
+
+function NextMatchLine({ snapshot }: { snapshot: N01MatchIntelligenceSnapshot }): React.JSX.Element {
+  if (snapshot.nextMatchStatus === 'resolved' && snapshot.nextMatch) {
+    const match = snapshot.nextMatch;
+    return (
+      <p className="small-text" data-testid="sync-next-match">
+        次戦: vs {match.opponentName}
+        {match.date ? ` (${Number(match.date.slice(5, 7))}/${Number(match.date.slice(8, 10))})` : ''}
+      </p>
+    );
+  }
+  return (
+    <p className="small-text muted" data-testid="sync-next-match">
+      {snapshot.nextMatchStatus === 'ambiguous'
+        ? `次戦を 1 試合に決められません (候補 ${snapshot.nextMatchOptions.length} 試合)。`
+        : '残りの試合はありません。'}
+    </p>
   );
 }

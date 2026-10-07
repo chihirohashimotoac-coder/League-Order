@@ -71,10 +71,39 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 ## 4. 永続化
 
 - IndexedDB `darts-league-order` を **v3** に更新し、ストア `n01Cache` を追加 (既存ストアは不変、在置アップグレード)。
-- `n01Cache` のレコード: `N01SyncSnapshot` (`sync:<teamId>`)。Phase 2 で Intelligence snapshot を追加。
+- `n01Cache` のレコード: `N01SyncSnapshot` (`sync:<teamId>`) と `N01MatchIntelligenceSnapshot` (`intel:<teamId>`)。
 - 同期結果の保存は `StorageBackend.writeBatch` による**単一トランザクション** (IndexedDB)。
   `put` が同期的に失敗した場合もトランザクションを明示的に中止し、半端な保存を残さない。
 - JSON バックアップ: バインディング・`pprSource`・`source`・`GameSlotDef.n01` を含める。
   **キャッシュは含めない** (n01 から再取得できる派生データ)。不完全なバインディングは取り込まず手動扱いにする。
 - 互換性: v3 の DB を旧ビルド (v2) が開くと VersionError になり、旧ビルドは localStorage フォールバックで起動する
   (ダウングレード時のみ。PWA の通常更新では発生しない)。
+
+## 5. Match Intelligence (Phase 2)
+
+`N01MatchIntelligenceSnapshot` (`src/domain/n01/intelligence.ts`) — 同期のたびに再構築する。
+
+| 項目 | 内容 |
+|---|---|
+| `nextMatchStatus` / `nextMatch` / `nextMatchOptions` | 次戦 (`resolved` / `ambiguous` / `none`)。`lsid`, raw title, date (解析できた時のみ), our / opponent tpid, 相手名 |
+| `games` | 自チームの管理フォーマット (gameId, LogicalGameSignature, 人数, cricket, limitLegCount) |
+| `ourPlayers` / `ourStats` | 自チーム名簿と、opid で Season 横断した成績 (`HistoricalPlayerStats`) |
+| `opponent` | 相手名簿・成績・`OpponentPositionModel` |
+| `leagueMeanPpr` | 全 Season の stats 行の recency 加重 darts 加重平均 (shrinkage の事前分布) |
+| `seasons` / `historyDepth` | 使用した Season と重み、取得深さ |
+| `orderConfidence` | 相手オーダーモデルの信頼度 |
+
+### 5.1 取得範囲とリクエスト数
+
+既定 `current + 2 previous`。1 同期のリクエスト上限:
+Team 4 (tournament list / tournament / roster / stats) + 日程 1 + 相手 roster・orders 2 + 過去 Season ごとに最大 3 (tournament / stats / 相手 orders)。
+既定深さで最大 13。過去 Season の取得失敗は `notes` に記録し同期全体は失敗させない。
+
+### 5.2 Position model
+
+- 観測: 相手チームとしての過去オーダー (その Season に**そのチームで**出たもの) を `signature` に写像。
+  Season 横断の写像は `schid` ではなく LogicalGameSignature (`SINGLES|01|2` 等)。
+- 縮約: slot → structure (同じ構造の他 slot) → team (他の構造) → base (半分一様 + 半分強度比例)。
+  各段は外側の観測だけで作り、同じ観測を二重に数えない。β = `POSITION_PRIOR_STRENGTH` (3) 試合分の席数。
+- `probability` は席のシェア (名簿全体で和 1)。k 人ゲームの出場確率はおよそ `min(1, k·probability)`。
+- `lineups`: 現名簿のみで構成された観測済みの組合せ (和 1)。

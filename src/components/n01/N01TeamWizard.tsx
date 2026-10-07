@@ -165,13 +165,23 @@ export function N01TeamWizard({
       return;
     }
     setSaving(true);
-    sync
-      .apply(plan, { activate: mode.kind === 'create' })
-      .then(() => {
-        toast.show(mode.kind === 'create' ? `${plan.team.name} を作成しました` : `${plan.team.name} を n01 と接続しました`, 'ok');
-        onDone(plan.team);
-      })
-      .catch(() => setSaving(false));
+    void (async () => {
+      // The first look at the next match is best effort: the team is created either way.
+      const intel = data
+        ? await sync.intelligence(plan.team.id, data, plan.format).then(
+            (result) => result.snapshot,
+            () => null,
+          )
+        : null;
+      try {
+        await sync.apply(plan, { activate: mode.kind === 'create', extraCache: intel ? [intel] : [] });
+      } catch {
+        setSaving(false);
+        return;
+      }
+      toast.show(mode.kind === 'create' ? `${plan.team.name} を作成しました` : `${plan.team.name} を n01 と接続しました`, 'ok');
+      onDone(plan.team);
+    })();
   };
 
   const title = mode.kind === 'create' ? 'n01から作成' : 'n01と接続';

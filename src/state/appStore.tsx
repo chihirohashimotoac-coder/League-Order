@@ -177,6 +177,7 @@ const EMPTY: AppData = {
       consecutive: 0.5,
       season: 0.25,
     },
+    n01: { autoSync: true, historyDepth: 2, showPredictions: true },
   },
 };
 

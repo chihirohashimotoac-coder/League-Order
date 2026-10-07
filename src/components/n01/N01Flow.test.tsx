@@ -162,3 +162,22 @@ describe('linking an existing team', () => {
     expect(stored.teams.find((team) => team.id === 'team_manual')?.n01?.lastTeamId).toBe('GpiQ');
   });
 });
+
+describe('next match intelligence (Phase 2)', () => {
+  it('is analysed when the team is created and again on every re-sync', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    const { openBackend } = await import('../../storage/db');
+    const repository = new Repository(await openBackend());
+    const cache = await repository.loadN01Cache();
+    const intel = cache.find((record) => record.kind === 'intel');
+    expect(intel).toMatchObject({ nextMatchStatus: 'resolved', nextMatch: { opponentName: 'スピンコブラ', date: '2026-10-08' } });
+    expect(intel && intel.kind === 'intel' ? intel.opponent?.positionModel.slots.length : 0).toBe(7);
+
+    await user.click(screen.getByRole('button', { name: 'n01を再同期' }));
+    const sheet = await screen.findByRole('dialog', { name: 'n01を再同期' });
+    expect(await within(sheet).findByTestId('sync-next-match')).toHaveTextContent('次戦: vs スピンコブラ (10/8)');
+    expect(within(sheet).getByTestId('n01-sync-done')).toHaveTextContent('変更はありません');
+  });
+});

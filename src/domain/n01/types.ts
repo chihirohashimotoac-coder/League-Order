@@ -1,4 +1,5 @@
 import type { DartsDiscipline } from '../types';
+import type { N01MatchIntelligenceSnapshot } from './intelligence';
 
 /**
  * n01 bindings (docs/N01_MASTER_DESIGN.md §2–§3).
@@ -134,4 +135,4 @@ export function syncSnapshotId(teamId: string): string {
 }
 
 /** Any record kept in the `n01Cache` store. */
-export type N01CacheRecord = N01SyncSnapshot;
+export type N01CacheRecord = N01SyncSnapshot | N01MatchIntelligenceSnapshot;
