@@ -12,7 +12,17 @@ import type {
   ScoreWeights,
   SolutionMeta,
 } from '../domain/types';
-import { CANDIDATE_PRESETS, PRESETS } from '../domain/orders/presets';
+import {
+  CANDIDATE_PRESETS,
+  CONFIDENCE_WEIGHT_FACTOR,
+  OPPONENT_CANDIDATE_PRESETS,
+  PRESETS,
+  riskValue,
+} from '../domain/orders/presets';
+import type { ExplanationFactor, OrderExplanation } from '../domain/types';
+import { independentGamesModel } from '../domain/prediction/matchWinProbability';
+import { INDEPENDENCE_NOTE, confidenceText, formatProbability, predictOrder } from '../domain/prediction/predictOrder';
+import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
 import { round } from '../utils/math';
 import {
   buildAllCandidates,
@@ -25,11 +35,17 @@ import { validateHardConstraints, type HardViolation } from './constraints/valid
 import { analyseRelaxations, precheck } from './diagnose';
 import { prepare, type PreparedContext } from './prepare';
 import { buildExplanation } from './scoring/explain';
-import { compareEvaluations, evaluateSelection, type Evaluation } from './scoring/score';
+import {
+  compareEvaluations,
+  evaluateSelection,
+  negativeWeightSum,
+  positiveWeightSum,
+  type Evaluation,
+} from './scoring/score';
 import { beamSearch } from './search/beam';
 import { buildBoundContext, type BoundContext } from './search/bound';
 import { dfsSearch } from './search/dfs';
-import { polish } from './search/polish';
+import { hardFeasible, polish } from './search/polish';
 
 /**
  * Order generation entry point (docs/DESIGN.md §6).
@@ -137,6 +153,17 @@ function runOnce(
     stage = stage === 'dfs' ? 'dfs+polish' : 'beam+polish';
   }
 
+  // Opponent-aware runs: the search ranks by the additive score (expected games won plus
+  // the soft terms); the final pick among the near-optimal line-ups is the one with the
+  // best estimated *match* outcome, which is not additive in the games.
+  if ((ctx.weights.opponentWin ?? 0) > 0 && ctx.opponent) {
+    const reranked = rerankByMatchOutcome(ctx, [...pool, ...(dfs.best ? [dfs.best] : []), bestSelection], bestEvaluation);
+    if (reranked) {
+      bestSelection = reranked.selection;
+      bestEvaluation = reranked.evaluation;
+    }
+  }
+
   return {
     selection: bestSelection,
     evaluation: bestEvaluation,
@@ -149,6 +176,49 @@ function runOnce(
       presetKey,
     },
   };
+}
+
+/**
+ * Share of the score span a line-up may give up to be preferred for its estimated match
+ * outcome (docs/OPPONENT_OPTIMIZER.md §4). Fairness, role spread and consecutive runs
+ * are all inside the score, so a line-up that gives them up badly never qualifies.
+ */
+export const RERANK_SCORE_TOLERANCE = 0.015;
+
+/** Risk-neutral match value (win + ½ draw) of a selection, over games with opponent data. */
+export function selectionMatchValue(ctx: PreparedContext, selection: readonly Combo[]): number {
+  const probabilities = selection.flatMap((combo, gi) => (ctx.opponentGames[gi] ? [combo.oppWin] : []));
+  return riskValue(independentGamesModel.outcome(probabilities));
+}
+
+function rerankByMatchOutcome(
+  ctx: PreparedContext,
+  pool: readonly Combo[][],
+  best: Evaluation,
+): { selection: Combo[]; evaluation: Evaluation } | null {
+  const span = positiveWeightSum(ctx) + negativeWeightSum(ctx);
+  const floor = best.breakdown.total - RERANK_SCORE_TOLERANCE * span;
+  const seen = new Set<string>();
+  let chosen: { selection: Combo[]; evaluation: Evaluation; value: number } | null = null;
+  for (const selection of pool) {
+    if (selection.length !== ctx.gameCount) continue;
+    const key = selectionSignature(ctx, selection);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (!hardFeasible(ctx, selection)) continue;
+    const evaluation = evaluateSelection(ctx, selection);
+    if (evaluation.breakdown.total < floor - 1e-12) continue;
+    const value = selectionMatchValue(ctx, selection);
+    if (
+      !chosen ||
+      value > chosen.value + 1e-12 ||
+      (Math.abs(value - chosen.value) <= 1e-12 &&
+        compareEvaluations({ selection, evaluation }, { selection: chosen.selection, evaluation: chosen.evaluation }) < 0)
+    ) {
+      chosen = { selection: [...selection], evaluation, value };
+    }
+  }
+  return chosen;
 }
 
 /** Turns a member-set selection into slot-ordered assignments, honouring locks. */
@@ -297,6 +367,22 @@ function buildWarnings(
       });
     }
   }
+  const plan = ctx.opponentPlan;
+  if (plan?.mode === 'fallback') {
+    warnings.push({
+      severity: 'warning',
+      code: 'OPPONENT_DATA_MISSING',
+      message: '対戦データ不足のため、対戦相手の予測を使わず通常の勝利優先 (戦力重視) で生成しました。',
+    });
+  } else if (plan?.mode === 'reduced' && plan.confidence) {
+    warnings.push({
+      severity: 'info',
+      code: 'OPPONENT_WEIGHT_REDUCED',
+      message: `対戦相手データの信頼度が「${CONFIDENCE_LABELS[plan.confidence]}」のため、対戦相手の影響を ${Math.round(
+        CONFIDENCE_WEIGHT_FACTOR[plan.confidence] * 100,
+      )}% に弱め、通常の戦力評価に寄せています。`,
+    });
+  }
   if (!meta.exhaustive) {
     const capped = candidates.filter((entry) => !entry.complete).length;
     warnings.push({
@@ -321,6 +407,7 @@ function roundScore(breakdown: ScoreBreakdown): ScoreBreakdown {
     novelty: round(breakdown.novelty),
     consecutivePenalty: round(breakdown.consecutivePenalty),
     seasonImbalance: round(breakdown.seasonImbalance),
+    ...(breakdown.opponentWin === undefined ? {} : { opponentWin: round(breakdown.opponentWin) }),
     total: round(breakdown.total, 4),
     display: round(breakdown.display, 1),
   };
@@ -345,15 +432,60 @@ function assembleSolution(
   if (violations.length > 0) return null;
 
   const comparable = evaluateSelection(referenceCtx, outcome.selection);
+  const prediction = ctx.opponent ? predictOrder(ctx.opponent, assignments, ctx.input.pairs) ?? undefined : undefined;
 
   return {
     assignments,
     tallies: buildTallies(ctx, outcome.evaluation),
     score: roundScore(comparable.breakdown),
     metrics: buildMetrics(ctx, outcome.evaluation),
-    explanation: buildExplanation(ctx, bctx, outcome.selection, outcome.evaluation),
+    explanation: withPredictionFactors(buildExplanation(ctx, bctx, outcome.selection, outcome.evaluation), prediction),
     warnings: buildWarnings(ctx, outcome.evaluation, candidates, outcome.meta),
-    meta: outcome.meta,
+    meta: ctx.opponentPlan ? { ...outcome.meta, opponent: ctx.opponentPlan } : outcome.meta,
+    prediction,
+  };
+}
+
+/**
+ * Adds the estimated win probabilities to the reasons (MASTER SPEC Phase 3 §12): one
+ * factor per game with its confidence and why, and the match estimate at the top of the
+ * summary. Worded as estimates; LOW confidence is called 参考値.
+ */
+function withPredictionFactors(
+  explanation: OrderExplanation,
+  prediction: OrderSolution['prediction'],
+): OrderExplanation {
+  if (!prediction) return explanation;
+  const byGame = new Map(prediction.games.map((game) => [game.gameId, game]));
+  const tone = (p: number): ExplanationFactor['tone'] => (p >= 0.55 ? 'positive' : p <= 0.45 ? 'negative' : 'neutral');
+  return {
+    games: explanation.games.map((game) => {
+      const predicted = byGame.get(game.gameId);
+      if (!predicted) return game;
+      return {
+        ...game,
+        factors: [
+          {
+            key: 'opponent',
+            label: '推定ゲーム勝率',
+            value: predicted.probability,
+            detail: `${formatProbability(predicted.probability)} (${confidenceText(predicted.confidence)}) ・ ${predicted.reasons.join(' ・ ')}`,
+            tone: tone(predicted.probability),
+          },
+          ...game.factors,
+        ],
+      };
+    }),
+    overall: [
+      {
+        key: 'opponent',
+        label: `推定 Match 勝率 (vs ${prediction.opponentName})`,
+        value: prediction.win,
+        detail: `${formatProbability(prediction.win)} ・ 期待勝ちゲーム ${prediction.expectedGames.toFixed(1)} / ${prediction.gameCount} ・ ${confidenceText(prediction.confidence)}。${INDEPENDENCE_NOTE}`,
+        tone: tone(prediction.win),
+      },
+      ...explanation.overall,
+    ],
   };
 }
 
@@ -417,8 +549,9 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
   ];
 
   if (!options.singleCandidate) {
-    const wanted = Math.max(1, options.candidateCount ?? 3);
-    for (const presetKey of CANDIDATE_PRESETS) {
+    const opponentRun = input.preset === 'OPPONENT_OPTIMIZED';
+    const wanted = Math.max(1, options.candidateCount ?? (opponentRun ? OPPONENT_CANDIDATE_PRESETS.length : 3));
+    for (const presetKey of opponentRun ? OPPONENT_CANDIDATE_PRESETS : CANDIDATE_PRESETS) {
       if (runs.length >= wanted) break;
       if (presetKey === input.preset) continue;
       runs.push({
@@ -559,17 +692,22 @@ export function evaluateManualOrder(
     elapsedMs: 0,
     label: '手動編集',
     presetKey: input.preset,
+    ...(ctx.opponentPlan ? { opponent: ctx.opponentPlan } : {}),
   };
+  const copied = assignments.map((a) => ({ ...a, playerIds: [...a.playerIds] }));
+  // A hand edit is re-estimated live, exactly like every other number on the screen.
+  const prediction = ctx.opponent ? predictOrder(ctx.opponent, copied, input.pairs) ?? undefined : undefined;
   const solution: OrderSolution = {
-    assignments: assignments.map((a) => ({ ...a, playerIds: [...a.playerIds] })),
+    assignments: copied,
     tallies: buildTallies(ctx, evaluation),
     score: roundScore(evaluation.breakdown),
     metrics: buildMetrics(ctx, evaluation),
     // The reasons are told about the violations, so a hand-edited line-up never gets a
     // "nothing is violated" rationale while the validator says otherwise (spec §15).
-    explanation: buildExplanation(ctx, bctx, selection, evaluation, violations),
+    explanation: withPredictionFactors(buildExplanation(ctx, bctx, selection, evaluation, violations), prediction),
     warnings: buildWarnings(ctx, evaluation, candidates, meta),
     meta,
+    prediction,
   };
   return { ok: violations.length === 0, solution, violations };
 }

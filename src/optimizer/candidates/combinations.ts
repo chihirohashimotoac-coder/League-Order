@@ -1,4 +1,6 @@
 import { mean } from '../../utils/math';
+import { expectedGameWin } from '../../domain/prediction/opponentContext';
+import { sideStrength } from '../../domain/prediction/teamMatchup';
 import type { PreparedContext } from '../prepare';
 
 /**
@@ -24,6 +26,11 @@ export interface Combo {
   pairFit: number;
   /** Mean pair novelty over all member pairs (0.5 for single-player games). */
   novelty: number;
+  /**
+   * Estimated chance of winning this game against the predicted opponent, from the same
+   * functions the result screen's 推定勝率 uses. 0.5 when the game has no opponent data.
+   */
+  oppWin: number;
   /** Static, count-independent part of the score; used for ordering and pruning. */
   localScore: number;
 }
@@ -36,6 +43,7 @@ export interface GameCandidates {
   maxGameFit: number;
   maxPairFit: number;
   maxNovelty: number;
+  maxOppWin: number;
   /** True when the full combination space was enumerated without sampling. */
   complete: boolean;
   /** Number of combos before the cap was applied. */
@@ -73,11 +81,33 @@ export function describeCombo(ctx: PreparedContext, gameIndex: number, members: 
     novelty = mean(novelties);
   }
 
+  let oppWin = 0.5;
+  const opponentGame = ctx.opponentGames[gameIndex];
+  if (opponentGame) {
+    let bonus = 0;
+    let pairsCount = 0;
+    for (let i = 0; i < members.length; i += 1) {
+      for (let j = i + 1; j < members.length; j += 1) {
+        bonus += ctx.pairBonusPpr[members[i]][members[j]];
+        pairsCount += 1;
+      }
+    }
+    const side = sideStrength(
+      members.map((pi) => ctx.predictionStrength[pi]),
+      pairsCount > 0 ? bonus / pairsCount : 0,
+    );
+    oppWin = expectedGameWin(side, opponentGame);
+  }
+
   const w = ctx.weights;
   const localScore =
-    w.strength * strength + w.gameFit * gameFit + w.pairFit * pairFit + w.novelty * novelty;
+    w.strength * strength +
+    w.gameFit * gameFit +
+    w.pairFit * pairFit +
+    w.novelty * novelty +
+    (w.opponentWin ?? 0) * oppWin;
 
-  return { members, strength, gameFit, pairFit, novelty, localScore };
+  return { members, strength, gameFit, pairFit, novelty, oppWin, localScore };
 }
 
 /** True when any member pair is marked FORBIDDEN (a hard constraint). */
@@ -260,6 +290,7 @@ export function buildGameCandidates(ctx: PreparedContext, gameIndex: number): Ga
     maxGameFit: combos.reduce((acc, c) => Math.max(acc, c.gameFit), 0),
     maxPairFit: combos.reduce((acc, c) => Math.max(acc, c.pairFit), 0),
     maxNovelty: combos.reduce((acc, c) => Math.max(acc, c.novelty), 0),
+    maxOppWin: combos.reduce((acc, c) => Math.max(acc, c.oppWin), 0),
     complete,
     rawCount,
   };

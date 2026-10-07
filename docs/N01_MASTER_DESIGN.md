@@ -238,8 +238,9 @@ src/state/n01Session.ts      ← React 側: 同期の起動・進捗・キャッ
 - `ScoreWeights.opponentWin` (旧データは 0 で補完)。Combo ごとに
   `winProb = E[P_game]` を前計算し、`OpponentWin = mean_g winProb_g` (= 期待勝ちゲーム数 / n) を
   他の加法項と同様に Score・上界 (suffix max)・説明に使う。既存プリセットは重み 0 で**数値も探索も不変**。
-- `OPPONENT_OPTIMIZED` 重み (基準): opponentWin 2.4 / strength 0.35 / gameFit 0.5 / pairFit 0.3 /
-  fairness 0.3 / roleFairness 0.22 / consecutive 0.4 / season 0.05。fairness・roleFairness・consecutive は Soft として残す。
+- `OPPONENT_OPTIMIZED` 重み (基準): opponentWin 2.4 / strength 0.3 / gameFit 0.45 / pairFit 0.35 /
+  fairness 0.9 / roleFairness 0.3 / consecutive 0.5 / season 0.05。fairness・roleFairness・consecutive は
+  バランスと同水準の Soft として残す (v1.1 で改訂、理由は `OPPONENT_OPTIMIZER.md` §3)。
 - **ロバスト化**: `effectiveOpponentWeight = base × confidenceFactor`
   (HIGH 1.0 / MEDIUM 0.7 / LOW 0.35)。減らした分は strength へ移す (不確かな推定に全体を賭けない)。
 - **最終順位**: 探索で得た完全解の候補プール (beam 解 + B&B 最良 + polish) のうち、
@@ -278,3 +279,4 @@ src/state/n01Session.ts      ← React 側: 同期の起動・進捗・キャッ
 | 版 | 内容 |
 |---|---|
 | 1.0 | Phase 0: アーキテクチャ固定 |
+| 1.1 | Phase 4: 対戦相手最適化の公平性の重みをバランス水準へ改訂 (fairness 0.3 では退化解になることをテストで確認したため) |

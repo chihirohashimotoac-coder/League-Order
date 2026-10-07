@@ -3652,3 +3652,117 @@ input[type='range'] {
   color: var(--color-success);
   font-weight: 800;
 }
+
+/* ------------------------------------------------------------- opponent analysis */
+
+.opponent-basis {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+
+.opponent-basis .basis-title {
+  display: block;
+  font-weight: 800;
+}
+
+.opponent-basis .basis-note {
+  display: block;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.opponent-panel {
+  margin: 0 0 14px;
+  padding: 14px;
+  border: 1px solid var(--color-border-strong);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+
+.opponent-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.opponent-name {
+  font-size: 18px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.opponent-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.opponent-figures .k {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--color-text-muted);
+}
+
+.opponent-figures .v {
+  display: block;
+  font-size: 26px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.opponent-figures small {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.opponent-figures .delta.up {
+  color: var(--color-success);
+}
+
+.opponent-figures .delta.down {
+  color: var(--color-danger);
+}
+
+.opponent-sub {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.opponent-reasons {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+}
+
+.opponent-reasons li {
+  overflow-wrap: anywhere;
+}
+
+.opponent-note {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0 0;
+}
+
+.tag.predict {
+  border-color: var(--color-accent-text);
+  color: var(--color-accent-text);
+  font-weight: 800;
+}
+
+.c-conf {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}

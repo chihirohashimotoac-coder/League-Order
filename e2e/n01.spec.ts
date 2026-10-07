@@ -137,4 +137,20 @@ test.describe('n01 league native sync (Phase 1)', () => {
     await page.locator('.list-row').filter({ hasText: 'n01 管理' }).click();
     await audit(page, 'MANAGED FORMAT');
   });
+
+  test('対戦相手最適化 compares four candidates with estimated win probabilities (Phase 4)', async ({ page }) => {
+    await start(page);
+    await createKalavinka(page);
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await expect(page.getByTestId('setup-opponent')).toContainText('次戦: vs スピンコブラ');
+    await page.getByRole('radio', { name: /対戦相手最適化/ }).click();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
+    await expect(page.locator('.candidate-tab .c-label')).toHaveText(['対戦相手最適化', '勝利優先', 'バランス', '公平性優先']);
+    const panel = page.getByTestId('opponent-panel');
+    await expect(panel).toContainText('推定 Match 勝率');
+    await expect(panel).toContainText('通常の勝利優先');
+    await expect(page.locator('.tag.predict')).toHaveCount(7);
+    await audit(page, 'RESULT (opponent-optimised)');
+  });
 });

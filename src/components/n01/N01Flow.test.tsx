@@ -181,3 +181,29 @@ describe('next match intelligence (Phase 2)', () => {
     expect(within(sheet).getByTestId('n01-sync-done')).toHaveTextContent('変更はありません');
   });
 });
+
+describe('opponent-optimised order (Phase 4)', () => {
+  it('offers 対戦相手最適化 for the next opponent and shows the estimate next to 勝利優先', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    await user.click(screen.getByRole('button', { name: '新しいオーダーを作る' }));
+    await screen.findByRole('heading', { name: 'オーダー設定' });
+    expect(screen.getByTestId('setup-opponent')).toHaveTextContent('次戦: vs スピンコブラ (10/8)');
+    await user.click(screen.getByRole('radio', { name: /対戦相手最適化/ }));
+    await user.click(screen.getByRole('button', { name: 'オーダーを生成' }));
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 15_000 });
+
+    const tabs = document.querySelectorAll('.candidate-tab');
+    expect([...tabs].map((tab) => tab.querySelector('.c-label')?.textContent)).toEqual(['対戦相手最適化', '勝利優先', 'バランス', '公平性優先']);
+    const panel = screen.getByTestId('opponent-panel');
+    expect(panel).toHaveTextContent('スピンコブラ');
+    expect(panel).toHaveTextContent('推定 Match 勝率');
+    expect(panel).toHaveTextContent('通常の勝利優先');
+    expect(panel).toHaveTextContent('推定値であり、結果を保証するものではありません');
+    expect(screen.getByTestId('estimated-match-win').textContent).toMatch(/^\d{1,3}%$/);
+    expect(document.querySelectorAll('.tag.predict')).toHaveLength(7);
+    // No absolute claims anywhere on the screen.
+    expect(document.body.textContent).not.toMatch(/確実|必勝|絶対勝/);
+  }, 30_000);
+});

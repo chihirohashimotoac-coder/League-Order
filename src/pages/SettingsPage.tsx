@@ -6,7 +6,9 @@ import { downloadText } from '../share';
 import { useAppStore } from '../state/appStore';
 import { Card, ConfirmDialog, Field, Stepper, useToast } from '../components/ui';
 
-const WEIGHT_LABELS: { key: keyof ScoreWeights; label: string; hint: string }[] = [
+// The opponent term is not a custom weight: it only means something with opponent data,
+// which the opponent-optimised preset brings along.
+const WEIGHT_LABELS: { key: Exclude<keyof ScoreWeights, 'opponentWin'>; label: string; hint: string }[] = [
   { key: 'strength', label: '戦力 (Rating / PPR)', hint: '高いほど Rating・PPR の高い選手を優先' },
   { key: 'gameFit', label: 'ゲーム適性', hint: '高いほど得意なゲームに配置' },
   { key: 'pairFit', label: 'ペア相性', hint: '高いほど相性の良いペアを優先' },

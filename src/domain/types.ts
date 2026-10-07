@@ -13,6 +13,9 @@ import type {
   N01TeamBinding,
   PprSource,
 } from './n01/types';
+import type { OpponentContext } from './prediction/opponentContext';
+import type { MatchPrediction } from './prediction/predictOrder';
+import type { ConfidenceLevel } from './prediction/confidence';
 
 export type TeamId = string;
 export type PlayerId = string;
@@ -322,6 +325,7 @@ export type FairnessScope = 'today' | 'season';
 export type ConstraintMode = 'hard' | 'soft';
 
 export const PRESET_KEYS = [
+  'OPPONENT_OPTIMIZED',
   'WIN_FIRST',
   'BALANCED',
   'FAIRNESS_FIRST',
@@ -333,6 +337,7 @@ export const PRESET_KEYS = [
 export type PresetKey = (typeof PRESET_KEYS)[number];
 
 export const PRESET_LABELS: Record<PresetKey, string> = {
+  OPPONENT_OPTIMIZED: '対戦相手最適化',
   WIN_FIRST: '勝利優先',
   BALANCED: 'バランス',
   FAIRNESS_FIRST: '公平性優先',
@@ -354,6 +359,12 @@ export interface ScoreWeights {
   novelty: number;
   consecutive: number;
   season: number;
+  /**
+   * Estimated chance of winning each game against the predicted opponent line-ups
+   * (docs/OPPONENT_OPTIMIZER.md). Only the opponent-optimised preset uses it; absent or
+   * 0 everywhere else, which leaves every other preset exactly as it was.
+   */
+  opponentWin?: number;
 }
 
 export interface OptimizerSettings {
@@ -386,6 +397,12 @@ export interface OrderInput {
    * as `UNSPECIFIED`.
    */
   discipline: DartsDiscipline;
+  /**
+   * The opponent the order is made against (Phase 4): our players' predicted strengths
+   * and, per game, the distribution of the opponent side. Self-contained, so a saved
+   * order can always be re-evaluated as it was generated. Absent = no opponent data.
+   */
+  opponent?: OpponentContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,7 +427,8 @@ export type ExplanationKey =
   | 'consecutive'
   | 'season'
   | 'constraint'
-  | 'lock';
+  | 'lock'
+  | 'opponent';
 
 export interface ExplanationFactor {
   key: ExplanationKey;
@@ -463,6 +481,8 @@ export interface ScoreBreakdown {
   novelty: number;
   consecutivePenalty: number;
   seasonImbalance: number;
+  /** Mean estimated game win probability against the opponent (opponent-aware runs). */
+  opponentWin?: number;
   /** Raw weighted sum. */
   total: number;
   /** `total` mapped linearly onto 0..100 for display. */
@@ -528,6 +548,14 @@ export interface SolutionMeta {
    * and the UI says so rather than presenting a near-copy as the preset's choice.
    */
   alternativeTo?: string;
+  /** How opponent data was used by this run (opponent-optimised preset only). */
+  opponent?: {
+    /** `applied` at full weight, `reduced` for weaker data, `fallback` when there was none. */
+    mode: 'applied' | 'reduced' | 'fallback';
+    baseWeight: number;
+    effectiveWeight: number;
+    confidence: ConfidenceLevel | null;
+  };
 }
 
 export interface OrderSolution {
@@ -538,6 +566,11 @@ export interface OrderSolution {
   explanation: OrderExplanation;
   warnings: OrderWarning[];
   meta: SolutionMeta;
+  /**
+   * Estimated match outcome against the opponent (推定勝率), when the order input carries
+   * opponent data. A model estimate, never a certainty.
+   */
+  prediction?: MatchPrediction;
 }
 
 // ---------------------------------------------------------------------------
