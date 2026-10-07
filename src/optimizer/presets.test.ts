@@ -3,7 +3,9 @@ import type { DartsDiscipline, GameSlotDef, OrderInput, OrderSolution, Player, P
 import { createParticipantConfig } from '../domain/orders/participants';
 import { games, orderInput, pair, player } from '../test/factories';
 import { validateHardConstraints } from './constraints/validate';
-import { generateOrder } from './generateOrder';
+import { bestShownLineUp, generateOrder } from './generateOrder';
+import { describeCombo } from './candidates/combinations';
+import { evaluateSelection } from './scoring/score';
 import { prepare } from './prepare';
 
 /**
@@ -326,5 +328,31 @@ describe('candidates', () => {
       expect(candidate.meta.exhaustive).toBe(false);
       expect(candidate.meta.alternativeTo).toBeUndefined();
     }
+  });
+
+  it('names the highest-scoring shown line-up as the shared optimum, not the first one', () => {
+    const ctx = prepare(orderInput(syntheticRoster(), sixGames(), { preset: 'FAIRNESS_FIRST' }));
+    const lineUp = (members: string[][]) => ({ members });
+    const total = (members: string[][]) =>
+      evaluateSelection(
+        ctx,
+        members.map((ids, gi) =>
+          describeCombo(ctx, gi, ids.map((id) => ctx.playerIndex.get(id)!).sort((a, b) => a - b)),
+        ),
+      ).breakdown.total;
+    // Perfectly even (every player twice, one Single each for three of them) against a
+    // line-up that gives A three games: the even one scores higher under fairness-first.
+    const even = [['pA'], ['pB'], ['pC', 'pD'], ['pA', 'pE'], ['pB', 'pD', 'pE'], ['pC']];
+    const skewed = [['pA'], ['pA'], ['pB', 'pC'], ['pA', 'pD'], ['pB', 'pC', 'pE'], ['pD']];
+    expect(total(even)).toBeGreaterThan(total(skewed));
+    const achieved = Math.min(total(even), total(skewed)) - 0.5;
+    // The weaker line-up was shown first; the stronger one is still the shared optimum.
+    const shown = [
+      { label: '勝利優先', ...lineUp(skewed) },
+      { label: 'バランス', ...lineUp(even) },
+    ];
+    expect(bestShownLineUp(ctx, shown, achieved)).toBe('バランス');
+    // Nothing reaches the run's own result: no claim at all.
+    expect(bestShownLineUp(ctx, shown, total(even) + 1)).toBeUndefined();
   });
 });

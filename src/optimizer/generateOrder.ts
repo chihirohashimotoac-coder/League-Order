@@ -359,14 +359,18 @@ function assembleSolution(
 
 /**
  * When an already-shown line-up scores at least as well under this run's weights as the
- * run's own result, the preset's optimum *is* that line-up: the run only produced a
- * different order because shown line-ups are excluded. Returns the earliest such label.
+ * run's own result, the preset's optimum *is* a shown line-up: the run only produced a
+ * different order because shown line-ups are excluded. The optimum is the
+ * highest-scoring of those line-ups (the earliest on a tie), so every shown line-up is
+ * scored before one is named. Exported for tests.
  */
-function bestShownLineUp(
+export function bestShownLineUp(
   ctx: PreparedContext,
   shown: readonly { label: string; members: PlayerId[][] }[],
   achieved: number,
 ): string | undefined {
+  const EPSILON = 1e-9;
+  let best: { label: string; total: number } | undefined;
   for (const entry of shown) {
     const selection: Combo[] = [];
     let valid = entry.members.length === ctx.gameCount;
@@ -379,9 +383,11 @@ function bestShownLineUp(
       selection.push(describeCombo(ctx, gi, (members as number[]).sort((a, b) => a - b)));
     }
     if (!valid) continue;
-    if (evaluateSelection(ctx, selection).breakdown.total >= achieved - 1e-9) return entry.label;
+    const total = evaluateSelection(ctx, selection).breakdown.total;
+    if (total < achieved - EPSILON) continue;
+    if (!best || total > best.total + EPSILON) best = { label: entry.label, total };
   }
-  return undefined;
+  return best?.label;
 }
 
 function signature(assignments: readonly GameAssignment[]): string {
