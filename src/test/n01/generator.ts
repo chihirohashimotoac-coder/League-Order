@@ -38,6 +38,8 @@ export interface FixtureSeasonSpec {
   schedule: RawSlot[];
   gameSettings?: { round: number; schedule: RawSlot[] }[];
   divisions: { title: string; teams: FixtureTeamSpec[] }[];
+  /** n01 shape: `t_date` is 0 (not set), so only `createTime` dates the season (as on real ATDO). */
+  noTDate?: boolean;
   /** Explicit rounds; when absent a single round robin is generated per division. */
   rounds?: { date: string; title?: string; pairs: [string, string | null][] }[];
   intervalDays?: number;
@@ -188,13 +190,19 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
   dataset.set(requestKey('league/tournament/list', { lgid: spec.leagueId }), {
     lgid: spec.leagueId,
     title: spec.title,
-    // n01 lists tournaments in creation order (oldest first here) and dates them with
-    // `t_date`; the legacy shape is newest first with `start_date`.
+    // n01 lists tournaments in creation order (oldest first here), dated by `t_date` (0
+    // when not set) and `createTime` (here 4 weeks before the start, epoch seconds); the
+    // legacy shape is newest first with `start_date`.
     list: (spec.shape === 'n01' ? [...spec.seasons].reverse() : spec.seasons).map((season) => ({
       tdid: season.tournamentId,
       title: season.title,
       status: season.status,
-      ...(spec.shape === 'n01' ? { t_date: season.startDate } : { start_date: season.startDate }),
+      ...(spec.shape === 'n01'
+        ? {
+            t_date: season.noTDate ? 0 : season.startDate,
+            createTime: Date.parse(`${season.startDate}T10:00:00+09:00`) / 1000 - 28 * 86_400,
+          }
+        : { start_date: season.startDate }),
     })),
   });
 

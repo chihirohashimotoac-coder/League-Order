@@ -170,6 +170,8 @@ export function parseDateText(textValue: string | null, now: number): string | n
 
 function epochOf(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
+    // n01 writes 0 for "no date set": that is no date, not 1970.
+    if (value <= 0) return null;
     // Seconds or milliseconds.
     return value < 1e12 ? value * 1000 : value;
   }
@@ -179,6 +181,15 @@ function epochOf(value: unknown): number | null {
   const iso = parseDateText(t, 0);
   if (!iso) return null;
   return Date.parse(`${iso}T00:00:00Z`);
+}
+
+/** The first of `keys` that holds a usable date, as epoch ms. */
+function firstEpoch(record: Rec, keys: readonly string[]): number | null {
+  for (const key of keys) {
+    const epoch = epochOf(record[key]);
+    if (epoch !== null) return epoch;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,8 +216,9 @@ export function parseLeagueTournaments(raw: unknown, leagueId: string): N01Leagu
       tournamentId,
       title: nonEmpty(first(row, ['title', 't_title', 'name'])) ?? tournamentId,
       status: num(row.status),
-      // `t_date` is n01's competition date; the list itself is in creation order.
-      startedAt: epochOf(first(row, ['t_date', 'start_date', 'startdate', 'date', 'start_time', 'created'])),
+      // `t_date` is n01's competition date (0 on many seasons: not set); the list itself
+      // is in creation order. The first field holding a real date wins, `createTime` last.
+      startedAt: firstEpoch(row, ['t_date', 'start_date', 'startdate', 'date', 'start_time', 'createTime', 'created']),
       listIndex: index,
     };
   });

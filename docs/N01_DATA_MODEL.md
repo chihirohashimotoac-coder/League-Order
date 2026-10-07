@@ -22,7 +22,7 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 | 操作 | パラメータ | 読むフィールド |
 |---|---|---|
 | `league/list` | `keyword` | `{ result: 0, list: [{ lgid, title }] }` |
-| `league/tournament/list` | `lgid` | `title`, `list[].tdid`, `title`, `status` (20 受付 / 25 組み合わせ作成中 / 30 開催中 / 40 終了)、`t_date` (開催日。当初形は `start_date`)。一覧は**作成順**なので、Season の新旧は `t_date` で決める |
+| `league/tournament/list` | `lgid` | `title`, `list[].tdid`, `title`, `status` (20 受付 / 25 組み合わせ作成中 / 30 開催中 / 40 終了)、`t_date` (開催日。未設定は `0`)、`createTime` (作成日時。当初形は `start_date`)。一覧は**作成順**なので、Season の新旧は「有効な `t_date` (> 0) → `start_date` 等 → `createTime`」の最初の日時で決める |
 | `tournament/get` | `tdid` | (`{ result: 0, tournament: {…} }` の `tournament`) `title`, `lgid`, `status`, `softdarts`, `entry_list[].tpid/name`, `lg_table[division][]` (tpid の配列。`"empty"` は bye でチームではない)、`lg_title[division]` (無ければ `Division N`)、`lg_setting.schedule[]`, `lg_setting.game_setting[].round/schedule[]` (`round` = Division 番号)、`lg_result` (キー `<division>_<lsid>`、例 `0_rqbd` → `rqbd` に正規化し Division は別に保持)。当初形の `lg_table[].lg_title/list[].tpid` と素の `lsid` キーも読む |
 | `team/player/list` | `tdid`, `tpid` | `list[].opid`, `oid`, `tpid`, `oname` |
 | `tournament/stats` | `tdid`, `kind=player_stats_list` (団体戦で個人行を得る) | `player_stats_list[]`: `opid`, `tpid`, `oname`, `score`, `darts`, `leg`, `winLeg`, `match`, `f9Score`, `f9Darts`, `highOut`, `best`, `ton00`, `ton40`, `ton70`, `ton80` (`set` / `winSet` / `worst` は未使用)。当初形の snake_case (`legs`, `win_legs`, `first9_score`, `best_leg`, `ton` …) も読む。PPR = `score / darts × 3`、欠損は `null` |
@@ -52,9 +52,10 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 
 ### 1.2 時刻・日付
 
-- `t_date` / `start_date` / `date` は `YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY年M月D日`、月日のみ (`10/8`)、またはエポック (秒 / ミリ秒、数値文字列も可) を解釈する。
+- `t_date` / `start_date` / `date` / `createTime` は `YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY年M月D日`、月日のみ (`10/8`)、またはエポック (秒 / ミリ秒、数値文字列も可) を解釈する。
+  `t_date = 0` (と 0 以下のエポック) は日付として扱わない (実 ATDO では多くの Season が `0`)。
   月日のみの場合は注入された現在時刻に最も近い年を採る。解釈できない日付は `null` (推測しない)。
-- `league/tournament/list` の並びは作成順で開催順とは限らないため、Season は `t_date` の新しい順に並べる。
+- `league/tournament/list` の並びは作成順で開催順とは限らないため、Season は上記の日時 (`t_date` → `start_date` 等 → `createTime`) の新しい順に並べる。
   日付が無い Season に限り n01 の並び順を使う。
 
 ## 2. 正規化型 (`src/integrations/n01/types.ts`)

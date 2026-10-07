@@ -11,12 +11,16 @@ import { N01_STATUS } from './types';
  *   3. otherwise tournaments open for entry (status 20),
  *   4. otherwise the latest finished tournament (status 40).
  *
+ * A status 25 / 20 tournament counts only when it is newer than the latest finished
+ * one: n01 keeps stale ones around (e.g. an organiser's test tournament left at 25), and
+ * those must not hide the latest finished season.
+ *
  * The title is never parsed ("2026 3rd" says nothing reliable). When a priority group
  * holds more than one tournament, the caller narrows it by team membership, and only if
  * that still leaves several does the captain choose.
  */
 
-/** Newest first: by competition date (`t_date`) when n01 gives one, otherwise by list order. */
+/** Newest first: by `startedAt` (`t_date` → start date → `createTime`), otherwise by list order. */
 export function newestFirst(list: readonly N01TournamentSummary[]): N01TournamentSummary[] {
   return [...list].sort((a, b) => {
     if (a.startedAt !== null && b.startedAt !== null && a.startedAt !== b.startedAt) {
@@ -35,10 +39,15 @@ export function newestFirst(list: readonly N01TournamentSummary[]): N01Tournamen
  */
 export function seasonPriorityGroups(list: readonly N01TournamentSummary[]): N01TournamentSummary[][] {
   const ordered = newestFirst(list);
-  const running = ordered.filter((t) => t.status === N01_STATUS.RUNNING);
-  const bracket = ordered.filter((t) => t.status === N01_STATUS.BRACKET);
-  const open = ordered.filter((t) => t.status === N01_STATUS.OPEN);
   const finished = ordered.filter((t) => t.status === N01_STATUS.FINISHED).slice(0, 1);
+  const latestFinished = finished[0];
+  // Upcoming = newer than the latest finished season. Undated on either side cannot be
+  // shown to be stale, so it stays a candidate.
+  const upcoming = (t: N01TournamentSummary): boolean =>
+    !latestFinished || t.startedAt === null || latestFinished.startedAt === null || t.startedAt > latestFinished.startedAt;
+  const running = ordered.filter((t) => t.status === N01_STATUS.RUNNING);
+  const bracket = ordered.filter((t) => t.status === N01_STATUS.BRACKET && upcoming(t));
+  const open = ordered.filter((t) => t.status === N01_STATUS.OPEN && upcoming(t));
   return [running, bracket, open, finished].filter((group) => group.length > 0);
 }
 

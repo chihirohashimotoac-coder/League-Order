@@ -11,7 +11,7 @@ import { eligiblePlayers } from '../../domain/n01/nextMatch';
 import { buildOpponentContext } from '../../domain/prediction/opponentContext';
 import { createFixtureTransport, type FixtureTransportOptions } from '../../test/n01/transport';
 import { generateLeague } from '../../test/n01/generator';
-import { FIXTURE_NOW, atdoSpec, fixtureLeagues, tdaSpec } from '../../test/n01/leagues';
+import { FIXTURE_NOW, atdoSpec, fixtureLeagues, tdaSpec, tdoSpec } from '../../test/n01/leagues';
 import { jstNoon } from '../../test/n01/replay';
 
 /**
@@ -343,7 +343,9 @@ describe('league/tournament/list: seasons dated by t_date, listed in creation or
     expect(parsed.tournaments.map((t) => t.startedAt)).toEqual([seconds * 1000, seconds * 1000]);
   });
 
-  it('ATDO fixture (oldest first, as created): current and previous seasons come out by date', async () => {
+  it('ATDO fixture (oldest first, as created; t_date 0 everywhere): current and previous seasons come out by createTime', async () => {
+    const raw = fixtureLeagues().atdo.dataset.get(`league/tournament/list?lgid=${ATDO}`) as { list: { t_date: unknown; createTime: unknown }[] };
+    expect(raw.list.every((row) => row.t_date === 0 && typeof row.createTime === 'number')).toBe(true);
     const list = await client().leagueTournaments(ATDO);
     const newestFirst = tids(atdoSpec().seasons);
     expect(tids(list.tournaments)).toEqual([...newestFirst].reverse());
@@ -379,5 +381,114 @@ describe('status 25 (building the bracket) is the current season', () => {
     expect(data.tournament.status).toBe(20);
     const plan = planN01Sync({ team: { id: 'team_st', name: 'スターズ', createdAt: 0 }, localPlayers: [], existingFormat: null, data, now: FIXTURE_NOW, newId: ids('b') });
     expect(await resolveLinkedTeam(c(), plan.team.n01!)).toEqual({ kind: 'ok', selection });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. t_date = 0 is no date; createTime is the fallback (owner's check of real ATDO)
+// ---------------------------------------------------------------------------
+
+describe('league/tournament/list: t_date = 0 is not a date, createTime orders the season', () => {
+  const ct = (day: string) => Date.parse(`${day}T00:00:00Z`) / 1000;
+
+  it('several t_date = 0 seasons, listed oldest first: newest first by createTime, history in order', () => {
+    const parsed = parseLeagueTournaments(
+      {
+        result: 0,
+        list: [
+          { tdid: 'old', status: 40, t_date: 0, createTime: ct('2025-10-01') },
+          { tdid: 'mid', status: 40, t_date: 0, createTime: ct('2026-01-10') },
+          { tdid: 'new', status: 40, t_date: 0, createTime: ct('2026-04-15') },
+        ],
+      },
+      'lg_x',
+    );
+    expect(parsed.tournaments.map((t) => t.startedAt)).toEqual(['2025-10-01', '2026-01-10', '2026-04-15'].map((day) => ct(day) * 1000));
+    expect(seasonPriorityGroups(parsed.tournaments).map(tids)).toEqual([['new']]);
+    expect(tids(previousSeasons(parsed.tournaments, 'new', 2))).toEqual(['mid', 'old']);
+  });
+
+  it('a valid t_date wins, then a start date, then createTime; "0" and createTime as text are read too', () => {
+    const parsed = parseLeagueTournaments(
+      {
+        result: 0,
+        list: [
+          { tdid: 'a', t_date: '2026-04-02', createTime: ct('2026-03-01') },
+          { tdid: 'b', t_date: 0, start_date: '2026-05-07', createTime: ct('2026-04-01') },
+          { tdid: 'c', t_date: '0', createTime: '2026-06-01 10:00:00' },
+          { tdid: 'd', t_date: 0 },
+        ],
+      },
+      'lg_x',
+    );
+    expect(parsed.tournaments.map((t) => t.startedAt)).toEqual([
+      Date.parse('2026-04-02T00:00:00Z'),
+      Date.parse('2026-05-07T00:00:00Z'),
+      Date.parse('2026-06-01T00:00:00Z'),
+      null,
+    ]);
+  });
+
+  it('ATDO fixture with every season finished: the latest is chosen although the list is oldest first', async () => {
+    const finished = generateLeague({ ...atdoSpec(), seasons: atdoSpec().seasons.map((season) => ({ ...season, status: 40 as const })) });
+    const c = new N01Client(createFixtureTransport({ datasets: [finished.dataset] }), { now: () => FIXTURE_NOW });
+    const browse = await browseLeague(c, ATDO);
+    expect(browse.candidates.map((t) => t.tournamentId)).toEqual(['t_ABvC_5234']);
+    expect(tids(previousSeasons(browse.tournaments, 't_ABvC_5234', 3))).toEqual(['t_ATp2_5101', 't_ATp1_4988', 't_ATp0_4870']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. A stale status 25 / 20 never hides the latest finished season (owner's check of real TDO)
+// ---------------------------------------------------------------------------
+
+describe('status 25 / 20 count as current only when newer than the latest finished season', () => {
+  const TDO = 'lg_3qgW_6619';
+  const t = (tournamentId: string, status: number, startedAt: number | null) => ({ tournamentId, title: tournamentId, status, startedAt, listIndex: 0 });
+
+  it('old 25 / 20 fall back to the latest finished; a newer 25 / 20 is current; 30 still comes first', () => {
+    const stale = [t('test25', 25, 1), t('oldEntry20', 20, 2), t('latest40', 40, 5), t('older40', 40, 3)];
+    expect(seasonPriorityGroups(stale).map(tids)).toEqual([['latest40']]);
+    expect(seasonPriorityGroups([...stale, t('next25', 25, 6)]).map(tids)).toEqual([['next25'], ['latest40']]);
+    expect(seasonPriorityGroups([...stale, t('next20', 20, 6)]).map(tids)).toEqual([['next20'], ['latest40']]);
+    expect(seasonPriorityGroups([...stale, t('live30', 30, 4)]).map(tids)).toEqual([['live30'], ['latest40']]);
+    // Started on the same day is not newer.
+    expect(seasonPriorityGroups([t('same25', 25, 5), t('latest40', 40, 5)]).map(tids)).toEqual([['latest40']]);
+    // Without a date on either side staleness cannot be shown: still a candidate.
+    expect(seasonPriorityGroups([t('undated25', 25, null), t('latest40', 40, 5)]).map(tids)).toEqual([['undated25'], ['latest40']]);
+  });
+
+  // TDO-like, as real TDO: an organiser's test tournament left at status 25 long ago.
+  const testTournament = {
+    tournamentId: 't_TDvf_5900',
+    title: 'TDO事務局検証作業用',
+    status: 25 as const,
+    startDate: '2025-12-02',
+    schedule: tdoSpec().seasons[0].schedule,
+    divisions: [{ title: 'Premier', teams: [
+      { tpid: 'Vf9a', name: '検証A', members: tdoSpec().seasons[0].divisions[0].teams[0].members.slice(0, 2) },
+      { tpid: 'Vf9b', name: '検証B', members: tdoSpec().seasons[0].divisions[0].teams[1].members.slice(0, 2) },
+    ] }],
+    intervalDays: 7,
+  };
+  const league = (seasons: ReturnType<typeof tdoSpec>['seasons']) =>
+    new N01Client(createFixtureTransport({ datasets: [generateLeague({ ...tdoSpec(), seasons }).dataset] }), { now: () => FIXTURE_NOW });
+  const allFinished = () => tdoSpec().seasons.map((season) => ({ ...season, status: 40 as const }));
+
+  it('real TDO today (3rd at 30, 2nd at 40, the test tournament at 25): the running seasons', async () => {
+    const browse = await browseLeague(league([...tdoSpec().seasons, testTournament]), TDO);
+    expect(browse.candidates.map((x) => x.tournamentId)).toEqual(['t_TDth_7002', 't_TDtu_7001']);
+  });
+
+  it('no season running, the test tournament still at 25: the latest finished season, not the test tournament', async () => {
+    const browse = await browseLeague(league([...allFinished(), testTournament]), TDO);
+    expect(browse.candidates.map((x) => x.tournamentId)).toEqual(['t_TDth_7002']);
+    expect(browse.choices.map((choice) => choice.name)).not.toContain('検証A');
+  });
+
+  it('a new season at 25 after the latest finished one: the new season', async () => {
+    const next = { ...testTournament, tournamentId: 't_TDwi_7101', title: '2026 冬', startDate: '2026-12-01' };
+    const browse = await browseLeague(league([next, ...allFinished(), testTournament]), TDO);
+    expect(browse.candidates.map((x) => x.tournamentId)).toEqual(['t_TDwi_7101']);
   });
 });

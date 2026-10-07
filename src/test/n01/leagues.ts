@@ -162,12 +162,13 @@ export function atdoSpec(): FixtureLeagueSpec {
     title: 'ATDO',
     softdarts: 0,
     people,
+    // As on real ATDO, no season has its t_date set: createTime alone orders them.
     seasons: [
       current,
       previous('t_ATp2_5101', '2026 2nd', '2026-05-07', 'p', 'P2'),
       previous('t_ATp1_4988', '2026 1st', '2026-02-05', 'q', 'P1'),
       previous('t_ATp0_4870', '2025 4th', '2025-11-06', 'r', 'P0'),
-    ],
+    ].map((season) => ({ ...season, noTDate: true })),
     seed: 3397,
     today: FIXTURE_TODAY,
     shape: 'n01',

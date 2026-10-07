@@ -33,7 +33,10 @@ export interface N01TournamentSummary {
   title: string;
   /** `status` (20 / 25 / 30 / 40 …), `null` when absent or not a number. */
   status: number | null;
-  /** Competition date (`t_date`) as epoch ms when n01 provides a parsable one, else `null`. */
+  /**
+   * When the season happens, as epoch ms: `t_date` when set (n01 writes 0 when not), else a
+   * start date, else `createTime`. `null` when none is usable.
+   */
   startedAt: number | null;
   /** Position in n01's list (0-based), used for ordering when no date is given. */
   listIndex: number;
