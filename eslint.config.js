@@ -69,6 +69,11 @@ export default tseslint.config(
               group: ['**/storage/**', '**/components/**', '**/pages/**', '**/state/**', '**/share/**'],
               message: 'domain/optimizer must not depend on storage, UI or share layers (DESIGN.md §12).',
             },
+            {
+              group: ['**/integrations/**'],
+              message:
+                'domain/optimizer must not depend on the n01 integration: no HTTP below the state layer (N01_MASTER_DESIGN.md §4).',
+            },
           ],
         },
       ],
@@ -78,6 +83,38 @@ export default tseslint.config(
         { name: 'window', message: 'domain/optimizer must stay DOM-free (DESIGN.md §12).' },
         { name: 'localStorage', message: 'domain/optimizer must not touch storage (DESIGN.md §12).' },
         { name: 'indexedDB', message: 'domain/optimizer must not touch storage (DESIGN.md §12).' },
+      ],
+    },
+  },
+  {
+    /**
+     * The n01 integration is the network boundary. It may use the domain, but never React,
+     * storage, the UI, the share layer or the optimizer (N01_MASTER_DESIGN.md §4).
+     */
+    files: ['src/integrations/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'react', message: 'integrations must stay React-free (N01_MASTER_DESIGN.md §4).' },
+            { name: 'react-dom', message: 'integrations must stay React-free (N01_MASTER_DESIGN.md §4).' },
+          ],
+          patterns: [
+            {
+              group: ['**/storage/**', '**/components/**', '**/pages/**', '**/state/**', '**/share/**', '**/optimizer/**', '**/test/**'],
+              message: 'integrations must not depend on storage, UI, share, optimizer or test code (N01_MASTER_DESIGN.md §4).',
+            },
+          ],
+        },
+      ],
+      'no-restricted-globals': [
+        'error',
+        { name: 'document', message: 'integrations must stay DOM-free.' },
+        { name: 'window', message: 'integrations must stay DOM-free.' },
+        { name: 'localStorage', message: 'integrations must not touch storage.' },
+        { name: 'indexedDB', message: 'integrations must not touch storage.' },
       ],
     },
   },

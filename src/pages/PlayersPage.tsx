@@ -13,7 +13,13 @@ import {
   formatStrengthLine,
   useToast,
 } from '../components/ui';
-import { parsePprInput, playerPpr } from '../domain/players/strength';
+import { formatPpr, parsePprInput, playerPpr } from '../domain/players/strength';
+import {
+  EFFECTIVE_PPR_ORIGIN_LABELS,
+  effectivePpr,
+  pprSourceOf,
+  withEffectivePpr,
+} from '../domain/n01/effectivePpr';
 import { PPR_MAX } from '../domain/types';
 import { Icon } from '../components/icons';
 
@@ -69,7 +75,7 @@ export function PlayersPage(): React.JSX.Element {
         <p className="tiny muted" style={{ margin: 0 }}>
           {store.teamPlayers.length} 名登録 ・ Rating 未入力{' '}
           {store.teamPlayers.filter((player) => player.rating === null).length} 名 ・ PPR 未入力{' '}
-          {store.teamPlayers.filter((player) => playerPpr(player) === null).length} 名
+          {store.teamPlayers.filter((player) => effectivePpr(player).value === null).length} 名
         </p>
       </Card>
 
@@ -87,15 +93,21 @@ export function PlayersPage(): React.JSX.Element {
                     {Array.from(player.name || '?')[0]}
                   </span>
                   <span className="grow">
-                    <span className="title">{player.name || '(名称未設定)'}</span>
+                    <span className="title">
+                      {player.name || '(名称未設定)'}
+                      {player.n01 && !player.n01.rosterActive ? <span className="n01-tag muted-tag">登録外</span> : null}
+                    </span>
                     <span
                       className={
-                        player.rating === null && playerPpr(player) === null
+                        player.rating === null && effectivePpr(player).value === null
                           ? 'strength-line unknown'
                           : 'strength-line'
                       }
                     >
-                      {formatStrengthLine(player)}
+                      {formatStrengthLine(withEffectivePpr(player))}
+                      {player.n01 ? (
+                        <span className="ppr-origin"> ・ PPR {EFFECTIVE_PPR_ORIGIN_LABELS[effectivePpr(player).origin]}</span>
+                      ) : null}
                     </span>
                     <span className="meta">
                       シーズン {player.seasonAppearances} 回
@@ -225,6 +237,37 @@ function PlayerEditor({
         />
       </Field>
 
+      {player.n01 ? (
+        <div className="sheet-section n01-player" data-testid="n01-player">
+          <span className="kicker">n01</span>
+          <p className="small-text" style={{ margin: '0 0 6px' }}>
+            {player.n01.sourceName}
+            {player.n01.rosterActive ? '' : ' ・ 現在の登録メンバーではありません'}
+          </p>
+          <p className="small-text secondary" style={{ margin: '0 0 10px' }}>
+            {player.n01.stats?.ppr != null
+              ? `${formatPpr(player.n01.stats.ppr)} (${player.n01.stats.score} 点 / ${player.n01.stats.darts} ダーツ${
+                  player.n01.stats.legs !== null ? ` / ${player.n01.stats.legs} レッグ` : ''
+                })`
+              : 'n01 に PPR のデータがありません'}
+          </p>
+          <div className="segmented" role="radiogroup" aria-label="使用する PPR">
+            {(['n01', 'manual'] as const).map((source) => (
+              <button
+                type="button"
+                key={source}
+                role="radio"
+                aria-checked={pprSourceOf(draft) === source}
+                onClick={() => setDraft({ ...draft, pprSource: source })}
+              >
+                {source === 'n01' ? 'n01 の PPR' : '手動の PPR'}
+              </button>
+            ))}
+          </div>
+          <p className="hint">名前と n01 の PPR は同期のたびに n01 から更新されます。Rating・適性・メモはこのアプリだけの設定です。</p>
+        </div>
+      ) : null}
+
       <div className="field-pair">
         <Field label="Rating (任意)">
           <input
@@ -237,7 +280,7 @@ function PlayerEditor({
           />
         </Field>
         <label className="field">
-          <span>PPR Average (任意)</span>
+          <span>{player.n01 ? '手動 PPR (任意)' : 'PPR Average (任意)'}</span>
           <input
             type="number"
             inputMode="decimal"

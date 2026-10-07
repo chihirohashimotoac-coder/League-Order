@@ -8,13 +8,18 @@ export function createParticipantConfig(playerId: PlayerId, include = true): Par
 /**
  * Reconciles a participant list with the current roster: keeps existing rows, adds
  * missing players and drops rows whose player no longer exists.
+ *
+ * A new row starts included unless the player is archived or has left the n01 roster.
  */
 export function syncParticipants(
   participants: readonly ParticipantConfig[],
   players: readonly Player[],
 ): ParticipantConfig[] {
   const byId = new Map(participants.map((c) => [c.playerId, c]));
-  return players.map((player) => byId.get(player.id) ?? createParticipantConfig(player.id, !player.archived));
+  return players.map(
+    (player) =>
+      byId.get(player.id) ?? createParticipantConfig(player.id, !player.archived && player.n01?.rosterActive !== false),
+  );
 }
 
 export function includedParticipants(

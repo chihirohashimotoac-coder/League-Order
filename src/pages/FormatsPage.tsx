@@ -54,15 +54,20 @@ export function FormatsPage(): React.JSX.Element {
     });
   };
 
+  const [viewing, setViewing] = useState<LeagueFormat | null>(null);
+
+  // A copy is always a manual format: the n01 source and game metadata stay with the
+  // managed original, which keeps being rewritten by every sync.
   const duplicate = (format: LeagueFormat): void => {
     store.saveFormat({
       ...format,
       id: createId('fmt'),
-      name: `${format.name} のコピー`,
-      games: format.games.map((game) => ({ ...game, id: createId('gm') })),
+      name: format.source ? `${format.name} (手動)` : `${format.name} のコピー`,
+      games: format.games.map((game) => ({ ...game, id: createId('gm'), n01: undefined })),
       createdAt: Date.now(),
+      source: undefined,
     });
-    toast.show('複製しました', 'ok');
+    toast.show(format.source ? '手動フォーマットとしてコピーしました' : '複製しました', 'ok');
   };
 
   return (
@@ -77,13 +82,18 @@ export function FormatsPage(): React.JSX.Element {
             {store.teamFormats.map((format) => (
               <li key={format.id}>
                 <div className="row" style={{ paddingRight: 10 }}>
-                  <button type="button" className="list-row grow" onClick={() => setEditing(format)}>
+                  <button
+                    type="button"
+                    className="list-row grow"
+                    onClick={() => (format.source ? setViewing(format) : setEditing(format))}
+                  >
                     <span className="lead" aria-hidden="true">
-                      <Icon name="format" size={18} />
+                      <Icon name={format.source ? 'refresh' : 'format'} size={18} />
                     </span>
                     <span className="grow">
                       <span className="title">{format.name}</span>
                       <DisciplineBadge discipline={formatDiscipline(format)} />
+                      {format.source ? <span className="n01-tag">n01 管理</span> : null}
                       <span className="meta">
                         {format.games.length} ゲーム / 総枠 {totalSlots(format.games)}
                         {format.teamId === null ? ' ・ 共有' : ''}
@@ -95,9 +105,9 @@ export function FormatsPage(): React.JSX.Element {
                     type="button"
                     className="btn small ghost"
                     onClick={() => duplicate(format)}
-                    aria-label={`${format.name} を複製`}
+                    aria-label={format.source ? `${format.name} を手動フォーマットとしてコピー` : `${format.name} を複製`}
                   >
-                    複製
+                    {format.source ? 'コピー' : '複製'}
                   </button>
                 </div>
               </li>
@@ -135,6 +145,17 @@ export function FormatsPage(): React.JSX.Element {
         />
       ) : null}
 
+      {viewing ? (
+        <ManagedFormatViewer
+          format={viewing}
+          onClose={() => setViewing(null)}
+          onCopy={() => {
+            duplicate(viewing);
+            setViewing(null);
+          }}
+        />
+      ) : null}
+
       {confirmDelete ? (
         <ConfirmDialog
           title="フォーマットを削除"
@@ -150,6 +171,62 @@ export function FormatsPage(): React.JSX.Element {
         />
       ) : null}
     </>
+  );
+}
+
+/**
+ * An n01-managed format (MASTER SPEC Phase 1 §12): read-only, rewritten by each sync.
+ * Editing starts from a manual copy, so the managed one keeps following n01.
+ */
+function ManagedFormatViewer({
+  format,
+  onClose,
+  onCopy,
+}: {
+  format: LeagueFormat;
+  onClose: () => void;
+  onCopy: () => void;
+}): React.JSX.Element {
+  const source = format.source!;
+  return (
+    <Sheet
+      title="n01 管理フォーマット"
+      onClose={onClose}
+      footer={
+        <button type="button" className="btn primary grow" onClick={onCopy}>
+          <Icon name="edit" size={18} />
+          コピーして手動フォーマット
+        </button>
+      }
+    >
+      <div className="n01-source" data-testid="managed-format-source">
+        <span className="kicker">SOURCE</span>
+        <p className="body-text" style={{ margin: 0 }}>
+          {source.leagueTitle}
+          <br />
+          {source.tournamentTitle}
+          {source.divisionTitle ? (
+            <>
+              <br />
+              {source.divisionTitle} Division
+            </>
+          ) : null}
+        </p>
+        <p className="tiny muted">n01 と同期するたびに更新されます。ここでは編集できません。</p>
+      </div>
+      <p className="small-text">
+        <DisciplineBadge discipline={formatDiscipline(format)} /> {DARTS_DISCIPLINE_LABELS[formatDiscipline(format)]}
+      </p>
+      <ol className="lineup-preview">
+        {format.games.map((game) => (
+          <li key={game.id}>
+            <span className="no">{String(game.order).padStart(2, '0')}</span>
+            <span>{game.name}</span>
+            <span className="badge">{game.playerCount}名</span>
+          </li>
+        ))}
+      </ol>
+    </Sheet>
   );
 }
 

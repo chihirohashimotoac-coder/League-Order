@@ -13,6 +13,9 @@ import {
   useToast,
 } from '../components/ui';
 import { Icon, type IconName } from '../components/icons';
+import { N01TeamWizard, type N01WizardMode } from '../components/n01/N01TeamWizard';
+import { N01SyncSheet } from '../components/n01/N01SyncSheet';
+import { freshness } from '../domain/n01/freshness';
 import type { Page } from '../navigation';
 
 /** What HOME needs to know about the order currently open in this session. */
@@ -48,6 +51,8 @@ export function HomePage({
   const [confirmDelete, setConfirmDelete] = useState<Team | null>(null);
   const [confirmLeaveDemo, setConfirmLeaveDemo] = useState(false);
   const [confirmSwitch, setConfirmSwitch] = useState<Team | null>(null);
+  const [wizard, setWizard] = useState<N01WizardMode | null>(null);
+  const [syncing, setSyncing] = useState<Team | null>(null);
 
   // Switching teams detaches the working order (it belongs to the old team), so unsaved
   // work there is confirmed first, exactly like starting a new order.
@@ -133,6 +138,7 @@ export function HomePage({
                 切替 / 管理
               </button>
             </div>
+            {team?.n01 ? <N01TeamStatus team={team} onSync={() => setSyncing(team)} /> : null}
             <div className="scoreboard">
               <div>
                 <span className="k">PLAYERS</span>
@@ -216,16 +222,22 @@ export function HomePage({
           title="チーム"
           onClose={() => setTeamSheet(false)}
           footer={
-            <button
-              type="button"
-              className="btn primary grow"
-              onClick={() =>
-                setEditingTeam({ id: createId('team'), name: '', createdAt: Date.now() })
-              }
-            >
-              <Icon name="plus" size={18} />
-              チームを追加
-            </button>
+            <>
+              <button type="button" className="btn grow" onClick={() => setWizard({ kind: 'create' })}>
+                <Icon name="refresh" size={18} />
+                n01から追加
+              </button>
+              <button
+                type="button"
+                className="btn primary grow"
+                onClick={() =>
+                  setEditingTeam({ id: createId('team'), name: '', createdAt: Date.now() })
+                }
+              >
+                <Icon name="plus" size={18} />
+                チームを追加
+              </button>
+            </>
           }
         >
           <ul className="list">
@@ -289,6 +301,36 @@ export function HomePage({
           onDelete={() => {
             setConfirmDelete(editingTeam);
             setEditingTeam(null);
+          }}
+          onLinkN01={
+            store.teams.some((entry) => entry.id === editingTeam.id) && !editingTeam.n01
+              ? () => {
+                  setWizard({ kind: 'link', team: editingTeam });
+                  setEditingTeam(null);
+                }
+              : undefined
+          }
+        />
+      ) : null}
+
+      {syncing ? (
+        <N01SyncSheet
+          team={syncing}
+          onClose={() => setSyncing(null)}
+          onRelink={() => {
+            setWizard({ kind: 'link', team: syncing });
+            setSyncing(null);
+          }}
+        />
+      ) : null}
+
+      {wizard ? (
+        <N01TeamWizard
+          mode={wizard}
+          onClose={() => setWizard(null)}
+          onDone={() => {
+            setWizard(null);
+            setTeamSheet(false);
           }}
         />
       ) : null}
@@ -360,18 +402,47 @@ export function HomePage({
   );
 }
 
+/** League / season / division and the age of the last sync, on the team card. */
+function N01TeamStatus({ team, onSync }: { team: Team; onSync: () => void }): React.JSX.Element {
+  const store = useAppStore();
+  const binding = team.n01!;
+  const cached = store.n01CacheFor(team.id).find((record) => record.kind === 'sync');
+  const age = cached ? freshness(cached.fetchedAt, Date.now()) : null;
+  return (
+    <div className="n01-status" data-testid="n01-team-status">
+      <span className="grow">
+        <span className="n01-line">
+          <span className="n01-tag">n01</span>
+          {binding.leagueTitle} ・ {binding.lastTournamentTitle}
+          {binding.lastDivisionTitle ? ` ・ ${binding.lastDivisionTitle} Division` : ''}
+        </span>
+        <span className={`n01-age level-${age?.level ?? 'danger'}`}>
+          {age ? `最終同期 ${age.label}` : '未同期'}
+        </span>
+      </span>
+      <button type="button" className="btn small" onClick={onSync}>
+        <Icon name="refresh" size={16} />
+        n01を再同期
+      </button>
+    </div>
+  );
+}
+
 function TeamEditor({
   team,
   canDelete,
   onClose,
   onSave,
   onDelete,
+  onLinkN01,
 }: {
   team: Team;
   canDelete: boolean;
   onClose: () => void;
   onSave: (team: Team) => void;
   onDelete: () => void;
+  /** Offered for an existing team that is not linked to n01 yet. */
+  onLinkN01?: () => void;
 }): React.JSX.Element {
   const [draft, setDraft] = useState(team);
   return (
@@ -413,6 +484,26 @@ function TeamEditor({
           onChange={(event) => setDraft({ ...draft, note: event.target.value })}
         />
       </Field>
+      {team.n01 ? (
+        <div className="sheet-section">
+          <span className="kicker">n01</span>
+          <p className="small-text" style={{ margin: 0 }}>
+            {team.n01.leagueTitle} ・ {team.n01.lastTournamentTitle}
+            {team.n01.lastDivisionTitle ? ` ・ ${team.n01.lastDivisionTitle} Division` : ''} ・ n01 名「{team.n01.lastTeamName}」
+          </p>
+        </div>
+      ) : onLinkN01 ? (
+        <div className="sheet-section">
+          <span className="kicker">n01</span>
+          <p className="tiny muted" style={{ marginTop: 0 }}>
+            n01 のチームと接続すると、メンバー・PPR・フォーマットを n01 から同期します。Rating などこのアプリの設定は残ります。
+          </p>
+          <button type="button" className="btn small" onClick={onLinkN01}>
+            <Icon name="refresh" size={16} />
+            n01と接続
+          </button>
+        </div>
+      ) : null}
     </Sheet>
   );
 }

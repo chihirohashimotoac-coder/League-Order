@@ -6,6 +6,14 @@
  * (see docs/DESIGN.md §12).
  */
 
+import type {
+  N01FormatSource,
+  N01GameMeta,
+  N01PlayerBinding,
+  N01TeamBinding,
+  PprSource,
+} from './n01/types';
+
 export type TeamId = string;
 export type PlayerId = string;
 export type GameId = string;
@@ -140,6 +148,17 @@ export interface Player {
   seasonAppearancesByKind: Partial<Record<GameKind, number>>;
   archived: boolean;
   createdAt: number;
+  /**
+   * Where the roster entry comes from on n01 (docs/N01_MASTER_DESIGN.md §2). Absent on
+   * players created by hand. A sync rewrites only this record and the name — never the
+   * Rating, aptitudes, notes or season counts.
+   */
+  n01?: N01PlayerBinding;
+  /**
+   * Which PPR the optimizer uses. Absent means the default: `n01` for a linked player,
+   * `manual` otherwise (see `domain/n01/effectivePpr.ts`).
+   */
+  pprSource?: PprSource;
 }
 
 export interface Team {
@@ -154,6 +173,8 @@ export interface Team {
    */
   demo?: boolean;
   createdAt: number;
+  /** Present when the team is linked to an n01 league team. */
+  n01?: N01TeamBinding;
 }
 
 /**
@@ -189,6 +210,8 @@ export interface GameSlotDef {
   kinds: GameKind[];
   /** Required number of players for this game. */
   playerCount: number;
+  /** What n01 says about the game, on formats managed by n01. */
+  n01?: N01GameMeta;
 }
 
 export interface LeagueFormat {
@@ -204,6 +227,11 @@ export interface LeagueFormat {
   discipline: DartsDiscipline;
   games: GameSlotDef[];
   createdAt: number;
+  /**
+   * Set on formats that n01 manages: they are rewritten by each sync and are read-only
+   * in the editor ("copy to a manual format" makes an editable one).
+   */
+  source?: N01FormatSource;
 }
 
 export function formatDiscipline(format: Pick<LeagueFormat, 'discipline'> | null | undefined): DartsDiscipline {

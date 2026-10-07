@@ -32,12 +32,9 @@ import {
   formatStrengthLine,
   useToast,
 } from '../components/ui';
-import {
-  describeStrengthWeights,
-  playerPpr,
-  resolveStrength,
-} from '../domain/players/strength';
+import { describeStrengthWeights, resolveStrength } from '../domain/players/strength';
 import { Icon, type IconName } from '../components/icons';
+import { effectivePpr, withEffectivePpr } from '../domain/n01/effectivePpr';
 import type { Page } from '../navigation';
 
 /**
@@ -103,11 +100,14 @@ export function SetupPage({
 
   const included = draft.participants.filter((config) => config.include);
   const discipline = formatDiscipline(format);
+  // n01-linked players carry their PPR from n01 (or the manual fallback): the order input
+  // snapshots that effective value, so a saved order keeps the PPR it was made with.
+  const effectivePlayers = useMemo(() => store.teamPlayers.map(withEffectivePpr), [store.teamPlayers]);
   // The same resolution the optimizer runs, so the blend shown here is the one used.
   const strengthBlend = useMemo(
     () =>
-      describeStrengthWeights(resolveStrength(discipline, store.teamPlayers, draft.participants).weights),
-    [discipline, store.teamPlayers, draft.participants],
+      describeStrengthWeights(resolveStrength(discipline, effectivePlayers, draft.participants).weights),
+    [discipline, effectivePlayers, draft.participants],
   );
 
   const updateConfig = (playerId: string, change: Partial<ParticipantConfig>): void => {
@@ -143,7 +143,7 @@ export function SetupPage({
       teamId: store.activeTeamId ?? '',
       formatId: format.id,
       games: format.games,
-      players: store.teamPlayers,
+      players: effectivePlayers,
       participants: draft.participants,
       pairs: store.teamPairs,
       locks: [],
@@ -304,10 +304,10 @@ export function SetupPage({
                     <strong>{player.name}</strong>
                     <span
                       className={
-                        player.rating === null && playerPpr(player) === null ? 'rt unknown' : 'rt'
+                        player.rating === null && effectivePpr(player).value === null ? 'rt unknown' : 'rt'
                       }
                     >
-                      {formatStrengthLine(player)}
+                      {formatStrengthLine(withEffectivePpr(player))}
                     </span>
                   </span>
                   <span className={restrictions.length > 0 && config.include ? 'p-meta has-conditions' : 'p-meta'}>

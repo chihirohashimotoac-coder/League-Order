@@ -8,6 +8,7 @@ import type {
   Team,
 } from '../domain/types';
 import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../domain/orders/presets';
+import type { N01CacheRecord } from '../domain/n01/types';
 import { mergeDefined } from '../utils/merge';
 import { normaliseFormat, normalisePlayer, normaliseSavedOrder } from '../domain/normalise';
 import { openBackend, type BackendKind, type StorageBackend } from './db';
@@ -98,12 +99,13 @@ export class Repository {
   }
 
   async deleteTeam(teamId: string): Promise<void> {
-    const [players, formats, pairs, orders, commits] = await Promise.all([
+    const [players, formats, pairs, orders, commits, cache] = await Promise.all([
       this.backend.getAll<Player>('players'),
       this.backend.getAll<LeagueFormat>('formats'),
       this.backend.getAll<PairSetting>('pairs'),
       this.backend.getAll<SavedOrder>('orders'),
       this.backend.getAll<SeasonCommit>('seasonCommits'),
+      this.backend.getAll<N01CacheRecord>('n01Cache'),
     ]);
     await Promise.all([
       ...players.filter((p) => p.teamId === teamId).map((p) => this.backend.remove('players', p.id)),
@@ -111,8 +113,39 @@ export class Repository {
       ...pairs.filter((p) => p.teamId === teamId).map((p) => this.backend.remove('pairs', p.id)),
       ...orders.filter((o) => o.teamId === teamId).map((o) => this.backend.remove('orders', o.id)),
       ...commits.filter((c) => c.teamId === teamId).map((c) => this.backend.remove('seasonCommits', c.id)),
+      ...cache.filter((c) => c.teamId === teamId).map((c) => this.backend.remove('n01Cache', c.id)),
     ]);
     await this.backend.remove('teams', teamId);
+  }
+
+  /** Cached n01 data for every team (offline use, "last synced"). */
+  loadN01Cache(): Promise<N01CacheRecord[]> {
+    return this.backend.getAll<N01CacheRecord>('n01Cache');
+  }
+
+  /**
+   * Stores the result of an n01 sync in one batch: the team (with its binding), the
+   * changed players, the managed format and the cache records. On IndexedDB this is a
+   * single transaction, so a sync is never half-applied.
+   */
+  applyN01Sync(change: {
+    team: Team;
+    players: readonly Player[];
+    format: LeagueFormat | null;
+    cache: readonly N01CacheRecord[];
+    settings?: AppSettings;
+  }): Promise<void> {
+    return this.backend.writeBatch([
+      { store: 'teams', put: [change.team] },
+      { store: 'players', put: change.players },
+      { store: 'formats', put: change.format ? [change.format] : [] },
+      { store: 'n01Cache', put: change.cache },
+      ...(change.settings ? [{ store: 'settings' as const, put: [{ id: SETTINGS_ID, ...change.settings }] }] : []),
+    ]);
+  }
+
+  saveN01Cache(records: readonly N01CacheRecord[]): Promise<void> {
+    return this.backend.putMany('n01Cache', records);
   }
 
   savePlayer(player: Player): Promise<void> {
