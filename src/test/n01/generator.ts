@@ -63,6 +63,14 @@ export interface FixtureLeagueSpec {
   today: string;
   /** opids that get a stats row with zero darts in the newest season. */
   zeroDarts?: string[];
+  /**
+   * Response shapes. `documented` follows n01's External Integration API Manual as
+   * described in the PR review (`{ result: 0, tournament }`, fixtures nested per division
+   * as `{ p: [tpid1, tpid2], lsid, t }`, order rows as `{ tmid, position, order }`);
+   * `legacy` is the flat shape the integration was first written against. The parser
+   * accepts both, so each fixture league exercises one.
+   */
+  shape?: 'documented' | 'legacy';
 }
 
 /** A fixture dataset: request key → raw response. */
@@ -390,7 +398,8 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
       }
     }
 
-    dataset.set(requestKey('tournament/get', { tdid: season.tournamentId }), {
+    const documented = spec.shape === 'documented';
+    const tournamentBody = {
       tdid: season.tournamentId,
       title: season.title,
       lgid: spec.leagueId,
@@ -403,9 +412,13 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
       })),
       lg_setting: { schedule: season.schedule, game_setting: season.gameSettings ?? [] },
       lg_result: results,
-    });
+    };
+    dataset.set(
+      requestKey('tournament/get', { tdid: season.tournamentId }),
+      documented ? { result: 0, tournament: tournamentBody } : tournamentBody,
+    );
 
-    dataset.set(requestKey('tournament/stats', { tdid: season.tournamentId }), {
+    dataset.set(requestKey('tournament/stats', { tdid: season.tournamentId, kind: 'player_stats_list' }), {
       player_stats_list: [...stats.values()].map((entry) => ({
         ...(opidOf(entry.opid) ? { opid: entry.opid } : {}),
         oid: entry.oid,
@@ -430,20 +443,36 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
           oname: spec.people[opid].name,
         })),
       });
+      const orders = (ordersByTeam.get(team.tpid) ?? []) as { lsid: string; schid: string; position: number; players: unknown[] }[];
       dataset.set(requestKey('team/order/list', { tdid: season.tournamentId, tpid: team.tpid }), {
-        list: ordersByTeam.get(team.tpid) ?? [],
+        list: documented
+          ? orders.map((row) => ({ tmid: row.lsid, position: row.position, order: row.players }))
+          : orders,
       });
     }
 
-    dataset.set(requestKey('league/schedule/get', { tdid: season.tournamentId }), {
-      list: fixtures.map((fixture) => ({
-        lsid: fixture.lsid,
-        title: `${fixture.title} ${Number(fixture.date.slice(5, 7))}/${Number(fixture.date.slice(8, 10))}`,
-        tpid1: fixture.tpid1,
-        tpid2: fixture.tpid2 ?? '',
-        date: fixture.date,
-      })),
-    });
+    const divisionOf = (tpid: string): number => season.divisions.findIndex((division) => division.teams.some((team) => team.tpid === tpid));
+    dataset.set(
+      requestKey('league/schedule/get', { tdid: season.tournamentId }),
+      documented
+        ? {
+            result: 0,
+            schedule: season.divisions.map((_, index) =>
+              fixtures
+                .filter((fixture) => divisionOf(fixture.tpid1) === index)
+                .map((fixture) => ({ p: [fixture.tpid1, fixture.tpid2 ?? ''], lsid: fixture.lsid, t: fixture.date })),
+            ),
+          }
+        : {
+            list: fixtures.map((fixture) => ({
+              lsid: fixture.lsid,
+              title: `${fixture.title} ${Number(fixture.date.slice(5, 7))}/${Number(fixture.date.slice(8, 10))}`,
+              tpid1: fixture.tpid1,
+              tpid2: fixture.tpid2 ?? '',
+              date: fixture.date,
+            })),
+          },
+    );
   });
 
   return { dataset, games };

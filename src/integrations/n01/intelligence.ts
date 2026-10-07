@@ -201,7 +201,8 @@ function observations(orders: readonly N01OrderEntry[], tournament: N01Tournamen
   const result: OrderObservation[] = [];
   orders.forEach((entry, index) => {
     const signature =
-      bySchid.get(entry.schid) ?? (entry.position !== null ? byPosition[entry.position - 1] : undefined);
+      (entry.schid !== null ? bySchid.get(entry.schid) : undefined) ??
+      (entry.position !== null ? byPosition[entry.position - 1] : undefined);
     if (!signature) return;
     result.push({
       seasonIndex,

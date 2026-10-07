@@ -66,11 +66,14 @@ describe('security review (Phase 6 §11)', () => {
   });
 
   it('URL validation: https on an n01 host only, no look-alikes, no embedded credentials', () => {
-    expect(N01_ALLOWED_HOSTS).toEqual(['n01darts.com', 'www.n01darts.com']);
+    expect(N01_ALLOWED_HOSTS).toEqual(['push.n01darts.com', 'n01darts.com', 'www.n01darts.com']);
+    expect(isAllowedN01Url('https://push.n01darts.com/api/v1')).toBe(true);
     expect(isAllowedN01Url('https://n01darts.com/n01/league/?lgid=lg_l3hI_3397')).toBe(true);
     for (const url of [
       'http://n01darts.com/n01/api',
       'https://n01darts.com.example.com/n01/api',
+      'https://push.n01darts.com.example.com/api/v1',
+      'http://push.n01darts.com/api/v1',
       'https://example.com/n01darts.com',
       'https://user:pass@n01darts.com/n01/api',
       'https://n01darts.co/n01/api',

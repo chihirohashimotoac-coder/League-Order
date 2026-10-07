@@ -223,6 +223,7 @@ export function tdoSpec(): FixtureLeagueSpec {
     ],
     seed: 6619,
     today: FIXTURE_TODAY,
+    shape: 'documented',
   };
 }
 

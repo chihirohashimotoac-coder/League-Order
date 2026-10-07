@@ -3,7 +3,7 @@ import type { Player, Team } from '../../domain/types';
 import { N01Client, N01Error, createFetchTransport } from './client';
 import { buildUrl, parseRequestUrl, N01_API_BASE_URL } from './endpoints';
 import { parseLeagueReference, KNOWN_LEAGUES } from './leagueRegistry';
-import { parseDateText, parseStats, parseTournament } from './validation';
+import { parseDateText, parseOrders, parseSchedule, parseStats, parseTournament } from './validation';
 import { newestFirst, pickSeasonByMembership, previousSeasons, seasonPriorityGroups } from './seasonResolver';
 import { describeFormat, effectiveSchedule, gamesFromSchedule } from './formatResolver';
 import { browseLeague, fetchTeamData, planN01Sync, resolveLinkedTeam, type N01TeamData } from './sync';
@@ -37,9 +37,9 @@ describe('endpoints and league registry', () => {
   it('maps an operation to a GET URL and back', () => {
     const request: N01Request = { operation: 'team/player/list', params: { tpid: 'GpiQ', tdid: 't_ABvC_5234' } };
     const url = buildUrl(N01_API_BASE_URL, request);
-    expect(url).toBe('https://n01darts.com/n01/api/team/player/list?tdid=t_ABvC_5234&tpid=GpiQ');
+    expect(url).toBe('https://push.n01darts.com/api/v1/team/player/list?tdid=t_ABvC_5234&tpid=GpiQ');
     expect(parseRequestUrl(N01_API_BASE_URL, url)).toEqual(request);
-    expect(parseRequestUrl(N01_API_BASE_URL, 'https://n01darts.com/n01/api/team/delete?tpid=x')).toBeNull();
+    expect(parseRequestUrl(N01_API_BASE_URL, 'https://push.n01darts.com/api/v1/team/delete?tpid=x')).toBeNull();
   });
 
   it('knows ATDO, TDO and TDA by league id only', () => {
@@ -64,7 +64,74 @@ describe('endpoints and league registry', () => {
 
   it('refuses to build a transport for a non-n01 base URL', () => {
     expect(() => createFetchTransport({ baseUrl: 'https://example.com/api' })).toThrow(N01Error);
-    expect(() => createFetchTransport({ baseUrl: 'http://n01darts.com/n01/api' })).toThrow(N01Error);
+    expect(() => createFetchTransport({ baseUrl: 'http://push.n01darts.com/api/v1' })).toThrow(N01Error);
+  });
+
+  it('asks for per-player stats (team events list members only for this kind)', async () => {
+    const log: N01Request[] = [];
+    await new N01Client(createFixtureTransport({ log })).stats('t_ABvC_5234');
+    expect(log).toEqual([{ operation: 'tournament/stats', params: { tdid: 't_ABvC_5234', kind: 'player_stats_list' } }]);
+  });
+});
+
+describe('documented response shapes (n01 External Integration API Manual, as cited in review)', () => {
+  it('tournament/get: unwraps { result: 0, tournament }', () => {
+    const tournament = parseTournament(
+      {
+        result: 0,
+        tournament: {
+          title: 'S',
+          status: 30,
+          entry_list: [{ tpid: 'GpiQ', name: 'kalavinka' }],
+          lg_table: [{ lg_title: 'A', list: [{ tpid: 'GpiQ' }] }],
+          lg_setting: { schedule: [{ schid: 's1', num_part: 1, match_type: '01', start_score: 501, limit_leg_count: 2 }] },
+        },
+      },
+      't_x',
+    );
+    expect(tournament.entries).toEqual([{ teamId: 'GpiQ', name: 'kalavinka' }]);
+    expect(tournament.schedule[0]).toMatchObject({ schid: 's1', limitLegCount: 2 });
+  });
+
+  it('league/schedule/get: one array per division, fixtures as { p: [tpid1, tpid2], lsid, t }', () => {
+    const fixtures = parseSchedule(
+      {
+        result: 0,
+        schedule: [
+          [{ p: ['GpiQ', '68wv'], lsid: 'm1', t: '2026-10-08' }, { p: ['BEyE', ''], lsid: 'm2', t: '2026-10-08' }],
+          [{ p: ['Rbrl', 'Phnx'], lsid: 'm3', t: Date.parse('2026-10-15T03:00:00Z') / 1000 }],
+        ],
+      },
+      FIXTURE_NOW,
+    );
+    expect(fixtures.map((fixture) => [fixture.matchId, fixture.homeTeamId, fixture.awayTeamId, fixture.date])).toEqual([
+      ['m1', 'GpiQ', '68wv', '2026-10-08'],
+      ['m2', 'BEyE', null, '2026-10-08'],
+      ['m3', 'Rbrl', 'Phnx', '2026-10-15'],
+    ]);
+  });
+
+  it('team/order/list: the line-up is `order`, the match is `tmid`, the game may be its position', () => {
+    const [row] = parseOrders({ list: [{ tmid: 'm1', position: 3, order: [{ oid: 'o1', opid: 'p1', oname: 'A' }, 'o2'] }] });
+    expect(row).toEqual({
+      matchId: 'm1',
+      schid: null,
+      position: 3,
+      players: [
+        { oid: 'o1', opid: 'p1', name: 'A' },
+        { oid: 'o2', opid: null, name: null },
+      ],
+    });
+  });
+
+  it('the legacy flat shapes are still read', () => {
+    const [fixture] = parseSchedule({ list: [{ lsid: 'm1', tpid1: 'A', tpid2: 'B', date: '2026-10-08', title: '第5節' }] }, FIXTURE_NOW);
+    expect(fixture).toMatchObject({ matchId: 'm1', homeTeamId: 'A', awayTeamId: 'B', date: '2026-10-08' });
+    const [order] = parseOrders({ list: [{ lsid: 'm1', schid: 's1', position: 1, players: [{ oid: 'o1' }] }] });
+    expect(order).toMatchObject({ matchId: 'm1', schid: 's1', position: 1 });
+    // A scalar under a documented key does not hide the list under a legacy one.
+    const [numbered] = parseOrders({ list: [{ lsid: 'm1', schid: 's1', order: 2, players: [{ oid: 'o1' }] }] });
+    expect(numbered.players).toEqual([{ oid: 'o1', opid: null, name: null }]);
   });
 });
 

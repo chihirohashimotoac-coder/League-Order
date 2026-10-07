@@ -167,9 +167,10 @@ export interface N01Fixture {
 
 /** One game a team fielded in a past match (`team/order/list`). */
 export interface N01OrderEntry {
-  /** `lsid` of the match, when given. */
+  /** The match (`tmid`, or `lsid`), when given. */
   matchId: string | null;
-  schid: string;
+  /** The game's `schid`; rows may identify the game by `position` only. */
+  schid: string | null;
   /** `position` of the game in the match order (1-based), when given. */
   position: number | null;
   /** The players fielded, as tournament-scoped ids (`oid`) with `opid` when present. */

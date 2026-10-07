@@ -195,7 +195,8 @@ export class N01Client {
   }
 
   stats(tournamentId: string): Promise<N01PlayerStats[]> {
-    return this.parsed('tournament/stats', { tdid: tournamentId }, parseStats);
+    // Team events return individual members' rows only for this kind.
+    return this.parsed('tournament/stats', { tdid: tournamentId, kind: 'player_stats_list' }, parseStats);
   }
 
   roster(tournamentId: string, teamId: string): Promise<N01RosterPlayer[]> {

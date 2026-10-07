@@ -5,25 +5,30 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 ## 1. 想定する n01 Read API 契約 (要ライブ検証)
 
 > **重要**: 開発環境から n01 への通信がネットワークポリシーで拒否されたため、
-> 以下の契約は MASTER SPEC に記載された操作名・フィールド名から組み立てた**想定**である。
+> 以下の契約は MASTER SPEC に記載された操作名・フィールド名と、PR レビューで示された
+> n01 External Integration API Manual (<https://push.n01darts.com/api/v1/n01_api_manual_en.html>)
+> の記述から組み立てた**想定**である (マニュアル本体はこの環境から読めていない)。
 > `npm run verify:n01` (read-only, CI 非必須) を n01 に到達できる環境で実行し、
 > 差異があれば `src/integrations/n01/endpoints.ts` (URL) と
 > `src/integrations/n01/validation.ts` (応答形) の 2 ファイルだけを修正する。
 
-- Base URL: `https://n01darts.com/n01/api` (定数 `N01_API_BASE_URL`)
+- Base URL: `https://push.n01darts.com/api/v1` (定数 `N01_API_BASE_URL`、マニュアルの公開オリジン)
 - 形式: `GET {base}/{operation}?{params}`、匿名 (`credentials: 'omit'`)、`cache: 'no-store'`
-- 許可ホスト: `n01darts.com` / `www.n01darts.com` (https のみ、URL 内認証情報は拒否)
+- 許可ホスト: `push.n01darts.com` (API) / `n01darts.com` / `www.n01darts.com` (貼り付けられたリーグ URL)。
+  https のみ、URL 内認証情報は拒否
 - 応答は JSON。`{ data: … }` / `{ result: … }` の包みは剥がす。`{ error: "…" }` はスキーマエラー扱い。
+- 応答形は**マニュアル準拠 (レビューで示された形) と、当初想定のフラットな形の両方**を受け付ける
+  (フィクスチャは TDO-like がマニュアル準拠、ATDO-like / TDA-like が当初形)。
 
 | 操作 | パラメータ | 読むフィールド |
 |---|---|---|
 | `league/search` | `q` | `list[].lgid`, `title` |
 | `league/tournament/list` | `lgid` | `title`, `list[].tdid`, `title`, `status`, `start_date` |
-| `tournament/get` | `tdid` | `title`, `lgid`, `status`, `softdarts`, `entry_list[].tpid/name`, `lg_table[].lg_title/list[].tpid`, `lg_setting.schedule[]`, `lg_setting.game_setting[].round/schedule[]`, `lg_result` |
+| `tournament/get` | `tdid` | (`{ result: 0, tournament: {…} }` の `tournament`) `title`, `lgid`, `status`, `softdarts`, `entry_list[].tpid/name`, `lg_table[].lg_title/list[].tpid`, `lg_setting.schedule[]`, `lg_setting.game_setting[].round/schedule[]`, `lg_result` |
 | `team/player/list` | `tdid`, `tpid` | `list[].opid`, `oid`, `tpid`, `oname` |
-| `tournament/stats` | `tdid` | `player_stats_list[].opid/oid/tpid/oname/score/darts/legs/win_legs/first9_score/first9_darts/high_out/best_leg/ton/ton40/ton70/ton80/matches` |
-| `league/schedule/get` | `tdid` | `list[].lsid`, `title`, `tpid1`, `tpid2` (空 = bye), `date` |
-| `team/order/list` | `tdid`, `tpid` | `list[].lsid`, `schid`, `position`, `players[].oid/opid/oname` |
+| `tournament/stats` | `tdid`, `kind=player_stats_list` (団体戦で個人行を得る) | `player_stats_list[].opid/oid/tpid/oname/score/darts/legs/win_legs/first9_score/first9_darts/high_out/best_leg/ton/ton40/ton70/ton80/matches` |
+| `league/schedule/get` | `tdid` | マニュアル: `schedule[division][]` = `{ p: [tpid1, tpid2], lsid, t }`。当初形: `list[].lsid`, `title`, `tpid1`, `tpid2`, `date`。空の tpid = bye。`t` は日付文字列またはエポック (秒 / ミリ秒、JST の日付に変換) |
+| `team/order/list` | `tdid`, `tpid` | マニュアル: `list[].tmid`, `position`, `order[]` (選手)。当初形: `list[].lsid`, `schid`, `position`, `players[]`。選手は `oid/opid/oname` のオブジェクトか `oid` 文字列。`schid` が無ければ `position` でゲームに対応付ける |
 
 `schedule[]` (試合形式の 1 ゲーム): `schid`, `num_part`, `subtitle`, `match_type`, `start_score`, `limit_leg_count`, `group`。
 

@@ -10,10 +10,19 @@
  * Read operations only. There is no write operation and no credential anywhere.
  */
 
-export const N01_API_BASE_URL = 'https://n01darts.com/n01/api';
+/**
+ * The published origin of n01's external integration API (n01 External Integration API
+ * Manual, https://push.n01darts.com/api/v1/n01_api_manual_en.html — pointed out in the
+ * PR review; the manual itself could not be read from the build environment, so
+ * `npm run verify:n01` is still the check).
+ */
+export const N01_API_BASE_URL = 'https://push.n01darts.com/api/v1';
 
-/** Hosts the client will talk to. Anything else is refused before a request is made. */
-export const N01_ALLOWED_HOSTS: readonly string[] = ['n01darts.com', 'www.n01darts.com'];
+/**
+ * Hosts the client will talk to. Anything else is refused before a request is made.
+ * `n01darts.com` / `www.n01darts.com` are the league pages a captain may paste a link to.
+ */
+export const N01_ALLOWED_HOSTS: readonly string[] = ['push.n01darts.com', 'n01darts.com', 'www.n01darts.com'];
 
 export const N01_OPERATIONS = [
   'league/search',

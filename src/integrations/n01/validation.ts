@@ -290,7 +290,9 @@ function parseResults(value: unknown): Map<string, N01MatchResult> {
 }
 
 export function parseTournament(raw: unknown, tournamentId: string): N01Tournament {
-  const body = unwrap(raw);
+  // Documented success shape: `{ result: 0, tournament: { … } }`.
+  const outer = unwrap(raw);
+  const body = isRec(outer) && isRec(outer.tournament) ? outer.tournament : outer;
   if (!isRec(body)) throw new N01SchemaError('tournament/get', '応答がオブジェクトではありません。');
   const entryRows = requireList('tournament/get', body, ['entry_list', 'entries']);
   const entries = mapRows<N01Entry>('tournament/get', entryRows, (row) => {
@@ -386,14 +388,35 @@ export function parseStats(raw: unknown): N01PlayerStats[] {
 
 const BYE_MARKERS = new Set(['', 'bye', 'BYE', '-', '0']);
 
+/** The first of `keys` whose value is an array (a same-named scalar does not hide a later list). */
+function firstList(row: Rec, keys: readonly string[]): unknown[] | null {
+  for (const key of keys) {
+    const value = row[key];
+    if (Array.isArray(value)) return value;
+  }
+  return null;
+}
+
+/** A fixture date given as text, or as an epoch (seconds or ms), as a JST calendar day. */
+function fixtureDate(value: unknown, now: number): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const ms = value < 1e12 ? value * 1000 : value;
+    return new Date(ms + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+  return parseDateText(nonEmpty(value), now);
+}
+
 export function parseSchedule(raw: unknown, now: number): N01Fixture[] {
-  const rows = requireList('league/schedule/get', raw, ['list', 'schedule', 'match_list']);
+  const listed = requireList('league/schedule/get', raw, ['list', 'schedule', 'match_list']);
+  // Unfiltered, n01 returns one array of fixtures per division.
+  const rows = listed.flatMap((row) => (Array.isArray(row) ? row : [row]));
   return mapRows('league/schedule/get', rows, (row, index) => {
     const matchId = nonEmpty(first(row, ['lsid', 'id', '__key']));
     if (!matchId) return null;
     let sides: (string | null)[] = [];
-    const teams = first(row, ['teams', 'tp_list']);
-    if (Array.isArray(teams)) {
+    // Documented: `p: [tpid1, tpid2]`.
+    const teams = firstList(row, ['p', 'teams', 'tp_list']);
+    if (teams) {
       sides = teams.map((side) => (isRec(side) ? nonEmpty(first(side, ['tpid', 'id'])) : nonEmpty(side)));
     } else {
       sides = [
@@ -404,13 +427,14 @@ export function parseSchedule(raw: unknown, now: number): N01Fixture[] {
     const real = sides.filter((side): side is string => side !== null && !BYE_MARKERS.has(side));
     if (real.length === 0) return null;
     const title = nonEmpty(first(row, ['title', 'name'])) ?? '';
-    const dateText = nonEmpty(first(row, ['date', 'match_date', 'day']));
+    // Documented: `t`.
+    const dateValue = first(row, ['date', 'match_date', 'day', 't']);
     return {
       matchId,
       title,
       homeTeamId: real[0],
       awayTeamId: real[1] ?? null,
-      date: parseDateText(dateText, now) ?? parseDateText(title, now),
+      date: fixtureDate(dateValue, now) ?? parseDateText(title, now),
       listIndex: index,
     };
   });
@@ -420,8 +444,10 @@ export function parseOrders(raw: unknown): N01OrderEntry[] {
   const rows = requireList('team/order/list', raw, ['list', 'order_list', 'orders']);
   return mapRows('team/order/list', rows, (row) => {
     const schid = nonEmpty(first(row, ['schid', 'sch_id']));
-    const playerRows = first(row, ['players', 'player_list', 'oids']);
-    if (!schid || !Array.isArray(playerRows)) return null;
+    const position = num(row.position);
+    // Documented: the game's line-up is `order`, the match is `tmid`.
+    const playerRows = firstList(row, ['order', 'players', 'player_list', 'oids']);
+    if ((!schid && position === null) || !playerRows) return null;
     const players = playerRows
       .map((entry) =>
         isRec(entry)
@@ -431,9 +457,9 @@ export function parseOrders(raw: unknown): N01OrderEntry[] {
       .filter((entry) => entry.oid !== null || entry.opid !== null);
     if (players.length === 0) return null;
     return {
-      matchId: nonEmpty(first(row, ['lsid', 'match_id'])),
+      matchId: nonEmpty(first(row, ['tmid', 'lsid', 'match_id'])),
       schid,
-      position: num(row.position),
+      position,
       players,
     };
   });
