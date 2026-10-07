@@ -128,8 +128,19 @@ interface StatAccumulator {
 }
 
 /** Ground truth for backtests: every simulated game, oldest first. */
+/** One player's numbers in one simulated game. */
+export interface SimulatedLine {
+  opid: string;
+  score: number;
+  darts: number;
+  legs: number;
+  legsWon: number;
+}
+
 export interface SimulatedGame {
   tournamentId: string;
+  /** 0 = the oldest season of the league. */
+  seasonOrdinal: number;
   matchId: string;
   date: string;
   schid: string;
@@ -141,6 +152,9 @@ export interface SimulatedGame {
   homeOpids: string[];
   awayOpids: string[];
   homeWon: boolean;
+  legsToWin: number;
+  /** What every player of both sides scored in this game. */
+  lines: SimulatedLine[];
 }
 
 export interface GeneratedLeague {
@@ -299,6 +313,14 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
           const diff = strength(homeOrder[gameIndex]) - strength(awayOrder[gameIndex]);
           const k = slot.match_type === 'cricket' ? 0.05 : 0.09;
           const pLeg = 1 / (1 + Math.exp(-k * diff));
+          const fielded: [FixtureTeamSpec, string][] = [
+            ...homeOrder[gameIndex].map((opid) => [homeTeam, opid] as [FixtureTeamSpec, string]),
+            ...awayOrder[gameIndex].map((opid) => [awayTeam, opid] as [FixtureTeamSpec, string]),
+          ];
+          const before = fielded.map(([team, opid]) => {
+            const entry = record(team, opid);
+            return { opid, score: entry.score, darts: entry.darts, legs: entry.legs, legsWon: entry.legsWon };
+          });
           let homeLegs = 0;
           let awayLegs = 0;
           while (homeLegs < need && awayLegs < need) {
@@ -312,8 +334,19 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
           for (const opid of awayOrder[gameIndex]) record(awayTeam, opid).matches += 1;
           const homeWon = homeLegs > awayLegs;
           gameResults.push({ schid: slot.schid, win_tpid: homeWon ? home : away });
+          const lines = fielded.map(([team, opid], index) => {
+            const entry = record(team, opid);
+            return {
+              opid,
+              score: entry.score - before[index].score,
+              darts: entry.darts - before[index].darts,
+              legs: entry.legs - before[index].legs,
+              legsWon: entry.legsWon - before[index].legsWon,
+            };
+          });
           games.push({
             tournamentId: season.tournamentId,
+            seasonOrdinal: seasonIndex,
             matchId: lsid,
             date: round.date,
             schid: slot.schid,
@@ -325,6 +358,8 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
             homeOpids: [...homeOrder[gameIndex]],
             awayOpids: [...awayOrder[gameIndex]],
             homeWon,
+            legsToWin: need,
+            lines,
           });
         });
         results[lsid] = { lsid, games: gameResults };
