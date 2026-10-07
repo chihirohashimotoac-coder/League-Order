@@ -1,5 +1,5 @@
 import type { LeagueFormat, Player, Team } from '../../domain/types';
-import type { N01SyncSnapshot, N01TeamBinding } from '../../domain/n01/types';
+import type { N01PlayerBinding, N01SyncSnapshot, N01TeamBinding } from '../../domain/n01/types';
 import { syncSnapshotId } from '../../domain/n01/types';
 import { planRosterSync, type RosterSyncResult } from '../../domain/n01/roster';
 import { emptyChangeSummary, type N01ChangeSummary } from '../../domain/n01/changes';
@@ -16,7 +16,7 @@ import type {
   N01TournamentSummary,
 } from './types';
 import { knownLeague } from './leagueRegistry';
-import { pickSeasonByMembership, seasonPriorityGroups } from './seasonResolver';
+import { newestFirst, pickSeasonByMembership, seasonPriorityGroups } from './seasonResolver';
 import { entryById, findTeamEntries, identityOfEntry, teamChoices, type TeamChoice } from './teamResolver';
 import { resolveDivision } from './divisionResolver';
 import { buildManagedFormat, describeFormat, disciplineOf, formatShape } from './formatResolver';
@@ -70,6 +70,12 @@ export interface N01TeamData {
   division: N01Division | null;
   roster: N01RosterPlayer[];
   stats: N01PlayerStats[];
+  /**
+   * True when n01 had no usable stats for the season (404 or an unreadable shape). The
+   * roster and format are still synced; PPR keeps its previous values (MASTER SPEC
+   * Phase 6 §6 "missing stats").
+   */
+  statsUnavailable?: boolean;
   fetchedAt: number;
 }
 
@@ -146,20 +152,27 @@ export async function resolveLinkedTeam(
   onProgress('season', pick.kind === 'notFound' ? 'error' : 'done');
   const leagueTitle = leagueTitleOf(binding.leagueId, list.league.title, binding.leagueTitle);
 
-  if (pick.kind === 'notFound') {
+  const notFoundBrowse = (): LeagueBrowse => {
     const candidates = groups.length > 0 ? groups[0].map((t) => details.get(t.tournamentId)!).filter(Boolean) : [];
     return {
-      kind: 'teamNotFound',
-      browse: {
-        league: { leagueId: binding.leagueId, title: leagueTitle },
-        tournaments: list.tournaments,
-        candidates,
-        choices: teamChoices(candidates),
-      },
+      league: { leagueId: binding.leagueId, title: leagueTitle },
+      tournaments: list.tournaments,
+      candidates,
+      choices: teamChoices(candidates),
     };
-  }
+  };
+  if (pick.kind === 'notFound') return { kind: 'teamNotFound', browse: notFoundBrowse() };
 
-  const ids = pick.kind === 'resolved' ? [pick.tournamentId] : pick.tournamentIds;
+  // Never go back in time: a team already synced in a newer season that is no longer
+  // found there (most often a renamed team) is not silently re-synced to an older one.
+  const order = newestFirst(list.tournaments).map((t) => t.tournamentId);
+  const lastIndex = order.indexOf(binding.lastTournamentId);
+  const notOlder = (id: string): boolean => lastIndex < 0 || order.indexOf(id) <= lastIndex;
+  const ids = (pick.kind === 'resolved' ? [pick.tournamentId] : pick.tournamentIds).filter(notOlder);
+  if (ids.length === 0) {
+    onProgress('season', 'error');
+    return { kind: 'teamNotFound', browse: notFoundBrowse() };
+  }
   const options = ids.flatMap((id) => {
     const tournament = details.get(id)!;
     const entries = findTeamEntries(tournament, binding.stableIdentity);
@@ -208,8 +221,18 @@ export async function fetchTeamData(
   onProgress('roster', 'done');
 
   onProgress('ppr', 'running');
-  const stats = await client.stats(tournament.tournamentId);
-  onProgress('ppr', 'done');
+  let stats: N01PlayerStats[] = [];
+  let statsUnavailable = false;
+  try {
+    stats = await client.stats(tournament.tournamentId);
+    onProgress('ppr', 'done');
+  } catch (error) {
+    // Being offline fails the whole sync (the previous data stays as it was); stats that
+    // are missing or unreadable only cost the PPR update.
+    if (!(error instanceof N01Error) || (error.kind !== 'notFound' && error.kind !== 'schema')) throw error;
+    statsUnavailable = true;
+    onProgress('ppr', 'error');
+  }
 
   onProgress('format', 'running');
   if (tournament.schedule.length === 0 && tournament.gameSettings.length === 0) {
@@ -226,6 +249,7 @@ export async function fetchTeamData(
     division,
     roster,
     stats,
+    ...(statsUnavailable ? { statsUnavailable } : {}),
     fetchedAt: now(),
   };
 }
@@ -273,8 +297,21 @@ export function planN01Sync(input: N01SyncPlanInput): N01SyncPlan {
     createdAt: input.existingFormat?.createdAt,
   });
 
-  const source = rosterSource(data.roster, data.stats, data.tournament.tournamentId, now);
+  const tournamentId = data.tournament.tournamentId;
+  let source = rosterSource(data.roster, data.stats, tournamentId, now);
   const changes = emptyChangeSummary(!previous);
+  if (data.statsUnavailable) {
+    // Keep each player's last known n01 stats (exact identity only) instead of erasing them.
+    const lastStats = (entry: (typeof source)[number]): N01PlayerBinding['stats'] =>
+      input.localPlayers.find(
+        (player) =>
+          player.n01 &&
+          ((entry.opid !== null && player.n01.opid === entry.opid) ||
+            (player.n01.currentOid === entry.oid && player.n01.lastSeenTournamentId === tournamentId)),
+      )?.n01?.stats ?? null;
+    source = source.map((entry) => ({ ...entry, stats: lastStats(entry) }));
+    changes.notes.push('n01 の成績データを取得できなかったため、PPR は前回の値のままです。');
+  }
   let roster: RosterSyncResult;
   if (source.length === 0 && input.localPlayers.some((player) => player.n01?.rosterActive)) {
     // An empty roster for a team that had players is far more likely a data problem than

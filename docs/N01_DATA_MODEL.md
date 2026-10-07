@@ -35,6 +35,15 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
   空のロスターや空の成績を「本物のデータ」として返さない。
 - 欠損した数値は `null`。**0 にしない**。
 
+### 1.3 必須でない応答の扱い (Phase 6)
+
+| 応答 | 取得できない (404 / 読めない形) | オフライン / タイムアウト |
+|---|---|---|
+| `tournament/get`, `team/player/list` | 同期失敗 (`schema` / `notFound`)、何も保存しない | 同期失敗、前回データはそのまま |
+| `tournament/stats` | **同期は続行**。PPR は前回値のまま (完全一致の選手のみ)、初回なら `null`。変更要約に「n01 の成績データを取得できなかったため…」 | 同期失敗 (成績だけ欠けた中途半端な保存はしない) |
+| `league/schedule/get` | 次戦なし (`notes` に記録)、勝利優先で生成 | 同上 |
+| 過去 Season の各応答 | その Season を除外 (`notes`) | 同上 |
+
 ### 1.2 時刻・日付
 
 - `start_date` / `date` は `YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY年M月D日`、または月日のみ (`10/8`) を解釈する。
@@ -98,6 +107,8 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 既定 `current + 2 previous`。1 同期のリクエスト上限:
 Team 4 (tournament list / tournament / roster / stats) + 日程 1 + 相手 roster・orders 2 + 過去 Season ごとに最大 3 (tournament / stats / 相手 orders)。
 既定深さで最大 13。過去 Season の取得失敗は `notes` に記録し同期全体は失敗させない。
+実測 (フィクスチャ、`src/integrations/n01/n01Requests.test.ts`): 「次戦のオーダーを作る」の再同期 1 回 = **13 GET、重複 0**
+(Season 解決 2 + 名簿・成績 2 + 分析 9)。過去 Season 1 つあたりの追加数は一定。チーム情報 (名簿・成績・形式) だけなら 4。
 
 ### 5.2 Position model
 

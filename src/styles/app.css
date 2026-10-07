@@ -2176,6 +2176,13 @@ input[type='range'] {
   margin-bottom: var(--space-3);
 }
 
+/* Four candidates (対戦相手最適化 + 3) do not fit side by side on a phone: 2 × 2. */
+@media (max-width: 599px) {
+  .candidate-grid.count-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .candidate-tab {
   position: relative;
   display: flex;
@@ -3734,6 +3741,11 @@ input[type='range'] {
   color: var(--color-danger);
 }
 
+.opponent-tradeoff {
+  margin: 10px 0 0;
+  color: var(--color-text-secondary);
+}
+
 .opponent-sub {
   margin: 12px 0 4px;
   font-size: 13px;
@@ -3859,6 +3871,10 @@ input[type='range'] {
   gap: 4px 8px;
   margin-bottom: 8px;
   font-size: 17px;
+}
+
+.next-match-conf {
+  flex-basis: 100%;
 }
 
 .stale-note {

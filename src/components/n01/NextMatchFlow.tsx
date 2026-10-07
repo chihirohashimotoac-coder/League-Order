@@ -298,7 +298,7 @@ function Attendance({
           <span className="kicker">NEXT MATCH</span>
           <strong>vs {intel.nextMatch.opponentName}</strong>
           {intel.nextMatch.date ? <span> {Number(intel.nextMatch.date.slice(5, 7))}/{Number(intel.nextMatch.date.slice(8, 10))}</span> : null}
-          <span className="small-text secondary"> ・ 相手データ 信頼度 {CONFIDENCE_LABELS[intel.orderConfidence]}</span>
+          <span className="next-match-conf small-text secondary">相手データの信頼度: {CONFIDENCE_LABELS[intel.orderConfidence]}</span>
         </div>
       ) : (
         <p className="small-text">次戦の相手データがないため、勝利優先で作成します。</p>

@@ -16,12 +16,15 @@ export interface N01ServerControl {
   offline: boolean;
   /** Requests served so far, as `operation?params`. */
   log: string[];
+  /** Holds every answer this long (ms), to see the progress screen. */
+  delayMs: number;
 }
 
 export async function serveN01(page: Page): Promise<N01ServerControl> {
-  const control: N01ServerControl = { offline: false, log: [] };
+  const control: N01ServerControl = { offline: false, log: [], delayMs: 0 };
   const datasets = allFixtureDatasets();
   await page.route(`${N01_API_BASE_URL}/**`, async (route) => {
+    if (control.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, control.delayMs));
     if (control.offline) {
       await route.abort('internetdisconnected');
       return;

@@ -539,7 +539,7 @@ function CandidateGrid({
   showPredictions: boolean;
 }): React.JSX.Element {
   return (
-    <div className="candidate-grid" role="group" aria-label="候補の比較">
+    <div className={`candidate-grid count-${candidates.length}`} role="group" aria-label="候補の比較">
       {candidates.map((candidate, index) => {
         const letter = String.fromCharCode(65 + index);
         return (

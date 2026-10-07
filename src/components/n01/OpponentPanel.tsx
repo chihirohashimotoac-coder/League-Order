@@ -81,6 +81,12 @@ export function OpponentPanel({
           </div>
         ) : null}
       </div>
+      {delta !== null && delta < 0 ? (
+        <p className="small-text opponent-tradeoff" data-testid="opponent-tradeoff">
+          出場バランス (公平性) を保つため、勝利優先より推定 Match 勝率が {-delta}pt 低い案です。
+          推定勝率を優先する場合は「勝利優先」の案を選べます。
+        </p>
+      ) : null}
       {reasons.length > 0 ? (
         <>
           <p className="opponent-sub">主な理由</p>

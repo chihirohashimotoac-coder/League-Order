@@ -207,3 +207,42 @@ test.describe('next match order in one flow (Phase 5)', () => {
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 20_000 });
   });
 });
+
+test.describe('n01 screens at every supported width (Phase 6 §8)', () => {
+  for (const width of [320, 375, 390, 412, 768, 1280]) {
+    test(`WCAG AA and no sideways scroll at ${width}px`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== 'mobile', 'widths are set explicitly; one project is enough');
+      await page.setViewportSize({ width, height: width >= 1000 ? 900 : 760 });
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await start(page);
+      const overflow = async (label: string): Promise<void> => {
+        const extra = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect(extra, label).toBeLessThanOrEqual(1);
+      };
+
+      await page.getByRole('button', { name: 'n01から作成' }).click();
+      const wizard = page.getByRole('dialog', { name: 'n01から作成' });
+      await wizard.getByRole('button', { name: 'ATDO', exact: true }).click();
+      await expect(wizard.getByRole('button', { name: /kalavinka/ })).toBeVisible();
+      await overflow('team picker');
+      await wizard.getByRole('button', { name: /kalavinka/ }).click();
+      await expect(wizard.getByTestId('n01-preview')).toBeVisible();
+      await overflow('preview');
+      await wizard.getByRole('button', { name: 'このチームを作成' }).click();
+      await expect(page.getByTestId('next-match-card')).toBeVisible();
+      await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });
+      await overflow('HOME');
+      await audit(page, `HOME ${width}`);
+
+      await page.getByRole('button', { name: '次戦のオーダーを作る' }).click();
+      const flow = page.getByRole('dialog', { name: '次戦のオーダーを作る' });
+      await expect(flow.getByTestId('flow-attendance')).toBeVisible();
+      await overflow('attendance');
+      await audit(page, `NEXT MATCH ${width}`);
+      await flow.getByRole('button', { name: 'このメンバーで作成' }).click();
+      await expect(page.getByTestId('opponent-panel')).toBeVisible({ timeout: 20_000 });
+      await overflow('result');
+      await audit(page, `RESULT ${width}`);
+    });
+  }
+});

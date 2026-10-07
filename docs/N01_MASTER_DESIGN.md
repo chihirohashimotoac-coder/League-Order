@@ -109,6 +109,8 @@ Phase 0 ではスクリプトを「出力しない型検査」に修正する (�
 `status 30 (開催中)` → `status 20 (受付/準備)` → `status 40 (終了) の最新`。
 同順位が複数ならチーム所属 (entry_list にチームの同一性が一致するもの) で絞る。それでも複数ならユーザーが選ぶ。
 タイトル文字列からは判断しない。
+**時間を遡らない**: 連携済みチームが前回同期した Season より古い Season にしか見つからない場合
+(多くはチーム名の変更) は「チームが見つかりません」とし、古い Season へ黙って同期し直さない。
 
 ### 3.3 Team
 - `tpid` は Season スコープ。**永続 ID にしない**。
@@ -298,3 +300,27 @@ HOME の NEXT MATCH カード → [次戦のオーダーを作る] の 1 操作�
 |---|---|
 | 1.0 | Phase 0: アーキテクチャ固定 |
 | 1.1 | Phase 4: 対戦相手最適化の公平性の重みをバランス水準へ改訂 (fairness 0.3 では退化解になることをテストで確認したため) |
+| 1.2 | Phase 6: 成績 (stats) の欠落を同期失敗にしない (PPR は前回値)、連携チームを古い Season へ戻さない (§3.2)、4 案比較をスマホで 2 × 2 表示 |
+
+## 13. Phase 6 検証の対応表
+
+| 仕様 | 確認しているテスト |
+|---|---|
+| §1–2 時系列 backtest・指標・較正 | `src/domain/prediction/calibration.test.ts` (3 リーグ、過信の検出)、`npm run backtest` |
+| §3 Optimizer backtest | `src/optimizer/orderBacktest.test.ts` (時間旅行リプレイ 40 試合) |
+| §4 感度 | 同上 (8 通りの変更) + `calibration.test.ts` (27 通りの格子) |
+| §5 疎データ (0 試合・1 試合・少 legs・新選手) | `src/optimizer/sparsity.test.ts` |
+| §6 エラー: API 停止 / 途中停止 / 不正 JSON・スキーマ変更 / 成績欠落 / 日程欠落 / 同名 / opid 欠落 / チーム改名 / Season 重複 / Division 移動 / 不戦 / 次戦なし | `src/integrations/n01/n01ErrorCases.test.ts` (各 1 件)、不正 JSON は `n01Sync.test.ts` |
+| §7 性能・リクエスト数 | `src/integrations/n01/n01Requests.test.ts`、`npm run backtest` §4 |
+| §8 a11y (320 / 375 / 390 / 412 / 768 / 1280) | `e2e/n01.spec.ts` (axe WCAG 2.1 AA + 横スクロールなし) |
+| §9 PWA (offline / update / cache / install) | `e2e/n01Pwa.spec.ts` (SW 有効時のオフライン、n01 応答を SW がキャッシュしない)、`src/pwa.dom.test.ts` (更新は明示操作のみ)、既存 `e2e/vnext.spec.ts` (manifest) |
+| §10 画面確認 | `SCREENSHOTS=<dir> npx playwright test e2e/screenshots.spec.ts --project=mobile` (15 画面) |
+| §11 セキュリティ | `src/security.test.ts` (危険な HTML・資格情報・GET 以外・URL 検証) |
+
+### 13.1 既知の制約
+
+- **n01 のライブ契約は未検証。** 開発環境から n01darts.com へ接続できなかった (プロキシで 403)。
+  API の URL 形 (`endpoints.ts`) と応答の形 (`validation.ts`) は仮定であり、`npm run verify:n01` で確認する。
+  ブラウザから n01 への直接アクセスに CORS が許可されているかも未確認 (許可されていなければ同期は
+  「接続できませんでした」になり、手動フローのみ使える)。
+- 予測と対戦相手最適化の数値は合成データでのみ検証済み (PREDICTION_MODEL.md §9)。
