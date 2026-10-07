@@ -309,4 +309,18 @@ describe('candidates', () => {
     const win = rest.find((candidate) => candidate.meta.presetKey === 'WIN_FIRST');
     expect(win?.meta.alternativeTo).toBeUndefined();
   });
+
+  it('never claims a shared optimum when the search was not exhaustive', () => {
+    // Capped candidate sets make every run incomplete: nothing is proven optimal, so no
+    // candidate may say it shares an optimum with another.
+    const result = generateOrder(
+      orderInput(syntheticRoster(), sixGames(), { preset: 'BALANCED', settings: { maxCombosPerGame: 2 } }),
+      { timeLimitMs: 2000 },
+    );
+    expect(result.ok).toBe(true);
+    for (const candidate of result.candidates) {
+      expect(candidate.meta.exhaustive).toBe(false);
+      expect(candidate.meta.alternativeTo).toBeUndefined();
+    }
+  });
 });

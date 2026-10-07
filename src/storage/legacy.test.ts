@@ -193,3 +193,27 @@ describe('export → import round trip', () => {
     expect(parsed.snapshot.orders[0].input.discipline).toBe('SOFT');
   });
 });
+
+describe('damaged orders in a backup', () => {
+  it('skips an order missing its nested arrays instead of failing the import', () => {
+    const legacy = legacySnapshot();
+    const good = legacy.orders[0];
+    const noPlayers = { ...good, id: 'ord_no_players', input: { ...good.input, players: undefined } };
+    const badVersion = {
+      ...good,
+      id: 'ord_bad_version',
+      versions: [{ ...good.versions[0], players: undefined }],
+    };
+    const raw = JSON.stringify({
+      schemaVersion: 1,
+      app: 'darts-league-order',
+      exportedAt: '2026-01-01',
+      data: { ...legacy, orders: [good, noPlayers, badVersion] },
+    });
+    const parsed = parseBackup(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.snapshot.orders.map((order) => order.id)).toEqual(['ord_legacy']);
+    expect(parsed.warnings.some((warning) => warning.includes('2 件'))).toBe(true);
+  });
+});

@@ -47,15 +47,19 @@ export function normaliseWeights(preset: PresetKey, weights: Partial<ScoreWeight
 export function normaliseOrderInput(input: OrderInput): OrderInput {
   const discipline = asDiscipline((input as { discipline?: unknown }).discipline);
   const weights = normaliseWeights(input.preset, input.weights);
-  const players = input.players.map(normalisePlayer);
+  // Tolerate a damaged record rather than throwing while the app starts up.
+  const stored = Array.isArray(input.players) ? input.players : [];
+  const players = stored.map(normalisePlayer);
   const unchanged =
     input.discipline === discipline &&
     weights.roleFairness === input.weights?.roleFairness &&
-    players.every((player, index) => player === input.players[index]);
+    stored === input.players &&
+    players.every((player, index) => player === stored[index]);
   return unchanged ? input : { ...input, discipline, weights, players };
 }
 
 function normaliseVersion(version: OrderVersion): OrderVersion {
+  if (!Array.isArray(version.players)) return { ...version, players: [] };
   const players = version.players.map(normalisePlayer);
   return players.every((player, index) => player === version.players[index])
     ? version
@@ -68,6 +72,6 @@ function normaliseVersion(version: OrderVersion): OrderVersion {
  * score for it would be inventing history.
  */
 export function normaliseSavedOrder(order: SavedOrder): SavedOrder {
-  const versions = (order.versions ?? []).map(normaliseVersion);
+  const versions = (Array.isArray(order.versions) ? order.versions : []).map(normaliseVersion);
   return { ...order, input: normaliseOrderInput(order.input), versions };
 }

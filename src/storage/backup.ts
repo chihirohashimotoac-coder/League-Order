@@ -98,6 +98,21 @@ function parseKindCounts(value: unknown): Player['seasonAppearancesByKind'] {
   return counts;
 }
 
+function hasArrays(value: unknown, keys: readonly string[]): boolean {
+  return isRecord(value) && keys.every((key) => Array.isArray(value[key]));
+}
+
+/** True when a saved order carries the nested arrays the app and the upgrade read. */
+function isUsableOrder(row: Record<string, unknown>): boolean {
+  if (!hasArrays(row.input, ['games', 'players', 'participants'])) return false;
+  if (!hasArrays(row.solution, ['assignments'])) return false;
+  if (row.versions === undefined) return true;
+  return (
+    Array.isArray(row.versions) &&
+    row.versions.every((version) => hasArrays(version, ['games', 'players', 'assignments']))
+  );
+}
+
 /**
  * Parses and validates a backup file.
  * Returns every problem found rather than failing on the first one.
@@ -210,9 +225,18 @@ export function parseBackup(raw: string): ImportResult {
     })
     .filter((pair) => pair.id !== '' && pair.a !== '' && pair.b !== '');
 
-  const orders: SavedOrder[] = (Array.isArray(data.orders) ? data.orders : [])
+  const orderRows = (Array.isArray(data.orders) ? data.orders : [])
     .filter(isRecord)
-    .filter((row) => typeof row.id === 'string' && isRecord(row.input) && isRecord(row.solution))
+    .filter((row) => typeof row.id === 'string' && isRecord(row.input) && isRecord(row.solution));
+  // An order whose snapshot lacks the arrays every screen reads cannot be opened, and
+  // upgrading it would throw: it is skipped with a warning instead of failing the import.
+  const usableOrders = orderRows.filter(isUsableOrder);
+  if (usableOrders.length < orderRows.length) {
+    warnings.push(
+      `構造が壊れているオーダー ${orderRows.length - usableOrders.length} 件を読み込みませんでした。`,
+    );
+  }
+  const orders: SavedOrder[] = usableOrders
     .map((row) =>
       normaliseSavedOrder({
         ...(row as unknown as SavedOrder),

@@ -443,7 +443,11 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
       excluded,
     );
     if (!outcome) continue;
-    const sameAs = bestShownLineUp(ctx, shown, outcome.evaluation.breakdown.total);
+    // "Same optimum" is only claimed when the run proved its result optimal; a run cut
+    // short by the clock or by capped candidate sets may have missed a better order.
+    const sameAs = outcome.meta.exhaustive
+      ? bestShownLineUp(ctx, shown, outcome.evaluation.breakdown.total)
+      : undefined;
     if (sameAs) outcome.meta = { ...outcome.meta, alternativeTo: sameAs };
     const solution = assembleSolution(ctx, bctx, candidates, outcome, referenceCtx);
     if (!solution) continue;
