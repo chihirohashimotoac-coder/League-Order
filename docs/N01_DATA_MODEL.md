@@ -29,7 +29,8 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 | `league/schedule/get` | `tdid` | マニュアル: `schedule[division][]` = `{ p: [tpid1, tpid2], lsid, t }`。当初形: `list[].lsid`, `title`, `tpid1`, `tpid2`, `date`。空の tpid = bye。`t` は日付文字列またはエポック (秒 / ミリ秒、JST の日付に変換) |
 | `team/order/list` | `tdid`, `tpid` | マニュアル: `list[].tmid`, `position`, `order[]` (選手)。当初形: `list[].lsid`, `schid`, `position`, `players[]`。選手は `oid/opid/oname` のオブジェクトか `oid` 文字列。`schid` が無ければ `position` でゲームに対応付ける |
 
-`schedule[]` (試合形式の 1 ゲーム): `schid`, `num_part`, `subtitle`, `match_type`, `start_score`, `limit_leg_count`, `group`。
+`schedule[]` (試合形式の 1 ゲーム): `schid`, `num_part`, `subTitle`, `match_type`, `startScore`, `limit_leg_count`, `group`
+(n01 の名前は `startScore` / `subTitle`。当初形の `start_score` / `subtitle` も読む)。
 
 ### 1.1 寛容な抽出と明示的な失敗 (`validation.ts`)
 
@@ -47,6 +48,7 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 | `tournament/stats` | **同期は続行**。PPR は前回値のまま (完全一致の選手のみ)、初回なら `null`。変更要約に「n01 の成績データを取得できなかったため…」 | 同期失敗 (成績だけ欠けた中途半端な保存はしない) |
 | `league/schedule/get` | 次戦なし (`notes` に記録)、勝利優先で生成 | 同上 |
 | 過去 Season の各応答 | その Season を除外 (`notes`) | 同上 |
+| 相手の名簿・オーダー (次戦の分析) | 名簿・形式・PPR は保存し、**前回の分析は削除**する (古い相手を最新として使わない)。次戦は勝利優先で生成、変更要約に注記 | 同上 |
 
 ### 1.2 時刻・日付
 

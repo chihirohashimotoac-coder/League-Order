@@ -54,6 +54,8 @@ export interface N01SyncWrite {
   players: readonly Player[];
   format: LeagueFormat | null;
   cache: readonly N01CacheRecord[];
+  /** Cache records this sync makes obsolete (removed in the same batch). */
+  removeCache?: readonly string[];
 }
 
 /**
@@ -615,7 +617,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           teams: upsert(current.teams, change.team),
           players: change.players.reduce((acc, player) => upsert(acc, player), current.players),
           formats: change.format ? upsert(current.formats, change.format) : current.formats,
-          n01Cache: change.cache.reduce((acc, record) => upsert(acc, record), current.n01Cache),
+          n01Cache: change.cache.reduce(
+            (acc, record) => upsert(acc, record),
+            current.n01Cache.filter((record) => !change.removeCache?.includes(record.id)),
+          ),
           settings: options.activate
             ? { ...current.settings, activeTeamId: change.team.id }
             : current.settings,

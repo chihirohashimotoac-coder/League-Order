@@ -88,6 +88,38 @@ describe('n01 error cases (Phase 6 §6)', () => {
     expect(fresh.players.every((player) => player.ppr === null)).toBe(true);
   });
 
+  it('missing stats: the retained PPR still reaches the prediction, not the league mean', async () => {
+    const first = await syncKalavinka();
+    const missing = (request: N01Request) =>
+      request.operation === 'tournament/stats' ? new N01Error('notFound', 'n01 にデータが見つかりませんでした。', request.operation, 404) : undefined;
+    const c = client({ override: missing });
+    const data = await fetchTeamData(c, KALAVINKA, () => FIXTURE_NOW);
+    // History off: the analysis has no stats line for anyone in this team.
+    const fetched = await fetchIntelligence(c, data, { historyDepth: 0, now: () => FIXTURE_NOW });
+    const intel = buildIntelligenceSnapshot({ teamId: TEAM.id, data, format: first.plan.format, fetched, historyDepth: 0, now: FIXTURE_NOW });
+    expect(intel.ourStats.filter((entry) => entry.seasons.length > 0)).toEqual([]);
+    // The players as stored: the sync kept their previous n01 stats.
+    const order = buildNextMatchOrder({
+      team: first.plan.team,
+      players: eligiblePlayers(first.plan.players),
+      format: first.plan.format,
+      pairs: [],
+      settings: { activeTeamId: TEAM.id, optimizer: DEFAULT_OPTIMIZER_SETTINGS, lastPreset: 'BALANCED', customWeights: DEFAULT_WEIGHTS },
+      intel,
+      attending: new Set(first.plan.players.map((player) => player.id)),
+    });
+    const context = order.input.opponent!;
+    const withPpr = first.plan.players.filter((player) => player.n01?.stats?.ppr != null);
+    expect(withPpr.length).toBeGreaterThan(1);
+    const strengths = withPpr.map((player) => context.players[player.id]);
+    // Retained PPRs differ, so the strengths differ too (the mean would make them all equal) …
+    expect(new Set(strengths.map((entry) => entry.strength)).size).toBeGreaterThan(1);
+    for (const entry of strengths) expect(entry).toMatchObject({ imputed: false, confidence: 'LOW' });
+    // … and a player with no PPR at all is still the league mean.
+    const noPpr = first.plan.players.find((player) => player.n01?.stats?.ppr == null && player.ppr === null)!;
+    expect(context.players[noPpr.id]).toMatchObject({ imputed: true, strength: context.leagueMeanPpr });
+  });
+
   it('stats with an unreadable shape are treated like missing stats', async () => {
     const override = (request: N01Request) => (request.operation === 'tournament/stats' ? { stats: 'moved' } : undefined);
     const data = await fetchTeamData(client({ override }), KALAVINKA, () => FIXTURE_NOW);

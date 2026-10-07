@@ -170,8 +170,12 @@ export function buildOpponentContext(input: BuildContextInput): OpponentContext 
     const key = binding ? playerKey(binding.opid, binding.lastSeenTournamentId, binding.currentOid) : null;
     const stats = key ? ourStatsByKey.get(key) : undefined;
     const manual = player.pprSource === 'manual' || !binding;
+    // No line in this analysis (e.g. the season's stats could not be read, so the sync kept
+    // the previous PPR): the effective PPR counts as a little evidence, not the league mean.
     players[player.id] = toOurContext(
-      manual ? manualStrength(effectivePpr(player).value, prior, parameters.priorLegs) : playerStrength(stats, prior, parameters),
+      manual || !stats || stats.seasons.length === 0
+        ? manualStrength(effectivePpr(player).value, prior, parameters.priorLegs)
+        : playerStrength(stats, prior, parameters),
     );
   }
 

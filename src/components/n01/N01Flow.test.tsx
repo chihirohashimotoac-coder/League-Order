@@ -25,6 +25,8 @@ vi.mock('../../pwa', () => ({ onUpdateAvailable: () => () => undefined, initServ
 afterEach(cleanup);
 
 let failRequests = false;
+/** Fails only the opponent's roster request, so the analysis fails but the sync does not. */
+let failOpponent = false;
 /** Extra roster entries served for kalavinka on later syncs (simulates an n01 change). */
 let extraRoster: { opid: string; oid: string; tpid: string; oname: string }[] = [];
 
@@ -33,6 +35,7 @@ beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
   resetBackendCache();
   failRequests = false;
+  failOpponent = false;
   extraRoster = [];
 });
 
@@ -42,6 +45,7 @@ const env: N01Environment = {
       createFixtureTransport({
         override: (request) => {
           if (failRequests) return FAIL;
+          if (failOpponent && request.operation === 'team/player/list' && request.params.tpid === '68wv') return FAIL;
           if (extraRoster.length > 0 && request.operation === 'team/player/list' && request.params.tpid === 'GpiQ') {
             const base = fixtureResponse(request, allFixtureDatasets()) as { list: unknown[] };
             return { list: [...base.list, ...extraRoster] };
@@ -276,6 +280,23 @@ describe('next match order in one flow (Phase 5)', () => {
     await user.click(within(offline).getByRole('button', { name: '前回データで続ける' }));
     const attendance = await within(flow).findByTestId('flow-attendance');
     expect(within(attendance).getByTestId('flow-stale')).toHaveTextContent('最新ではありません');
+  }, 30_000);
+
+  it('a re-sync whose opponent analysis fails drops the old analysis instead of showing it as current', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    expect(screen.getByTestId('next-match-card')).toHaveTextContent('vs スピンコブラ');
+    failOpponent = true;
+    const flow = await startNextMatch(user);
+    const changes = await within(flow).findByTestId('flow-changes', {}, { timeout: 10_000 });
+    expect(changes).toHaveTextContent('次戦の分析データを取得できませんでした');
+    await user.click(within(changes).getByRole('button', { name: '確認して続ける' }));
+    const attendance = await within(flow).findByTestId('flow-attendance');
+    expect(attendance).toHaveTextContent('次戦の相手データがないため、勝利優先で作成します。');
+    expect(attendance).not.toHaveTextContent('スピンコブラ');
+    await user.click(within(flow).getByRole('button', { name: '閉じる' }));
+    expect(screen.getByTestId('next-match-card')).toHaveTextContent('次戦: 未取得');
   }, 30_000);
 
   it('stops to show an important n01 change before going on', async () => {

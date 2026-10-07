@@ -126,6 +126,35 @@ describe('divisions: lg_table is one array of tpids per division, titles in lg_t
   });
 });
 
+describe('format slots: n01 names start score and subtitle startScore / subTitle', () => {
+  it('reads startScore and subTitle (and still the older names)', () => {
+    const tournament = parseTournament(
+      realTournament({
+        lg_setting: {
+          schedule: [
+            { schid: 'g1', num_part: 4, match_type: '01', startScore: 1501, limit_leg_count: 1, subTitle: 'Gallon' },
+            { schid: 'g2', num_part: 2, match_type: '01', start_score: 701, limit_leg_count: 1, subtitle: 'Doubles' },
+          ],
+        },
+      }),
+      't',
+    );
+    expect(tournament.schedule.map((slot) => [slot.schid, slot.startScore, slot.subtitle])).toEqual([
+      ['g1', 1501, 'Gallon'],
+      ['g2', 701, 'Doubles'],
+    ]);
+  });
+
+  it('TDO-like (real shape): the Gallon game and the 701 / 1501 starts survive the sync', async () => {
+    const data = await fetchTeamData(client(), { leagueId: 'lg_3qgW_6619', leagueTitle: 'TDO', tournamentId: 't_TDtu_7001', teamTpid: 'Ow1t' }, () => FIXTURE_NOW);
+    const plan = planN01Sync({ team: { id: 't', name: 'owls', createdAt: 0 }, localPlayers: [], existingFormat: null, data, now: FIXTURE_NOW, newId: ids('g') });
+    const games = plan.format.games;
+    expect(games.map((game) => game.n01?.startScore)).toEqual([501, null, 701, null, 1501]);
+    expect(games[4].kinds).toContain('GALLON');
+    expect(games[4].n01?.subtitle).toBe('Gallon');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 2. lg_result keys
 // ---------------------------------------------------------------------------

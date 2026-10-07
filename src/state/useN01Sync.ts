@@ -13,7 +13,7 @@ import { browseLeague, fetchTeamData, planN01Sync, resolveLinkedTeam } from '../
 import type { N01LeagueSummary } from '../integrations/n01/types';
 import type { LeagueFormat } from '../domain/types';
 import { DEFAULT_N01_SETTINGS } from '../domain/types';
-import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
+import { intelligenceSnapshotId, type N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
 import type { N01CacheRecord } from '../domain/n01/types';
 import { opponentChange } from '../domain/n01/changes';
 import { buildIntelligenceSnapshot, fetchIntelligence } from '../integrations/n01/intelligence';
@@ -103,16 +103,17 @@ export function useN01Sync(): N01SyncActions {
         }
         return { snapshot, notes: fetched.notes };
       },
-      apply: (result, options) =>
-        applyN01Sync(
-          {
-            team: result.team,
-            players: result.players,
-            format: result.format,
-            cache: [result.snapshot, ...(options?.extraCache ?? [])],
-          },
+      apply: (result, options) => {
+        const cache = [result.snapshot, ...(options?.extraCache ?? [])];
+        // The opponent analysis is replaced or removed, never left over from an earlier
+        // sync: a stale snapshot would show last time's opponent as current.
+        const intelId = intelligenceSnapshotId(result.team.id);
+        const removeCache = cache.some((record) => record.id === intelId) ? [] : [intelId];
+        return applyN01Sync(
+          { team: result.team, players: result.players, format: result.format, cache, removeCache },
           { activate: options?.activate },
-        ),
+        );
+      },
     }),
     [env, plan, applyN01Sync, n01CacheFor, historyDepth],
   );

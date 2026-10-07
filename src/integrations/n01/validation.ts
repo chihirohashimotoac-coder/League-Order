@@ -221,11 +221,12 @@ function parseScheduleSlots(operation: string, value: unknown): N01ScheduleSlot[
   return mapRows(operation, rows, (row, index) => {
     const numPart = num(first(row, ['num_part', 'numpart', 'num']));
     if (numPart === null || numPart < 1 || !Number.isInteger(numPart)) return null;
-    const startScore = num(first(row, ['start_score', 'startscore', 'score']));
+    // n01's own names (camelCase) first, then the older aliases.
+    const startScore = num(first(row, ['startScore', 'start_score', 'startscore', 'score']));
     return {
       schid: nonEmpty(first(row, ['schid', 'id', '__key'])) ?? `idx${index}`,
       numPart,
-      subtitle: nonEmpty(first(row, ['subtitle', 'sub_title', 'title'])),
+      subtitle: nonEmpty(first(row, ['subTitle', 'subtitle', 'sub_title', 'title'])),
       matchType: (nonEmpty(first(row, ['match_type', 'matchtype', 'type'])) ?? '01').toLowerCase(),
       startScore,
       limitLegCount: num(first(row, ['limit_leg_count', 'limitlegcount', 'leg_count', 'legs'])),

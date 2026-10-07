@@ -31,6 +31,13 @@ import { PERTURBATIONS, orderBacktestSummary, sensitivity } from '../src/test/n0
 import { createFixtureTransport } from '../src/test/n01/transport';
 
 const pct = (value: number): string => `${(value * 100).toFixed(1)}%`;
+
+/**
+ * The report's searches are bounded by the optimizer's node limit only, never by the
+ * clock, so every number below reads the same on any machine. (The app itself stops at
+ * its time limit; section 4 times it with the app's settings.)
+ */
+const UNTIMED = { timeLimitMs: 10 * 60 * 1000 };
 const num = (value: number, digits = 4): string => (Number.isFinite(value) ? value.toFixed(digits) : '—');
 
 function ece(m: Metrics): number {
@@ -95,7 +102,7 @@ async function section3(): Promise<void> {
   }
   const replayMs = performance.now() - started;
   const generate = (input: OrderInput) => {
-    const result = generateOrder(input);
+    const result = generateOrder(input, UNTIMED);
     if (!result.ok) throw new Error('generation failed');
     return result.candidates;
   };
@@ -123,7 +130,7 @@ async function section3(): Promise<void> {
   console.log('|---|---|---|---|');
   const sample = replays.filter((replay) => replay.tournamentId === 't_ABvC_5234' && replay.format.games.length === 7).slice(0, 6);
   const single = (input: OrderInput) => {
-    const result = generateOrder(input, { singleCandidate: true, timeLimitMs: Math.floor(input.settings.timeLimitMs / 4) });
+    const result = generateOrder(input, { singleCandidate: true, ...UNTIMED });
     if (!result.ok) throw new Error('generation failed');
     return result.candidates[0];
   };
@@ -131,7 +138,14 @@ async function section3(): Promise<void> {
     const result = sensitivity(sample, perturbation, single);
     console.log(`| ${perturbation.name} | ${(result.meanRegret * 100).toFixed(2)} pt | ${(result.maxRegret * 100).toFixed(2)} pt | ${pct(result.meanSeatChange)} |`);
   }
-  const times = summary.rows.map((row) => row.optimizerMs).sort((a, b) => a - b);
+  // The app's own settings (time limit included), for timing only.
+  const times = replays
+    .map((replay) => {
+      const started = performance.now();
+      generateOrder(replay.order.input);
+      return performance.now() - started;
+    })
+    .sort((a, b) => a - b);
   console.log(`\n## 4. Performance (Node, this machine)\n`);
   console.log(`- replay (fetch + plan + intelligence) of ${replays.length} matches: ${replayMs.toFixed(0)} ms total`);
   console.log(`- optimizer (4 candidates) per match: median ${times[Math.floor(times.length / 2)].toFixed(0)} ms, max ${times[times.length - 1].toFixed(0)} ms`);

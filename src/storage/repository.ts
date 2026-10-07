@@ -136,13 +136,14 @@ export class Repository {
     players: readonly Player[];
     format: LeagueFormat | null;
     cache: readonly N01CacheRecord[];
+    removeCache?: readonly string[];
     settings?: AppSettings;
   }): Promise<void> {
     return this.backend.writeBatch([
       { store: 'teams', put: [change.team] },
       { store: 'players', put: change.players },
       { store: 'formats', put: change.format ? [change.format] : [] },
-      { store: 'n01Cache', put: change.cache },
+      { store: 'n01Cache', put: change.cache, remove: change.removeCache ?? [] },
       ...(change.settings ? [{ store: 'settings' as const, put: [{ id: SETTINGS_ID, ...change.settings }] }] : []),
     ]);
   }

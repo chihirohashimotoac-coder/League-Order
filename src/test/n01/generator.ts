@@ -173,6 +173,12 @@ export interface GeneratedLeague {
   games: SimulatedGame[];
 }
 
+/** A format slot as n01 really names its fields (`startScore`, `subTitle`). */
+function realSlot(slot: RawSlot): Record<string, unknown> {
+  const { start_score: startScore, subtitle: subTitle, ...rest } = slot;
+  return { ...rest, ...(startScore === undefined ? {} : { startScore }), ...(subTitle === undefined ? {} : { subTitle }) };
+}
+
 export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
   const rng = mulberry32(spec.seed);
   const dataset: FixtureDataset = new Map();
@@ -418,7 +424,10 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
             ...(division.teams.length % 2 === 1 ? ['empty'] : []),
           ]),
           lg_title: season.divisions.map((division) => division.title),
-          lg_setting: { schedule: season.schedule, game_setting: season.gameSettings ?? [] },
+          lg_setting: {
+            schedule: season.schedule.map(realSlot),
+            game_setting: (season.gameSettings ?? []).map((setting) => ({ ...setting, schedule: setting.schedule.map(realSlot) })),
+          },
           lg_result: Object.fromEntries(
             Object.entries(results).map(([lsid, result]) => [`${divisionOf(homeOf.get(lsid)!)}_${lsid}`, { games: result.games }]),
           ),
