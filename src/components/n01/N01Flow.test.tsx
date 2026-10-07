@@ -11,7 +11,7 @@ import { N01EnvironmentProvider, type N01Environment } from '../../state/n01Envi
 import { N01Client } from '../../integrations/n01/client';
 import { resetBackendCache } from '../../storage/db';
 import { Repository } from '../../storage/repository';
-import { createFixtureTransport, FAIL } from '../../test/n01/transport';
+import { allFixtureDatasets, createFixtureTransport, FAIL, fixtureResponse } from '../../test/n01/transport';
 import { FIXTURE_NOW } from '../../test/n01/leagues';
 
 vi.mock('../../pwa', () => ({ onUpdateAvailable: () => () => undefined, initServiceWorker: () => undefined }));
@@ -25,17 +25,32 @@ vi.mock('../../pwa', () => ({ onUpdateAvailable: () => () => undefined, initServ
 afterEach(cleanup);
 
 let failRequests = false;
+/** Extra roster entries served for kalavinka on later syncs (simulates an n01 change). */
+let extraRoster: { opid: string; oid: string; tpid: string; oname: string }[] = [];
 
 beforeEach(() => {
   window.scrollTo = vi.fn() as never;
   globalThis.indexedDB = new IDBFactory();
   resetBackendCache();
   failRequests = false;
+  extraRoster = [];
 });
 
 const env: N01Environment = {
   createClient: () =>
-    new N01Client(createFixtureTransport({ override: () => (failRequests ? FAIL : undefined) }), { now: () => FIXTURE_NOW }),
+    new N01Client(
+      createFixtureTransport({
+        override: (request) => {
+          if (failRequests) return FAIL;
+          if (extraRoster.length > 0 && request.operation === 'team/player/list' && request.params.tpid === 'GpiQ') {
+            const base = fixtureResponse(request, allFixtureDatasets()) as { list: unknown[] };
+            return { list: [...base.list, ...extraRoster] };
+          }
+          return undefined;
+        },
+      }),
+      { now: () => FIXTURE_NOW },
+    ),
   now: () => FIXTURE_NOW,
 };
 
@@ -205,5 +220,73 @@ describe('opponent-optimised order (Phase 4)', () => {
     expect(document.querySelectorAll('.tag.predict')).toHaveLength(7);
     // No absolute claims anywhere on the screen.
     expect(document.body.textContent).not.toMatch(/確実|必勝|絶対勝/);
+  }, 30_000);
+});
+
+describe('next match order in one flow (Phase 5)', () => {
+  async function startNextMatch(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+    await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
+    return screen.findByRole('dialog', { name: '次戦のオーダーを作る' });
+  }
+
+  it('HOME shows the next match; one tap syncs, asks who is here, and builds the order', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    const card = screen.getByTestId('next-match-card');
+    expect(card).toHaveTextContent('vs スピンコブラ');
+    expect(card).toHaveTextContent('10/8');
+    expect(card).toHaveTextContent('kalavinka ・ ATDO ・ A Division');
+    expect(screen.getByTestId('n01-freshness')).toHaveTextContent('n01 ✓ 最新');
+
+    const flow = await startNextMatch(user);
+    const attendance = await within(flow).findByTestId('flow-attendance', {}, { timeout: 10_000 });
+    expect(attendance).toHaveTextContent('vs スピンコブラ');
+    expect(attendance).toHaveTextContent('本日参加 7 / 7');
+    await user.click(within(attendance).getByRole('checkbox', { name: /伊藤 由佳/ }));
+    expect(attendance).toHaveTextContent('本日参加 6 / 7');
+    await user.click(within(attendance).getByRole('button', { name: 'このメンバーで作成' }));
+
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
+    expect(screen.getByTestId('opponent-panel')).toHaveTextContent('スピンコブラ');
+    const fielded = [...document.querySelectorAll<HTMLSelectElement>('.order-game select')].map(
+      (select) => select.selectedOptions[0]?.textContent ?? '',
+    );
+    expect(fielded.length).toBe(12);
+    expect(fielded.some((name) => name.includes('伊藤 由佳'))).toBe(false);
+
+    // The next time, today's attendance starts from last time's.
+    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'ホーム' }));
+    const again = await startNextMatch(user);
+    const second = await within(again).findByTestId('flow-attendance', {}, { timeout: 10_000 });
+    expect((within(second).getByRole('checkbox', { name: /伊藤 由佳/ }) as HTMLInputElement).checked).toBe(false);
+  }, 60_000);
+
+  it('offline: names the last sync and continues with that data only when asked', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    failRequests = true;
+    const flow = await startNextMatch(user);
+    const offline = await within(flow).findByTestId('flow-offline');
+    expect(offline).toHaveTextContent('n01 に接続できませんでした');
+    expect(offline).toHaveTextContent('前回:');
+    expect(offline).toHaveTextContent('このデータは最新ではありません');
+    expect(within(flow).queryByTestId('flow-attendance')).toBeNull();
+    await user.click(within(offline).getByRole('button', { name: '前回データで続ける' }));
+    const attendance = await within(flow).findByTestId('flow-attendance');
+    expect(within(attendance).getByTestId('flow-stale')).toHaveTextContent('最新ではありません');
+  }, 30_000);
+
+  it('stops to show an important n01 change before going on', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    extraRoster = [{ opid: 'op_newcomer', oid: 'o3_op_newcomer', tpid: 'GpiQ', oname: '新加入 太郎' }];
+    const flow = await startNextMatch(user);
+    const changes = await within(flow).findByTestId('flow-changes', {}, { timeout: 10_000 });
+    expect(changes).toHaveTextContent('メンバー追加: 新加入 太郎');
+    await user.click(within(changes).getByRole('button', { name: '確認して続ける' }));
+    expect(await within(flow).findByTestId('flow-attendance')).toHaveTextContent('本日参加 8 / 8');
   }, 30_000);
 });

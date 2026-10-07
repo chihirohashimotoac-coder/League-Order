@@ -12,6 +12,8 @@ import { recencyWeight, RECENCY_WEIGHTS, RECENCY_FLOOR } from '../../domain/n01/
 import { describeSignature, formatSignatures, signaturesOf } from '../../domain/n01/signature';
 import { aggregateConfidence, minConfidence, playerConfidence, slotConfidence } from '../../domain/prediction/confidence';
 import { FAIL, createFixtureTransport } from '../../test/n01/transport';
+import { buildNextMatchOrder, eligiblePlayers } from '../../domain/n01/nextMatch';
+import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../../domain/orders/presets';
 import { FIXTURE_NOW } from '../../test/n01/leagues';
 
 const ATDO = 'lg_l3hI_3397';
@@ -256,5 +258,38 @@ describe('confidence model', () => {
     expect(leagueMeanPpr([])).toBeNull();
     // 中村 never played: present, with no stat lines (not zeros).
     expect(snapshot.ourStats.find((entry) => entry.name === '中村 蓮')?.seasons).toEqual([]);
+  });
+});
+
+describe('next match order from a synced team (Phase 5)', () => {
+  it('kalavinka vs スピンコブラ: opponent-optimised input over the synced roster and format', async () => {
+    const c = client();
+    const data = await fetchTeamData(c, { leagueId: ATDO, leagueTitle: 'ATDO', tournamentId: 't_ABvC_5234', teamTpid: 'GpiQ' }, () => FIXTURE_NOW);
+    let n = 0;
+    const team = { id: 'team_kv', name: 'kalavinka', createdAt: 0 };
+    const plan = planN01Sync({ team, localPlayers: [], existingFormat: null, data, now: FIXTURE_NOW, newId: (p) => `${p}_${++n}` });
+    const fetched = await fetchIntelligence(c, data, { historyDepth: 2, now: () => FIXTURE_NOW });
+    const intel = buildIntelligenceSnapshot({ teamId: team.id, data, format: plan.format, fetched, historyDepth: 2, now: FIXTURE_NOW });
+    const players = eligiblePlayers(plan.players);
+    const attending = new Set(players.slice(1).map((player) => player.id));
+    const built = buildNextMatchOrder({
+      team: plan.team,
+      players,
+      format: plan.format,
+      pairs: [],
+      settings: { activeTeamId: team.id, optimizer: DEFAULT_OPTIMIZER_SETTINGS, lastPreset: 'BALANCED', customWeights: DEFAULT_WEIGHTS },
+      intel,
+      attending,
+    });
+    expect(built.opponentAvailable).toBe(true);
+    expect(built.input.preset).toBe('OPPONENT_OPTIMIZED');
+    expect(built.input.opponent?.opponentName).toBe('スピンコブラ');
+    expect(built.match).toMatchObject({ opponentName: 'スピンコブラ', matchDate: '2026-10-08', teamName: 'kalavinka' });
+    expect(built.input.games).toBe(plan.format.games);
+    expect(built.input.participants.filter((config) => config.include).map((config) => config.playerId)).toEqual([...attending]);
+    // Effective PPR is what the optimizer sees: n01 stats wherever they exist.
+    const withStats = plan.players.find((player) => player.n01?.stats);
+    expect(withStats).toBeDefined();
+    expect(built.input.players.find((player) => player.id === withStats?.id)?.ppr).toBe(withStats?.n01?.stats?.ppr);
   });
 });

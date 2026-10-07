@@ -140,6 +140,11 @@ export interface AppStore extends AppData {
   applyN01Sync(write: N01SyncWrite, options?: { activate?: boolean }): Promise<void>;
   /** Cached n01 records of a team. */
   n01CacheFor(teamId: TeamId): N01CacheRecord[];
+  /**
+   * When a sync of the team last succeeded *in this app session* (not persisted). Only
+   * this may be called "最新": a cache read back after a restart is just old data.
+   */
+  n01SessionSyncAt(teamId: TeamId): number | null;
   mergeEverything(snapshot: Snapshot): Promise<void>;
   snapshot(): Snapshot;
 }
@@ -197,6 +202,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
   const [backendKind, setBackendKind] = useState<BackendKind | null>(null);
   /** Set once a write has actually failed, so a lost save is never silent (spec §24). */
   const [writeFailed, setWriteFailed] = useState(false);
+  const [sessionSyncs, setSessionSyncs] = useState<Record<TeamId, number>>({});
   const repositoryRef = useRef<Repository | null>(null);
   const toast = useToast();
 
@@ -614,7 +620,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
             ? { ...current.settings, activeTeamId: change.team.id }
             : current.settings,
         }));
+        const fetchedAt = change.cache.find((record) => record.kind === 'sync')?.fetchedAt;
+        if (fetchedAt !== undefined) setSessionSyncs((current) => ({ ...current, [change.team.id]: fetchedAt }));
       },
+
+      n01SessionSyncAt: (teamId) => sessionSyncs[teamId] ?? null,
 
       n01CacheFor: (teamId) => data.n01Cache.filter((record) => record.teamId === teamId),
 
@@ -643,7 +653,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
 
       snapshot,
     };
-  }, [data, ready, backendKind, writeFailed, write, toast]);
+  }, [data, ready, backendKind, writeFailed, write, toast, sessionSyncs]);
 
   return <AppStoreContext.Provider value={store}>{children}</AppStoreContext.Provider>;
 }

@@ -2,12 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Team } from '../../domain/types';
 import { describeChanges, hasAnyChanges, type N01ChangeSummary } from '../../domain/n01/changes';
 import { formatSyncTime } from '../../domain/n01/freshness';
-import { N01Error, describeN01Error } from '../../integrations/n01/client';
+import { describeN01Error } from '../../integrations/n01/client';
 import type { N01MatchIntelligenceSnapshot } from '../../domain/n01/intelligence';
-import type { N01CacheRecord } from '../../domain/n01/types';
 import type { N01SyncStep, N01TeamSelection } from '../../integrations/n01/sync';
 import { useAppStore } from '../../state/appStore';
-import { useN01Sync } from '../../state/useN01Sync';
+import { useN01FreshSync } from '../../state/useN01FreshSync';
 import { Sheet, useToast } from '../ui';
 import { Icon } from '../icons';
 import { SyncProgress, type SyncProgressState } from './SyncProgress';
@@ -39,7 +38,7 @@ export function N01SyncSheet({
   /** Opens the team picker again (the team was renamed or did not enter this season). */
   onRelink: () => void;
 }): React.JSX.Element {
-  const sync = useN01Sync();
+  const freshSync = useN01FreshSync();
   const store = useAppStore();
   const toast = useToast();
   const [phase, setPhase] = useState<Phase>({ kind: 'running' });
@@ -56,44 +55,23 @@ export function N01SyncSheet({
       setPhase({ kind: 'running' });
       setProgress({});
       try {
-        let selection = chosen;
-        if (!selection) {
-          const resolution = await sync.resolve(team, report);
-          if (attempt !== run.current) return;
-          if (resolution.kind === 'seasonAmbiguous') {
-            setPhase({ kind: 'season', options: resolution.options });
-            return;
-          }
-          if (resolution.kind === 'teamNotFound') {
-            setPhase({ kind: 'notFound' });
-            return;
-          }
-          selection = resolution.selection;
+        const result = await freshSync(team, { onProgress: report, selection: chosen, isCurrent: () => attempt === run.current });
+        if (!result || attempt !== run.current) return;
+        if (result.kind === 'seasonAmbiguous') {
+          setPhase({ kind: 'season', options: result.options });
+          return;
         }
-        const data = await sync.fetch(selection, report);
-        if (attempt !== run.current) return;
-        const plan = sync.plan(team, data);
-        // The next match is analysed after the roster: if that part fails, the roster,
-        // PPR and format are still brought up to date, and the failure is listed.
-        let intel: N01MatchIntelligenceSnapshot | null = null;
-        try {
-          intel = (await sync.intelligence(team.id, data, plan.format, { onProgress: report, plan })).snapshot;
-        } catch (error) {
-          if (error instanceof N01Error && error.kind === 'aborted') throw error;
-          report('opponent', 'error');
-          plan.changes.notes.push(`次戦の分析データを取得できませんでした (${describeN01Error(error)})`);
+        if (result.kind === 'teamNotFound') {
+          setPhase({ kind: 'notFound' });
+          return;
         }
-        if (attempt !== run.current) return;
-        const extraCache: N01CacheRecord[] = intel ? [intel] : [];
-        await sync.apply(plan, { extraCache });
-        if (attempt !== run.current) return;
-        setPhase({ kind: 'done', changes: plan.changes, nextMatch: intel });
+        setPhase({ kind: 'done', changes: result.plan.changes, nextMatch: result.intel });
         toast.show('n01 と同期しました', 'ok');
       } catch (error) {
         if (attempt === run.current) setPhase({ kind: 'error', message: describeN01Error(error) });
       }
     },
-    [sync, team, toast],
+    [freshSync, team, toast],
   );
 
   // Runs once per opened sheet; a retry calls `execute` explicitly.

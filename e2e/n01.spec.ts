@@ -154,3 +154,56 @@ test.describe('n01 league native sync (Phase 1)', () => {
     await audit(page, 'RESULT (opponent-optimised)');
   });
 });
+
+test.describe('next match order in one flow (Phase 5)', () => {
+  async function openFlow(page: Page) {
+    await page.getByRole('button', { name: '次戦のオーダーを作る' }).click();
+    return page.getByRole('dialog', { name: '次戦のオーダーを作る' });
+  }
+
+  test('HOME → 次戦のオーダーを作る → attendance → result, in one flow', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await start(page);
+    await createKalavinka(page);
+    const card = page.getByTestId('next-match-card');
+    await expect(card).toContainText('vs スピンコブラ');
+    await expect(card).toContainText('10/8');
+    await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });
+    await audit(page, 'HOME next-match card');
+
+    const flow = await openFlow(page);
+    const attendance = flow.getByTestId('flow-attendance');
+    await expect(attendance).toContainText('本日参加 7 / 7');
+    await audit(page, 'NEXT MATCH attendance');
+    await attendance.getByRole('checkbox', { name: /伊藤 由佳/ }).uncheck();
+    await expect(attendance).toContainText('本日参加 6 / 7');
+    await attendance.getByRole('button', { name: 'このメンバーで作成' }).click();
+
+    await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('opponent-panel')).toContainText('スピンコブラ');
+    await expect(page.locator('.order-game')).toHaveCount(7);
+    const fielded = await page
+      .locator('.order-game select')
+      .evaluateAll((selects) => selects.map((select) => (select as HTMLSelectElement).selectedOptions[0]?.textContent ?? ''));
+    expect(fielded).toHaveLength(12);
+    expect(fielded.some((name) => name.includes('伊藤 由佳'))).toBe(false);
+  });
+
+  test('offline: shows the last sync and continues with that data only when asked', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const server = await start(page);
+    await createKalavinka(page);
+    await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });
+    server.offline = true;
+    const flow = await openFlow(page);
+    const offline = flow.getByTestId('flow-offline');
+    await expect(offline).toContainText('n01 に接続できませんでした');
+    await expect(offline).toContainText('このデータは最新ではありません');
+    await expect(flow.getByTestId('flow-attendance')).toHaveCount(0);
+    await audit(page, 'NEXT MATCH offline');
+    await offline.getByRole('button', { name: '前回データで続ける' }).click();
+    await expect(flow.getByTestId('flow-stale')).toContainText('最新ではありません');
+    await flow.getByRole('button', { name: 'このメンバーで作成' }).click();
+    await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 20_000 });
+  });
+});

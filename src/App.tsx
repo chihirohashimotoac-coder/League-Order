@@ -37,6 +37,7 @@ import { ResultPage } from './pages/ResultPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { WelcomePage } from './pages/WelcomePage';
+import type { NextMatchOrder } from './domain/n01/nextMatch';
 
 /**
  * Application shell.
@@ -65,7 +66,8 @@ export function App(): React.JSX.Element {
   /** The persisted order record, once the captain has saved or finalized it. */
   const [record, setRecord] = useState<SavedOrder | null>(null);
   const [applyUpdate, setApplyUpdate] = useState<(() => void) | null>(null);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  /** What to do once the captain agrees to discard unsaved work (null = no dialog). */
+  const [confirmDiscard, setConfirmDiscard] = useState<(() => void) | null>(null);
 
   // A new build is never applied automatically — the captain decides when.
   useEffect(() => onUpdateAvailable((apply) => setApplyUpdate(() => apply)), []);
@@ -235,13 +237,16 @@ export function App(): React.JSX.Element {
 
   const startNewOrder = useCallback(
     (force = false) => {
+      const start = (): void => {
+        resetWorkingOrder();
+        setPage('setup');
+      };
       // Work that only exists in this session is never dropped without asking.
       if (!force && unsaved) {
-        setConfirmDiscard(true);
+        setConfirmDiscard(() => start);
         return;
       }
-      resetWorkingOrder();
-      setPage('setup');
+      start();
     },
     [unsaved, resetWorkingOrder],
   );
@@ -263,6 +268,33 @@ export function App(): React.JSX.Element {
       });
     },
     [run],
+  );
+
+  /**
+   * 「次戦のオーダーを作る」 (Phase 5): a new order for the next match, set up exactly as
+   * SETUP would set it up — the managed format, today's attendance, the next opponent in
+   * the match header — so the captain can still go back to SETUP and adjust anything.
+   */
+  const generateNextMatch = useCallback(
+    (order: NextMatchOrder) => {
+      const start = (): void => {
+        resetWorkingOrder();
+        setMatch(order.match);
+        setDraft({
+          formatId: order.input.formatId,
+          participants: order.input.participants,
+          preset: order.input.preset,
+          settings: order.input.settings,
+        });
+        handleGenerate(order.input);
+      };
+      if (unsaved) {
+        setConfirmDiscard(() => start);
+        return;
+      }
+      start();
+    },
+    [unsaved, resetWorkingOrder, handleGenerate],
   );
 
   const handleRegenerate = useCallback(() => {
@@ -502,6 +534,8 @@ export function App(): React.JSX.Element {
             onNewOrder={() => startNewOrder()}
             working={working}
             onResume={() => setPage('result')}
+            onNextMatch={generateNextMatch}
+            currentParticipants={draft?.participants ?? null}
           />
         ) : null}
         {page === 'players' ? <PlayersPage /> : null}
@@ -593,10 +627,11 @@ export function App(): React.JSX.Element {
           message="作業中のオーダーに保存されていない変更があります。破棄して新しいオーダーを作りますか？ 残す場合は結果画面で保存または確定してください。"
           confirmLabel="破棄して作成"
           destructive
-          onCancel={() => setConfirmDiscard(false)}
+          onCancel={() => setConfirmDiscard(null)}
           onConfirm={() => {
-            setConfirmDiscard(false);
-            startNewOrder(true);
+            const action = confirmDiscard;
+            setConfirmDiscard(null);
+            action();
           }}
         />
       ) : null}

@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 import type { AppSettings, ScoreWeights } from '../domain/types';
+import { DEFAULT_N01_SETTINGS } from '../domain/types';
+import { HISTORY_DEPTH_MAX } from '../domain/n01/recency';
 import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../domain/orders/presets';
 import { parseBackup, serialiseBackup } from '../storage/backup';
 import { downloadText } from '../share';
@@ -35,6 +37,7 @@ export function SettingsPage(): React.JSX.Element {
   const [confirmReset, setConfirmReset] = useState(false);
 
   const settings = store.settings;
+  const n01 = settings.n01 ?? DEFAULT_N01_SETTINGS;
 
   const update = (change: Partial<AppSettings>): void => store.saveSettings({ ...settings, ...change });
 
@@ -84,6 +87,38 @@ export function SettingsPage(): React.JSX.Element {
             if (file) void handleFile(file);
           }}
         />
+      </Card>
+
+      <Card title="n01 連携" kicker="N01">
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={n01.autoSync}
+            onChange={(event) => update({ n01: { ...n01, autoSync: event.target.checked } })}
+          />
+          <span className="small-text">「次戦のオーダーを作る」の前に n01 と同期する</span>
+        </label>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={n01.showPredictions}
+            onChange={(event) => update({ n01: { ...n01, showPredictions: event.target.checked } })}
+          />
+          <span className="small-text">推定勝率を表示する (共有画像には表示されません)</span>
+        </label>
+        <div className="row between" style={{ marginTop: 8 }}>
+          <span className="small-text">過去シーズンの取得数 (相手分析)</span>
+          <Stepper
+            label="過去シーズンの取得数"
+            value={n01.historyDepth}
+            min={0}
+            max={HISTORY_DEPTH_MAX}
+            onChange={(next) => update({ n01: { ...n01, historyDepth: next } })}
+          />
+        </div>
+        <p className="tiny muted" style={{ marginBottom: 0 }}>
+          多いほど相手の傾向を広く見ますが、同期に時間がかかります (既定 {DEFAULT_N01_SETTINGS.historyDepth})。
+        </p>
       </Card>
 
       <Card title="カスタムウェイト" kicker="WEIGHTS">

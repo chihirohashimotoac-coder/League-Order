@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { Player } from '../types';
+import type { AppSettings, Player } from '../types';
 import { normalizeName, sameName } from './names';
 import { effectivePpr, pprFromStats, pprSourceOf, withEffectivePpr } from './effectivePpr';
 import { describeChanges, emptyChangeSummary, hasImportantChanges } from './changes';
-import { STALE_DANGER_MS, STALE_WARN_MS, formatAge, freshness } from './freshness';
+import { LATEST_WINDOW_MS, STALE_DANGER_MS, STALE_WARN_MS, formatAge, freshness, isLatest } from './freshness';
+import { buildNextMatchOrder, eligiblePlayers, previousAvailability } from './nextMatch';
+import { createParticipantConfig } from '../orders/participants';
+import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../orders/presets';
+import { TEAM_ID, format, games, player as factoryPlayer, team } from '../../test/factories';
 import { parsePlayerBinding, parseTeamBinding } from './parse';
 import type { N01PlayerBinding } from './types';
 
@@ -126,5 +130,70 @@ describe('binding parsing (import)', () => {
     expect(parsePlayerBinding(binding(50))).toEqual(binding(50));
     expect(parsePlayerBinding({ ...binding(50), opid: null, currentOid: null })).toBeUndefined();
     expect(parsePlayerBinding({ ...binding(50), stats: { ppr: 999, score: 1, darts: 1, tournamentId: 't' } })?.stats?.ppr).toBeNull();
+  });
+});
+
+describe('next match order (Phase 5)', () => {
+  const settings: AppSettings = {
+    activeTeamId: TEAM_ID,
+    optimizer: DEFAULT_OPTIMIZER_SETTINGS,
+    lastPreset: 'BALANCED',
+    customWeights: DEFAULT_WEIGHTS,
+  };
+  const roster = [
+    factoryPlayer({ id: 'a', name: 'A', ppr: 20 }),
+    factoryPlayer({ id: 'b', name: 'B', ppr: 18 }),
+    { ...factoryPlayer({ id: 'c', name: 'C' }), archived: true },
+    { ...factoryPlayer({ id: 'd', name: 'D' }), n01: { ...binding(null), rosterActive: false } },
+    factoryPlayer({ id: 'e', name: 'E' }),
+  ];
+
+  it('offers only players who can play: not archived and still on the n01 roster', () => {
+    expect(eligiblePlayers(roster).map((p) => p.id)).toEqual(['a', 'b', 'e']);
+  });
+
+  it('starts availability from the working order, else the last saved order, else everyone', () => {
+    const current = [createParticipantConfig('a', false)];
+    const last = { input: { participants: [createParticipantConfig('b', false), createParticipantConfig('d', true)] } };
+    expect([...previousAvailability(roster, current, null)]).toEqual([['a', false], ['b', true], ['e', true]]);
+    expect([...previousAvailability(roster, [], last as never)]).toEqual([['a', true], ['b', false], ['e', true]]);
+    expect([...previousAvailability(roster, null, null)].every(([, here]) => here)).toBe(true);
+    // Another team's working order is not this team's attendance.
+    const otherTeam = [createParticipantConfig('x', false)];
+    expect([...previousAvailability(roster, otherTeam, last as never)]).toEqual([['a', true], ['b', false], ['e', true]]);
+  });
+
+  it('without opponent data builds a 勝利優先 order from who is here, keeping day-of exclusions', () => {
+    const fmt = format(games([{ id: 'g1', name: 'S', kinds: ['G501'], playerCount: 1 }]));
+    const previous = [{ ...createParticipantConfig('a'), excludedGameIds: ['g1'] }];
+    const built = buildNextMatchOrder({
+      team: { ...team('Kalavinka'), leagueName: 'ATDO' },
+      players: eligiblePlayers(roster),
+      format: fmt,
+      pairs: [],
+      settings,
+      intel: null,
+      attending: new Set(['a', 'e']),
+      previous,
+    });
+    expect(built.opponentAvailable).toBe(false);
+    expect(built.input.preset).toBe('WIN_FIRST');
+    expect(built.input.opponent).toBeUndefined();
+    expect(built.input.participants).toEqual([
+      { ...previous[0], include: true },
+      { ...createParticipantConfig('b'), include: false },
+      { ...createParticipantConfig('e'), include: true },
+    ]);
+    expect(built.match).toEqual({ leagueName: 'ATDO', teamName: 'Kalavinka', opponentName: '', matchDate: '' });
+  });
+});
+
+describe('"最新" is reserved for this session', () => {
+  it('holds for LATEST_WINDOW_MS after a sync in this session only', () => {
+    expect(isLatest(null, 1_000)).toBe(false);
+    expect(isLatest(1_000, 1_000)).toBe(true);
+    expect(isLatest(1_000, 1_000 + LATEST_WINDOW_MS - 1)).toBe(true);
+    expect(isLatest(1_000, 1_000 + LATEST_WINDOW_MS)).toBe(false);
+    expect(isLatest(5_000, 1_000)).toBe(false);
   });
 });

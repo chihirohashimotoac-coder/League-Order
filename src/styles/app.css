@@ -3766,3 +3766,146 @@ input[type='range'] {
   font-weight: 600;
   color: var(--color-text-muted);
 }
+
+/* ------------------------------------------------------------- next match (Phase 5) */
+
+.next-match-card {
+  margin: 0 0 14px;
+  padding: 16px;
+  border: 1px solid var(--color-border-strong);
+  border-top: 4px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-2);
+}
+
+.next-match-title {
+  margin: 4px 0 0;
+  font-size: 24px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.next-match-date {
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.next-match-team {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.n01-fresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 12px;
+  color: var(--color-success);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.n01-fresh.level-recent {
+  color: var(--color-text-secondary);
+}
+
+.n01-fresh.level-warn,
+.stale-note.level-warn {
+  color: var(--color-warning);
+}
+
+.n01-fresh.level-danger,
+.stale-note.level-danger {
+  color: var(--color-danger);
+}
+
+.next-match-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.next-match-actions .btn.xl {
+  flex: 1 1 220px;
+}
+
+.flow-block {
+  padding: 4px 0;
+}
+
+.flow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.flow-actions.sticky {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 0 2px;
+  background: var(--color-surface-1);
+}
+
+.next-match-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+  font-size: 17px;
+}
+
+.stale-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.attendance-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 6px;
+  font-weight: 800;
+}
+
+.attendance {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.attendance li {
+  list-style: none;
+}
+
+.attendance li + li {
+  border-top: 1px solid var(--color-border);
+}
+
+.attendance label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap-target);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.attendance input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--color-accent);
+}

@@ -39,3 +39,13 @@ export function formatSyncTime(epochMs: number): string {
   const pad = (value: number): string => String(value).padStart(2, '0');
   return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+/**
+ * How long after a successful sync *in this session* the data may be called "最新".
+ * After that — or for anything read back from the cache — the age is shown instead.
+ */
+export const LATEST_WINDOW_MS = 30 * 60 * 1000;
+
+export function isLatest(sessionSyncAt: number | null, now: number): boolean {
+  return sessionSyncAt !== null && now - sessionSyncAt >= 0 && now - sessionSyncAt < LATEST_WINDOW_MS;
+}
