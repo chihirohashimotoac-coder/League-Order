@@ -133,6 +133,10 @@ describe('strength model in the optimizer', () => {
     expect(solution.metrics.strengthWeights).toEqual({ rating: 0, ppr: 1 });
     expect(solution.metrics.averagePpr).not.toBeNull();
     expect(solution.warnings.some((w) => w.code === 'NO_RATING')).toBe(false);
+    // Rating took no part in scoring, so nothing may claim a Rating median was used.
+    expect(solution.metrics.hasImputedRating).toBe(false);
+    expect(solution.tallies.every((tally) => !tally.ratingImputed && tally.effectiveRating === null)).toBe(true);
+    expect(solution.warnings.some((w) => w.code === 'RATING_IMPUTED')).toBe(false);
   });
 
   it('5. is neutral when neither metric exists', () => {

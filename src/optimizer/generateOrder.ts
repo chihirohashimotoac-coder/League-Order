@@ -199,8 +199,13 @@ function buildTallies(ctx: PreparedContext, evaluation: Evaluation): PlayerTally
       count: evaluation.counts[pi],
       seasonBefore: player.seasonAppearances,
       seasonTotal: player.seasonAppearances + evaluation.counts[pi],
-      effectiveRating: ctx.ratings.effective.get(playerId) ?? null,
-      ratingImputed: ctx.ratings.imputed.has(playerId),
+      // Like PPR below: an imputed Rating is only reported when Rating took part in
+      // scoring, otherwise the screen would claim a median was used that never was.
+      effectiveRating:
+        ctx.strengthWeights.rating > 0 || !ctx.ratings.imputed.has(playerId)
+          ? (ctx.ratings.effective.get(playerId) ?? null)
+          : null,
+      ratingImputed: ctx.strengthWeights.rating > 0 && ctx.ratings.imputed.has(playerId),
       // An imputed PPR is only reported when PPR actually took part in scoring; otherwise
       // the median would be shown next to players who never entered one.
       effectivePpr:
@@ -224,7 +229,7 @@ function buildMetrics(ctx: PreparedContext, evaluation: Evaluation): OrderMetric
     maxConsecutive: evaluation.maxConsecutive,
     averageRating: evaluation.averageRating === null ? null : round(evaluation.averageRating, 2),
     averagePpr: evaluation.averagePpr === null ? null : round(evaluation.averagePpr, 2),
-    hasImputedRating: ctx.ratings.imputed.size > 0,
+    hasImputedRating: ctx.strengthWeights.rating > 0 && ctx.ratings.imputed.size > 0,
     strengthWeights: { ...ctx.strengthWeights },
     discipline: ctx.discipline,
     maxRoleConcentration: evaluation.roleFairness.maxConcentration,
