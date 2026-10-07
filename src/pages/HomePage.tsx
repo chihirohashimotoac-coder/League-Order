@@ -16,6 +16,7 @@ import { Icon, type IconName } from '../components/icons';
 import { N01TeamWizard, type N01WizardMode } from '../components/n01/N01TeamWizard';
 import { N01SyncSheet } from '../components/n01/N01SyncSheet';
 import { freshness, isLatest } from '../domain/n01/freshness';
+import { divisionLabel } from '../domain/n01/division';
 import { NextMatchFlow } from '../components/n01/NextMatchFlow';
 import type { NextMatchOrder } from '../domain/n01/nextMatch';
 import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
@@ -455,7 +456,7 @@ function N01TeamStatus({ team }: { team: Team }): React.JSX.Element {
         <span className="n01-line">
           <span className="n01-tag">n01</span>
           {binding.leagueTitle} ・ {binding.lastTournamentTitle}
-          {binding.lastDivisionTitle ? ` ・ ${binding.lastDivisionTitle} Division` : ''}
+          {binding.lastDivisionTitle ? ` ・ ${divisionLabel(binding.lastDivisionTitle)}` : ''}
         </span>
         {intel?.nextMatch ? <span className="n01-age">現在の対戦相手: {intel.nextMatch.opponentName}</span> : null}
         <span className={`n01-age level-${age?.level ?? 'danger'}`}>{age ? `最終同期 ${age.label}` : '未同期'}</span>
@@ -496,7 +497,7 @@ function NextMatchCard({
       {match?.date ? <p className="next-match-date">{Number(match.date.slice(5, 7))}/{Number(match.date.slice(8, 10))}</p> : null}
       <p className="next-match-team">
         {team.name} ・ {binding.leagueTitle}
-        {binding.lastDivisionTitle ? ` ・ ${binding.lastDivisionTitle} Division` : ''}
+        {binding.lastDivisionTitle ? ` ・ ${divisionLabel(binding.lastDivisionTitle)}` : ''}
       </p>
       <p className={latest ? 'n01-fresh' : `n01-fresh level-${age?.level ?? 'danger'}`} data-testid="n01-freshness">
         {latest ? (
@@ -584,7 +585,7 @@ function TeamEditor({
           <span className="kicker">n01</span>
           <p className="small-text" style={{ margin: 0 }}>
             {team.n01.leagueTitle} ・ {team.n01.lastTournamentTitle}
-            {team.n01.lastDivisionTitle ? ` ・ ${team.n01.lastDivisionTitle} Division` : ''} ・ n01 名「{team.n01.lastTeamName}」
+            {team.n01.lastDivisionTitle ? ` ・ ${divisionLabel(team.n01.lastDivisionTitle)}` : ''} ・ n01 名「{team.n01.lastTeamName}」
           </p>
         </div>
       ) : onLinkN01 ? (

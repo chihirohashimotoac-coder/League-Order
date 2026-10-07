@@ -181,12 +181,13 @@ function epochOf(value: unknown): number | null {
 }
 
 // ---------------------------------------------------------------------------
-// league/search, league/tournament/list
+// league/list, league/tournament/list
 // ---------------------------------------------------------------------------
 
+/** `league/list?keyword=…` → `{ result: 0, list: [{ lgid, title, … }] }`. */
 export function parseLeagueSearch(raw: unknown): N01LeagueSummary[] {
-  const rows = requireList('league/search', raw, ['list', 'leagues', 'league_list']);
-  return mapRows('league/search', rows, (row) => {
+  const rows = requireList('league/list', raw, ['list', 'leagues', 'league_list']);
+  return mapRows('league/list', rows, (row) => {
     const leagueId = nonEmpty(first(row, ['lgid', 'id', '__key']));
     if (!leagueId) return null;
     return { leagueId, title: nonEmpty(first(row, ['title', 'lg_title', 'name'])) ?? leagueId };
@@ -233,26 +234,42 @@ function parseScheduleSlots(operation: string, value: unknown): N01ScheduleSlot[
   });
 }
 
-function parseDivisions(value: unknown): N01Division[] {
-  const rows = Array.isArray(value) ? value : isRec(value) ? Object.values(value) : [];
+/** Placeholders n01 puts where a team would be: a bye, never a team. */
+const BYE_MARKERS = new Set(['', 'bye', '-', '0', 'empty']);
+
+function isBye(value: string): boolean {
+  return BYE_MARKERS.has(value.trim().toLowerCase());
+}
+
+function valuesOf(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : isRec(value) ? Object.values(value) : [];
+}
+
+/**
+ * Divisions. n01: `lg_table` is one array of `tpid`s per division and the titles are the
+ * tournament's `lg_title[index]`. Also read: rows of `{ lg_title, list: [{ tpid }] }`.
+ * The index is the position in `lg_table` — the key `game_setting[].round` refers to.
+ */
+function parseDivisions(value: unknown, titles: unknown): N01Division[] {
+  const rows = valuesOf(value);
+  const titleList = typeof titles === 'string' ? [titles] : valuesOf(titles);
   const divisions: N01Division[] = [];
   rows.forEach((row, index) => {
-    if (!isRec(row)) return;
-    const teamRows = first(row, ['list', 'teams', 'table', 'tp_list']);
+    const items = Array.isArray(row) ? row : isRec(row) ? valuesOf(first(row, ['list', 'teams', 'table', 'tp_list'])) : null;
+    if (items === null) return;
     const teamIds: string[] = [];
-    const items = Array.isArray(teamRows) ? teamRows : isRec(teamRows) ? Object.values(teamRows) : [];
     for (const item of items) {
       const id = isRec(item) ? nonEmpty(first(item, ['tpid', 'id'])) : nonEmpty(item);
-      if (id) teamIds.push(id);
+      if (id && !isBye(id)) teamIds.push(id);
     }
-    divisions.push({
-      index,
-      title: nonEmpty(first(row, ['lg_title', 'title', 'name'])) ?? `Division ${index + 1}`,
-      teamIds,
-    });
+    const ownTitle = isRec(row) ? nonEmpty(first(row, ['lg_title', 'title', 'name'])) : null;
+    divisions.push({ index, title: nonEmpty(titleList[index]) ?? ownTitle ?? `Division ${index + 1}`, teamIds });
   });
   return divisions;
 }
+
+/** n01 keys `lg_result` as `<division>_<lsid>` (`0_rqbd`); fixtures use the bare `lsid`. */
+const RESULT_KEY = /^(\d+)_(.+)$/u;
 
 function parseResults(value: unknown): Map<string, N01MatchResult> {
   const results = new Map<string, N01MatchResult>();
@@ -263,8 +280,11 @@ function parseResults(value: unknown): Map<string, N01MatchResult> {
       : [];
   for (const row of rows) {
     if (!isRec(row)) continue;
-    const matchId = nonEmpty(first(row, ['lsid', 'id', '__key']));
+    const key = nonEmpty(row.__key);
+    const keyed = key ? RESULT_KEY.exec(key) : null;
+    const matchId = nonEmpty(first(row, ['lsid', 'id'])) ?? (keyed ? keyed[2] : key);
     if (!matchId) continue;
+    const division = num(first(row, ['division', 'div'])) ?? (keyed ? Number(keyed[1]) : null);
     const explicit = row.finished ?? row.end;
     const status = num(row.status);
     // An lg_result entry records a played match unless it explicitly says otherwise.
@@ -284,7 +304,7 @@ function parseResults(value: unknown): Map<string, N01MatchResult> {
         games.push({ schid, winnerTeamId: nonEmpty(first(game, ['win_tpid', 'winner', 'winner_tpid'])) });
       }
     }
-    results.set(matchId, { matchId, finished, games });
+    results.set(matchId, { matchId, division, finished, games });
   }
   return results;
 }
@@ -326,7 +346,7 @@ export function parseTournament(raw: unknown, tournamentId: string): N01Tourname
     status: num(body.status),
     softdarts: soft === 1 ? true : soft === 0 ? false : null,
     entries,
-    divisions: parseDivisions(body.lg_table),
+    divisions: parseDivisions(body.lg_table, body.lg_title),
     schedule,
     gameSettings,
     results: parseResults(body.lg_result),
@@ -367,14 +387,15 @@ export function parseStats(raw: unknown): N01PlayerStats[] {
       name: nonEmpty(first(row, ['oname', 'name'])),
       score,
       darts,
-      legs: num(first(row, ['legs', 'leg', 'leg_count'])),
-      matches: num(first(row, ['matches', 'games', 'match_count'])),
-      legsWon: num(first(row, ['win_legs', 'legs_won', 'win_leg'])),
-      first9Score: num(first(row, ['first9_score', 'f9_score'])),
-      first9Darts: num(first(row, ['first9_darts', 'f9_darts'])),
-      highOut: num(first(row, ['high_out', 'highout'])),
-      bestLeg: num(first(row, ['best_leg', 'bestleg'])),
-      ton: num(first(row, ['ton', 't100'])),
+      // n01's own field names first (camelCase), then the older aliases.
+      legs: num(first(row, ['leg', 'legs', 'leg_count'])),
+      matches: num(first(row, ['match', 'matches', 'games', 'match_count'])),
+      legsWon: num(first(row, ['winLeg', 'win_legs', 'legs_won', 'win_leg'])),
+      first9Score: num(first(row, ['f9Score', 'first9_score', 'f9_score'])),
+      first9Darts: num(first(row, ['f9Darts', 'first9_darts', 'f9_darts'])),
+      highOut: num(first(row, ['highOut', 'high_out', 'highout'])),
+      bestLeg: num(first(row, ['best', 'best_leg', 'bestleg'])),
+      ton: num(first(row, ['ton00', 'ton', 't100'])),
       ton40: num(first(row, ['ton40', 't140'])),
       ton70: num(first(row, ['ton70', 't170'])),
       ton80: num(first(row, ['ton80', 't180'])),
@@ -385,8 +406,6 @@ export function parseStats(raw: unknown): N01PlayerStats[] {
 // ---------------------------------------------------------------------------
 // league/schedule/get, team/order/list
 // ---------------------------------------------------------------------------
-
-const BYE_MARKERS = new Set(['', 'bye', 'BYE', '-', '0']);
 
 /** The first of `keys` whose value is an array (a same-named scalar does not hide a later list). */
 function firstList(row: Rec, keys: readonly string[]): unknown[] | null {
@@ -424,7 +443,7 @@ export function parseSchedule(raw: unknown, now: number): N01Fixture[] {
         nonEmpty(first(row, ['tpid2', 'away_tpid', 'tpid_b'])),
       ];
     }
-    const real = sides.filter((side): side is string => side !== null && !BYE_MARKERS.has(side));
+    const real = sides.filter((side): side is string => side !== null && !isBye(side));
     if (real.length === 0) return null;
     const title = nonEmpty(first(row, ['title', 'name'])) ?? '';
     // Documented: `t`.

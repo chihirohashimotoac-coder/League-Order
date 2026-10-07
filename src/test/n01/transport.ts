@@ -20,9 +20,9 @@ export interface FixtureTransportOptions {
 export const FAIL = Symbol('fail');
 
 export function fixtureResponse(request: N01Request, datasets: readonly FixtureDataset[]): unknown | undefined {
-  if (request.operation === 'league/search') {
-    const query = (request.params.q ?? '').toLowerCase();
-    return { list: FIXTURE_LEAGUE_SEARCH.filter((league) => league.title.toLowerCase().includes(query)) };
+  if (request.operation === 'league/list') {
+    const keyword = (request.params.keyword ?? '').toLowerCase();
+    return { result: 0, list: FIXTURE_LEAGUE_SEARCH.filter((league) => league.title.toLowerCase().includes(keyword)) };
   }
   const key = requestKey(request.operation, request.params);
   for (const dataset of datasets) {

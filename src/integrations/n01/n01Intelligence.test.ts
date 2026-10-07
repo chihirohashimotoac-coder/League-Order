@@ -39,7 +39,7 @@ async function intelligence(depth = 2, options: Parameters<typeof createFixtureT
 function tournamentWith(divisions: string[][], results: string[] = []): Pick<N01Tournament, 'divisions' | 'results' | 'entries'> {
   return {
     divisions: divisions.map((teamIds, index) => ({ index, title: `D${index}`, teamIds })),
-    results: new Map(results.map((id) => [id, { matchId: id, finished: true, games: [] }])),
+    results: new Map(results.map((id) => [id, { matchId: id, division: 0, finished: true, games: [] }])),
     entries: divisions.flat().map((teamId) => ({ teamId, name: `name-${teamId}` })),
   };
 }

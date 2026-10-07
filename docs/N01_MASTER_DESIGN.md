@@ -63,7 +63,7 @@ Phase 0 ではスクリプトを「出力しない型検査」に修正する (�
    - `npm run verify:n01` (read-only ライブ契約テスト、CI 非必須) を用意する。
    - 単体・E2E は**フィクスチャのみ**で完結させる (MASTER SPEC TEST STRATEGY)。
 4. ブラウザ (GitHub Pages) から n01 への直接 fetch は n01 側の CORS 応答に依存する。
-   未検証のため既知の制約として扱い、失敗時はオフライン経路 (前回データ) へ確実に落とす。
+   公式マニュアルで CORS 有効と確認済み (オーナー、PR #5 レビュー)。通信失敗時はオフライン経路 (前回データ) へ確実に落とす。
 
 ---
 
@@ -102,7 +102,7 @@ Phase 0 ではスクリプトを「出力しない型検査」に修正する (�
 | TDA | `lg_Ev9v_7379` |
 
 **League identity のみを定数化**する。Tournament (Season) ID・Team ID は定数化禁止。
-その他のリーグは League 検索 (`league/search`) または n01 の URL / ID 貼り付け (厳格に検証) で追加する。
+その他のリーグは League 検索 (`league/list?keyword=`) または n01 の URL / ID 貼り付け (厳格に検証) で追加する。
 
 ### 3.2 Season (Tournament)
 毎同期で `league/tournament/list` から再解決する:
@@ -301,6 +301,7 @@ HOME の NEXT MATCH カード → [次戦のオーダーを作る] の 1 操作�
 | 1.0 | Phase 0: アーキテクチャ固定 |
 | 1.1 | Phase 4: 対戦相手最適化の公平性の重みをバランス水準へ改訂 (fairness 0.3 では退化解になることをテストで確認したため) |
 | 1.2 | Phase 6: 成績 (stats) の欠落を同期失敗にしない (PPR は前回値)、連携チームを古い Season へ戻さない (§3.2)、4 案比較をスマホで 2 × 2 表示 |
+| 1.3 | レビュー対応: API オリジン `push.n01darts.com/api/v1`、実 n01 の応答形 (`lg_table` / `lg_title`、`lg_result` キー正規化、`league/list`、stats camelCase、日程・オーダー行) に対応 |
 
 ## 13. Phase 6 検証の対応表
 
@@ -319,9 +320,8 @@ HOME の NEXT MATCH カード → [次戦のオーダーを作る] の 1 操作�
 
 ### 13.1 既知の制約
 
-- **n01 のライブ契約は未検証。** 開発環境から n01 (push.n01darts.com を含む) へ接続できなかった (プロキシで 403)。
-  API のオリジンと応答形は PR レビューで示された n01 External Integration API Manual の記述に合わせ、
-  当初想定の形も引き続き受け付ける。実際の応答での確認は `npm run verify:n01` で行う。
-  ブラウザから n01 への直接アクセスに CORS が許可されているかも未確認 (許可されていなければ同期は
-  「接続できませんでした」になり、手動フローのみ使える)。
+- **公式マニュアルで確認済み (オーナー)**: Base URL `https://push.n01darts.com/api/v1`、公開 Read API は認証不要、CORS 有効。
+  実データとの照合で見つかった差 (`lg_table` / `lg_title`、`lg_result` のキー、`league/list`、stats の camelCase) は反映済み。
+- **開発環境からはライブ API を呼べない** (ネットワークポリシーで 403)。上記以外の細部 (例: `team/order/list` の行の形、
+  日程の `t` の形式) は実データでの再確認が望ましい (`npm run verify:n01`)。当初想定の形も引き続き受け付ける。
 - 予測と対戦相手最適化の数値は合成データでのみ検証済み (PREDICTION_MODEL.md §9)。

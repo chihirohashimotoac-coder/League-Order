@@ -25,7 +25,7 @@ export const N01_API_BASE_URL = 'https://push.n01darts.com/api/v1';
 export const N01_ALLOWED_HOSTS: readonly string[] = ['push.n01darts.com', 'n01darts.com', 'www.n01darts.com'];
 
 export const N01_OPERATIONS = [
-  'league/search',
+  'league/list',
   'league/tournament/list',
   'league/schedule/get',
   'tournament/get',

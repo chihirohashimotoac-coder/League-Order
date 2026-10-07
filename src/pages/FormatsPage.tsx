@@ -21,6 +21,7 @@ import {
   useToast,
 } from '../components/ui';
 import { Icon } from '../components/icons';
+import { divisionLabel } from '../domain/n01/division';
 
 /**
  * FORMAT screen (spec §4).
@@ -208,7 +209,7 @@ function ManagedFormatViewer({
           {source.divisionTitle ? (
             <>
               <br />
-              {source.divisionTitle} Division
+              {divisionLabel(source.divisionTitle)}
             </>
           ) : null}
         </p>

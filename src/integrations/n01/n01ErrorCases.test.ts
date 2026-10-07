@@ -152,9 +152,11 @@ describe('n01 error cases (Phase 6 §6)', () => {
     const renamed = (request: N01Request) => {
       if (request.operation !== 'tournament/get' || request.params.tdid !== 't_ABvC_5234') return undefined;
       const raw = structuredClone(fixtureLeagues().atdo.dataset.get(`tournament/get?tdid=t_ABvC_5234`)) as {
-        entry_list: { tpid: string; name: string }[];
+        tournament: { entry_list: { tpid: string; name: string }[] };
       };
-      raw.entry_list = raw.entry_list.map((entry) => (entry.tpid === 'GpiQ' ? { ...entry, name: 'kalavinka 改', tpid: 'Zz99' } : entry));
+      raw.tournament.entry_list = raw.tournament.entry_list.map((entry) =>
+        entry.tpid === 'GpiQ' ? { ...entry, name: 'kalavinka 改', tpid: 'Zz99' } : entry,
+      );
       return raw;
     };
     const resolution = await resolveLinkedTeam(client({ override: renamed }), plan.team.n01!);

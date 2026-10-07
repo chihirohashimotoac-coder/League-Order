@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Team } from '../../domain/types';
 import { DARTS_DISCIPLINE_LABELS } from '../../domain/types';
 import { suggestLinks } from '../../domain/n01/roster';
+import { divisionLabel } from '../../domain/n01/division';
 import { formatPpr } from '../../domain/players/strength';
 import { describeN01Error } from '../../integrations/n01/client';
 import { KNOWN_LEAGUES, parseLeagueReference } from '../../integrations/n01/leagueRegistry';
@@ -245,7 +246,7 @@ export function N01TeamWizard({
                 <button type="button" className="list-row" onClick={() => chooseSeason(choice, index)}>
                   <span className="grow">
                     <span className="title">{season.tournamentTitle}</span>
-                    <span className="meta">{season.division ? `${season.division.title} Division` : 'ディビジョンなし'}</span>
+                    <span className="meta">{season.division ? divisionLabel(season.division.title) : 'ディビジョンなし'}</span>
                   </span>
                   <Icon name="chevronRight" size={18} className="chevron" />
                 </button>

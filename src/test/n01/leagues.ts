@@ -170,6 +170,7 @@ export function atdoSpec(): FixtureLeagueSpec {
     ],
     seed: 3397,
     today: FIXTURE_TODAY,
+    shape: 'n01',
   };
 }
 
@@ -223,7 +224,7 @@ export function tdoSpec(): FixtureLeagueSpec {
     ],
     seed: 6619,
     today: FIXTURE_TODAY,
-    shape: 'documented',
+    shape: 'n01',
   };
 }
 

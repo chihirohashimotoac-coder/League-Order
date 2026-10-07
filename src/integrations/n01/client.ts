@@ -183,7 +183,7 @@ export class N01Client {
   }
 
   searchLeagues(query: string): Promise<N01LeagueSummary[]> {
-    return this.parsed('league/search', { q: query }, parseLeagueSearch);
+    return this.parsed('league/list', { keyword: query }, parseLeagueSearch);
   }
 
   leagueTournaments(leagueId: string): Promise<N01LeagueTournaments> {

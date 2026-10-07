@@ -106,6 +106,19 @@ test.describe('n01 league native sync (Phase 1)', () => {
     await expect(sheet.getByText('n01 ✓ 最新')).toHaveCount(0);
   });
 
+  test('その他のリーグ: searched by league/list?keyword=, then chosen like a known league', async ({ page }) => {
+    const server = await start(page);
+    await page.getByRole('button', { name: 'n01から作成' }).click();
+    const wizard = page.getByRole('dialog', { name: 'n01から作成' });
+    await wizard.getByText('その他のリーグ').click();
+    await wizard.getByLabel('リーグ名で検索').fill('TDA');
+    await wizard.getByRole('button', { name: '検索', exact: true }).click();
+    await wizard.getByRole('button', { name: /TDA\s*lg_Ev9v_7379/ }).click();
+    await expect(wizard.getByRole('button', { name: /スターズ/ })).toBeVisible();
+    expect(server.log).toContain('league/list?keyword=TDA');
+    expect(server.log.some((entry) => entry.startsWith('league/search'))).toBe(false);
+  });
+
   test('the manual flow is untouched', async ({ page }) => {
     await start(page);
     await expect(page.getByRole('button', { name: '自分のチームを作る' })).toBeVisible();

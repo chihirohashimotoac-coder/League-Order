@@ -1,5 +1,6 @@
 import type { DartsDiscipline, GameKind, GameSlotDef, LeagueFormat } from '../../domain/types';
 import type { N01FormatSource, N01GameMeta } from '../../domain/n01/types';
+import { divisionLabel } from '../../domain/n01/division';
 import type { N01Division, N01ScheduleSlot, N01Tournament } from './types';
 
 /**
@@ -137,7 +138,7 @@ export function buildManagedFormat(input: ManagedFormatInput): LeagueFormat {
     divisionTitle: division?.title ?? null,
     syncedAt: input.now,
   };
-  const label = [input.leagueTitle, tournament.title, division?.title ? `${division.title} Division` : null]
+  const label = [input.leagueTitle, tournament.title, division?.title ? divisionLabel(division.title) : null]
     .filter(Boolean)
     .join(' ');
   return {

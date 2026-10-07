@@ -90,8 +90,10 @@ export interface N01GameResult {
 
 /** Result of one league match (`lg_result`). */
 export interface N01MatchResult {
-  /** `lsid` of the match. */
+  /** `lsid` of the match (normalised from n01's `<division>_<lsid>` key). */
   matchId: string;
+  /** Division index from the key, when n01 gives one. */
+  division: number | null;
   finished: boolean;
   games: N01GameResult[];
 }
