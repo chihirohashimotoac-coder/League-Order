@@ -265,7 +265,7 @@ describe('助っ人 on the ordinary SETUP screen', () => {
     const basis = screen.getByTestId('strength-basis-panel');
     expect(basis).toHaveTextContent('使用 Season: 2026 3rd');
     expect(basis).toHaveTextContent('信頼度');
-    expect(within(basis).getByText('助っ人 花子').closest('li')).toHaveAttribute('data-origin', 'unknown');
+    expect(within(basis).getByText('助っ人 花子').closest('.basis-row')).toHaveAttribute('data-origin', 'unknown');
 
     await user.click(screen.getByRole('button', { name: 'オーダーを生成' }));
     await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });

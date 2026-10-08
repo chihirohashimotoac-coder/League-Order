@@ -51,11 +51,11 @@ export function StrengthBasisPanel({
             : 'n01 の過去成績は使用していません。'}
           {basis.generatedAt > 0 ? ` ・ 分析データ: ${formatSyncTime(basis.generatedAt)} 時点` : ''}
         </p>
-        <ul className="basis-list">
+        <div className="basis-list">
           {rows.map((player) => {
             const entry = basis.players[player.id];
             return (
-              <li key={player.id} data-origin={entry.origin}>
+              <p key={player.id} className="basis-row" data-origin={entry.origin}>
                 <strong>{player.name}</strong>
                 <span className="small-text">
                   {' '}
@@ -64,10 +64,10 @@ export function StrengthBasisPanel({
                   {entry.origin === 'manual' || entry.origin === 'unknown' ? '' : ` ・ 約 ${Math.round(entry.legs)} レッグ`}
                   {` ・ 信頼度 ${CONFIDENCE_LABELS[entry.confidence]}`}
                 </span>
-              </li>
+              </p>
             );
           })}
-        </ul>
+        </div>
         <p className="tiny muted">
           信頼度は成績のレッグ数 (新しい Season ほど重く数えます) から決めています。低い場合、強さの差を理由にした出場回数の偏りは採用しません。
         </p>

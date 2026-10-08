@@ -3996,9 +3996,8 @@ input[type='range'] {
 
 .strength-basis-panel .basis-list {
   margin: 8px 0;
-  padding-left: 18px;
 }
 
-.strength-basis-panel .basis-list li {
+.strength-basis-panel .basis-row {
   margin: 4px 0;
 }
