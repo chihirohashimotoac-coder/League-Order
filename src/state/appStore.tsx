@@ -553,9 +553,23 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
         };
       },
 
+      /*
+       * The operations below store first and update the screen afterwards, which is the
+       * opposite of the optimistic `write()` used for ordinary edits above.
+       *
+       * The split is deliberate. An ordinary edit — renaming a player, saving an order —
+       * should never make the captain wait on IO, and losing one to a failed write costs
+       * a retype. These are different: each one replaces or creates the whole database,
+       * every caller already awaits them, and each is something the captain explicitly
+       * confirmed. Updating the screen first makes them *look* finished while the write
+       * is still in flight, and reopening the app inside that window undoes them — a
+       * deleted sample comes back, a reset restores everything, a just-created team is
+       * missing. CI caught two of these, on `deleteTeam` and on 全データ削除; the rest
+       * share the shape and are corrected here rather than one failure at a time.
+       *
+       * `applyN01Sync` below already works this way.
+       */
       replaceEverything: async (incoming) => {
-        // A replace clears every store, the n01 cache included (it is re-fetchable).
-        setData({ ...incoming, n01Cache: [] });
         try {
           await repositoryRef.current?.replaceAll(incoming);
         } catch (error) {
@@ -563,11 +577,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           toast.show(WRITE_FAILURE_NOTICE, 'error');
           throw error;
         }
+        // A replace clears every store, the n01 cache included (it is re-fetchable).
+        setData({ ...incoming, n01Cache: [] });
       },
 
       loadSample: async () => {
         const sample = buildSeed();
-        setData({ ...sample, n01Cache: [] });
         try {
           await repositoryRef.current?.replaceAll(sample);
         } catch (error) {
@@ -575,10 +590,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           toast.show(WRITE_FAILURE_NOTICE, 'error');
           throw error;
         }
+        setData({ ...sample, n01Cache: [] });
       },
 
       createTeamSetup: async (team, players, format) => {
         const settings = { ...data.settings, activeTeamId: team.id };
+        const repository = repositoryRef.current;
+        if (repository) {
+          try {
+            await repository.saveTeam(team);
+            await repository.savePlayers(players);
+            await repository.saveFormat(format);
+            await repository.saveSettings(settings);
+          } catch (error) {
+            setWriteFailed(true);
+            toast.show(WRITE_FAILURE_NOTICE, 'error');
+            throw error;
+          }
+        }
         setData((current) => ({
           ...current,
           teams: upsert(current.teams, team),
@@ -586,18 +615,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           formats: upsert(current.formats, format),
           settings: { ...current.settings, activeTeamId: team.id },
         }));
-        const repository = repositoryRef.current;
-        if (!repository) return;
-        try {
-          await repository.saveTeam(team);
-          await repository.savePlayers(players);
-          await repository.saveFormat(format);
-          await repository.saveSettings(settings);
-        } catch (error) {
-          setWriteFailed(true);
-          toast.show(WRITE_FAILURE_NOTICE, 'error');
-          throw error;
-        }
       },
 
       applyN01Sync: async (change, options = {}) => {
@@ -634,6 +651,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
       n01CacheFor: (teamId) => data.n01Cache.filter((record) => record.teamId === teamId),
 
       mergeEverything: async (incoming) => {
+        try {
+          await repositoryRef.current?.mergeAll(incoming);
+        } catch (error) {
+          setWriteFailed(true);
+          toast.show(WRITE_FAILURE_NOTICE, 'error');
+          throw error;
+        }
         setData((current) => ({
           teams: incoming.teams.reduce((acc, team) => upsert(acc, team), current.teams),
           players: incoming.players.reduce((acc, player) => upsert(acc, player), current.players),
@@ -647,13 +671,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
           settings: current.settings,
           n01Cache: current.n01Cache,
         }));
-        try {
-          await repositoryRef.current?.mergeAll(incoming);
-        } catch (error) {
-          setWriteFailed(true);
-          toast.show(WRITE_FAILURE_NOTICE, 'error');
-          throw error;
-        }
       },
 
       snapshot,
