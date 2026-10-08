@@ -295,7 +295,14 @@ function buildWarnings(
       )}% に弱め、通常の戦力評価に寄せています。`,
     });
   }
-  if (!meta.exhaustive) {
+  if (meta.skewGate?.outcome === 'unverified') {
+    warnings.push({
+      severity: 'warning',
+      code: 'SKEW_UNVERIFIED',
+      message: '均等案を探索できなかったため、この案の出場の偏りが妥当かは検証できていません。',
+    });
+  }
+  if (!meta.exhaustive && meta.skewGate?.outcome !== 'unverified') {
     const capped = candidates.filter((entry) => !entry.complete).length;
     warnings.push({
       severity: 'info',
@@ -381,7 +388,14 @@ function withSkewFactor(ctx: PreparedContext, explanation: OrderExplanation, rep
       : '同等戦力の相手を仮定した期待値の差 (勝率ではなく参考値)';
   const needed = report.required === null ? '—' : points(report.required);
   const factor: ExplanationFactor =
-    report.outcome === 'kept'
+    report.outcome === 'unverified'
+      ? {
+          key: 'fairness',
+          label: '出場の偏りは未検証',
+          detail: `この案 (${biased}) は均等配分から偏っていますが、比べる均等案を (既出の案と重ならない形で) 探索できなかったため、偏りが妥当か検証できていません。探索は未完了です。`,
+          tone: 'negative',
+        }
+      : report.outcome === 'kept'
       ? {
           key: 'fairness',
           label: '出場の偏りを採用',

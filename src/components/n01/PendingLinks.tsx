@@ -26,6 +26,7 @@ export function PendingLinks({
   onSkip: () => void;
 }): React.JSX.Element {
   const [answers, setAnswers] = useState<Map<string, string | null>>(new Map());
+  const names = pending.map((entry) => `「${entry.source.name}」`).join('、');
   const taken = new Set([...answers.values()].filter((value): value is string => value !== null));
 
   return (
@@ -35,7 +36,11 @@ export function PendingLinks({
       </p>
       <p className="small-text secondary">
         名前などが少し違うため、自動では結び付けていません。同じ人を選ぶと、手動で入力した Rating・適性・シーズン累計を引き継いだまま n01 と連携します。
-        確認せずに進めると、その人は今回の候補に入りません (次回の同期で再度確認します)。
+        別の人かもしれないので、確認するまで n01 の成績はどのメンバーにも使いません。
+      </p>
+      <p className="small-text secondary" id="pending-links-later" data-testid="pending-links-later">
+        「あとで確認する」を選ぶと: 手動で追加済みのメンバーは、これまでどおり今回の参加候補に残ります (n01 未連携のまま、n01 の成績は使いません)。
+        n01 の{names}は、新しいメンバーとして追加も、既存メンバーとの結び付けもしません (今回の参加候補にも出ません)。次回の同期で再確認します。
       </p>
       <ul className="link-list">
         {pending.map((entry) => {
@@ -43,7 +48,7 @@ export function PendingLinks({
           const name = `link-${entry.source.oid}`;
           return (
             <li key={entry.source.oid} className="link-row">
-              <fieldset>
+              <fieldset aria-describedby="pending-links-later">
                 <legend>
                   n01 の「{entry.source.name}」
                   {entry.source.stats?.ppr != null ? <span className="small-text secondary"> ・ {formatPpr(entry.source.stats.ppr)}</span> : null}

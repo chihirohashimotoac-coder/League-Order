@@ -139,8 +139,20 @@ interface Reference {
   exhaustive: boolean;
 }
 
-/** The most even line-up the Hard conditions allow (best of the rest by the run's own terms). */
-function searchEvenReference(ctx: PreparedContext, excluded: ReadonlySet<string>, timeLimitMs: number): Reference | null {
+/**
+ * The most even line-up the Hard conditions allow (best of the rest by the run's own terms).
+ *
+ * `excluded` (line-ups already shown as other candidates) is for the line-up the gate may
+ * *choose*; the line-up it *judges against* is searched with an empty set, because a
+ * comparison base does not have to be a new order. `searchPastExcluded` lets this search
+ * go on to the branch and bound when the beam holds nothing but excluded line-ups.
+ */
+export function searchEvenReference(
+  ctx: PreparedContext,
+  excluded: ReadonlySet<string>,
+  timeLimitMs: number,
+  searchPastExcluded = false,
+): Reference | null {
   const weights = ctx.input.weights;
   const evenCtx = prepare({
     ...ctx.input,
@@ -158,18 +170,29 @@ function searchEvenReference(ctx: PreparedContext, excluded: ReadonlySet<string>
     candidates,
     Math.max(60, Math.floor(timeLimitMs * 0.4)),
     excluded,
+    searchPastExcluded,
   );
   if (!found) return null;
   // Among the even line-ups the opponent-aware run picks by estimated match outcome too,
   // so the even line-up it is judged against is the best even one by the same measure.
+  // Only line-ups as even as the most even one found take part: the re-ranking tolerance is
+  // a share of the whole score span, and in a big format it can be wider than one step of
+  // role evenness, which would let match value buy unevenness into the "even" base.
   let selection = found.selection;
   if ((evenCtx.weights.opponentWin ?? 0) > 0 && evenCtx.opponent) {
+    const all = [...found.pool, ...(found.dfsBest ? [found.dfsBest] : []), found.selection].map((candidate) => ({
+      selection: candidate,
+      evaluation: evaluateSelection(evenCtx, candidate),
+    }));
+    const floor = Math.min(...all.map((entry) => unevenness(entry.evaluation)));
+    const level = all.filter((entry) => unevenness(entry.evaluation) <= floor + EPSILON);
+    const anchor = level.reduce((winner, entry) => (compareEvaluations(entry, winner) < 0 ? entry : winner));
     const reranked = rerankByMatchOutcome(
       evenCtx,
-      [...found.pool, ...(found.dfsBest ? [found.dfsBest] : []), found.selection],
-      found.evaluation,
+      level.map((entry) => entry.selection),
+      anchor.evaluation,
     );
-    if (reranked) selection = reranked.selection;
+    selection = reranked ? reranked.selection : anchor.selection;
   }
   // The same people index the same way in both contexts; only the weights differ.
   return {
@@ -209,14 +232,42 @@ interface Judged {
   pass: boolean;
 }
 
+/** Reads the verdict out of a line-up judged against the even one (see {@link SkewGateReport}). */
+function reportOf(
+  ctx: PreparedContext,
+  outcome: SkewGateReport['outcome'],
+  basis: SkewGateReport['basis'],
+  even: Evaluation | null,
+  biased: Judged,
+): SkewGateReport {
+  return {
+    outcome,
+    basis,
+    gain: biased.gain,
+    required: biased.required,
+    steps: biased.steps,
+    confidence: biased.confidence,
+    evenCounts: even ? countsById(ctx, even) : {},
+    biasedCounts: countsById(ctx, biased.evaluation),
+  };
+}
+
 export function applySkewGate(input: GateInput): GateOutcome {
   const { ctx, best } = input;
   const unchanged: GateOutcome = { selection: best.selection, evaluation: best.evaluation, exhaustive: true, changed: false };
   const threshold = ctx.input.settings.skewGainThreshold === undefined ? SKEW_GAIN_THRESHOLD : ctx.input.settings.skewGainThreshold;
   if (threshold === null || !GATED_PRESETS.has(input.presetKey) || unevenness(best.evaluation) <= EPSILON) return unchanged;
 
-  const reference = searchEvenReference(ctx, input.excluded, input.timeLimitMs);
-  if (!reference) return unchanged;
+  // The line-up judged against needs no new order, so the shown ones do not exclude it.
+  const reference = searchEvenReference(ctx, new Set(), input.timeLimitMs);
+  const unverified = (even: Evaluation | null, exhaustive = false): GateOutcome => {
+    // No even line-up to judge against (or none the gate may show): the bias is neither
+    // justified nor refuted. It is reported as unjudged and the search as unfinished.
+    const steps = even ? Math.max(0, unevenness(best.evaluation) - unevenness(even)) / 2 : 0;
+    const judged: Judged = { selection: best.selection, evaluation: best.evaluation, steps, gain: 0, required: null, confidence: 'LOW', pass: false };
+    return { ...unchanged, exhaustive, report: reportOf(ctx, 'unverified', valueModel(ctx)?.basis ?? 'reference', even, judged) };
+  };
+  if (!reference) return unverified(null);
   const referenceEvaluation = evaluateSelection(ctx, reference.selection);
   const referenceUnevenness = unevenness(referenceEvaluation);
   // The best line-up is already as even as the Hard conditions allow: nothing to judge.
@@ -261,7 +312,20 @@ export function applySkewGate(input: GateInput): GateOutcome {
   consider(best.selection, best.evaluation);
   for (const selection of input.pool) consider(selection);
 
-  const passing = judged.filter((entry) => entry.pass);
+  let passing = judged.filter((entry) => entry.pass);
+  let exhaustive = reference.exhaustive;
+  if (passing.length === 0) {
+    // The even line-up judged against is one that is already shown as another candidate,
+    // and nothing else in the pool is as even: look for another even one that may be shown.
+    const alternative = searchEvenReference(ctx, input.excluded, input.timeLimitMs, true);
+    if (alternative) {
+      exhaustive = exhaustive && alternative.exhaustive;
+      consider(alternative.selection);
+      passing = judged.filter((entry) => entry.pass);
+    }
+  }
+  // Still nothing the gate could stand behind: say so, rather than present the bias as checked.
+  if (passing.length === 0) return unverified(referenceEvaluation);
   let chosen = passing.reduce((winner, entry) =>
     compareEvaluations(entry, winner) < 0 ? entry : winner,
   );
@@ -285,23 +349,14 @@ export function applySkewGate(input: GateInput): GateOutcome {
 
   const biased = chosen.steps > EPSILON ? chosen : rejectedBest;
   const report: SkewGateReport | undefined = biased
-    ? {
-        outcome: chosen.steps > EPSILON ? 'kept' : 'replaced',
-        basis: model?.basis ?? 'reference',
-        gain: biased.gain,
-        required: biased.required,
-        steps: biased.steps,
-        confidence: biased.confidence,
-        evenCounts: countsById(ctx, referenceEvaluation),
-        biasedCounts: countsById(ctx, biased.evaluation),
-      }
+    ? reportOf(ctx, chosen.steps > EPSILON ? 'kept' : 'replaced', model?.basis ?? 'reference', referenceEvaluation, biased)
     : undefined;
 
   return {
     selection: chosen.selection,
     evaluation: chosen.evaluation,
     report,
-    exhaustive: reference.exhaustive,
+    exhaustive,
     changed: chosen.selection !== best.selection,
   };
 }

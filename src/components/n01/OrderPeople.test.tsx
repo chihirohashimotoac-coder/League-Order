@@ -227,7 +227,7 @@ describe('次回から参加するメンバー from the next-match flow', () => 
     expect(after[0].n01).toMatchObject({ opid: 'op_shinjin' });
   }, 90_000);
 
-  it('“later” leaves the member alone and the newcomer out, with no duplicate', async () => {
+  it('“later”: the hand-made member stays a candidate (n01 未連携), the held-back n01 row is neither created nor linked, and the screen says exactly that', async () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
@@ -240,11 +240,44 @@ describe('次回から参加するメンバー from the next-match flow', () => 
     await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
     const sheet = await screen.findByRole('dialog', { name: '次戦のオーダーを作る' });
     const links = await within(sheet).findByTestId('pending-links', {}, { timeout: 10_000 });
+    // What “later” does is stated about each side separately, and nothing reads as “the same person”.
+    const note = within(links).getByTestId('pending-links-later');
+    expect(note).toHaveTextContent('手動で追加済みのメンバーは、これまでどおり今回の参加候補に残ります');
+    expect(note).toHaveTextContent('n01 の成績は使いません');
+    expect(note).toHaveTextContent('n01 の「新人次郎」は、新しいメンバーとして追加も、既存メンバーとの結び付けもしません');
+    expect(note).toHaveTextContent('次回の同期で再確認します');
+    expect(links).not.toHaveTextContent('その人は今回の候補に入りません');
+    expect(within(links).getByRole('group', { name: /新人次郎/ })).toHaveAccessibleDescription(/手動で追加済みのメンバーは/);
+
     await user.click(within(links).getByRole('button', { name: 'あとで確認する' }));
     const attendance = await within(sheet).findByTestId('flow-attendance');
+    // The member is still offered (and ticked), marked as not linked to n01; the n01 row is not.
     expect(within(attendance).getAllByText(/新人/)).toHaveLength(1);
-    expect((await storedPlayers()).filter((entry) => /新人/.test(entry.name))).toHaveLength(1);
-  }, 90_000);
+    expect(within(attendance).getByText('新人 次郎')).toBeInTheDocument();
+    expect(within(attendance).queryByText('新人次郎')).toBeNull();
+    expect(within(attendance).getByTestId('manual-tag')).toHaveTextContent('n01 未連携');
+    expect((within(attendance).getByRole('checkbox', { name: /新人 次郎/ }) as HTMLInputElement).checked).toBe(true);
+    expect(attendance).toHaveTextContent('本日参加 8 / 8');
+
+    // Nothing was created or linked, and no n01 numbers were attached to the member.
+    const after = (await storedPlayers()).filter((entry) => /新人/.test(entry.name));
+    expect(after).toHaveLength(1);
+    expect(after[0].name).toBe('新人 次郎');
+    expect(after[0].n01).toBeUndefined();
+
+    // The member can be fielded now; their strength is Unknown, not n01’s.
+    await user.click(within(attendance).getByRole('button', { name: 'このメンバーで作成' }));
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
+    expect(fieldedNames().some((name) => name.includes('新人 次郎'))).toBe(true);
+    expect(fieldedNames().some((name) => name.includes('新人次郎'))).toBe(false);
+    expect(within(screen.getByTestId('strength-basis-panel')).getByText('新人 次郎').closest('.basis-row')).toHaveAttribute('data-origin', 'unknown');
+
+    // The next sync asks again.
+    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'ホーム' }));
+    await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
+    const again = await screen.findByRole('dialog', { name: '次戦のオーダーを作る' });
+    expect(await within(again).findByTestId('pending-links', {}, { timeout: 10_000 })).toHaveTextContent('新人次郎');
+  }, 120_000);
 });
 
 describe('助っ人 on the ordinary SETUP screen', () => {

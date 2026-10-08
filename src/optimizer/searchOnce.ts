@@ -32,6 +32,12 @@ export function searchOnce(
   candidates: readonly GameCandidates[],
   timeLimitMs: number,
   excluded: ReadonlySet<string>,
+  /**
+   * When every line-up the beam holds is already shown as another candidate, go on to the
+   * branch and bound instead of giving up (the bias gate needs *an* even line-up that is
+   * not one of those). Off for ordinary runs, which then skip the candidate as before.
+   */
+  searchPastExcluded = false,
 ): SearchOutcome | null {
   const started = performance.now();
   const deadline = started + timeLimitMs;
@@ -49,16 +55,16 @@ export function searchOnce(
     excluded.size === 0
       ? beam.solutions
       : beam.solutions.filter((solution) => !excluded.has(selectionSignature(ctx, solution)));
-  if (pool.length === 0) return null;
+  if (pool.length === 0 && !searchPastExcluded) return null;
 
-  let bestSelection = pool[0];
-  let bestEvaluation = evaluateSelection(ctx, bestSelection);
+  let bestSelection: Combo[] | null = pool[0] ?? null;
+  let bestEvaluation: Evaluation | null = bestSelection ? evaluateSelection(ctx, bestSelection) : null;
   let stage: SolutionMeta['stage'] = 'beam';
 
   for (const solution of pool.slice(1)) {
     const evaluation = evaluateSelection(ctx, solution);
     if (
-      compareEvaluations({ selection: solution, evaluation }, { selection: bestSelection, evaluation: bestEvaluation }) < 0
+      compareEvaluations({ selection: solution, evaluation }, { selection: bestSelection!, evaluation: bestEvaluation! }) < 0
     ) {
       bestSelection = solution;
       bestEvaluation = evaluation;
@@ -69,18 +75,20 @@ export function searchOnce(
   const dfs = dfsSearch(ctx, bctx, candidates, {
     deadline,
     nodeLimit: ctx.input.settings.nodeLimit,
-    incumbent: bestEvaluation.breakdown.total,
+    incumbent: bestEvaluation ? bestEvaluation.breakdown.total : Number.NEGATIVE_INFINITY,
     fairnessUrgency: ctx.weights.fairness,
     excluded,
   });
   if (dfs.best) {
     const evaluation = evaluateSelection(ctx, dfs.best);
-    if (evaluation.breakdown.total > bestEvaluation.breakdown.total) {
+    if (!bestEvaluation || evaluation.breakdown.total > bestEvaluation.breakdown.total) {
       bestSelection = dfs.best;
       bestEvaluation = evaluation;
       stage = 'dfs';
     }
   }
+
+  if (!bestSelection || !bestEvaluation) return null;
 
   // Stage 3: deterministic local improvement.
   const polished = polish(ctx, bestSelection, Math.max(deadline, performance.now() + 60), excluded);

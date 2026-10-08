@@ -558,8 +558,12 @@ export interface OrderWarning {
  * enough; otherwise the even line-up is used.
  */
 export interface SkewGateReport {
-  /** `kept`: a biased line-up stood. `replaced`: the biased line-up was set aside for an even one. */
-  outcome: 'kept' | 'replaced';
+  /**
+   * `kept`: a biased line-up stood. `replaced`: the biased line-up was set aside for an even one.
+   * `unverified`: no even line-up that may be shown could be found to judge it against, so the
+   * bias is neither justified nor refuted (the search is reported as unfinished).
+   */
+  outcome: 'kept' | 'replaced' | 'unverified';
   /**
    * What the gain was measured against. `opponent`: the predicted opponent of this order.
    * `reference`: no opponent data, so an opponent as strong as our own average player — a
