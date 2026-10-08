@@ -17,6 +17,10 @@ import {
   maxAppearancesFor,
   minAppearancesFor,
 } from '../domain/orders/participants';
+import { newGuest } from '../domain/players/newPlayer';
+import { createId } from '../utils/id';
+import { PlayerEditor } from '../components/PlayerEditor';
+import { StrengthBasisPanel } from '../components/StrengthBasisPanel';
 import { useAppStore } from '../state/appStore';
 import { MatchInfoFields } from '../components/MatchInfoFields';
 import {
@@ -35,6 +39,7 @@ import {
 import { describeStrengthWeights, resolveStrength } from '../domain/players/strength';
 import { Icon, type IconName } from '../components/icons';
 import { effectivePpr, withEffectivePpr } from '../domain/n01/effectivePpr';
+import { applyHistoryStrength } from '../domain/n01/historyStrength';
 import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
 import { buildOpponentContext } from '../domain/prediction/opponentContext';
 import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
@@ -51,6 +56,11 @@ import type { Page } from '../navigation';
 export interface SetupDraft {
   formatId: FormatId;
   participants: ParticipantConfig[];
+  /**
+   * Helpers for this order only (今回限りの助っ人): in the order's players and
+   * participants, in no roster. Cleared when a new order is started.
+   */
+  guests: Player[];
   preset: PresetKey;
   settings: OptimizerSettings;
 }
@@ -58,7 +68,7 @@ export interface SetupDraft {
 /** Presentation for the policy cards; the weights themselves live in the domain. */
 const PRESET_CARDS: Record<PresetKey, { icon: IconName; summary: string }> = {
   OPPONENT_OPTIMIZED: { icon: 'target', summary: '相手の予測に対して推定勝率を最大化' },
-  WIN_FIRST: { icon: 'trophy', summary: '戦力を最優先' },
+  WIN_FIRST: { icon: 'trophy', summary: '戦力を重視 (根拠が強いときだけ偏らせる)' },
   BALANCED: { icon: 'scale', summary: '勝利と公平性を両立' },
   FAIRNESS_FIRST: { icon: 'equal', summary: '出場回数を均等化' },
   DEVELOPMENT: { icon: 'sprout', summary: '出場の少ない選手を優先' },
@@ -93,6 +103,7 @@ export function SetupPage({
   const toast = useToast();
   const [detailFor, setDetailFor] = useState<Player | null>(null);
   const [showPolicy, setShowPolicy] = useState(false);
+  const [guestDraft, setGuestDraft] = useState<Player | null>(null);
 
   const format = store.teamFormats.find((entry) => entry.id === draft.formatId) ?? store.teamFormats[0];
   const games = format?.games ?? [];
@@ -105,10 +116,6 @@ export function SetupPage({
 
   const included = draft.participants.filter((config) => config.include);
   const discipline = formatDiscipline(format);
-  // n01-linked players carry their PPR from n01 (or the manual fallback): the order input
-  // snapshots that effective value, so a saved order keeps the PPR it was made with.
-  const effectivePlayers = useMemo(() => store.teamPlayers.map(withEffectivePpr), [store.teamPlayers]);
-
   // Opponent data for the next match (n01 teams only). The context is built against the
   // format chosen here and travels inside the order, so the saved order can always be
   // re-evaluated exactly as it was generated.
@@ -117,6 +124,14 @@ export function SetupPage({
         (record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel',
       ) ?? null)
     : null;
+  // n01-linked players carry their PPR from n01 — this season's, or the estimate over the
+  // seasons the last analysis returned — or the manual fallback: the order input snapshots
+  // that value and where it came from, so a saved order keeps the PPR it was made with.
+  const everyone = useMemo(() => [...store.teamPlayers, ...draft.guests], [store.teamPlayers, draft.guests]);
+  const { players: effectivePlayers, basis: strengthBasis } = useMemo(
+    () => applyHistoryStrength(everyone, intel),
+    [everyone, intel],
+  );
   const opponent = useMemo(
     () => (intel && format ? buildOpponentContext({ snapshot: intel, games: format.games, players: effectivePlayers }) : null),
     [intel, format, effectivePlayers],
@@ -141,6 +156,30 @@ export function SetupPage({
       participants: draft.participants.map((config) =>
         config.playerId === playerId ? { ...config, ...change } : config,
       ),
+    });
+  };
+
+  const startGuest = (): void => {
+    setGuestDraft(
+      newGuest(store.activeTeamId ?? '', createId('gst'), { name: '', rating: null, ppr: null, skills: {} }, Date.now()),
+    );
+  };
+
+  const addGuest = (guest: Player): void => {
+    onDraftChange({
+      ...draft,
+      guests: [...draft.guests, guest],
+      participants: [...draft.participants, createParticipantConfig(guest.id, true)],
+    });
+    setGuestDraft(null);
+    toast.show(`${guest.name} を今回の助っ人として追加しました`, 'ok');
+  };
+
+  const removeGuest = (guestId: string): void => {
+    onDraftChange({
+      ...draft,
+      guests: draft.guests.filter((guest) => guest.id !== guestId),
+      participants: draft.participants.filter((config) => config.playerId !== guestId),
     });
   };
 
@@ -178,6 +217,7 @@ export function SetupPage({
       // Snapshot: a later edit to the format's discipline must not re-score this order.
       discipline: formatDiscipline(format),
       ...(opponent ? { opponent } : {}),
+      strengthBasis,
     };
   };
 
@@ -275,7 +315,7 @@ export function SetupPage({
       <SectionHeader
         index={2}
         kicker="PLAYERS"
-        title={`参加者 ${included.length} / ${store.teamPlayers.length}`}
+        title={`参加者 ${included.length} / ${everyone.length}`}
         action={
           <div className="row" style={{ gap: 6 }}>
             <button
@@ -305,8 +345,13 @@ export function SetupPage({
           </div>
         }
       />
+      <StrengthBasisPanel
+        basis={strengthBasis}
+        players={effectivePlayers}
+        includedIds={new Set(included.map((config) => config.playerId))}
+      />
       <ul className="participants">
-        {store.teamPlayers.map((player) => {
+        {everyone.map((player) => {
           const config = configById.get(player.id) ?? createParticipantConfig(player.id, false);
           const restrictions = describeRestrictions(config, games);
           return (
@@ -328,6 +373,7 @@ export function SetupPage({
                 <span className="p-text">
                   <span className="p-name">
                     <strong>{player.name}</strong>
+                    {player.guest ? <span className="n01-tag guest-tag" data-testid="guest-tag">助っ人 (今回のみ)</span> : null}
                     <span
                       className={
                         player.rating === null && effectivePpr(player).value === null ? 'rt unknown' : 'rt'
@@ -350,11 +396,25 @@ export function SetupPage({
                 >
                   条件
                 </button>
+                {player.guest ? (
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => removeGuest(player.id)}
+                    aria-label={`助っ人 ${player.name} を外す`}
+                  >
+                    外す
+                  </button>
+                ) : null}
               </span>
             </li>
           );
         })}
       </ul>
+      <button type="button" className="btn small add-guest" onClick={startGuest}>
+        <Icon name="plus" size={16} strokeWidth={2.6} />
+        今回だけ助っ人を追加
+      </button>
 
       <SectionHeader index={3} kicker="STRATEGY" title="方針" />
       {n01Team && (hasOpponent || draft.preset === 'OPPONENT_OPTIMIZED') ? (
@@ -474,6 +534,19 @@ export function SetupPage({
             );
           })()
         : null}
+
+      {guestDraft ? (
+        <PlayerEditor
+          player={guestDraft}
+          isNew
+          mode="guest"
+          title="今回だけ助っ人を追加"
+          saveLabel="助っ人として追加"
+          existingNames={everyone.map((entry) => entry.name)}
+          onClose={() => setGuestDraft(null)}
+          onSave={addGuest}
+        />
+      ) : null}
 
       {showPolicy ? (
         <Sheet title="詳細条件" onClose={() => setShowPolicy(false)}>

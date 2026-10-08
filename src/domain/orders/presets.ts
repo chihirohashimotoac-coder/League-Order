@@ -8,7 +8,7 @@ import type { FairnessScope, OptimizerSettings, PresetKey, ScoreWeights } from '
  * bias toward the strongest players (spec §11, §32).
  *
  * The three compared presets differ in character, not just in degree (追補 v1.3 §V4):
- * win-first lets a clearly stronger player take one extra game and two Singles; balanced
+ * win-first lets a clearly stronger player take one extra game and two Singles when the data behind it can be believed (the bias gate, optimizer/skewGate.ts); balanced
  * keeps the totals even and limits Singles concentration; fairness-first minimises the
  * total spread, role concentration and consecutive runs.
  */
@@ -40,7 +40,7 @@ export const PRESETS: Record<Exclude<PresetKey, 'CUSTOM'>, PresetDefinition> = {
   WIN_FIRST: {
     key: 'WIN_FIRST',
     label: '勝利優先',
-    description: 'Rating・PPR と適性を最重視。強い選手の +1 試合は許容しますが、Singles の独占や誰かの 0 出場は避けます。',
+    description: 'Rating・PPR と適性を最重視。強い選手を +1 試合多く使うのは、データが信頼でき推定上の利得が十分なときだけで、根拠が足りなければ均等に配分します。Singles の独占や誰かの 0 出場は避けます。',
     weights: { strength: 1, gameFit: 0.8, pairFit: 0.35, fairness: 0.25, roleFairness: 0.18, novelty: 0, consecutive: 0.35, season: 0.05 },
     scope: 'today',
   },

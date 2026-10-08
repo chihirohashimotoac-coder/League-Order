@@ -269,6 +269,8 @@ export interface N01SyncPlanInput {
   newId: (prefix: string) => string;
   /** Captain's choices when linking an existing team (see `planRosterSync`). */
   explicit?: ReadonlyMap<string, string | null>;
+  /** Hold back n01 players who might be hand-made members, for the captain to confirm. */
+  deferAmbiguous?: boolean;
 }
 
 export interface N01SyncPlan {
@@ -308,7 +310,7 @@ export function planN01Sync(input: N01SyncPlanInput): N01SyncPlan {
   if (source.length === 0 && input.localPlayers.some((player) => player.n01?.rosterActive)) {
     // An empty roster for a team that had players is far more likely a data problem than
     // everybody leaving at once: nothing is deactivated, and the captain is told.
-    roster = { upserts: [], added: [], deactivated: [], reactivated: [], renamed: [], pprChanged: [], ambiguous: [] };
+    roster = { upserts: [], added: [], deactivated: [], reactivated: [], renamed: [], pprChanged: [], ambiguous: [], pending: [] };
     changes.notes.push('n01 の登録メンバーが 0 名だったため、メンバーは更新しませんでした。');
   } else {
     roster = planRosterSync({
@@ -320,6 +322,7 @@ export function planN01Sync(input: N01SyncPlanInput): N01SyncPlan {
       newId: () => input.newId('pl'),
       explicit: input.explicit,
       retainStats: data.statsUnavailable,
+      deferAmbiguous: input.deferAmbiguous,
     });
   }
 

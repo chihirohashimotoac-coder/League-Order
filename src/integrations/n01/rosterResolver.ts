@@ -15,7 +15,9 @@ export function rosterSource(
   tournamentId: string,
   now: number,
 ): RosterSourcePlayer[] {
-  const index = indexStats(stats);
+  // The roster is part of the evidence: it shows an `opid` is shared even when only one of
+  // the people who carry it has a stats row.
+  const index = indexStats(stats, roster);
   const seen = new Set<string>();
   const result: RosterSourcePlayer[] = [];
   for (const player of roster) {

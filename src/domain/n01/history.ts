@@ -1,10 +1,12 @@
+import { isUsableOpid } from './identity';
 import { recencyWeight, RECENCY_WEIGHTS } from './recency';
 
 /**
  * Historical player statistics (MASTER SPEC Phase 2 §3–§6).
  *
  * A player is followed across seasons by `opid`, whichever team they played for: this
- * is about the *person's* form. (Which team fielded whom is a team-level question and is
+ * is about the *person's* form. (Only an `opid` that names one person counts; see
+ * `identity.ts`.) (Which team fielded whom is a team-level question and is
  * answered from that team's own orders only — see `positionModel.ts`.)
  *
  * Only metrics n01 actually reported are used. A missing metric is `null` and simply
@@ -33,7 +35,7 @@ export interface SeasonStatLine {
 }
 
 export interface HistoricalPlayerStats {
-  /** `opid`, or `oid:<tournamentId>:<oid>` for a player n01 gave no opid. */
+  /** `opid`, or `oid:<tournamentId>:<oid>` for a player with no opid or one shared by several people. */
   key: string;
   opid: string | null;
   name: string;
@@ -62,8 +64,19 @@ export interface PlayerAggregate {
   currentLegs: number;
 }
 
-export function playerKey(opid: string | null, tournamentId: string, oid: string | null): string {
-  return opid ?? `oid:${tournamentId}:${oid ?? '?'}`;
+/**
+ * A person's key inside an intelligence snapshot: their `opid` when it names one person,
+ * else the tournament-scoped `oid` (so people who share an `opid` stay apart, and a
+ * shared label such as 助っ人 is never an identity). `shared` is the season's set of
+ * shared `opid`s (see `identity.ts`).
+ */
+export function playerKey(
+  opid: string | null,
+  tournamentId: string,
+  oid: string | null,
+  shared?: ReadonlySet<string>,
+): string {
+  return isUsableOpid(opid, shared) ? opid : `oid:${tournamentId}:${oid ?? '?'}`;
 }
 
 export function aggregatePlayer(

@@ -6,10 +6,11 @@ import { describeN01Error } from '../../integrations/n01/client';
 import type { N01MatchIntelligenceSnapshot } from '../../domain/n01/intelligence';
 import type { N01SyncStep, N01TeamSelection } from '../../integrations/n01/sync';
 import { useAppStore } from '../../state/appStore';
-import { useN01FreshSync } from '../../state/useN01FreshSync';
+import { useN01FreshSync, useN01LinkResolution, type FreshSyncResult } from '../../state/useN01FreshSync';
 import { Sheet, useToast } from '../ui';
 import { Icon } from '../icons';
 import { SyncProgress, type SyncProgressState } from './SyncProgress';
+import { PendingLinks } from './PendingLinks';
 
 /**
  * "n01を再同期" (MASTER SPEC Phase 1 §3–§11, Phase 5 §4–§6).
@@ -26,7 +27,13 @@ type Phase =
   | { kind: 'season'; options: { tournamentId: string; title: string; teamTpid: string }[] }
   | { kind: 'notFound' }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; changes: N01ChangeSummary; nextMatch: N01MatchIntelligenceSnapshot | null };
+  | {
+      kind: 'done';
+      changes: N01ChangeSummary;
+      nextMatch: N01MatchIntelligenceSnapshot | null;
+      /** n01 players who might be hand-made members, still waiting for the captain’s answer. */
+      links: Extract<FreshSyncResult, { kind: 'ok' }> | null;
+    };
 
 export function N01SyncSheet({
   team,
@@ -39,6 +46,8 @@ export function N01SyncSheet({
   onRelink: () => void;
 }): React.JSX.Element {
   const freshSync = useN01FreshSync();
+  const resolveLinks = useN01LinkResolution();
+  const [resolving, setResolving] = useState(false);
   const store = useAppStore();
   const toast = useToast();
   const [phase, setPhase] = useState<Phase>({ kind: 'running' });
@@ -65,7 +74,12 @@ export function N01SyncSheet({
           setPhase({ kind: 'notFound' });
           return;
         }
-        setPhase({ kind: 'done', changes: result.plan.changes, nextMatch: result.intel });
+        setPhase({
+          kind: 'done',
+          changes: result.plan.changes,
+          nextMatch: result.intel,
+          links: result.plan.roster.pending.length > 0 ? result : null,
+        });
         toast.show('n01 と同期しました', 'ok');
       } catch (error) {
         if (attempt === run.current) setPhase({ kind: 'error', message: describeN01Error(error) });
@@ -169,6 +183,24 @@ export function N01SyncSheet({
             {cached ? ` 前回の同期: ${formatSyncTime(cached.fetchedAt)} (このデータは最新ではありません)` : ''}
           </span>
         </div>
+      ) : null}
+
+      {phase.kind === 'done' && phase.links ? (
+        <PendingLinks
+          pending={phase.links.plan.roster.pending}
+          busy={resolving}
+          onSkip={() => setPhase({ ...phase, links: null })}
+          onApply={(answers) => {
+            setResolving(true);
+            resolveLinks(team, phase.links!, answers)
+              .then(() => {
+                toast.show('確認した内容を保存しました', 'ok');
+                setPhase({ ...phase, links: null });
+              })
+              .catch((error: unknown) => toast.show(`確認内容を保存できませんでした: ${describeN01Error(error)}`, 'error'))
+              .finally(() => setResolving(false));
+          }}
+        />
       ) : null}
 
       {phase.kind === 'done' ? (

@@ -3925,3 +3925,79 @@ input[type='range'] {
   height: 22px;
   accent-color: var(--color-accent);
 }
+
+/* ---- One-order helpers, members added for next time, and 本人確認 (F04, F06, F07) ---- */
+
+/* A guest is a person of this order only: marked in the accent colour so nobody mistakes
+   them for a team member. */
+.guest-tag {
+  margin-left: 6px;
+  border-color: var(--color-updated);
+  color: var(--color-updated);
+}
+
+.attendance li {
+  display: flex;
+  align-items: center;
+}
+
+.attendance li > label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.attendance li > .btn {
+  flex: none;
+  margin-right: 8px;
+}
+
+.attendance .grow {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.add-guest {
+  margin: 8px 0 0;
+}
+
+.add-people {
+  margin-top: 10px;
+}
+
+.p-cond {
+  gap: 6px;
+}
+
+.pending-links .link-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pending-links .link-row + .link-row {
+  margin-top: 12px;
+}
+
+.pending-links fieldset {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.pending-links legend {
+  padding: 0 6px;
+  font-weight: 800;
+}
+
+.strength-basis-panel {
+  margin: 10px 0;
+}
+
+.strength-basis-panel .basis-list {
+  margin: 8px 0;
+}
+
+.strength-basis-panel .basis-row {
+  margin: 4px 0;
+}

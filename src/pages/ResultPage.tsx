@@ -43,6 +43,7 @@ import {
   StatusBadge,
   formatRating,
 } from '../components/ui';
+import { StrengthBasisPanel } from '../components/StrengthBasisPanel';
 import { Icon } from '../components/icons';
 import { OpponentPanel } from '../components/n01/OpponentPanel';
 import { useAppStore } from '../state/appStore';
@@ -318,6 +319,11 @@ export function ResultPage({
             </div>
           </Card>
 
+          <StrengthBasisPanel
+            basis={state.input.strengthBasis}
+            players={players}
+            includedIds={new Set(solution.tallies.map((tally) => tally.playerId))}
+          />
           <AnalysisPanel solution={solution} ordered={ordered} nameById={nameById} />
         </div>
       </div>

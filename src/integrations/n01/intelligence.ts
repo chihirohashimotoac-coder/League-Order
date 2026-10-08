@@ -12,6 +12,7 @@ import { buildPositionModel, type OrderObservation } from '../../domain/n01/posi
 import { RECENCY_WEIGHTS, recencyWeight } from '../../domain/n01/recency';
 import { familyOf, formatSignatures, signaturesOf, structureOf, type MatchFamily } from '../../domain/n01/signature';
 import { normalizeName } from '../../domain/n01/names';
+import { isUsableOpid, sharedOpids, type IdentityRef } from '../../domain/n01/identity';
 import type { N01Client } from './client';
 import { N01Error } from './client';
 import type { N01Fixture, N01OrderEntry, N01PlayerStats, N01RosterPlayer, N01ScheduleSlot, N01Tournament, N01TournamentSummary } from './types';
@@ -170,25 +171,44 @@ function statLine(row: N01PlayerStats, season: SeasonSource): SeasonStatLine {
   };
 }
 
-/** A player's lines across seasons: by opid everywhere, by oid in the current season only. */
-function historyOf(player: { opid: string | null; oid: string; name: string }, seasons: readonly SeasonSource[], currentId: string): HistoricalPlayerStats {
+/** The `opid`s that name several people in a season (judged from that season's rows only). */
+type SeasonIdentity = (tournamentId: string) => ReadonlySet<string>;
+
+/**
+ * A player's lines across seasons (see `domain/n01/identity.ts`).
+ *
+ * In the current season the player's own `oid` is authoritative; their `opid` is only a
+ * fallback, and only when it names one person. Earlier seasons are reached through the
+ * `opid` alone, and only when it names one person in the current season *and* in that
+ * season — otherwise the person simply has no line there (Unknown, never a namesake's).
+ */
+function historyOf(
+  player: { opid: string | null; oid: string; name: string },
+  seasons: readonly SeasonSource[],
+  currentId: string,
+  identity: SeasonIdentity,
+): HistoricalPlayerStats {
+  const currentShared = identity(currentId);
   const lines: SeasonStatLine[] = [];
   for (const season of seasons) {
-    const row = player.opid
-      ? season.stats.find((candidate) => candidate.opid === player.opid)
-      : season.tournamentId === currentId
-        ? season.stats.find((candidate) => candidate.oid === player.oid)
-        : undefined;
+    let row: N01PlayerStats | undefined;
+    if (season.tournamentId === currentId) {
+      row =
+        season.stats.find((candidate) => candidate.oid === player.oid) ??
+        (isUsableOpid(player.opid, currentShared) ? season.stats.find((candidate) => candidate.opid === player.opid) : undefined);
+    } else if (isUsableOpid(player.opid, currentShared, identity(season.tournamentId))) {
+      row = season.stats.find((candidate) => candidate.opid === player.opid);
+    }
     if (row) lines.push(statLine(row, season));
   }
-  return { key: playerKey(player.opid, currentId, player.oid), opid: player.opid, name: player.name, seasons: lines };
+  return { key: playerKey(player.opid, currentId, player.oid, currentShared), opid: player.opid, name: player.name, seasons: lines };
 }
 
-function toPlayers(roster: readonly N01RosterPlayer[], tournamentId: string): IntelligencePlayer[] {
+function toPlayers(roster: readonly N01RosterPlayer[], tournamentId: string, shared: ReadonlySet<string>): IntelligencePlayer[] {
   const seen = new Set<string>();
   const players: IntelligencePlayer[] = [];
   for (const player of roster) {
-    const key = playerKey(player.opid, tournamentId, player.oid);
+    const key = playerKey(player.opid, tournamentId, player.oid, shared);
     if (seen.has(key)) continue;
     seen.add(key);
     players.push({ key, opid: player.opid, oid: player.oid, name: player.name });
@@ -196,7 +216,21 @@ function toPlayers(roster: readonly N01RosterPlayer[], tournamentId: string): In
   return players;
 }
 
-function observations(orders: readonly N01OrderEntry[], tournament: N01Tournament, teamId: string, seasonIndex: number): OrderObservation[] {
+/**
+ * A team's past line-ups as observations of people.
+ *
+ * Current-season orders name people by `oid`, which is matched to the roster directly.
+ * Earlier seasons can only be attributed through an `opid` that names one person in both
+ * that season and the current one; anything else is recorded under a key no current
+ * player has, so it is dropped rather than credited to the wrong person.
+ */
+function observations(
+  orders: readonly N01OrderEntry[],
+  tournament: N01Tournament,
+  teamId: string,
+  seasonIndex: number,
+  keyOf: (player: { opid: string | null; oid: string | null }) => string,
+): OrderObservation[] {
   const { bySchid, byPosition } = slotSignatures(tournament, teamId);
   const result: OrderObservation[] = [];
   orders.forEach((entry, index) => {
@@ -208,7 +242,7 @@ function observations(orders: readonly N01OrderEntry[], tournament: N01Tournamen
       seasonIndex,
       matchId: entry.matchId ?? `#${index}`,
       signature,
-      playerKeys: entry.players.map((player) => playerKey(player.opid, tournament.tournamentId, player.oid)),
+      playerKeys: entry.players.map(keyOf),
     });
   });
   return result;
@@ -251,22 +285,47 @@ export function buildIntelligenceSnapshot(input: BuildIntelligenceInput): N01Mat
       limitLegCount: game.n01?.limitLegCount ?? null,
     }));
 
-  const ourPlayers = toPlayers(data.roster, currentId);
+  // Which `opid`s name several people, judged season by season from that season's own rows.
+  const identityRows = new Map<string, IdentityRef[]>([
+    [currentId, [...data.stats, ...data.roster, ...fetched.opponentRoster, ...fetched.opponentOrders.flatMap((entry) => entry.players)]],
+  ]);
+  for (const season of fetched.history) {
+    identityRows.set(season.tournament.tournamentId, [
+      ...season.stats,
+      ...season.opponentOrders.flatMap((entry) => entry.players),
+    ]);
+  }
+  const sharedBySeason = new Map([...identityRows].map(([id, rows]) => [id, sharedOpids(rows)]));
+  const identity: SeasonIdentity = (tournamentId) => sharedBySeason.get(tournamentId) ?? new Set<string>();
+  const currentShared = identity(currentId);
+
+  const ourPlayers = toPlayers(data.roster, currentId, currentShared);
   const ourStats = data.roster
     .filter((player, index, all) => all.findIndex((other) => other.oid === player.oid) === index)
-    .map((player) => historyOf(player, seasons, currentId));
+    .map((player) => historyOf(player, seasons, currentId, identity));
 
   let opponent: OpponentSnapshot | null = null;
   if (fetched.resolution.kind === 'resolved') {
     const match = fetched.resolution.match;
-    const players = toPlayers(fetched.opponentRoster, currentId);
+    const players = toPlayers(fetched.opponentRoster, currentId, currentShared);
     const stats = fetched.opponentRoster
       .filter((player, index, all) => all.findIndex((other) => other.oid === player.oid) === index)
-      .map((player) => historyOf(player, seasons, currentId));
+      .map((player) => historyOf(player, seasons, currentId, identity));
+    const rosterKeyByOid = new Map(players.flatMap((player) => (player.oid ? [[player.oid, player.key] as const] : [])));
+    // This season's orders name people by oid; earlier seasons only through an opid that
+    // names one person in both seasons. Anything else gets a key no current player has.
+    const currentKey = (player: { opid: string | null; oid: string | null }): string =>
+      (player.oid ? rosterKeyByOid.get(player.oid) : undefined) ?? playerKey(player.opid, currentId, player.oid, currentShared);
+    const pastKey = (seasonId: string) => (player: { opid: string | null; oid: string | null }): string =>
+      isUsableOpid(player.opid, currentShared, identity(seasonId))
+        ? player.opid
+        : `oid:${seasonId}:${player.oid ?? '?'}`;
     const observed = [
-      ...observations(fetched.opponentOrders, data.tournament, match.opponentTeamId, 0),
+      ...observations(fetched.opponentOrders, data.tournament, match.opponentTeamId, 0, currentKey),
       ...fetched.history.flatMap((season) =>
-        season.opponentTeamId ? observations(season.opponentOrders, season.tournament, season.opponentTeamId, season.seasonIndex) : [],
+        season.opponentTeamId
+          ? observations(season.opponentOrders, season.tournament, season.opponentTeamId, season.seasonIndex, pastKey(season.tournament.tournamentId))
+          : [],
       ),
     ];
     const strengthOf = new Map(stats.map((entry) => [entry.key, aggregatePlayer(entry, weights).ppr]));

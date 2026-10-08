@@ -11,6 +11,7 @@ import { seasonCommitStatus } from './domain/orders/seasonLedger';
 import { validateHardConstraints } from './optimizer/constraints/validate';
 import { createId } from './utils/id';
 import { syncParticipants } from './domain/orders/participants';
+import { guestsOf } from './domain/players/newPlayer';
 import {
   autoValuesOf,
   syncMatchWithTeam,
@@ -95,6 +96,8 @@ export function App(): React.JSX.Element {
       setSession(null);
       setRecord(null);
       setDiagnostics([]);
+      // One team's one-order helpers are nobody's in the other team.
+      setDraft((current) => (current && current.guests.length > 0 ? clearGuests(current) : current));
     }
   }, [store.ready, store.activeTeamId]);
 
@@ -123,10 +126,14 @@ export function App(): React.JSX.Element {
         current && store.teamFormats.some((format) => format.id === current.formatId)
           ? current.formatId
           : (store.teamFormats[0]?.id ?? '');
-      const participants = syncParticipants(current?.participants ?? [], store.teamPlayers);
+      // The order's own guests are not on the roster: they are kept explicitly, or a roster
+      // sync would drop their rows (and the conditions set on them).
+      const guests = current?.guests ?? [];
+      const participants = syncParticipants(current?.participants ?? [], store.teamPlayers, guests);
       return {
         formatId,
         participants,
+        guests,
         preset: current?.preset ?? store.settings.lastPreset,
         settings: current?.settings ?? store.settings.optimizer,
       };
@@ -239,6 +246,8 @@ export function App(): React.JSX.Element {
     (force = false) => {
       const start = (): void => {
         resetWorkingOrder();
+        // A guest plays one order: the next one starts without them.
+        setDraft((current) => (current && current.guests.length > 0 ? clearGuests(current) : current));
         setPage('setup');
       };
       // Work that only exists in this session is never dropped without asking.
@@ -283,6 +292,7 @@ export function App(): React.JSX.Element {
         setDraft({
           formatId: order.input.formatId,
           participants: order.input.participants,
+          guests: guestsOf(order.input.players),
           preset: order.input.preset,
           settings: order.input.settings,
         });
@@ -322,7 +332,9 @@ export function App(): React.JSX.Element {
         formatId: store.teamFormats.some((format) => format.id === order.input.formatId)
           ? order.input.formatId
           : (store.teamFormats[0]?.id ?? ''),
-        participants: syncParticipants(order.input.participants, store.teamPlayers),
+        // The order's own guests come back with it, from its snapshot of players.
+        participants: syncParticipants(order.input.participants, store.teamPlayers, guestsOf(order.input.players)),
+        guests: guestsOf(order.input.players),
         preset: order.input.preset,
         settings: order.input.settings,
       });
@@ -647,4 +659,10 @@ function sameMatch(a: MatchInfo, b: MatchInfo): boolean {
     a.opponentName.trim() === b.opponentName.trim() &&
     a.matchDate.trim() === b.matchDate.trim()
   );
+}
+
+/** The draft without its one-order helpers (and their participant rows). */
+function clearGuests(draft: SetupDraft): SetupDraft {
+  const gone = new Set(draft.guests.map((guest) => guest.id));
+  return { ...draft, guests: [], participants: draft.participants.filter((config) => !gone.has(config.playerId)) };
 }

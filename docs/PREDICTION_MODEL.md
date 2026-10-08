@@ -57,6 +57,17 @@ E[P_game] = Σ_lineup q(lineup) · P_game(自サイド vs lineup)
 上位 24 通りまで保持し再正規化。これを `OpponentContext` としてオーダーに保存する
 (数 KB。生成時点の評価をいつでも再現できる)。
 
+### 4.1 自チームの強度は通常生成にも同じ値を使う (F03)
+
+自チームの選手の強度は `playerStrength` (§1) で求め、**相手最適化の `OpponentContext` と通常生成の
+`OrderInput.players[].ppr` の両方に同じ値**を使う (`domain/n01/historyStrength.ts`)。今季の成績が 0〜数件でも、
+前季・前々季の成績が recency 重みで効く。手動 PPR・n01 未連携の選手は手入力の値 (`MANUAL_PPR_LEGS` = 10 レッグ相当、LOW)、
+分析に成績のない選手は前回同期の値 (LOW)、何もなければ Unknown (参加者の中央値で補完。0 にしない)。
+`Player.n01.stats` は今季の集計のまま変えない。生成時の値と由来は `OrderInput.strengthBasis` に残り、
+画面の「戦力の根拠」はそれを読む (再計算しない)。
+
+選手の同一性は `opid` が 1 人を指すと確認できた場合だけ Season をまたぐ (docs/N01_MASTER_DESIGN.md §3.4)。
+
 ## 5. Match 勝率 (`matchWinProbability.ts`)
 
 ゲーム勝率 `p1..pn` から Poisson-binomial を DP で厳密計算:

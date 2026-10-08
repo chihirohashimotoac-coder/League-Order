@@ -287,9 +287,14 @@ describe('next match order from a synced team (Phase 5)', () => {
     expect(built.match).toMatchObject({ opponentName: 'スピンコブラ', matchDate: '2026-10-08', teamName: 'kalavinka' });
     expect(built.input.games).toBe(plan.format.games);
     expect(built.input.participants.filter((config) => config.include).map((config) => config.playerId)).toEqual([...attending]);
-    // Effective PPR is what the optimizer sees: n01 stats wherever they exist.
+    // What the optimizer sees for a player with n01 stats is the recency-weighted, shrunk
+    // estimate over the seasons analysed — the very number the opponent model uses for our
+    // players — while the player's own record keeps this season's PPR as synced.
     const withStats = plan.players.find((player) => player.n01?.stats);
     expect(withStats).toBeDefined();
-    expect(built.input.players.find((player) => player.id === withStats?.id)?.ppr).toBe(withStats?.n01?.stats?.ppr);
+    const used = built.input.players.find((player) => player.id === withStats?.id);
+    expect(used?.n01?.stats?.ppr).toBe(withStats?.n01?.stats?.ppr);
+    expect(used?.ppr).toBeCloseTo(built.input.opponent!.players[withStats!.id].strength, 1);
+    expect(built.input.strengthBasis?.players[withStats!.id].ppr).toBe(used?.ppr);
   });
 });

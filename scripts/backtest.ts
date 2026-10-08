@@ -15,7 +15,8 @@
  * Deterministic: no network, seeded data, fixed clock.
  */
 import { generateOrder } from '../src/optimizer/generateOrder';
-import type { OrderInput } from '../src/domain/types';
+import { SKEW_GAIN_THRESHOLD } from '../src/optimizer/skewGate';
+import type { OrderInput, OrderSolution } from '../src/domain/types';
 import { metrics, modelPredictor, runBacktest, type Metrics } from '../src/domain/prediction/backtest';
 import { K_LEG } from '../src/domain/prediction/matchup';
 import { PRIOR_LEGS } from '../src/domain/prediction/playerStrength';
@@ -87,6 +88,71 @@ function section2(): void {
   }
 }
 
+
+interface FairnessSummary {
+  meanSpread: number;
+  meanMostGames: number;
+  /** Share of orders in which a participant plays nothing although there are games for everyone. */
+  benchedShare: number;
+  kept: number;
+  replaced: number;
+}
+
+function fairnessOf(solutions: readonly OrderSolution[]): FairnessSummary {
+  const n = Math.max(1, solutions.length);
+  return {
+    meanSpread: solutions.reduce((acc, s) => acc + s.metrics.appearanceSpread, 0) / n,
+    meanMostGames: solutions.reduce((acc, s) => acc + Math.max(...s.tallies.map((t) => t.count)), 0) / n,
+    benchedShare:
+      solutions.filter((s) => s.metrics.totalSlots >= s.metrics.participantCount && s.tallies.some((t) => t.count === 0)).length / n,
+    kept: solutions.filter((s) => s.meta.skewGate?.outcome === 'kept').length,
+    replaced: solutions.filter((s) => s.meta.skewGate?.outcome === 'replaced').length,
+  };
+}
+
+async function replaysOfFixtures(): Promise<ReplayedMatch[]> {
+  const leagues = fixtureLeagues();
+  const replays: ReplayedMatch[] = [];
+  for (const target of playedTeamMatches(leagues.atdo.games, 't_ABvC_5234')) {
+    replays.push(await replayMatch(atdoSpec(), leagues.atdo.games, target, 't_ABvC_5234'));
+  }
+  for (const tournamentId of ['t_TDtu_7001', 't_TDth_7002']) {
+    for (const target of playedTeamMatches(leagues.tdo.games, tournamentId)) {
+      replays.push(await replayMatch(tdoSpec(), leagues.tdo.games, target, tournamentId));
+    }
+  }
+  return replays;
+}
+
+/**
+ * The appearance-bias gate's threshold against estimated match value and fairness, on the
+ * replayed fixture matches (docs/DESIGN.md, appearance bias). `off` is the engine without
+ * the gate. The default is a provisional policy value, not a measurement: real leagues
+ * should read this table with their own data before moving it.
+ */
+async function section3c(): Promise<void> {
+  console.log('\n## 3c. Appearance-bias gate: threshold calibration (same replays, 対戦相手最適化 candidate)\n');
+  console.log('| Threshold (per one-game shift) | Mean est. match value | Mean uplift vs fielded | Worst | Not lower | Mean spread | Most games by one player | Benched participant | Biased kept / set aside |');
+  console.log('|---|---|---|---|---|---|---|---|---|');
+  const replays = await replaysOfFixtures();
+  for (const threshold of [null, 0, 0.01, SKEW_GAIN_THRESHOLD, 0.03, 0.05]) {
+    const seen: OrderSolution[] = [];
+    const generate = (input: OrderInput) => {
+      const result = generateOrder({ ...input, settings: { ...input.settings, skewGainThreshold: threshold } }, UNTIMED);
+      if (!result.ok) throw new Error('generation failed');
+      seen.push(result.candidates[0]);
+      return result.candidates;
+    };
+    const summary = orderBacktestSummary(replays, generate);
+    const fair = fairnessOf(seen);
+    const mean = summary.rows.reduce((acc, row) => acc + row.recommended, 0) / Math.max(1, summary.rows.length);
+    const name = threshold === null ? 'off (no gate)' : threshold === SKEW_GAIN_THRESHOLD ? `**${(threshold * 100).toFixed(0)} pt (default)**` : `${(threshold * 100).toFixed(0)} pt`;
+    console.log(
+      `| ${name} | ${pct(mean)} | ${(summary.meanUplift * 100).toFixed(2)} pt | ${(summary.worstUplift * 100).toFixed(2)} pt | ${pct(summary.notWorseShare)} | ${fair.meanSpread.toFixed(2)} | ${fair.meanMostGames.toFixed(2)} | ${pct(fair.benchedShare)} | ${fair.kept} / ${fair.replaced} |`,
+    );
+  }
+}
+
 async function section3(): Promise<void> {
   console.log('\n## 3. Optimizer backtest (time-travel replays, model estimates only)\n');
   const leagues = fixtureLeagues();
@@ -101,9 +167,11 @@ async function section3(): Promise<void> {
     }
   }
   const replayMs = performance.now() - started;
+  const recommended: OrderSolution[] = [];
   const generate = (input: OrderInput) => {
     const result = generateOrder(input, UNTIMED);
     if (!result.ok) throw new Error('generation failed');
+    recommended.push(result.candidates[0]);
     return result.candidates;
   };
   const summary = orderBacktestSummary(replays, generate);
@@ -118,6 +186,11 @@ async function section3(): Promise<void> {
   console.log(`- mean model-estimated uplift vs fielded order: ${(summary.meanUplift * 100).toFixed(2)} pt`);
   console.log(`- worst: ${(summary.worstUplift * 100).toFixed(2)} pt; recommendation not lower in ${pct(summary.notWorseShare)} of matches`);
   console.log(`- mean uplift vs 勝利優先 candidate: ${(summary.meanUpliftOverWinFirst * 100).toFixed(2)} pt`);
+  const fair = fairnessOf(recommended);
+  console.log(
+    `- fairness of the recommendation: mean spread ${fair.meanSpread.toFixed(2)}, mean most games by one player ${fair.meanMostGames.toFixed(2)}, ` +
+      `benched participant in ${pct(fair.benchedShare)} of matches; bias gate kept a biased split in ${fair.kept}, set one aside in ${fair.replaced}`,
+  );
   // The realised outcome of the fielded order against its own pre-match estimate.
   const fieldedPairs = summary.rows.map((row) => ({
     p: row.fielded,
@@ -177,6 +250,7 @@ async function main(): Promise<void> {
   section1();
   section2();
   await section3();
+  await section3c();
   await section4();
 }
 

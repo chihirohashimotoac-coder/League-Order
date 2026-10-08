@@ -12,7 +12,7 @@ import type {
 import { formatDiscipline } from '../types';
 import { createParticipantConfig } from '../orders/participants';
 import { scopeForPreset, weightsForPreset } from '../orders/presets';
-import { withEffectivePpr } from './effectivePpr';
+import { applyHistoryStrength } from './historyStrength';
 import type { N01MatchIntelligenceSnapshot } from './intelligence';
 import { buildOpponentContext } from '../prediction/opponentContext';
 
@@ -47,6 +47,11 @@ export function previousAvailability(
 export interface NextMatchOrderInput {
   team: Team;
   players: readonly Player[];
+  /**
+   * One-order helpers (F06): in this order's players and participants only. Attending
+   * follows the same list as everyone; a guest is never offered again next time.
+   */
+  guests?: readonly Player[];
   format: LeagueFormat;
   pairs: readonly PairSetting[];
   settings: AppSettings;
@@ -65,7 +70,7 @@ export interface NextMatchOrder {
 }
 
 export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder {
-  const players = source.players.map(withEffectivePpr);
+  const { players, basis } = applyHistoryStrength([...source.players, ...(source.guests ?? [])], source.intel);
   const opponent = source.intel
     ? buildOpponentContext({ snapshot: source.intel, games: source.format.games, players })
     : null;
@@ -101,6 +106,7 @@ export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder
       },
       discipline: formatDiscipline(source.format),
       ...(opponent ? { opponent } : {}),
+      strengthBasis: basis,
     },
   };
 }

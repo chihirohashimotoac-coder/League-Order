@@ -33,8 +33,17 @@ export interface N01SyncActions {
   fetch(selection: N01TeamSelection, onProgress?: N01ProgressListener): Promise<N01TeamData>;
   /** Re-resolves a linked team (season, tpid) on n01. */
   resolve(team: Team, onProgress?: N01ProgressListener): Promise<LinkedResolution>;
-  /** Plans a fetch against a team (pure; nothing is written). */
-  plan(team: Team, data: N01TeamData, explicit?: ReadonlyMap<string, string | null>): N01SyncPlan;
+  /**
+   * Plans a fetch against a team (pure; nothing is written). `deferAmbiguous` holds back
+   * n01 players who might be hand-made members, for the captain to confirm (see
+   * `planRosterSync`).
+   */
+  plan(
+    team: Team,
+    data: N01TeamData,
+    explicit?: ReadonlyMap<string, string | null>,
+    options?: { deferAmbiguous?: boolean },
+  ): N01SyncPlan;
   /** A brand-new League Order team for an n01 team, named as on n01. */
   newTeam(data: N01TeamData): Team;
   /**
@@ -56,7 +65,12 @@ export function useN01Sync(): N01SyncActions {
   const env = useN01Environment();
 
   const plan = useCallback(
-    (team: Team, data: N01TeamData, explicit?: ReadonlyMap<string, string | null>): N01SyncPlan => {
+    (
+      team: Team,
+      data: N01TeamData,
+      explicit?: ReadonlyMap<string, string | null>,
+      options?: { deferAmbiguous?: boolean },
+    ): N01SyncPlan => {
       const existingFormatId = team.n01?.managedFormatId ?? null;
       return planN01Sync({
         team,
@@ -66,6 +80,7 @@ export function useN01Sync(): N01SyncActions {
         now: env.now(),
         newId: createId,
         explicit,
+        deferAmbiguous: options?.deferAmbiguous,
       });
     },
     [env, store.players, store.formats],

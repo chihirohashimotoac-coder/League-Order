@@ -80,6 +80,10 @@ export function polish(
   deadline: number,
   excluded: ReadonlySet<string> = new Set(),
   maxPasses = 12,
+  /** Extra condition a move must meet (the bias gate climbs only through justified steps). */
+  accept?: (selection: Combo[], evaluation: Evaluation) => boolean,
+  /** What a move must raise; the run's score unless told otherwise. */
+  objective?: (selection: Combo[], evaluation: Evaluation) => number,
 ): PolishResult {
   let current = [...initial];
   let evaluation = evaluateSelection(ctx, current);
@@ -95,7 +99,10 @@ export function polish(
       if (!hardFeasible(ctx, next)) return;
       if (excluded.size > 0 && excluded.has(selectionSignature(ctx, next))) return;
       const nextEval = evaluateSelection(ctx, next);
-      const gain = nextEval.breakdown.total - evaluation.breakdown.total;
+      if (accept && !accept(next, nextEval)) return;
+      const gain = objective
+        ? objective(next, nextEval) - objective(current, evaluation)
+        : nextEval.breakdown.total - evaluation.breakdown.total;
       if (gain > bestGain) {
         bestGain = gain;
         bestSelection = next;
