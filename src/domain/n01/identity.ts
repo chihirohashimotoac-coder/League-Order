@@ -42,11 +42,13 @@ export function isSharedLabel(opid: string | null | undefined): boolean {
  *   cannot tell people apart and is ignored); or
  * - the same `opid` on rows with different `oid`s, **even under one name**. Two people can
  *   share a name and be handed one `opid`, and the rows cannot show whether the second `oid`
- *   is a namesake or the same person's second membership (a transfer, a loan to another
- *   team — the real ATDO 2026 3rd lists `02-0109` 西俣 太陽 as `alpp` and `gm3v`). Joining
- *   them would risk lending one person's numbers to another, so they are not joined; each
- *   `oid` keeps its own row of the season and nothing is followed across seasons through
- *   the `opid`. A row without an `oid` cannot show a second one and is ignored.
+ *   is a namesake or the same person (the real ATDO 2026 3rd roster has two rows named
+ *   西俣 太陽 under `02-0109`, `alpp` and `gm3v`, with stats for `gm3v` only; whether they are
+ *   one person is not established). Joining them would risk lending one person's numbers to
+ *   another, so they are not joined; each `oid` keeps its own row of the season and nothing
+ *   is followed across seasons through the `opid`. If they were one person, the cost is that
+ *   the other `oid` gets no stats or history. A row without an `oid` cannot show a second
+ *   one and is ignored.
  */
 export function sharedOpids(rows: Iterable<IdentityRef>): Set<string> {
   const peopleByOpid = new Map<string, { names: Set<string>; oids: Set<string> }>();

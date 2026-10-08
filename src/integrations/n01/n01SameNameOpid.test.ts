@@ -20,14 +20,18 @@ import {
  *
  * Two readings fit those rows and the rows alone cannot tell them apart:
  *   (a) two people with the same name who were handed one `opid` (n01 does reuse an opid:
- *       the real ATDO 2026 3rd roster has two people under `02-0111`);
- *   (b) one person with two memberships in the season — in the real ATDO 2026 3rd roster,
- *       `02-0109` 西俣 太陽 is `alpp` on HsGD and `gm3v` on WpZb.
+ *       the real ATDO 2026 3rd roster has two different people under `02-0111`);
+ *   (b) one person who appears under two `oid`s.
+ *
+ * The real ATDO 2026 3rd data has such a pair: two rows named 西俣 太陽 under `02-0109`, with
+ * `oid`s `alpp` (team HsGD) and `gm3v` (team WpZb), and a stats row for `gm3v` only. Whether
+ * they are one person is NOT established; the fixtures below copy the shape of that data,
+ * not a conclusion about who they are.
  *
  * Reading (a) would lend one person's numbers and history to the other, so the `opid` is not
- * used to join people while it carries two `oid`s in a season's rows. Each `oid` keeps its
- * own row of that season. (b) therefore loses the cross-membership join: a safe loss
- * (Unknown / LOW), never a wrong number. The tests below fix both halves.
+ * used to join rows while it carries two `oid`s in a season. Each `oid` keeps its own row of
+ * that season. If (b) is the truth, the cost is that the other `oid` gets no stats or
+ * history (Unknown / LOW) — never a wrong number. The tests below fix both halves.
  */
 
 const OPID = 'op_twin';
@@ -76,9 +80,10 @@ describe('current-season stats', () => {
   });
 });
 
-describe('a person with two memberships in one season (real ATDO 2026 3rd, 02-0109)', () => {
-  it('is not joined across memberships: the safe loss is Unknown, not a namesake’s number', () => {
-    // alpp is 西俣 on HsGD (no stats row: they played for WpZb); gm3v is 西俣 on WpZb (has the row).
+describe('two oids under one name and opid, as in the real ATDO 2026 3rd roster (02-0109)', () => {
+  it('does not join the rows: the cost is Unknown for the oid without a stats row, never another oid’s number', () => {
+    // Shape of the real data: alpp (HsGD) has no stats row, gm3v (WpZb) has one. Whether the two
+    // are one person is not established, so the stats row is not lent to alpp.
     const source = rosterSource(
       [rosterPlayer('02-0109', 'alpp', '西俣 太陽', 'HsGD')],
       [row('02-0109', 'gm3v', '西俣 太陽', 54)],
@@ -86,7 +91,7 @@ describe('a person with two memberships in one season (real ATDO 2026 3rd, 02-01
       1_000,
     );
     expect(source[0].stats).toBeNull();
-    // ...and with the WpZb membership listed too, each oid still gets only its own row.
+    // ...and with the gm3v row listed too, each oid still gets only its own row.
     const both = rosterSource(
       [rosterPlayer('02-0109', 'alpp', '西俣 太陽', 'HsGD'), rosterPlayer('02-0109', 'gm3v', '西俣 太陽', 'WpZb')],
       [row('02-0109', 'gm3v', '西俣 太陽', 54)],

@@ -361,6 +361,8 @@ describe('助っ人 and the season', () => {
     await user.click(await within(await screen.findByRole('dialog', { name: 'シーズン累計へ反映' })).findByRole('button', { name: '反映する' }));
 
     const repository = new Repository(await openBackend());
+    // The commit is written after the click returns: read the database only once it is there.
+    await waitFor(async () => expect((await repository.loadAll()).seasonCommits).toHaveLength(1));
     const stored = await repository.loadAll();
     const guestId = stored.orders[0].input.players.find((entry) => entry.guest)!.id;
     const commit = stored.seasonCommits[0];
@@ -375,6 +377,7 @@ describe('助っ人 and the season', () => {
     // Counting again changes nothing.
     await user.click(screen.getByRole('button', { name: 'シーズン累計を再反映' }));
     await user.click(await within(await screen.findByRole('dialog', { name: 'シーズン累計を再反映' })).findByRole('button', { name: '反映する' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'シーズン累計を再反映' })).toBeNull());
     const again = await repository.loadAll();
     expect(again.players.reduce((acc, entry) => acc + entry.seasonAppearances, 0)).toBe(total);
 
