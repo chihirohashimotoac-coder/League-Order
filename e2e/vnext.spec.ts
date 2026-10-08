@@ -16,10 +16,27 @@ function tab(page: Page, name: string) {
   return page.locator('.tab-bar').getByRole('button', { name, exact: true });
 }
 
+/**
+ * Wait for every finite CSS animation on the page to end. A sheet slides up over 0.2s
+ * (`sheet-up`, 24px), so a bounding box read while it is still moving is up to 24px low —
+ * more than half the height of a 44px input — and a mouse press at those coordinates lands
+ * beside the field and selects nothing. The drag tests below read coordinates, so they
+ * must wait for the sheet to be at rest first.
+ */
+async function animationsSettled(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const finite = document
+      .getAnimations()
+      .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime as number));
+    await Promise.all(finite.map((animation) => animation.finished.catch(() => undefined)));
+  });
+}
+
 async function openPlayer(page: Page, name: string): Promise<void> {
   await tab(page, 'メンバー').click();
   await page.locator('.list-row').filter({ hasText: name }).click();
   await expect(page.getByRole('dialog', { name: 'メンバーを編集' })).toBeVisible();
+  await animationsSettled(page);
 }
 
 async function generate(page: Page): Promise<void> {

@@ -10,10 +10,11 @@ import { normalizeName } from './names';
  *
  * 1. **Inside one season, `oid` is authoritative.** It is unique to the person in that
  *    tournament, so an exact `oid` match beats any `opid` match.
- * 2. **An `opid` links seasons only when it names one person in every season involved.**
- *    "One person" is judged inside a single season's rows (stats, rosters, orders): the
- *    same `opid` on rows with different normalised names is shared. The same `opid` with
- *    different names in *different* seasons is a rename, and is followed.
+ * 2. **An `opid` links seasons only when it provably names one person in every season
+ *    involved.** "One person" is judged inside a single season's rows (stats, rosters,
+ *    orders): the same `opid` on rows with different normalised names, or with different
+ *    `oid`s, is shared. The same `opid` with different names in *different* seasons is a
+ *    rename, and is followed (every season has its own `oid`s, so those never count).
  *
  * Nothing here guesses. A shared `opid` is never resolved to a person; the people who
  * carry it are told apart by `oid` in their own season and have no history beyond it.
@@ -35,22 +36,31 @@ export function isSharedLabel(opid: string | null | undefined): boolean {
 }
 
 /**
- * The `opid`s that name more than one person among these rows (one season's worth):
- * the same `opid` on rows whose names differ after normalisation. A row without a name
- * cannot tell people apart and is ignored.
+ * The `opid`s that do not provably name one person among these rows (one season's worth):
+ *
+ * - the same `opid` on rows whose names differ after normalisation (a row without a name
+ *   cannot tell people apart and is ignored); or
+ * - the same `opid` on rows with different `oid`s, **even under one name**. Two people can
+ *   share a name and be handed one `opid`, and the rows cannot show whether the second `oid`
+ *   is a namesake or the same person's second membership (a transfer, a loan to another
+ *   team — the real ATDO 2026 3rd lists `02-0109` 西俣 太陽 as `alpp` and `gm3v`). Joining
+ *   them would risk lending one person's numbers to another, so they are not joined; each
+ *   `oid` keeps its own row of the season and nothing is followed across seasons through
+ *   the `opid`. A row without an `oid` cannot show a second one and is ignored.
  */
 export function sharedOpids(rows: Iterable<IdentityRef>): Set<string> {
-  const peopleByOpid = new Map<string, Set<string>>();
+  const peopleByOpid = new Map<string, { names: Set<string>; oids: Set<string> }>();
   for (const row of rows) {
     if (!row.opid) continue;
-    const people = peopleByOpid.get(row.opid) ?? new Set<string>();
+    const seen = peopleByOpid.get(row.opid) ?? { names: new Set<string>(), oids: new Set<string>() };
     const name = row.name ? normalizeName(row.name) : '';
-    if (name) people.add(name);
-    peopleByOpid.set(row.opid, people);
+    if (name) seen.names.add(name);
+    if (row.oid) seen.oids.add(row.oid);
+    peopleByOpid.set(row.opid, seen);
   }
   const shared = new Set<string>();
-  for (const [opid, people] of peopleByOpid) {
-    if (people.size > 1 || isSharedLabel(opid)) shared.add(opid);
+  for (const [opid, seen] of peopleByOpid) {
+    if (seen.names.size > 1 || seen.oids.size > 1 || isSharedLabel(opid)) shared.add(opid);
   }
   return shared;
 }
