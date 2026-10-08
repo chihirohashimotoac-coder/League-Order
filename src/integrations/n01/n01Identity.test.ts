@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildOpponentContext } from '../../domain/prediction/opponentContext';
 import { aggregatePlayer } from '../../domain/n01/history';
+import { planRosterSync, type RosterSourcePlayer } from '../../domain/n01/roster';
 import type { HistoricalPlayerStats } from '../../domain/n01/history';
 import { rosterSource } from './rosterResolver';
 import { indexStats, statsFor } from './statsResolver';
@@ -274,3 +275,35 @@ describe('our players in the opponent context', () => {
 });
 
 const THEM_TEAM = 'T2';
+
+describe('roster matching', () => {
+  const source = (opid: string | null, oid: string, name: string): RosterSourcePlayer => ({ opid, oid, teamId: 'T1', name, stats: null });
+  let n = 0;
+  const sync = (local: ReturnType<typeof linkedPlayer>[], roster: RosterSourcePlayer[]) =>
+    planRosterSync({ teamId: 'team_test', localPlayers: local, source: roster, tournamentId: CURRENT, now: 2_000, newId: () => `pl_new${++n}` });
+
+  it('matches two people who share an opid to their own records by oid, whatever the order', () => {
+    const uemura = linkedPlayer('pl_u', UEMURA);
+    const matsumoto = linkedPlayer('pl_m', MATSUMOTO);
+    const result = sync([uemura, matsumoto], [source(SHARED, '3ome', '松本 崚'), source(SHARED, 'WUnd', '植村 俊互')]);
+    expect(result.added).toEqual([]);
+    expect(result.renamed).toEqual([]);
+    expect(result.deactivated).toEqual([]);
+    expect(result.upserts.filter((player) => player.id === 'pl_u' && player.name !== '植村 俊互')).toEqual([]);
+    expect(result.upserts.filter((player) => player.id === 'pl_m' && player.name !== '松本 崚')).toEqual([]);
+  });
+
+  it('adds a newcomer who shares an opid instead of merging them into the namesake', () => {
+    const uemura = linkedPlayer('pl_u', UEMURA);
+    const result = sync([uemura], [source(SHARED, 'WUnd', '植村 俊互'), source(SHARED, '3ome', '松本 崚')]);
+    expect(result.added.map((entry) => entry.name)).toEqual(['松本 崚']);
+    expect(result.renamed).toEqual([]);
+  });
+
+  it('still follows a unique opid through a rename and a new oid', () => {
+    const tanaka = linkedPlayer('pl_t', { opid: 'op_k', oid: 'old_oid', name: '田中 太朗' });
+    const result = sync([tanaka], [source('op_k', 'new_oid', '田中 太郎')]);
+    expect(result.added).toEqual([]);
+    expect(result.renamed).toEqual([{ playerId: 'pl_t', from: '田中 太朗', to: '田中 太郎' }]);
+  });
+});

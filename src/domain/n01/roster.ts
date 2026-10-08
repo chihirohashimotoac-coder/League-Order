@@ -1,6 +1,7 @@
 import type { Player } from '../types';
 import type { N01PlayerBinding, N01PprStats } from './types';
 import { normalizeName } from './names';
+import { isUsableOpid, sharedOpids } from './identity';
 import { effectivePpr } from './effectivePpr';
 
 /**
@@ -123,11 +124,18 @@ function matchRoster(
   }
 
   // 2. opid, 3. oid in the same tournament.
+  //
+  // An `opid` identifies a person only when it names one: shared by several people on the
+  // n01 roster (or carried by several local players) it would hand one person's record to
+  // whichever of them comes first. Those fall through to `oid`, then to the name.
+  const sourceShared = sharedOpids(source);
+  const localOpidCounts = countBy(local.flatMap((player) => (player.n01?.opid ? [player.n01.opid] : [])));
   for (const entry of source) {
     if (matched.has(entry.oid)) continue;
-    const byOpid = entry.opid
-      ? local.find((player) => !used.has(player.id) && player.n01?.opid === entry.opid)
-      : undefined;
+    const byOpid =
+      isUsableOpid(entry.opid, sourceShared) && (localOpidCounts.get(entry.opid) ?? 0) === 1
+        ? local.find((player) => !used.has(player.id) && player.n01?.opid === entry.opid)
+        : undefined;
     const byOid =
       byOpid ??
       local.find(
