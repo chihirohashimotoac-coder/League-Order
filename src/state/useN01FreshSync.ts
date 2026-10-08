@@ -3,7 +3,7 @@ import type { Team } from '../domain/types';
 import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
 import type { N01CacheRecord } from '../domain/n01/types';
 import { N01Error, describeN01Error } from '../integrations/n01/client';
-import type { N01ProgressListener, N01SyncPlan, N01TeamSelection } from '../integrations/n01/sync';
+import type { N01ProgressListener, N01SyncPlan, N01TeamData, N01TeamSelection } from '../integrations/n01/sync';
 import { useN01Sync } from './useN01Sync';
 
 /**
@@ -15,7 +15,7 @@ import { useN01Sync } from './useN01Sync';
  * the rest is still stored and the failure is listed with the changes.
  */
 export type FreshSyncResult =
-  | { kind: 'ok'; plan: N01SyncPlan; intel: N01MatchIntelligenceSnapshot | null }
+  | { kind: 'ok'; plan: N01SyncPlan; intel: N01MatchIntelligenceSnapshot | null; data: N01TeamData }
   | { kind: 'seasonAmbiguous'; options: { tournamentId: string; title: string; teamTpid: string }[] }
   | { kind: 'teamNotFound' };
 
@@ -44,7 +44,9 @@ export function useN01FreshSync(): (team: Team, options?: FreshSyncOptions) => P
       }
       const data = await sync.fetch(selection, options.onProgress);
       if (!current()) return null;
-      const plan = sync.plan(team, data);
+      // n01 players who might be hand-made members are held back, not added a second time:
+      // they come back in `plan.roster.pending` for the captain to confirm.
+      const plan = sync.plan(team, data, undefined, { deferAmbiguous: true });
       let intel: N01MatchIntelligenceSnapshot | null = null;
       try {
         intel = (
@@ -62,7 +64,28 @@ export function useN01FreshSync(): (team: Team, options?: FreshSyncOptions) => P
       if (!current()) return null;
       const extraCache: N01CacheRecord[] = intel ? [intel] : [];
       await sync.apply(plan, { extraCache });
-      return { kind: 'ok', plan, intel };
+      return { kind: 'ok', plan, intel, data };
+    },
+    [sync],
+  );
+}
+
+/**
+ * Applies the captain's answers about uncertain matches (see `PendingLinks`): re-plans the
+ * same fetched data with their choices — a member to join, or `null` for "someone new" —
+ * and stores the result. Nothing is fetched again.
+ */
+export function useN01LinkResolution(): (
+  team: Team,
+  result: Extract<FreshSyncResult, { kind: 'ok' }>,
+  answers: ReadonlyMap<string, string | null>,
+) => Promise<N01SyncPlan> {
+  const sync = useN01Sync();
+  return useCallback(
+    async (team, result, answers) => {
+      const plan = sync.plan(team, result.data, answers, { deferAmbiguous: true });
+      await sync.apply(plan, { extraCache: result.intel ? [result.intel] : [] });
+      return plan;
     },
     [sync],
   );

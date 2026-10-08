@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ParticipantConfig, Team } from '../../domain/types';
+import type { ParticipantConfig, Player, Team } from '../../domain/types';
 import { DEFAULT_N01_SETTINGS } from '../../domain/types';
 import type { N01MatchIntelligenceSnapshot, N01NextMatch } from '../../domain/n01/intelligence';
 import { describeChanges, hasImportantChanges } from '../../domain/n01/changes';
@@ -13,8 +13,12 @@ import type { N01SyncStep, N01TeamSelection } from '../../integrations/n01/sync'
 import { N01_SYNC_STEPS } from '../../integrations/n01/sync';
 import { useAppStore } from '../../state/appStore';
 import { useN01Environment } from '../../state/n01Environment';
-import { useN01FreshSync } from '../../state/useN01FreshSync';
-import { Sheet } from '../ui';
+import { useN01FreshSync, useN01LinkResolution, type FreshSyncResult } from '../../state/useN01FreshSync';
+import { createId } from '../../utils/id';
+import { finalizeMember, isGuest, newGuest, newMember } from '../../domain/players/newPlayer';
+import { PlayerEditor } from '../PlayerEditor';
+import { PendingLinks } from './PendingLinks';
+import { Sheet, useToast } from '../ui';
 import { Icon } from '../icons';
 import { SyncProgress, type SyncProgressState } from './SyncProgress';
 
@@ -27,11 +31,14 @@ import { SyncProgress, type SyncProgressState } from './SyncProgress';
  * When n01 cannot be reached the captain is told when the data on the device was last
  * synced and chooses to continue with it — nothing old is ever presented as current.
  */
+type SyncedOk = Extract<FreshSyncResult, { kind: 'ok' }>;
+
 type Phase =
   | { kind: 'syncing' }
   | { kind: 'offline'; message: string }
   | { kind: 'season'; options: { tournamentId: string; title: string; teamTpid: string }[] }
   | { kind: 'notFound' }
+  | { kind: 'links'; result: SyncedOk; then: Phase }
   | { kind: 'changes'; lines: string[] }
   | { kind: 'pickMatch'; options: N01NextMatch[] }
   | { kind: 'noMatch' }
@@ -59,6 +66,14 @@ export function NextMatchFlow({
   const freshSync = useN01FreshSync();
   const [phase, setPhase] = useState<Phase>({ kind: 'syncing' });
   const [progress, setProgress] = useState<SyncProgressState>({});
+  // The attendance choices live here, not in the attendance step: a re-sync or a trip
+  // through the change summary must never undo a tick the captain made, and a guest is a
+  // person of this order only — they are held here until the order is generated.
+  const [choices, setChoices] = useState<Map<string, boolean>>(new Map());
+  const [guests, setGuests] = useState<Player[]>([]);
+  const [resolving, setResolving] = useState(false);
+  const resolveLinks = useN01LinkResolution();
+  const toast = useToast();
   const run = useRef(0);
   const n01Settings = store.settings.n01 ?? DEFAULT_N01_SETTINGS;
 
@@ -86,11 +101,13 @@ export function NextMatchFlow({
         if (result.kind === 'seasonAmbiguous') return setPhase({ kind: 'season', options: result.options });
         if (result.kind === 'teamNotFound') return setPhase({ kind: 'notFound' });
         const next = afterIntel(result.intel, true);
-        if (hasImportantChanges(result.plan.changes) && next.kind === 'attendance') {
-          setPhase({ kind: 'changes', lines: describeChanges(result.plan.changes) });
-          return;
-        }
-        setPhase(next);
+        const staged: Phase =
+          hasImportantChanges(result.plan.changes) && next.kind === 'attendance'
+            ? { kind: 'changes', lines: describeChanges(result.plan.changes) }
+            : next;
+        // n01 players who might be members added by hand are confirmed first, never merged
+        // or added twice on a guess.
+        setPhase(result.plan.roster.pending.length > 0 ? { kind: 'links', result, then: staged } : staged);
       } catch (error) {
         if (attempt === run.current) setPhase({ kind: 'offline', message: describeN01Error(error) });
       }
@@ -189,6 +206,21 @@ export function NextMatchFlow({
         </div>
       ) : null}
 
+      {phase.kind === 'links' ? (
+        <PendingLinks
+          pending={phase.result.plan.roster.pending}
+          busy={resolving}
+          onSkip={() => setPhase(phase.then)}
+          onApply={(answers) => {
+            setResolving(true);
+            resolveLinks(team, phase.result, answers)
+              .then(() => setPhase(phase.then))
+              .catch((error: unknown) => toast.show(`確認内容を保存できませんでした: ${describeN01Error(error)}`, 'error'))
+              .finally(() => setResolving(false));
+          }}
+        />
+      ) : null}
+
       {phase.kind === 'changes' ? (
         <div className="flow-block" data-testid="flow-changes">
           <p className="body-text">
@@ -243,6 +275,10 @@ export function NextMatchFlow({
           intel={intel}
           fresh={phase.fresh}
           currentParticipants={currentParticipants}
+          choices={choices}
+          onChoices={setChoices}
+          guests={guests}
+          onGuests={setGuests}
           onGenerate={onGenerate}
         />
       ) : null}
@@ -255,41 +291,64 @@ function Attendance({
   intel,
   fresh,
   currentParticipants,
+  choices,
+  onChoices,
+  guests,
+  onGuests,
   onGenerate,
 }: {
   team: Team;
   intel: N01MatchIntelligenceSnapshot | null;
   fresh: boolean;
   currentParticipants: readonly ParticipantConfig[] | null;
+  /** The captain’s own ticks; everything else starts from last time (see below). */
+  choices: ReadonlyMap<string, boolean>;
+  onChoices: (next: Map<string, boolean>) => void;
+  guests: readonly Player[];
+  onGuests: (next: Player[]) => void;
   onGenerate: (order: NextMatchOrder) => void;
 }): React.JSX.Element {
   const store = useAppStore();
   const env = useN01Environment();
   const players = store.players.filter((player) => player.teamId === team.id);
   const lastOrder = store.orders.filter((order) => order.teamId === team.id).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
-  // Read once when the step opens: later store updates must not overwrite the ticks.
-  const [attending, setAttending] = useState<Map<string, boolean>>(() =>
-    previousAvailability(players, currentParticipants, lastOrder),
-  );
+  // Today’s attendance: what the captain ticked, else what they chose last time (a player
+  // nobody has chosen for yet is here). A member added from this screen is ticked at once.
+  const previous = previousAvailability(players, currentParticipants, lastOrder);
+  const isHere = (id: string): boolean => choices.get(id) ?? previous.get(id) ?? false;
+  const setHere = (id: string, here: boolean): void => onChoices(new Map(choices).set(id, here));
   const format = store.formats.find((entry) => entry.id === team.n01?.managedFormatId) ?? null;
   const roster = eligiblePlayers(players);
-  const count = roster.filter((player) => attending.get(player.id)).length;
+  const everyone = [...roster, ...guests];
+  const count = everyone.filter((player) => isHere(player.id)).length;
   const age = intel ? freshness(intel.generatedAt, env.now()) : null;
+  const [editor, setEditor] = useState<{ kind: 'guest' | 'member'; player: Player } | null>(null);
 
   const generate = (): void => {
     if (!format) return;
     const order = buildNextMatchOrder({
       team,
       players,
+      guests,
       format,
       pairs: store.pairs.filter((pair) => pair.teamId === team.id),
       settings: store.settings,
       intel,
-      attending: new Set(roster.filter((player) => attending.get(player.id)).map((player) => player.id)),
+      attending: new Set(everyone.filter((player) => isHere(player.id)).map((player) => player.id)),
       previous: currentParticipants ?? lastOrder?.input.participants,
     });
     onGenerate(order);
   };
+
+  const blank = { name: '', rating: null, ppr: null, skills: {} };
+  const openEditor = (kind: 'guest' | 'member'): void =>
+    setEditor({
+      kind,
+      player:
+        kind === 'guest'
+          ? newGuest(team.id, createId('gst'), blank, Date.now())
+          : newMember(team.id, createId('pl'), blank, Date.now()),
+    });
 
   return (
     <div className="flow-block" data-testid="flow-attendance">
@@ -309,23 +368,43 @@ function Attendance({
         </p>
       ) : null}
       <p className="attendance-title">
-        本日参加 <span className="badge">{count} / {roster.length}</span>
+        本日参加 <span className="badge">{count} / {everyone.length}</span>
       </p>
       <ul className="attendance" aria-label="本日の参加者">
-        {roster.map((player) => (
+        {everyone.map((player) => (
           <li key={player.id}>
             <label>
-              <input
-                type="checkbox"
-                checked={attending.get(player.id) ?? false}
-                onChange={(event) => setAttending(new Map(attending).set(player.id, event.target.checked))}
-              />
-              <span className="grow">{player.name}</span>
+              <input type="checkbox" checked={isHere(player.id)} onChange={(event) => setHere(player.id, event.target.checked)} />
+              <span className="grow">
+                {player.name}
+                {isGuest(player) ? <span className="n01-tag guest-tag" data-testid="guest-tag">助っ人 (今回のみ)</span> : null}
+                {!isGuest(player) && !player.n01 ? <span className="n01-tag muted-tag" data-testid="manual-tag">n01 未連携</span> : null}
+              </span>
               <span className="small-text secondary">{formatStrengthLine(withEffectivePpr(player))}</span>
             </label>
+            {isGuest(player) ? (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => onGuests(guests.filter((entry) => entry.id !== player.id))}
+                aria-label={`助っ人 ${player.name} を外す`}
+              >
+                外す
+              </button>
+            ) : null}
           </li>
         ))}
       </ul>
+      <div className="flow-actions add-people">
+        <button type="button" className="btn small" onClick={() => openEditor('guest')}>
+          <Icon name="plus" size={16} strokeWidth={2.6} />
+          今回だけ助っ人を追加
+        </button>
+        <button type="button" className="btn small" onClick={() => openEditor('member')}>
+          <Icon name="plus" size={16} strokeWidth={2.6} />
+          次回から参加するメンバーを追加
+        </button>
+      </div>
       {!format ? <p className="notice warn small-text">n01 のフォーマットがありません。n01 を再同期してください。</p> : null}
       <div className="flow-actions sticky">
         <button type="button" className="btn primary grow" onClick={generate} disabled={!format || count === 0}>
@@ -333,6 +412,28 @@ function Attendance({
           このメンバーで作成
         </button>
       </div>
+
+      {editor ? (
+        <PlayerEditor
+          player={editor.player}
+          isNew
+          mode={editor.kind}
+          title={editor.kind === 'guest' ? '今回だけ助っ人を追加' : '次回から参加するメンバーを追加'}
+          saveLabel={editor.kind === 'guest' ? '助っ人として追加' : 'メンバーに追加'}
+          existingNames={everyone.map((entry) => entry.name)}
+          onClose={() => setEditor(null)}
+          onSave={(saved) => {
+            if (editor.kind === 'guest') {
+              onGuests([...guests, saved]);
+            } else {
+              // An ordinary roster player from now on, whether or not n01 knows them yet.
+              store.savePlayer(finalizeMember(saved));
+            }
+            setHere(saved.id, true);
+            setEditor(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

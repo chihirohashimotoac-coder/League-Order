@@ -163,6 +163,12 @@ export interface Player {
    * `manual` otherwise (see `domain/n01/effectivePpr.ts`).
    */
   pprSource?: PprSource;
+  /**
+   * True for a helper who plays in one order only (今回限りの助っ人). Such a player exists
+   * in that order's `players` and its saved versions — never in the team roster, the next
+   * order's candidates or the season totals.
+   */
+  guest?: boolean;
 }
 
 export interface Team {

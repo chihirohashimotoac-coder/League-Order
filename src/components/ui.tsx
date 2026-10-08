@@ -215,6 +215,9 @@ export function Segmented<T extends string>({
   );
 }
 
+/** The sheets currently open, oldest first (see the Escape handling in {@link Sheet}). */
+const openSheets: symbol[] = [];
+
 /**
  * Bottom sheet dialog: sticky header, scrolling body, sticky footer.
  *
@@ -248,12 +251,17 @@ export function Sheet({
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
+    // Sheets can be opened over one another (a form over the flow it belongs to): Escape
+    // closes the one on top only, not the whole stack.
+    const self = Symbol('sheet');
+    openSheets.push(self);
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') closeRef.current();
+      if (event.key === 'Escape' && openSheets[openSheets.length - 1] === self) closeRef.current();
     };
     document.addEventListener('keydown', onKey);
     ref.current?.focus();
     return () => {
+      openSheets.splice(openSheets.indexOf(self), 1);
       document.removeEventListener('keydown', onKey);
       // Hand focus back to the control that opened the sheet, if it is still there.
       if (opener && opener.isConnected) opener.focus({ preventScroll: true });

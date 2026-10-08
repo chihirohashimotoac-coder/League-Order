@@ -17,6 +17,12 @@ import { effectivePpr } from './effectivePpr';
  * the same tournament → exact normalised name (only when unambiguous on both sides).
  * Nothing fuzzier. A player is never matched twice.
  *
+ * With `deferAmbiguous`, an n01 player who could be one of the team's hand-made members
+ * (F07: a member added before n01 knew them) but cannot be matched with certainty is not
+ * added: it is returned in `pending` with the candidates, to be put to the captain. The
+ * answer comes back through `explicit` on the next plan. Nothing is merged by guesswork
+ * and nobody is created twice.
+ *
  * The Rating, aptitudes, notes, season counts, archived flag and PPR source of an
  * existing player are carried over untouched: only `name` and `n01` are n01's.
  */
@@ -49,6 +55,15 @@ export interface RosterSyncInput {
    * local player it was matched with (by whichever rule above), instead of losing them.
    */
   retainStats?: boolean;
+  /** Put uncertain matches with hand-made members to the captain instead of adding a duplicate. */
+  deferAmbiguous?: boolean;
+}
+
+/** An n01 player who might be a hand-made member of the team: the captain decides. */
+export interface PendingLink {
+  source: RosterSourcePlayer;
+  /** Hand-made members it could be, the most likely (same name apart from spacing) first. */
+  candidates: { playerId: string; name: string; likely: boolean }[];
 }
 
 export interface RosterChange {
@@ -68,6 +83,8 @@ export interface RosterSyncResult {
   pprChanged: { playerId: string; name: string; from: number | null; to: number | null }[];
   /** n01 names that could not be matched automatically because they were ambiguous. */
   ambiguous: string[];
+  /** Uncertain matches held back for the captain (only with `deferAmbiguous`). */
+  pending: PendingLink[];
 }
 
 function bindingFor(source: RosterSourcePlayer, tournamentId: string, now: number): N01PlayerBinding {
@@ -99,6 +116,12 @@ interface RosterMatch {
   matched: Map<string, Player | null>;
   used: Set<string>;
   ambiguous: string[];
+  pending: PendingLink[];
+}
+
+/** A name without its spacing, to rank candidates (never to decide a match). */
+function looseName(name: string): string {
+  return normalizeName(name).replace(/\s/gu, '');
 }
 
 function matchRoster(
@@ -106,10 +129,12 @@ function matchRoster(
   source: readonly RosterSourcePlayer[],
   tournamentId: string,
   explicit: ReadonlyMap<string, string | null> | undefined,
+  deferAmbiguous = false,
 ): RosterMatch {
   const used = new Set<string>();
   const matched = new Map<string, Player | null>();
   const ambiguous: string[] = [];
+  const pending: PendingLink[] = [];
 
   const sourceNameCounts = countBy(source.map((player) => normalizeName(player.name)));
   const localNameCounts = countBy(local.map(matchName));
@@ -164,18 +189,35 @@ function matchRoster(
     if (candidates.length === 1 && (sourceNameCounts.get(key) ?? 0) === 1 && (localNameCounts.get(key) ?? 0) === 1) {
       used.add(candidates[0].id);
       matched.set(entry.oid, candidates[0]);
-    } else {
-      if (candidates.length > 0) ambiguous.push(entry.name);
-      matched.set(entry.oid, null);
+      continue;
     }
+    if (candidates.length > 0) ambiguous.push(entry.name);
+
+    if (deferAmbiguous) {
+      // Hand-made members the n01 player might be: a same-name candidate, or any member n01
+      // has not been joined to yet (a different spelling or a nickname cannot be told apart).
+      const open = local.filter((player) => !used.has(player.id) && !player.n01 && !player.archived);
+      const pool = new Map([...candidates, ...open].map((player) => [player.id, player]));
+      if (pool.size > 0) {
+        pending.push({
+          source: entry,
+          candidates: [...pool.values()]
+            .map((player) => ({ playerId: player.id, name: player.name, likely: looseName(player.name) === looseName(entry.name) }))
+            .sort((a, b) => Number(b.likely) - Number(a.likely) || a.name.localeCompare(b.name)),
+        });
+        continue;
+      }
+    }
+    matched.set(entry.oid, null);
   }
-  return { matched, used, ambiguous };
+  return { matched, used, ambiguous, pending };
 }
 
 export function planRosterSync(input: RosterSyncInput): RosterSyncResult {
   const { tournamentId, now } = input;
   const local = input.localPlayers.filter((player) => player.teamId === input.teamId);
-  const { matched, used, ambiguous } = matchRoster(local, input.source, tournamentId, input.explicit);
+  const { matched, used, ambiguous, pending } = matchRoster(local, input.source, tournamentId, input.explicit, input.deferAmbiguous);
+  const held = new Set(pending.map((entry) => entry.source.oid));
 
   const result: RosterSyncResult = {
     upserts: [],
@@ -185,10 +227,12 @@ export function planRosterSync(input: RosterSyncInput): RosterSyncResult {
     renamed: [],
     pprChanged: [],
     ambiguous,
+    pending,
   };
 
   let created = 0;
   for (const source of input.source) {
+    if (held.has(source.oid)) continue;
     const existing = matched.get(source.oid) ?? null;
     const binding = bindingFor(
       input.retainStats ? { ...source, stats: existing?.n01?.stats ?? null } : source,

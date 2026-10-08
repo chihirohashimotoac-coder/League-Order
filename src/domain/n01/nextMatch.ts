@@ -47,6 +47,11 @@ export function previousAvailability(
 export interface NextMatchOrderInput {
   team: Team;
   players: readonly Player[];
+  /**
+   * One-order helpers (F06): in this order's players and participants only. Attending
+   * follows the same list as everyone; a guest is never offered again next time.
+   */
+  guests?: readonly Player[];
   format: LeagueFormat;
   pairs: readonly PairSetting[];
   settings: AppSettings;
@@ -65,7 +70,7 @@ export interface NextMatchOrder {
 }
 
 export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder {
-  const { players, basis } = applyHistoryStrength(source.players, source.intel);
+  const { players, basis } = applyHistoryStrength([...source.players, ...(source.guests ?? [])], source.intel);
   const opponent = source.intel
     ? buildOpponentContext({ snapshot: source.intel, games: source.format.games, players })
     : null;

@@ -146,7 +146,12 @@ export function planSeasonCommit(
   players: readonly Player[],
   committedAt: number,
 ): SeasonApplication {
-  const deltas = appearanceDelta(existing?.appearances ?? [], version.appearances);
+  // The ledger records exactly what was added to the roster's season totals. A guest
+  // (今回限りの助っ人) is nobody's total: counting them here would leave a ghost entry that
+  // no re-commit or withdrawal could ever settle against a player.
+  const guestIds = new Set(version.players.filter((player) => player.guest === true).map((player) => player.id));
+  const counted = version.appearances.filter((record) => !guestIds.has(record.playerId));
+  const deltas = appearanceDelta(existing?.appearances ?? [], counted);
   const { updatedPlayers, clamped } = applyDeltas(players, deltas);
 
   const commit: SeasonCommit = {
@@ -154,7 +159,7 @@ export function planSeasonCommit(
     teamId,
     committedVersion: version.version,
     committedAt,
-    appearances: version.appearances.map((record) => ({
+    appearances: counted.map((record) => ({
       ...record,
       byKind: { ...record.byKind },
     })),
