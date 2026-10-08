@@ -16,6 +16,7 @@ import type {
 import type { OpponentContext } from './prediction/opponentContext';
 import type { MatchPrediction } from './prediction/predictOrder';
 import type { ConfidenceLevel } from './prediction/confidence';
+import type { StrengthBasis } from './n01/historyStrength';
 
 export type TeamId = string;
 export type PlayerId = string;
@@ -403,6 +404,12 @@ export interface OrderInput {
    * order can always be re-evaluated as it was generated. Absent = no opponent data.
    */
   opponent?: OpponentContext;
+  /**
+   * Where each player's PPR in `players` came from (hand-entered, this season, earlier
+   * seasons, carried over) and how well the data behind it stands. Absent on orders made
+   * before it existed, which are read as "no evidence" wherever evidence is required.
+   */
+  strengthBasis?: StrengthBasis;
 }
 
 // ---------------------------------------------------------------------------

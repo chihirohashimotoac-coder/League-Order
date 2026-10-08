@@ -35,6 +35,7 @@ import {
 import { describeStrengthWeights, resolveStrength } from '../domain/players/strength';
 import { Icon, type IconName } from '../components/icons';
 import { effectivePpr, withEffectivePpr } from '../domain/n01/effectivePpr';
+import { applyHistoryStrength } from '../domain/n01/historyStrength';
 import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
 import { buildOpponentContext } from '../domain/prediction/opponentContext';
 import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
@@ -105,10 +106,6 @@ export function SetupPage({
 
   const included = draft.participants.filter((config) => config.include);
   const discipline = formatDiscipline(format);
-  // n01-linked players carry their PPR from n01 (or the manual fallback): the order input
-  // snapshots that effective value, so a saved order keeps the PPR it was made with.
-  const effectivePlayers = useMemo(() => store.teamPlayers.map(withEffectivePpr), [store.teamPlayers]);
-
   // Opponent data for the next match (n01 teams only). The context is built against the
   // format chosen here and travels inside the order, so the saved order can always be
   // re-evaluated exactly as it was generated.
@@ -117,6 +114,13 @@ export function SetupPage({
         (record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel',
       ) ?? null)
     : null;
+  // n01-linked players carry their PPR from n01 — this season's, or the estimate over the
+  // seasons the last analysis returned — or the manual fallback: the order input snapshots
+  // that value and where it came from, so a saved order keeps the PPR it was made with.
+  const { players: effectivePlayers, basis: strengthBasis } = useMemo(
+    () => applyHistoryStrength(store.teamPlayers, intel),
+    [store.teamPlayers, intel],
+  );
   const opponent = useMemo(
     () => (intel && format ? buildOpponentContext({ snapshot: intel, games: format.games, players: effectivePlayers }) : null),
     [intel, format, effectivePlayers],
@@ -178,6 +182,7 @@ export function SetupPage({
       // Snapshot: a later edit to the format's discipline must not re-score this order.
       discipline: formatDiscipline(format),
       ...(opponent ? { opponent } : {}),
+      strengthBasis,
     };
   };
 

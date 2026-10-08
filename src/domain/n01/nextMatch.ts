@@ -12,7 +12,7 @@ import type {
 import { formatDiscipline } from '../types';
 import { createParticipantConfig } from '../orders/participants';
 import { scopeForPreset, weightsForPreset } from '../orders/presets';
-import { withEffectivePpr } from './effectivePpr';
+import { applyHistoryStrength } from './historyStrength';
 import type { N01MatchIntelligenceSnapshot } from './intelligence';
 import { buildOpponentContext } from '../prediction/opponentContext';
 
@@ -65,7 +65,7 @@ export interface NextMatchOrder {
 }
 
 export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder {
-  const players = source.players.map(withEffectivePpr);
+  const { players, basis } = applyHistoryStrength(source.players, source.intel);
   const opponent = source.intel
     ? buildOpponentContext({ snapshot: source.intel, games: source.format.games, players })
     : null;
@@ -101,6 +101,7 @@ export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder
       },
       discipline: formatDiscipline(source.format),
       ...(opponent ? { opponent } : {}),
+      strengthBasis: basis,
     },
   };
 }

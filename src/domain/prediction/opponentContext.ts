@@ -1,7 +1,7 @@
 import type { GameId, GameSlotDef, Player, PlayerId } from '../types';
 import type { N01MatchIntelligenceSnapshot } from '../n01/intelligence';
 import type { OpponentSlotDistribution } from '../n01/positionModel';
-import { playerKey } from '../n01/history';
+import { leaguePriorOf, ownStatsOf } from '../n01/historyStrength';
 import { formatSignatures } from '../n01/signature';
 import { effectivePpr } from '../n01/effectivePpr';
 import type { ConfidenceLevel } from './confidence';
@@ -9,10 +9,8 @@ import { aggregateConfidence, lowerConfidence, minConfidence } from './confidenc
 import {
   DEFAULT_STRENGTH_PARAMETERS,
   FALLBACK_LEAGUE_PPR,
-  leagueFirst9Gap,
   manualStrength,
   playerStrength,
-  type LeaguePrior,
   type PlayerStrength,
   type StrengthParameters,
 } from './playerStrength';
@@ -157,38 +155,16 @@ export function buildOpponentContext(input: BuildContextInput): OpponentContext 
   const opponent = snapshot.opponent;
   if (!opponent || !snapshot.nextMatch) return null;
   const parameters = input.parameters ?? DEFAULT_STRENGTH_PARAMETERS;
-  const prior: LeaguePrior = {
-    meanPpr: snapshot.leagueMeanPpr,
-    first9Gap: leagueFirst9Gap([...snapshot.ourStats, ...opponent.stats], parameters.weights),
-  };
+  const prior = leaguePriorOf(snapshot, parameters);
   const leagueMean = snapshot.leagueMeanPpr ?? FALLBACK_LEAGUE_PPR;
 
-  const ourStatsByKey = new Map(snapshot.ourStats.map((entry) => [entry.key, entry]));
-  // A player is found by their oid in the snapshot's roster first (their `opid` may be
-  // shared with a namesake); the bare opid key is only the fallback for a stale binding.
-  const ourKeyByOid = new Map(snapshot.ourPlayers.map((entry) => [entry.oid, entry.key]));
-  const keyOfPlayer = (player: Player): string | null => {
-    const binding = player.n01;
-    if (!binding) return null;
-    const byOid =
-      binding.currentOid && binding.lastSeenTournamentId === snapshot.tournamentId
-        ? ourKeyByOid.get(binding.currentOid)
-        : undefined;
-    return byOid ?? playerKey(binding.opid, binding.lastSeenTournamentId, binding.currentOid);
-  };
-  // Two of our players resolving to one history (a snapshot made before shared opids were
-  // told apart) cannot both own it, so neither borrows it.
-  const claims = new Map<string, number>();
-  for (const player of input.players) {
-    const key = keyOfPlayer(player);
-    if (key) claims.set(key, (claims.get(key) ?? 0) + 1);
-  }
+  // Our players' histories are found by oid first and never shared between two players
+  // (see `ownStatsOf`); a player without a line counts their own PPR as a little evidence.
+  const ownStats = ownStatsOf(snapshot, input.players);
   const players: Record<PlayerId, OurPlayerContext> = {};
   for (const player of input.players) {
-    const binding = player.n01;
-    const key = keyOfPlayer(player);
-    const stats = key && (claims.get(key) ?? 0) === 1 ? ourStatsByKey.get(key) : undefined;
-    const manual = player.pprSource === 'manual' || !binding;
+    const stats = ownStats.get(player.id);
+    const manual = player.pprSource === 'manual' || !player.n01;
     // No line in this analysis (e.g. the season's stats could not be read, so the sync kept
     // the previous PPR): the effective PPR counts as a little evidence, not the league mean.
     players[player.id] = toOurContext(
