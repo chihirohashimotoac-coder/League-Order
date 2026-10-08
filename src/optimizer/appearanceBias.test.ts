@@ -3,7 +3,7 @@ import type { GameSlotDef, OrderInput, OrderSolution, ParticipantConfig, Player,
 import type { ConfidenceLevel } from '../domain/prediction/confidence';
 import type { OpponentContext } from '../domain/prediction/opponentContext';
 import { createParticipantConfig } from '../domain/orders/participants';
-import { games, orderInput, player } from '../test/factories';
+import { games, orderInput, player, withEvidence } from '../test/factories';
 import { generateOrder } from './generateOrder';
 import { validateHardConstraints } from './constraints/validate';
 
@@ -36,23 +36,6 @@ function singles(count: number): GameSlotDef[] {
       playerCount: 1,
     })),
   );
-}
-
-/** Marks every player's strength as backed by `confidence` data (what an n01 sync records). */
-function withEvidence(input: OrderInput, confidence: ConfidenceLevel): OrderInput {
-  return {
-    ...input,
-    strengthBasis: {
-      generatedAt: 0,
-      seasons: [],
-      players: Object.fromEntries(
-        input.players.map((entry) => [
-          entry.id,
-          { origin: 'current' as const, ppr: entry.ppr, currentPpr: entry.ppr, legs: 90, seasons: [0], confidence },
-        ]),
-      ),
-    },
-  };
 }
 
 function solve(input: OrderInput): OrderSolution {
@@ -128,7 +111,7 @@ describe('bias needs a gain that is large enough and data that can be believed',
     const gate = solution.meta.skewGate!;
     expect(gate.outcome).toBe('kept');
     expect(gate.confidence).toBe('HIGH');
-    expect(gate.gain).toBeGreaterThanOrEqual(gate.required);
+    expect(gate.gain).toBeGreaterThanOrEqual(gate.required!);
     expect(gate.basis).toBe('reference');
   });
 
@@ -214,7 +197,11 @@ describe('mixed formats', () => {
       expect(fielded.filter((id) => id === tally.playerId).length).toBe(tally.count);
     }
     const singlesBy = solution.tallies.map((tally) => tally.countByKind.SINGLES ?? 0);
-    expect(Math.max(...singlesBy)).toBe(solution.metrics.maxRoleConcentration);
+    // The metric is the largest count in any one role (Doubles and Trios included).
+    expect(solution.metrics.maxRoleConcentration).toBe(
+      Math.max(...solution.tallies.map((tally) => Math.max(tally.countByKind.SINGLES ?? 0, tally.countByKind.DOUBLES ?? 0, tally.countByKind.TRIOS ?? 0))),
+    );
+    // Four Singles over five people: nobody needs two.
     expect(Math.max(...singlesBy)).toBeLessThanOrEqual(1);
   });
 });
@@ -280,7 +267,7 @@ describe('the opponent-optimised preset obeys the same gate', () => {
     const gate = solution.meta.skewGate!;
     expect(gate.basis).toBe('opponent');
     if (gate.outcome === 'kept') {
-      expect(gate.gain).toBeGreaterThanOrEqual(gate.required);
+      expect(gate.gain).toBeGreaterThanOrEqual(gate.required!);
       expect(Math.min(...counts(solution))).toBeGreaterThanOrEqual(0);
     } else {
       expect(counts(solution)).toEqual([1, 1, 1, 1]);

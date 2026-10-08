@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DartsDiscipline, GameSlotDef, OrderInput, OrderSolution, Player, PresetKey } from '../domain/types';
 import { createParticipantConfig } from '../domain/orders/participants';
-import { games, orderInput, pair, player } from '../test/factories';
+import { games, orderInput, pair, player, withEvidence } from '../test/factories';
 import { validateHardConstraints } from './constraints/validate';
 import { bestShownLineUp, generateOrder } from './generateOrder';
 import { describeCombo } from './candidates/combinations';
@@ -182,7 +182,10 @@ describe('strength model in the optimizer', () => {
 // ---------------------------------------------------------------------------
 
 describe('preset character', () => {
-  const win = run(syntheticRoster(), sixGames(), 'WIN_FIRST');
+  // Win-first leans on strength only as far as the data behind it can be believed (the
+  // bias gate): the n01-backed roster is HIGH confidence, a hand-typed one is not.
+  const win = solve(withEvidence(orderInput(syntheticRoster(), sixGames(), { preset: 'WIN_FIRST' }), 'HIGH'));
+  const winUnproven = run(syntheticRoster(), sixGames(), 'WIN_FIRST');
   const balanced = run(syntheticRoster(), sixGames(), 'BALANCED');
   const fair = run(syntheticRoster(), sixGames(), 'FAIRNESS_FIRST');
 
@@ -218,6 +221,12 @@ describe('preset character', () => {
     expect(fair.score.strength).toBeLessThanOrEqual(balanced.score.strength);
     expect(balanced.score.strength).toBeLessThanOrEqual(win.score.strength);
     expect(balanced.metrics.appearanceSpread).toBeLessThanOrEqual(1);
+  });
+
+  it('9b. without data to believe, win-first shares the games as evenly as balanced', () => {
+    expect(winUnproven.metrics.appearanceSpread).toBe(0);
+    expect(winUnproven.tallies.map((tally) => tally.count)).toEqual(fair.tallies.map((tally) => tally.count));
+    expect(winUnproven.meta.skewGate?.outcome).toBe('replaced');
   });
 
   it('makes the presets produce different orders for the same input', () => {

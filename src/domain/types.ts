@@ -378,6 +378,12 @@ export interface OptimizerSettings {
   nodeLimit: number;
   maxCombosPerGame: number;
   beamWidth: number;
+  /**
+   * The match-outcome gain (0.03 = 3 points) one game of bias towards stronger players has
+   * to earn over the even split (see `optimizer/skewGate.ts`). Absent = the engine's
+   * default; `null` switches the gate off (calibration runs only).
+   */
+  skewGainThreshold?: number | null;
 }
 
 export interface OrderInput {
@@ -539,6 +545,34 @@ export interface OrderWarning {
   playerId?: PlayerId;
 }
 
+/**
+ * What the bias gate decided (docs/DESIGN.md, appearance bias). A line-up that plays some
+ * people more than the even split only stands when the estimated gain over the even
+ * line-up is large enough for the size of the bias and the data behind it is confident
+ * enough; otherwise the even line-up is used.
+ */
+export interface SkewGateReport {
+  /** `kept`: a biased line-up stood. `replaced`: the biased line-up was set aside for an even one. */
+  outcome: 'kept' | 'replaced';
+  /**
+   * What the gain was measured against. `opponent`: the predicted opponent of this order.
+   * `reference`: no opponent data, so an opponent as strong as our own average player — a
+   * model reference, not a forecast of anyone.
+   */
+  basis: 'opponent' | 'reference';
+  /** Estimated match-outcome gain of the biased line-up over the even one (0.03 = 3 points). */
+  gain: number;
+  /** The gain the bias had to reach; `null` when the data's confidence rules any bias out. */
+  required: number | null;
+  /** Size of the bias in one-game shifts: the excess squared deviation over the even line-up ÷ 2. */
+  steps: number;
+  /** The weakest confidence among the players whose number of games differs. */
+  confidence: ConfidenceLevel;
+  /** Games per player in the even line-up and in the biased one that was judged (by player id). */
+  evenCounts: Record<PlayerId, number>;
+  biasedCounts: Record<PlayerId, number>;
+}
+
 export interface SolutionMeta {
   /** Which generation stage produced the returned assignment. */
   stage: 'dfs' | 'beam' | 'dfs+polish' | 'beam+polish';
@@ -555,6 +589,8 @@ export interface SolutionMeta {
    * and the UI says so rather than presenting a near-copy as the preset's choice.
    */
   alternativeTo?: string;
+  /** Set when the run's line-up was judged against the even split (勝利優先 and 対戦相手最適化). */
+  skewGate?: SkewGateReport;
   /** How opponent data was used by this run (opponent-optimised preset only). */
   opponent?: {
     /** `applied` at full weight, `reduced` for weaker data, `fallback` when there was none. */

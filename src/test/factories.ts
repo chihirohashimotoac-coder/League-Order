@@ -17,6 +17,7 @@ import type {
 import { DEFAULT_OPTIMIZER_SETTINGS, PRESETS } from '../domain/orders/presets';
 import { createParticipantConfig } from '../domain/orders/participants';
 import { canonicalPair } from '../domain/games/pairKey';
+import type { ConfidenceLevel } from '../domain/prediction/confidence';
 
 /**
  * Test fixtures.
@@ -153,4 +154,25 @@ export function sampleFormatGames11(): GameSlotDef[] {
     { id: 'g5', name: 'Trios', kinds: ['TRIOS'], playerCount: 3 },
     { id: 'g6', name: 'Doubles 501', kinds: ['DOUBLES', 'G501'], playerCount: 2 },
   ]);
+}
+
+/**
+ * Marks every player's PPR as backed by data of `confidence` (what an n01 sync records in
+ * `strengthBasis`). Orders built by hand have none, which the bias gate reads as "no
+ * evidence": an even split.
+ */
+export function withEvidence(input: OrderInput, confidence: ConfidenceLevel): OrderInput {
+  return {
+    ...input,
+    strengthBasis: {
+      generatedAt: 0,
+      seasons: [],
+      players: Object.fromEntries(
+        input.players.map((entry) => [
+          entry.id,
+          { origin: 'current' as const, ppr: entry.ppr, currentPpr: entry.ppr, legs: 90, seasons: [0], confidence },
+        ]),
+      ),
+    },
+  };
 }

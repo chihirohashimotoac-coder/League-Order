@@ -8,7 +8,7 @@ import type { FairnessScope, OptimizerSettings, PresetKey, ScoreWeights } from '
  * bias toward the strongest players (spec §11, §32).
  *
  * The three compared presets differ in character, not just in degree (追補 v1.3 §V4):
- * win-first lets a clearly stronger player take one extra game and two Singles; balanced
+ * win-first lets a clearly stronger player take one extra game and two Singles when the data behind it can be believed (the bias gate, optimizer/skewGate.ts); balanced
  * keeps the totals even and limits Singles concentration; fairness-first minimises the
  * total spread, role concentration and consecutive runs.
  */

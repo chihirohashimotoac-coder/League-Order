@@ -17,10 +17,8 @@ import {
   CONFIDENCE_WEIGHT_FACTOR,
   OPPONENT_CANDIDATE_PRESETS,
   PRESETS,
-  riskValue,
 } from '../domain/orders/presets';
-import type { ExplanationFactor, OrderExplanation } from '../domain/types';
-import { independentGamesModel } from '../domain/prediction/matchWinProbability';
+import type { ExplanationFactor, OrderExplanation, SkewGateReport } from '../domain/types';
 import { INDEPENDENCE_NOTE, confidenceText, formatProbability, predictOrder } from '../domain/prediction/predictOrder';
 import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
 import { round } from '../utils/math';
@@ -35,17 +33,13 @@ import { validateHardConstraints, type HardViolation } from './constraints/valid
 import { analyseRelaxations, precheck } from './diagnose';
 import { prepare, type PreparedContext } from './prepare';
 import { buildExplanation } from './scoring/explain';
-import {
-  compareEvaluations,
-  evaluateSelection,
-  negativeWeightSum,
-  positiveWeightSum,
-  type Evaluation,
-} from './scoring/score';
-import { beamSearch } from './search/beam';
+import { evaluateSelection, type Evaluation } from './scoring/score';
 import { buildBoundContext, type BoundContext } from './search/bound';
-import { dfsSearch } from './search/dfs';
-import { hardFeasible, polish } from './search/polish';
+import { searchOnce } from './searchOnce';
+import { RERANK_SCORE_TOLERANCE, rerankByMatchOutcome, selectionMatchValue } from './rerank';
+import { applySkewGate } from './skewGate';
+
+export { RERANK_SCORE_TOLERANCE, selectionMatchValue };
 
 /**
  * Order generation entry point (docs/DESIGN.md §6).
@@ -80,6 +74,8 @@ interface RunOutcome {
   selection: Combo[];
   evaluation: Evaluation;
   meta: SolutionMeta;
+  /** The bias gate chose a different line-up than the run's best by score. */
+  gated: boolean;
 }
 
 function runOnce(
@@ -92,133 +88,49 @@ function runOnce(
   excluded: ReadonlySet<string>,
 ): RunOutcome | null {
   const started = performance.now();
-  const deadline = started + timeLimitMs;
+  const found = searchOnce(ctx, bctx, candidates, timeLimitMs, excluded);
+  if (!found) return null;
 
-  // Stage 2 first: a strong incumbent makes the branch-and-bound prune hard.
-  const beam = beamSearch(ctx, bctx, candidates, {
-    width: Math.max(1, ctx.input.settings.beamWidth),
-    deadline: started + timeLimitMs * 0.35,
-  });
-  if (!beam.feasible || beam.solutions.length === 0) return null;
-
-  // Line-ups already returned as other candidates are not eligible again, so each
-  // candidate the captain compares is genuinely a different order.
-  const pool =
-    excluded.size === 0
-      ? beam.solutions
-      : beam.solutions.filter((solution) => !excluded.has(selectionSignature(ctx, solution)));
-  if (pool.length === 0) return null;
-
-  let bestSelection = pool[0];
-  let bestEvaluation = evaluateSelection(ctx, bestSelection);
-  let stage: SolutionMeta['stage'] = 'beam';
-
-  for (const solution of pool.slice(1)) {
-    const evaluation = evaluateSelection(ctx, solution);
-    if (
-      compareEvaluations({ selection: solution, evaluation }, { selection: bestSelection, evaluation: bestEvaluation }) < 0
-    ) {
-      bestSelection = solution;
-      bestEvaluation = evaluation;
-    }
-  }
-
-  // Stage 1: branch and bound, seeded with the beam incumbent.
-  const dfs = dfsSearch(ctx, bctx, candidates, {
-    deadline,
-    nodeLimit: ctx.input.settings.nodeLimit,
-    incumbent: bestEvaluation.breakdown.total,
-    fairnessUrgency: ctx.weights.fairness,
-    excluded,
-  });
-  if (dfs.best) {
-    const evaluation = evaluateSelection(ctx, dfs.best);
-    if (evaluation.breakdown.total > bestEvaluation.breakdown.total) {
-      bestSelection = dfs.best;
-      bestEvaluation = evaluation;
-      stage = 'dfs';
-    }
-  }
-
-  // Stage 3: deterministic local improvement.
-  const polished = polish(
-    ctx,
-    bestSelection,
-    Math.max(deadline, performance.now() + 60),
-    excluded,
-  );
-  if (polished.improved && polished.evaluation.breakdown.total > bestEvaluation.breakdown.total) {
-    bestSelection = polished.selection;
-    bestEvaluation = polished.evaluation;
-    stage = stage === 'dfs' ? 'dfs+polish' : 'beam+polish';
-  }
+  let bestSelection = found.selection;
+  let bestEvaluation = found.evaluation;
+  const stage = found.stage;
 
   // Opponent-aware runs: the search ranks by the additive score (expected games won plus
   // the soft terms); the final pick among the near-optimal line-ups is the one with the
   // best estimated *match* outcome, which is not additive in the games.
+  const pool = [...found.pool, ...(found.dfsBest ? [found.dfsBest] : [])];
   if ((ctx.weights.opponentWin ?? 0) > 0 && ctx.opponent) {
-    const reranked = rerankByMatchOutcome(ctx, [...pool, ...(dfs.best ? [dfs.best] : []), bestSelection], bestEvaluation);
+    const reranked = rerankByMatchOutcome(ctx, [...pool, bestSelection], bestEvaluation);
     if (reranked) {
       bestSelection = reranked.selection;
       bestEvaluation = reranked.evaluation;
     }
   }
 
+  // Bias towards stronger players has to earn its place over the even split.
+  const gate = applySkewGate({
+    ctx,
+    presetKey,
+    best: { selection: bestSelection, evaluation: bestEvaluation },
+    pool: [...pool, bestSelection],
+    excluded,
+    timeLimitMs,
+  });
+
   return {
-    selection: bestSelection,
-    evaluation: bestEvaluation,
+    selection: gate.selection,
+    evaluation: gate.evaluation,
+    gated: gate.changed,
     meta: {
       stage,
-      exhaustive: dfs.exhaustive && candidates.every((entry) => entry.complete),
-      nodesVisited: dfs.nodes,
+      exhaustive: found.exhaustive && gate.exhaustive,
+      nodesVisited: found.nodes,
       elapsedMs: round(performance.now() - started, 1),
       label,
       presetKey,
+      ...(gate.report ? { skewGate: gate.report } : {}),
     },
   };
-}
-
-/**
- * Share of the score span a line-up may give up to be preferred for its estimated match
- * outcome (docs/OPPONENT_OPTIMIZER.md §4). Fairness, role spread and consecutive runs
- * are all inside the score, so a line-up that gives them up badly never qualifies.
- */
-export const RERANK_SCORE_TOLERANCE = 0.015;
-
-/** Risk-neutral match value (win + ½ draw) of a selection, over games with opponent data. */
-export function selectionMatchValue(ctx: PreparedContext, selection: readonly Combo[]): number {
-  const probabilities = selection.flatMap((combo, gi) => (ctx.opponentGames[gi] ? [combo.oppWin] : []));
-  return riskValue(independentGamesModel.outcome(probabilities));
-}
-
-function rerankByMatchOutcome(
-  ctx: PreparedContext,
-  pool: readonly Combo[][],
-  best: Evaluation,
-): { selection: Combo[]; evaluation: Evaluation } | null {
-  const span = positiveWeightSum(ctx) + negativeWeightSum(ctx);
-  const floor = best.breakdown.total - RERANK_SCORE_TOLERANCE * span;
-  const seen = new Set<string>();
-  let chosen: { selection: Combo[]; evaluation: Evaluation; value: number } | null = null;
-  for (const selection of pool) {
-    if (selection.length !== ctx.gameCount) continue;
-    const key = selectionSignature(ctx, selection);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (!hardFeasible(ctx, selection)) continue;
-    const evaluation = evaluateSelection(ctx, selection);
-    if (evaluation.breakdown.total < floor - 1e-12) continue;
-    const value = selectionMatchValue(ctx, selection);
-    if (
-      !chosen ||
-      value > chosen.value + 1e-12 ||
-      (Math.abs(value - chosen.value) <= 1e-12 &&
-        compareEvaluations({ selection, evaluation }, { selection: chosen.selection, evaluation: chosen.evaluation }) < 0)
-    ) {
-      chosen = { selection: [...selection], evaluation, value };
-    }
-  }
-  return chosen;
 }
 
 /** Turns a member-set selection into slot-ordered assignments, honouring locks. */
@@ -318,7 +230,7 @@ function buildWarnings(
     warnings.push({
       severity: 'warning',
       code: 'SPREAD_OVER_ONE',
-      message: `出場回数の最大差が ${evaluation.fairness.spread} です。絶対条件 (出場不可・最大出場回数・ロック)、または方針の重み付け (勝利優先の戦力重視など) により完全な均等化はしていません。`,
+      message: `出場回数の最大差が ${evaluation.fairness.spread} です。絶対条件 (出場不可・最大出場回数・ロック)、または方針の重み付けにより完全な均等化はしていません。`,
     });
   }
   if (evaluation.consecutiveExcessTotal > 0) {
@@ -439,11 +351,53 @@ function assembleSolution(
     tallies: buildTallies(ctx, outcome.evaluation),
     score: roundScore(comparable.breakdown),
     metrics: buildMetrics(ctx, outcome.evaluation),
-    explanation: withPredictionFactors(buildExplanation(ctx, bctx, outcome.selection, outcome.evaluation), prediction),
+    explanation: withPredictionFactors(
+      withSkewFactor(ctx, buildExplanation(ctx, bctx, outcome.selection, outcome.evaluation), outcome.meta.skewGate),
+      prediction,
+    ),
     warnings: buildWarnings(ctx, outcome.evaluation, candidates, outcome.meta),
     meta: ctx.opponentPlan ? { ...outcome.meta, opponent: ctx.opponentPlan } : outcome.meta,
     prediction,
   };
+}
+
+const countsText = (ctx: PreparedContext, counts: Record<string, number>): string =>
+  ctx.playerIds.map((id, index) => `${ctx.players[index].name} ${counts[id] ?? 0}`).join(' / ');
+
+const points = (value: number): string => `${(value * 100).toFixed(1)}pt`;
+
+/**
+ * The bias gate's verdict as a reason (docs/DESIGN.md, appearance bias): which split was
+ * judged against the even one, the gain measured, what it had to reach and on what data.
+ * Worded as an estimate; with no opponent the measure is a model reference, not a win rate.
+ */
+function withSkewFactor(ctx: PreparedContext, explanation: OrderExplanation, report: SkewGateReport | undefined): OrderExplanation {
+  if (!report) return explanation;
+  const even = countsText(ctx, report.evenCounts);
+  const biased = countsText(ctx, report.biasedCounts);
+  const measure =
+    report.basis === 'opponent'
+      ? '推定 Match 勝率の差'
+      : '同等戦力の相手を仮定した期待値の差 (勝率ではなく参考値)';
+  const needed = report.required === null ? '—' : points(report.required);
+  const factor: ExplanationFactor =
+    report.outcome === 'kept'
+      ? {
+          key: 'fairness',
+          label: '出場の偏りを採用',
+          detail: `均等案 (${even}) ではなく ${biased} を採用: ${measure} ${points(report.gain)} が必要な ${needed} を上回り、データの信頼度は「${CONFIDENCE_LABELS[report.confidence]}」です。`,
+          tone: 'neutral',
+        }
+      : {
+          key: 'fairness',
+          label: '出場の偏りは見送り (均等配分)',
+          detail:
+            report.required === null
+              ? `戦力差を活かす案 (${biased}) は、データの信頼度が「${CONFIDENCE_LABELS[report.confidence]}」で偏りの根拠にできないため見送り、均等案 (${even}) にしました。`
+              : `戦力差を活かす案 (${biased}) は、${measure} ${points(report.gain)} が必要な ${needed} に届かないため見送り、均等案 (${even}) にしました。`,
+          tone: 'neutral',
+        };
+  return { ...explanation, overall: [factor, ...explanation.overall] };
 }
 
 /**
@@ -589,9 +543,12 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
     if (!outcome) continue;
     // "Same optimum" is only claimed when the run proved its result optimal; a run cut
     // short by the clock or by capped candidate sets may have missed a better order.
-    const sameAs = outcome.meta.exhaustive
-      ? bestShownLineUp(ctx, shown, outcome.evaluation.breakdown.total)
-      : undefined;
+    // A line-up the bias gate chose over the run's best by score is not that run's optimum,
+    // so it never claims to be a shown one's twin.
+    const sameAs =
+      outcome.meta.exhaustive && !outcome.gated
+        ? bestShownLineUp(ctx, shown, outcome.evaluation.breakdown.total)
+        : undefined;
     if (sameAs) outcome.meta = { ...outcome.meta, alternativeTo: sameAs };
     const solution = assembleSolution(ctx, bctx, candidates, outcome, referenceCtx);
     if (!solution) continue;
