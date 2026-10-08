@@ -40,11 +40,11 @@ import { searchOnce } from './searchOnce';
 
 /**
  * Match-outcome gain (win + ½ draw) a one-game shift of bias must earn (HIGH-confidence
- * data; MEDIUM needs 1.5×). A provisional policy value: on the 40 replayed fixture matches
- * every threshold from 0 to 0.08 turns away 30–35 of the 35 biased line-ups (confidence,
- * not the threshold, does most of the work there), and 0.02 is the largest value for which
- * the worst replay stays inside the backtest's pre-existing −5 point guard. Real leagues
- * should calibrate it: `npm run backtest` prints the table, docs/DESIGN.md explains.
+ * data; MEDIUM needs 1.5×). A provisional policy value, not a measurement. On the 40
+ * replayed fixture matches (`npm run backtest`, section 3c) 0 pt still lets somebody sit
+ * out in a quarter of the matches, and 2 pt is the largest value for which the worst
+ * replay stays inside the backtest's long-standing −5 pt guard (3 pt does not). Real
+ * leagues should calibrate it; docs/DESIGN.md (追補 v1.5 W1) has the table.
  */
 export const SKEW_GAIN_THRESHOLD = 0.02;
 

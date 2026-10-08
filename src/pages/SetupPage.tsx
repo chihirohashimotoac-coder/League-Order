@@ -20,6 +20,7 @@ import {
 import { newGuest } from '../domain/players/newPlayer';
 import { createId } from '../utils/id';
 import { PlayerEditor } from '../components/PlayerEditor';
+import { StrengthBasisPanel } from '../components/StrengthBasisPanel';
 import { useAppStore } from '../state/appStore';
 import { MatchInfoFields } from '../components/MatchInfoFields';
 import {
@@ -67,7 +68,7 @@ export interface SetupDraft {
 /** Presentation for the policy cards; the weights themselves live in the domain. */
 const PRESET_CARDS: Record<PresetKey, { icon: IconName; summary: string }> = {
   OPPONENT_OPTIMIZED: { icon: 'target', summary: '相手の予測に対して推定勝率を最大化' },
-  WIN_FIRST: { icon: 'trophy', summary: '戦力を最優先' },
+  WIN_FIRST: { icon: 'trophy', summary: '戦力を重視 (根拠が強いときだけ偏らせる)' },
   BALANCED: { icon: 'scale', summary: '勝利と公平性を両立' },
   FAIRNESS_FIRST: { icon: 'equal', summary: '出場回数を均等化' },
   DEVELOPMENT: { icon: 'sprout', summary: '出場の少ない選手を優先' },
@@ -343,6 +344,11 @@ export function SetupPage({
             </button>
           </div>
         }
+      />
+      <StrengthBasisPanel
+        basis={strengthBasis}
+        players={effectivePlayers}
+        includedIds={new Set(included.map((config) => config.playerId))}
       />
       <ul className="participants">
         {everyone.map((player) => {

@@ -123,10 +123,20 @@ Season の新旧は「有効な `t_date` (> 0) → `start_date` 等 → `createT
 - 自動の fuzzy remap は禁止。一致しなければ「チームが見つかりません」→ ユーザーが選び直す。
 
 ### 3.4 Player
-- `opid` を安定 ID とする (チーム移籍しても同一人物)。
+- `opid` は n01 の安定 ID だが、**常に 1 人を指すとは限らない** (実 ATDO 2026 3rd 名簿で別人 2 名が `02-0111`、
+  過去の「助っ人」は 1 つの `opid` を多数が共有)。判定は `domain/n01/identity.ts`:
+  1. **同一 Season の中では `oid` が最優先**。`oid` はその Tournament で本人に一意。
+  2. `opid` で Season をつなぐのは、**関わるすべての Season の行の中で 1 人を指す `opid` だけ**。
+     「1 人」とは、同じ Season の行 (成績・名簿・オーダー) で、同じ `opid` に付く正規化名が 1 つであること。
+     名前が異なる行が同じ `opid` を持てば共有。共有ラベル (助っ人 / ゲスト / guest …) は常に共有。
+  3. 共有 `opid` の人は、その Season の `oid` で区別するだけ。過去 Season の行は誰にも渡さず Unknown / LOW。
+  4. 異なる Season で名前が変わるのは改名として、`opid` が一意なら追う。移籍 (チーム変更) も同じ。
+  5. 選手キー (`playerKey`) は一意な `opid`、でなければ `oid:<tdid>:<oid>`。旧キャッシュで共有 `opid` を 1 人に
+     まとめていたものは、複数の選手が 1 つの履歴を取り合うため**誰にも渡さない** (自分の PPR のみ・LOW)。
 - `opid` が無い応答: 同一 Tournament 内の `oid`、次に**正規化名の完全一致** (チーム内)。
   曖昧 (同名複数) なら自動対応付けしない。
 - 既存 (手動) チームの n01 接続時: `opid` → 正規化名完全一致 → 手動解決。fuzzy merge 禁止。
+- 手動で追加したメンバー (次戦確認の「次回から参加するメンバーを追加」) との照合は §4.2。
 
 ---
 
@@ -167,6 +177,18 @@ src/state/n01Session.ts      ← React 側: 同期の起動・進捗・キャッ
 | 新規 | 無し | Player を追加 (Rating=null, PPR source=n01) |
 | 既存 | 有り | `n01` バインディング・名前を更新。**ローカル項目は保持** |
 | 不在 | 有り | `rosterActive=false`。削除しない。参加者の既定 include を false |
+| 新規 | 手動メンバー (n01 未連携) | 下記。確実なときだけ自動で結び付け、迷うときは作業者に確認 |
+
+照合の順: 作業者の明示選択 → `opid` (n01 名簿と手元のどちらでも 1 人を指すときだけ) → 同一 Season の `oid` →
+正規化完全一致の名前 (n01 側・ローカル側とも一意のときだけ)。それより曖昧なものは自動で結び付けない。
+
+**手動メンバーとの照合 (`deferAmbiguous`、次戦フロー・再同期)**: 上の順で結び付けられない n01 選手のうち、
+手動メンバー (n01 未連携・休止でない) かもしれないものは、**追加せず `pending` として保留**する。
+同名の候補が複数ある、綴りの違い (空白など) がある、別名かもしれない、のいずれも同じ扱い。
+作業者は候補を見て「同一人物 / 別の人」を選ぶ (初期選択なし)。同一人物なら手動メンバーが n01 に結び付き、
+**ローカル ID・Rating・適性・シーズン累計・手動 PPR の方針は維持**されて名前だけ n01 のものになる。別人なら新規追加。
+「あとで」なら保留のままで、その人は今回の候補に入らない (次の同期で再度確認)。誤マージ・別名の黙認・二重作成をしない。
+既存のウィザード (チームを n01 と接続) は従来どおり全員を作業者が対応付けるため保留を使わない。
 
 ---
 
@@ -294,6 +316,7 @@ HOME の NEXT MATCH カード → [次戦のオーダーを作る] の 1 操作�
 | `POSITION_PRIOR_STRENGTH` | 3 | `domain/n01/positionModel.ts` |
 | `CONFIDENCE_THRESHOLDS` | 下記 (Phase 2) | `domain/prediction/confidence.ts` |
 | `CONFIDENCE_WEIGHT_FACTOR` | HIGH 1.0 / MEDIUM 0.7 / LOW 0.35 | `domain/orders/presets.ts` |
+| `SKEW_GAIN_THRESHOLD` | 2pt × steps² (MEDIUM ×1.5、LOW は偏りなし) — provisional | `optimizer/skewGate.ts` |
 | `STALE_WARN_MS` / `STALE_DANGER_MS` | 24h / 48h | `domain/n01/freshness.ts` |
 | `LATEST_WINDOW_MS` | 30 分 (セッション内のみ) | 同上 |
 

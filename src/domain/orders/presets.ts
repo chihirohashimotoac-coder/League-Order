@@ -40,7 +40,7 @@ export const PRESETS: Record<Exclude<PresetKey, 'CUSTOM'>, PresetDefinition> = {
   WIN_FIRST: {
     key: 'WIN_FIRST',
     label: '勝利優先',
-    description: 'Rating・PPR と適性を最重視。強い選手の +1 試合は許容しますが、Singles の独占や誰かの 0 出場は避けます。',
+    description: 'Rating・PPR と適性を最重視。強い選手を +1 試合多く使うのは、データが信頼でき推定上の利得が十分なときだけで、根拠が足りなければ均等に配分します。Singles の独占や誰かの 0 出場は避けます。',
     weights: { strength: 1, gameFit: 0.8, pairFit: 0.35, fairness: 0.25, roleFairness: 0.18, novelty: 0, consecutive: 0.35, season: 0.05 },
     scope: 'today',
   },
