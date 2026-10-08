@@ -137,6 +137,11 @@ Season の新旧は「有効な `t_date` (> 0) → `start_date` 等 → `createT
      (所属変更・兼務・同姓同名のいずれとも断定しない)。現実装では `oid` ごとにその Season の行だけを使い、`opid` による
      Season 間の履歴結合・別 `oid` の行の流用はしない。このため `alpp` 側には `gm3v` の成績・履歴が使われず、
      Unknown / LOW になる (他人の成績を渡さない代わりに、同一人物だった場合の成績・履歴が使えなくなる損失)。
+     **「その Season の行」には全チームの名簿を含める。** 成績・オーダーは出場した人しか示さないため、片方の `oid` にしか
+     成績が無くても、全名簿に同じ `opid` の別 `oid` があれば共有と判定できる。全名簿は今季と参照する過去 Season ごとに
+     1 回だけ取得する (`team/player/list` を `tpid` なしで)。**取得に失敗した Season は `opid` を証明できない**ものとして、
+     その Season では `opid` を一切信用しない (Season 間の結合なし)。同一 Season の `oid` 照合は維持し、履歴の無い選手は
+     低信頼のフォールバック (自分の現在値) に落ちる。失敗は `notes` に記録し、同期全体は失敗させない。
   3. 共有 `opid` の人は、その Season の `oid` で区別するだけ。過去 Season の行は誰にも渡さず Unknown / LOW。
   4. 異なる Season で名前が変わるのは改名として、`opid` が一意なら追う。チーム変更も、Season ごとに `oid` が1つなら同じ。
      (同じ Season 内で `oid` が複数になる場合は上記のとおり結合しない。将来結び付けるなら、本人確認を経た特定の
@@ -173,7 +178,8 @@ src/state/n01Session.ts      ← React 側: 同期の起動・進捗・キャッ
 - 時刻は `now: () => number` を注入。テストは固定時刻。乱数は使わない。
 - 書き込みは Read のみ。n01 の write 系 API・認証・トークンは一切使わない。
 - 同期 1 回のリクエスト数は上限を持つ (Season 1 + Tournament 1 + 自チーム roster 1 + stats 1 +
-  schedule 1 + 相手 roster 1 + 相手 orders 1 + 履歴 (depth×(Tournament+stats))。重複は 1 同期内でメモ化)。
+  schedule 1 + 相手 roster 1 + 相手 orders 1 + 今季の全チーム名簿 1 + 履歴 (depth×(Tournament+stats+全チーム名簿))。
+  重複は 1 同期内でメモ化)。
 
 ### 4.1 同期結果の適用 (原子的)
 

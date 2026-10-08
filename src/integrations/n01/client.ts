@@ -203,6 +203,14 @@ export class N01Client {
     return this.parsed('team/player/list', { tdid: tournamentId, tpid: teamId }, (raw) => parseRoster(raw, teamId));
   }
 
+  /**
+   * Every team's members of a tournament in one request (`team/player/list` without a
+   * `tpid`). It is the evidence for whether an `opid` names one person in that season.
+   */
+  fullRoster(tournamentId: string): Promise<N01RosterPlayer[]> {
+    return this.parsed('team/player/list', { tdid: tournamentId }, (raw) => parseRoster(raw, ''));
+  }
+
   schedule(tournamentId: string): Promise<N01Fixture[]> {
     return this.parsed('league/schedule/get', { tdid: tournamentId }, (raw) => parseSchedule(raw, this.now()));
   }

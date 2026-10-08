@@ -24,7 +24,7 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 | `league/list` | `keyword` | `{ result: 0, list: [{ lgid, title }] }` |
 | `league/tournament/list` | `lgid` | `title`, `list[].tdid`, `title`, `status` (20 受付 / 25 組み合わせ作成中 / 30 開催中 / 40 終了)、`t_date` (開催日。未設定は `0`)、`createTime` (作成日時。当初形は `start_date`)。一覧は**作成順**なので、Season の新旧は「有効な `t_date` (> 0) → `start_date` 等 → `createTime`」の最初の日時で決める |
 | `tournament/get` | `tdid` | (`{ result: 0, tournament: {…} }` の `tournament`) `title`, `lgid`, `status`, `softdarts`, `entry_list[].tpid/name`, `lg_table[division][]` (tpid の配列。`"empty"` は bye でチームではない)、`lg_title[division]` (無ければ `Division N`)、`lg_setting.schedule[]`, `lg_setting.game_setting[].round/schedule[]` (`round` = Division 番号)、`lg_result` (キー `<division>_<lsid>`、例 `0_rqbd` → `rqbd` に正規化し Division は別に保持)。当初形の `lg_table[].lg_title/list[].tpid` と素の `lsid` キーも読む |
-| `team/player/list` | `tdid`, `tpid` | `list[].opid`, `oid`, `tpid`, `oname` |
+| `team/player/list` | `tdid`, `tpid` (省略すると**全チーム**の名簿。`opid` が 1 人を指すかの判定に Season ごとに 1 回使う) | `list[].opid`, `oid`, `tpid`, `oname` |
 | `tournament/stats` | `tdid`, `kind=player_stats_list` (団体戦で個人行を得る) | `player_stats_list[]`: `opid`, `tpid`, `oname`, `score`, `darts`, `leg`, `winLeg`, `match`, `f9Score`, `f9Darts`, `highOut`, `best`, `ton00`, `ton40`, `ton70`, `ton80` (`set` / `winSet` / `worst` は未使用)。当初形の snake_case (`legs`, `win_legs`, `first9_score`, `best_leg`, `ton` …) も読む。PPR = `score / darts × 3`、欠損は `null` |
 | `league/schedule/get` | `tdid` | マニュアル: `schedule[division][]` = `{ p: [tpid1, tpid2], lsid, t }`。当初形: `list[].lsid`, `title`, `tpid1`, `tpid2`, `date`。空の tpid = bye。`t` は日付文字列またはエポック (秒 / ミリ秒、JST の日付に変換) |
 | `team/order/list` | `tdid`, `tpid` | マニュアル: `list[].tmid`, `position`, `order[]` (選手)。当初形: `list[].lsid`, `schid`, `position`, `players[]`。選手は `oid/opid/oname` のオブジェクトか `oid` 文字列。`schid` が無ければ `position` でゲームに対応付ける |
@@ -48,6 +48,7 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 | `tournament/stats` | **同期は続行**。PPR は前回値のまま (名簿の照合で対応付いた選手。`opid` が無く Season をまたいで名前で対応付いた選手も含む)、初回なら `null`。変更要約に「n01 の成績データを取得できなかったため…」 | 同期失敗 (成績だけ欠けた中途半端な保存はしない) |
 | `league/schedule/get` | 次戦なし (`notes` に記録)、勝利優先で生成 | 同上 |
 | 過去 Season の各応答 | その Season を除外 (`notes`) | 同上 |
+| 全チームの名簿 (`team/player/list` を `tpid` なしで、今季と各過去 Season に 1 回) | **同期は続行**。その Season は `opid` を証明できない扱いにし、`opid` による Season 間の結合をしない (同一 Season の `oid` 照合は維持。履歴の無い選手は低信頼)。`notes` に記録 | 同上 |
 | 相手の名簿・オーダー (次戦の分析) | 名簿・形式・PPR は保存し、**前回の分析は削除**する (古い相手を最新として使わない)。次戦は勝利優先で生成、変更要約に注記 | 同上 |
 
 ### 1.2 時刻・日付
@@ -113,10 +114,12 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 ### 5.1 取得範囲とリクエスト数
 
 既定 `current + 2 previous`。1 同期のリクエスト上限:
-Team 4 (tournament list / tournament / roster / stats) + 日程 1 + 相手 roster・orders 2 + 過去 Season ごとに最大 3 (tournament / stats / 相手 orders)。
-既定深さで最大 13。過去 Season の取得失敗は `notes` に記録し同期全体は失敗させない。
-実測 (フィクスチャ、`src/integrations/n01/n01Requests.test.ts`): 「次戦のオーダーを作る」の再同期 1 回 = **13 GET、重複 0**
-(Season 解決 2 + 名簿・成績 2 + 分析 9)。過去 Season 1 つあたりの追加数は一定。チーム情報 (名簿・成績・形式) だけなら 4。
+Team 4 (tournament list / tournament / roster / stats) + 日程 1 + 相手 roster・orders 2 + 今季の全チーム名簿 1 +
+過去 Season ごとに最大 4 (tournament / stats / 全チーム名簿 / 相手 orders)。
+既定深さで最大 16。過去 Season の取得失敗は `notes` に記録し同期全体は失敗させない。
+実測 (フィクスチャ、`src/integrations/n01/n01Requests.test.ts`): 「次戦のオーダーを作る」の再同期 1 回 = **16 GET、重複 0**
+(Season 解決 2 + 名簿・成績 2 + 分析 12)。過去 Season 1 つあたりの追加数は一定。チーム情報 (名簿・成績・形式) だけなら 4。
+(全名簿導入前は 13。+3 は今季と過去 2 Season の全チーム名簿。)
 
 ### 5.2 Position model
 

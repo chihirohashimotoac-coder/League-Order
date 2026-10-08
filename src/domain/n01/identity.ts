@@ -11,10 +11,13 @@ import { normalizeName } from './names';
  * 1. **Inside one season, `oid` is authoritative.** It is unique to the person in that
  *    tournament, so an exact `oid` match beats any `opid` match.
  * 2. **An `opid` links seasons only when it provably names one person in every season
- *    involved.** "One person" is judged inside a single season's rows (stats, rosters,
- *    orders): the same `opid` on rows with different normalised names, or with different
+ *    involved.** "One person" is judged inside a single season's rows (the season's whole
+ *    roster first, then stats and orders — stats and orders only show who played): the
+ *    same `opid` on rows with different normalised names, or with different
  *    `oid`s, is shared. The same `opid` with different names in *different* seasons is a
  *    rename, and is followed (every season has its own `oid`s, so those never count).
+ *
+ * A season whose whole roster could not be read proves nothing ({@link unprovenOpids}).
  *
  * Nothing here guesses. A shared `opid` is never resolved to a person; the people who
  * carry it are told apart by `oid` in their own season and have no history beyond it.
@@ -71,6 +74,23 @@ export function sharedOpids(rows: Iterable<IdentityRef>): Set<string> {
 export function isUsableOpid(opid: string | null | undefined, ...shared: (ReadonlySet<string> | undefined)[]): opid is string {
   if (!opid || isSharedLabel(opid)) return false;
   return shared.every((set) => !set?.has(opid));
+}
+
+/** Stands for "every `opid`": {@link unprovenOpids}. */
+class EveryOpid extends Set<string> {
+  override has(): boolean {
+    return true;
+  }
+}
+
+/**
+ * The shared set of a season whose whole roster could not be read. With nothing to show
+ * that an `opid` names one person there, no `opid` is trusted in that season: it joins
+ * nothing across seasons. The season's own `oid`s still match inside it, and people with
+ * no history are left to the low-confidence fallback — never to a namesake's numbers.
+ */
+export function unprovenOpids(): ReadonlySet<string> {
+  return new EveryOpid();
 }
 
 export function unionOf(...sets: (ReadonlySet<string> | undefined)[]): Set<string> {

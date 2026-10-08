@@ -12,7 +12,7 @@ import { buildPositionModel, type OrderObservation } from '../../domain/n01/posi
 import { RECENCY_WEIGHTS, recencyWeight } from '../../domain/n01/recency';
 import { familyOf, formatSignatures, signaturesOf, structureOf, type MatchFamily } from '../../domain/n01/signature';
 import { normalizeName } from '../../domain/n01/names';
-import { isUsableOpid, sharedOpids, type IdentityRef } from '../../domain/n01/identity';
+import { isUsableOpid, sharedOpids, unprovenOpids, type IdentityRef } from '../../domain/n01/identity';
 import type { N01Client } from './client';
 import { N01Error } from './client';
 import type { N01Fixture, N01OrderEntry, N01PlayerStats, N01RosterPlayer, N01ScheduleSlot, N01Tournament, N01TournamentSummary } from './types';
@@ -29,9 +29,15 @@ import { effectiveSchedule, matchKind, structuralKind } from './formatResolver';
  * previous seasons (at most `historyDepth`; their stats, and the opponent's orders when
  * the same team — by exact name — played that season).
  *
+ * Whole rosters: for the current season and for each past season referenced, every team's
+ * members are read once (`team/player/list` without a team). They are what shows whether an
+ * `opid` names one person in that season (`domain/n01/identity.ts`): stats and line-ups only
+ * name the people who played.
+ *
  * Build (pure): the snapshot the predictions read. A failed *historical* request only
  * thins the history (and is listed in `notes`); it never fails the sync, because the
- * current season is what matters most and is already in hand.
+ * current season is what matters most and is already in hand. A season whose whole roster
+ * could not be read is not *proven* for any `opid`: nothing joins seasons through it.
  */
 
 export interface HistoricalSeasonData {
@@ -43,12 +49,19 @@ export interface HistoricalSeasonData {
   opponentOrders: N01OrderEntry[];
 }
 
+/** Every team's members, per season; `null` = the request failed (nothing is proven there). */
+export interface SeasonRosters {
+  current: N01RosterPlayer[] | null;
+  byTournament: Record<string, N01RosterPlayer[] | null>;
+}
+
 export interface IntelligenceFetch {
   schedule: N01Fixture[];
   resolution: NextMatchResolution;
   opponentRoster: N01RosterPlayer[];
   opponentOrders: N01OrderEntry[];
   history: HistoricalSeasonData[];
+  rosters: SeasonRosters;
   notes: string[];
 }
 
@@ -76,6 +89,16 @@ export async function fetchIntelligence(
   const notes: string[] = [];
   const tournamentId = data.tournament.tournamentId;
 
+  // The current season's whole roster, asked once and alongside everything else.
+  const currentRoster = soft(
+    client.fullRoster(tournamentId),
+    null as N01RosterPlayer[] | null,
+    notes,
+    '今季の名簿 (全チーム) を取得できなかったため、選手 ID (opid) による過去シーズンとの結び付けは行いません。',
+  );
+  // An abort rejects it; if something else throws first it must not go unhandled.
+  currentRoster.catch(() => undefined);
+
   onProgress('opponent', 'running');
   const schedule = await soft(client.schedule(tournamentId), [] as N01Fixture[], notes, 'n01 の日程を取得できませんでした。');
   let resolution = resolveNextMatch(schedule, data.tournament, data.entry.teamId, options.now());
@@ -97,10 +120,21 @@ export async function fetchIntelligence(
   onProgress('analysis', 'running');
   const opponentName = resolution.kind === 'resolved' ? normalizeName(resolution.match.opponentName) : null;
   const history: HistoricalSeasonData[] = [];
+  const byTournament: Record<string, N01RosterPlayer[] | null> = {};
   const previous = previousSeasons(data.tournaments, tournamentId, options.historyDepth);
   for (const [index, summary] of previous.entries()) {
     try {
-      const [tournament, stats] = await Promise.all([client.tournament(summary.tournamentId), client.stats(summary.tournamentId)]);
+      const [tournament, stats, roster] = await Promise.all([
+        client.tournament(summary.tournamentId),
+        client.stats(summary.tournamentId),
+        soft(
+          client.fullRoster(summary.tournamentId),
+          null as N01RosterPlayer[] | null,
+          notes,
+          `${summary.title}: 名簿 (全チーム) を取得できなかったため、この季は選手 ID (opid) による結び付けを行いません。`,
+        ),
+      ]);
+      byTournament[summary.tournamentId] = roster;
       const opponentEntry = opponentName
         ? tournament.entries.find((entry) => normalizeName(entry.name) === opponentName)
         : undefined;
@@ -122,7 +156,7 @@ export async function fetchIntelligence(
   }
   onProgress('analysis', 'done');
 
-  return { schedule, resolution, opponentRoster, opponentOrders, history, notes };
+  return { schedule, resolution, opponentRoster, opponentOrders, history, rosters: { current: await currentRoster, byTournament }, notes };
 }
 
 // ---------------------------------------------------------------------------
@@ -285,18 +319,32 @@ export function buildIntelligenceSnapshot(input: BuildIntelligenceInput): N01Mat
       limitLegCount: game.n01?.limitLegCount ?? null,
     }));
 
-  // Which `opid`s name several people, judged season by season from that season's own rows.
+  // Which `opid`s name several people, judged season by season from that season's own rows:
+  // the whole roster first (it shows the people who did not play too), then stats and orders.
+  // A season whose whole roster is missing has no proven `opid` at all.
   const identityRows = new Map<string, IdentityRef[]>([
-    [currentId, [...data.stats, ...data.roster, ...fetched.opponentRoster, ...fetched.opponentOrders.flatMap((entry) => entry.players)]],
+    [
+      currentId,
+      [
+        ...(fetched.rosters.current ?? []),
+        ...data.stats,
+        ...data.roster,
+        ...fetched.opponentRoster,
+        ...fetched.opponentOrders.flatMap((entry) => entry.players),
+      ],
+    ],
   ]);
+  const unproven = new Set<string>();
+  if (!fetched.rosters.current) unproven.add(currentId);
   for (const season of fetched.history) {
-    identityRows.set(season.tournament.tournamentId, [
-      ...season.stats,
-      ...season.opponentOrders.flatMap((entry) => entry.players),
-    ]);
+    const id = season.tournament.tournamentId;
+    const roster = fetched.rosters.byTournament[id];
+    if (!roster) unproven.add(id);
+    identityRows.set(id, [...(roster ?? []), ...season.stats, ...season.opponentOrders.flatMap((entry) => entry.players)]);
   }
   const sharedBySeason = new Map([...identityRows].map(([id, rows]) => [id, sharedOpids(rows)]));
-  const identity: SeasonIdentity = (tournamentId) => sharedBySeason.get(tournamentId) ?? new Set<string>();
+  const identity: SeasonIdentity = (tournamentId) =>
+    unproven.has(tournamentId) ? unprovenOpids() : (sharedBySeason.get(tournamentId) ?? new Set<string>());
   const currentShared = identity(currentId);
 
   const ourPlayers = toPlayers(data.roster, currentId, currentShared);

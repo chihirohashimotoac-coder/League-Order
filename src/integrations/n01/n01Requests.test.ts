@@ -30,11 +30,12 @@ async function fullSync(historyDepth: number): Promise<N01Request[]> {
 }
 
 describe('request budget of a complete sync (Phase 6 §7)', () => {
-  it('resolve + roster + PPR + format + opponent + 2 past seasons = 13 GETs, none repeated', async () => {
+  it('resolve + roster + PPR + format + opponent + 2 past seasons + 3 whole rosters = 16 GETs, none repeated', async () => {
     const log = await fullSync(2);
     const keys = log.map((request) => `${request.operation}?${new URLSearchParams(request.params).toString()}`);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(log).toHaveLength(13);
+    // 13 before whole rosters, plus one whole roster for the current season and one per past season.
+    expect(log).toHaveLength(13 + 3);
     expect(log.every((request) => /^(league|tournament|team)\//.test(request.operation))).toBe(true);
   });
 

@@ -110,6 +110,12 @@ export interface HistorySpec {
   seasonIndex: number;
   stats: N01PlayerStats[];
   opponentOrders?: N01OrderEntry[];
+  /**
+   * The season's whole roster (`team/player/list` without a team): every team's rows.
+   * `null` = the request failed. Omitted = the stats rows' people, which is what the
+   * snapshot saw before whole rosters were fetched.
+   */
+  roster?: N01RosterPlayer[] | null;
 }
 
 export interface IntelSpec {
@@ -118,9 +124,18 @@ export interface IntelSpec {
   history?: HistorySpec[];
   opponentRoster?: N01RosterPlayer[];
   opponentOrders?: N01OrderEntry[];
+  /** The current season's whole roster: every team (see {@link HistorySpec.roster}). */
+  fullRoster?: N01RosterPlayer[] | null;
   /** Resolve the next match (an opponent exists) or not. */
   withOpponent?: boolean;
   now?: number;
+}
+
+/** The people a season's stats rows name, as roster rows (the pre-whole-roster evidence). */
+function rosterFromStats(stats: readonly N01PlayerStats[]): N01RosterPlayer[] {
+  return stats.flatMap((row) =>
+    row.oid ? [{ opid: row.opid, oid: row.oid, teamId: row.teamId ?? US, name: row.name ?? '' }] : [],
+  );
 }
 
 export function buildIntel(spec: IntelSpec): N01MatchIntelligenceSnapshot {
@@ -155,6 +170,12 @@ export function buildIntel(spec: IntelSpec): N01MatchIntelligenceSnapshot {
     opponentRoster: spec.opponentRoster ?? [],
     opponentOrders: spec.opponentOrders ?? [],
     history,
+    rosters: {
+      current: spec.fullRoster === undefined ? rosterFromStats(spec.stats) : spec.fullRoster,
+      byTournament: Object.fromEntries(
+        (spec.history ?? []).map((season) => [season.id, season.roster === undefined ? rosterFromStats(season.stats) : season.roster]),
+      ),
+    },
     notes: [],
   };
   return buildIntelligenceSnapshot({
