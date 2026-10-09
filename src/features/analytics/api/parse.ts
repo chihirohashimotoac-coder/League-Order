@@ -70,6 +70,17 @@ function positive(value: number | null): number | null {
 }
 
 /** One stats row → counters. 0 for High Finish / Best Leg means "no record" (design §2). */
+/**
+ * `r_g` is the division number counted from 1 (real ATDO 2026 3rd: the six teams of the A
+ * division all carry `r_g: 1` while `standings` calls that group index 0). The league table
+ * (`lg_table`) stays the authority for who is in which division; this is only a fallback, so
+ * it is converted to the same 0-based index and 0 / missing mean "unknown".
+ */
+function divisionOf(value: unknown): number | null {
+  const n = num(value);
+  return n !== null && n >= 1 ? n - 1 : null;
+}
+
 export function parseStatLine(row: Rec): StatLine {
   return {
     score: num(row.score),
@@ -99,7 +110,7 @@ export function parseTeamStats(raw: unknown): TeamStatsRow[] {
   for (const { key, row } of statRows('tournament/stats(stats_list)', raw, ['stats', 'stats_list', 'list'])) {
     const teamId = str(row.tpid) ?? key;
     if (!teamId) continue;
-    rows.push({ teamId, divisionIndex: num(row.r_g), line: parseStatLine(row) });
+    rows.push({ teamId, divisionIndex: divisionOf(row.r_g), line: parseStatLine(row) });
   }
   return rows;
 }
@@ -115,7 +126,7 @@ export function parsePlayerStats(raw: unknown): PlayerStatsRow[] {
       opid: str(row.opid),
       teamId: str(row.tpid),
       name: str(row.oname) ?? str(row.name),
-      divisionIndex: num(row.r_g),
+      divisionIndex: divisionOf(row.r_g),
       line: parseStatLine(row),
     });
   }

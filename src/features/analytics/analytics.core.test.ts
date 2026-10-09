@@ -21,7 +21,7 @@ describe('parse: live shapes', () => {
   it('team stats are keyed by tpid and keep every counter', () => {
     const [row] = parseTeamStats({ result: 0, kind: 'stats_list', stats: { GpiQ: TEAM_KALAVINKA } });
     expect(row.teamId).toBe('GpiQ');
-    expect(row.divisionIndex).toBe(1);
+    expect(row.divisionIndex).toBe(0); // r_g is 1-based; the A division is index 0
     expect(row.line).toMatchObject({ score: 20101, darts: 1195, breakLegs: 24, breakWins: 7, f9Score: 6270, bestLeg: 19, highOut: 89 });
   });
 
