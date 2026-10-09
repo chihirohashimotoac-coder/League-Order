@@ -6,7 +6,7 @@ import { MIN_SAMPLE, pairOf, reliabilityOf } from './metrics';
 import { pooledAverage, rankBestLeg, rankMetric, scopePlayers } from './ranking';
 import type { PlayerScope, RankingResult, ScopedPopulation } from './ranking';
 import type { SeasonData } from './seasonData';
-import type { MetricId, Ratio, Reliability } from './types';
+import type { MetricId, Metrics, Ratio, Reliability } from './types';
 
 /**
  * Player Analytics view-model (design §4): pure functions from a loaded period to what the
@@ -117,10 +117,24 @@ const PER_SIDE = 2;
  * Leg win rate alone says nothing about finishing.
  */
 export function buildInsights(person: PlayerPeriod, population: PlayerPopulation, baseRankings: (metric: MetricId) => RankingResult): Insights {
+  return buildInsightsFor({ key: person.personKey, metrics: person.metrics }, population.averages, baseRankings);
+}
+
+/** Anything with pooled metrics — a player or a team — can be judged the same way. */
+export interface InsightSubject {
+  key: string;
+  metrics: Metrics;
+}
+
+export function buildInsightsFor(
+  person: InsightSubject,
+  averages: Record<MetricId, Ratio>,
+  baseRankings: (metric: MetricId) => RankingResult,
+): Insights {
   const found: Insight[] = [];
   for (const metric of INSIGHT_METRICS) {
     const mine = person.metrics[metric];
-    const avg = population.averages[metric];
+    const avg = averages[metric];
     if (mine.value === null || avg.value === null || mine.den < MIN_SAMPLE[metric]) continue;
     const ranking = baseRankings(metric);
     if (ranking.population < MIN_POPULATION) continue;
@@ -128,7 +142,7 @@ export function buildInsights(person: PlayerPeriod, population: PlayerPopulation
     const diff = relative ? (mine.value - avg.value) / avg.value : mine.value - avg.value;
     const threshold = MATERIAL[metric] ?? 0.05;
     if (Math.abs(diff) < threshold) continue;
-    const standing = standingOf(ranking, person.personKey);
+    const standing = standingOf(ranking, person.key);
     found.push({
       kind: diff > 0 ? 'strength' : 'improve',
       metric,
@@ -183,13 +197,13 @@ export function trendOf(person: PlayerPeriod, metric: MetricId): TrendPoint[] {
 
 export const COMPARE_METRICS: RankMetric[] = ['ppr', 'first9', 'legRate', 'setRate', 'keep', 'break', 'ton80Rate', 'bestLeg'];
 
-export function metricValue(person: PlayerPeriod, metric: RankMetric): { value: number | null; sample: number } {
+export function metricValue(person: { metrics: Metrics }, metric: RankMetric): { value: number | null; sample: number } {
   if (metric === 'bestLeg') return { value: person.metrics.extremes.bestLeg, sample: person.metrics.extremes.bestLeg === null ? 0 : 1 };
   return { value: person.metrics[metric].value, sample: person.metrics[metric].den };
 }
 
 /** Text for a cell: the value, marked as reference when the sample is under the threshold. */
-export function cellText(person: PlayerPeriod, metric: RankMetric): { text: string; reference: boolean } {
+export function cellText(person: { metrics: Metrics }, metric: RankMetric): { text: string; reference: boolean } {
   const { value, sample } = metricValue(person, metric);
   if (value === null) return { text: '—', reference: false };
   const reference = metric !== 'bestLeg' && sample < MIN_SAMPLE[metric];
