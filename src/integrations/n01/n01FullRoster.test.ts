@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { rosterCoverage } from '../../domain/n01/identity';
 import { N01Client } from './client';
 import type { N01Request } from './endpoints';
 import { fetchTeamData } from './sync';
 import { buildIntelligenceSnapshot, fetchIntelligence } from './intelligence';
-import { createFixtureTransport, FAIL } from '../../test/n01/transport';
+import { allFixtureDatasets, createFixtureTransport, FAIL, fixtureResponse } from '../../test/n01/transport';
 import { FIXTURE_NOW } from '../../test/n01/leagues';
 import {
   BEFORE,
@@ -14,6 +15,7 @@ import {
   orderEntry,
   rosterPlayer,
   row,
+  wholeRoster,
 } from '../../test/n01/intelFixtures';
 
 /**
@@ -35,7 +37,7 @@ const ours = rosterPlayer(OP, 'cx', NAME);
 const nowRow = row(OP, 'cx', NAME, 60);
 
 describe('a previous season’s whole roster has two oids under one opid, stats for one', () => {
-  const previousRoster = [rosterPlayer(OP, 'pA', NAME, 'T9'), rosterPlayer(OP, 'pB', NAME, 'T9')];
+  const previousRoster = wholeRoster([rosterPlayer(OP, 'pA', NAME, 'T9'), rosterPlayer(OP, 'pB', NAME, 'T9')]);
   const previousStats = [row(OP, 'pB', NAME, 40, 1200, 'T9')];
 
   it('does not hand that row to the current player', () => {
@@ -52,7 +54,7 @@ describe('a previous season’s whole roster has two oids under one opid, stats 
       roster: [ours],
       stats: [nowRow],
       history: [
-        { id: PREVIOUS, title: '2026 2nd', seasonIndex: 1, stats: previousStats, roster: [rosterPlayer(OP, 'pB', NAME, 'T9')] },
+        { id: PREVIOUS, title: '2026 2nd', seasonIndex: 1, stats: previousStats, roster: wholeRoster([rosterPlayer(OP, 'pB', NAME, 'T9')]) },
       ],
     });
     expect(intel.ourStats[0].seasons.map((line) => line.seasonIndex)).toEqual([0, 1]);
@@ -65,7 +67,7 @@ describe('the current season’s whole roster has a same-named oid on another te
       roster: [ours],
       stats: [nowRow],
       // The other team's 田中 太郎: same name, same opid, another oid. Our own roster shows only one.
-      fullRoster: [ours, rosterPlayer(OP, 'cy', NAME, 'T7')],
+      fullRoster: wholeRoster([ours, rosterPlayer(OP, 'cy', NAME, 'T7')]),
       history: [{ id: PREVIOUS, title: '2026 2nd', seasonIndex: 1, stats: [row(OP, 'pB', NAME, 40)] }],
     });
     const player = intel.ourStats[0];
@@ -85,7 +87,7 @@ describe('a whole roster that could not be fetched proves nothing for that seaso
     const intel = buildIntel({
       roster: unique,
       stats: uniqueNow,
-      history: [{ id: PREVIOUS, title: '2026 2nd', seasonIndex: 1, stats: uniquePast, roster: [rosterPlayer('op_k', 'kOld', NAME)] }],
+      history: [{ id: PREVIOUS, title: '2026 2nd', seasonIndex: 1, stats: uniquePast, roster: wholeRoster([rosterPlayer('op_k', 'kOld', NAME)]) }],
     });
     expect(intel.ourStats[0].key).toBe('op_k');
     expect(intel.ourStats[0].seasons.map((line) => line.seasonIndex)).toEqual([0, 1]);
@@ -106,7 +108,7 @@ describe('a whole roster that could not be fetched proves nothing for that seaso
       stats: uniqueNow,
       history: [
         { id: PREVIOUS, title: '2026 2nd', seasonIndex: 1, stats: uniquePast, roster: null },
-        { id: BEFORE, title: '2026 1st', seasonIndex: 2, stats: [row('op_k', 'kOlder', NAME, 40)], roster: [rosterPlayer('op_k', 'kOlder', NAME)] },
+        { id: BEFORE, title: '2026 1st', seasonIndex: 2, stats: [row('op_k', 'kOlder', NAME, 40)], roster: wholeRoster([rosterPlayer('op_k', 'kOlder', NAME)]) },
       ],
     });
     expect(intel.ourStats[0].seasons.map((line) => line.seasonIndex)).toEqual([0, 2]);
@@ -117,7 +119,7 @@ describe('a whole roster that could not be fetched proves nothing for that seaso
       roster: unique,
       stats: uniqueNow,
       fullRoster: null,
-      history: [{ id: PREVIOUS, title: '2026 2nd', seasonIndex: 1, stats: uniquePast, roster: [rosterPlayer('op_k', 'kOld', NAME)] }],
+      history: [{ id: PREVIOUS, title: '2026 2nd', seasonIndex: 1, stats: uniquePast, roster: wholeRoster([rosterPlayer('op_k', 'kOld', NAME)]) }],
     });
     const player = intel.ourStats[0];
     expect(player.key).toBe('oid:t_cur:k1');
@@ -149,7 +151,7 @@ describe('a whole roster that could not be fetched proves nothing for that seaso
       const slot = intel.opponent!.positionModel.slots.find((entry) => entry.signature === 'SINGLES|01|1')!;
       return slot.players.reduce((total, player) => total + player.appearanceCount, 0);
     };
-    expect(seats([rosterPlayer('op_x', 'xOld', '山田 次郎', THEM)])).toBeGreaterThan(0);
+    expect(seats(wholeRoster([rosterPlayer('op_x', 'xOld', '山田 次郎', THEM)]))).toBeGreaterThan(0);
     expect(seats(null)).toBe(0);
   });
 });
@@ -165,14 +167,14 @@ describe('a rename and a normal join are unaffected', () => {
           title: '2026 2nd',
           seasonIndex: 1,
           stats: [row('op_k', 'old1', '田中 太朗', 44, 1200, THEM)],
-          roster: [rosterPlayer('op_k', 'old1', '田中 太朗', THEM)],
+          roster: wholeRoster([rosterPlayer('op_k', 'old1', '田中 太朗', THEM)]),
         },
         {
           id: BEFORE,
           title: '2026 1st',
           seasonIndex: 2,
           stats: [row('op_k', 'old2', '田中 太朗', 40)],
-          roster: [rosterPlayer('op_k', 'old2', '田中 太朗')],
+          roster: wholeRoster([rosterPlayer('op_k', 'old2', '田中 太朗')]),
         },
       ],
     });
@@ -191,7 +193,7 @@ describe('a rename and a normal join are unaffected', () => {
           seasonIndex: 1,
           stats: [row('op_k', 'old1', '田中 太朗', 44)],
           // Same opid, another oid and ANOTHER spelling: still two people under one opid.
-          roster: [rosterPlayer('op_k', 'old1', '田中 太朗'), rosterPlayer('op_k', 'old9', '田中 太郎')],
+          roster: wholeRoster([rosterPlayer('op_k', 'old1', '田中 太朗'), rosterPlayer('op_k', 'old9', '田中 太郎')]),
         },
       ],
     });
@@ -243,5 +245,221 @@ describe('fetching: each season’s whole roster is requested once', () => {
     // The failed season contributes no line to anybody through an opid.
     const failedIndex = fetched.history.find((season) => season.tournament.tournamentId === pastId)!.seasonIndex;
     for (const entry of intel.ourStats) expect(entry.seasons.map((line) => line.seasonIndex)).not.toContain(failedIndex);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A response can be a well-formed list and still not be every team's.
+// ---------------------------------------------------------------------------
+
+describe('rosterCoverage', () => {
+  const team = (teamId: string) => ({ teamId });
+
+  it('is complete when every registered team has a row', () => {
+    expect(rosterCoverage([team('A'), team('B'), team('C')], ['A', 'B', 'C'])).toEqual({ complete: true, missing: [], extra: [] });
+  });
+
+  it('is not complete when one registered team is missing, and says which', () => {
+    expect(rosterCoverage([team('A'), team('B')], ['A', 'B', 'C'])).toEqual({ complete: false, missing: ['C'], extra: [] });
+  });
+
+  it('stays complete when the response also names unregistered teams', () => {
+    expect(rosterCoverage([team('A'), team('B'), team('Z')], ['A', 'B'])).toEqual({ complete: true, missing: [], extra: ['Z'] });
+  });
+
+  it('cannot be proven for a tournament that lists no registered team', () => {
+    expect(rosterCoverage([team('A')], []).complete).toBe(false);
+  });
+});
+
+describe('a partial whole roster (3 registered teams, the response has 2) proves nothing for that season', () => {
+  // T3 is registered but missing from the response. Its unplayed member would share the
+  // opid with the player who has the stats row — which the response cannot show.
+  const registered3 = { extraTeams: ['T3'] };
+  const partial = (rows: ReturnType<typeof rosterPlayer>[]) => wholeRoster(rows); // US and THEM only
+  const mine = rosterPlayer('op_k', 'k1', NAME);
+  const nowRows = [row('op_k', 'k1', NAME, 60)];
+  const past = (seasonIndex: number, id: string, oid: string, ppr: number) => ({
+    id,
+    title: `season ${seasonIndex}`,
+    seasonIndex,
+    stats: [row('op_k', oid, NAME, ppr, 1200, 'T3')],
+    ...registered3,
+  });
+
+  it('a previous season’s partial response joins nobody through the opid', () => {
+    const intel = buildIntel({
+      roster: [mine],
+      stats: nowRows,
+      history: [{ ...past(1, PREVIOUS, 'kOld', 44), roster: partial([rosterPlayer('op_other', 'o1', '別人')]) }],
+    });
+    expect(intel.ourStats[0].seasons.map((line) => line.seasonIndex)).toEqual([0]);
+  });
+
+  it('the same season is used once the response names every registered team', () => {
+    const intel = buildIntel({
+      roster: [mine],
+      stats: nowRows,
+      history: [
+        {
+          ...past(1, PREVIOUS, 'kOld', 44),
+          roster: wholeRoster([rosterPlayer('op_other', 'o1', '別人'), rosterPlayer('op_k', 'kOld', NAME, 'T3')], ['US', 'T1', 'T2', 'T3']),
+        },
+      ],
+    });
+    expect(intel.ourStats[0].seasons.map((line) => line.seasonIndex)).toEqual([0, 1]);
+  });
+
+  it('the current season’s partial response holds back every season, but this season still reads by oid', () => {
+    const intel = buildIntel({
+      roster: [mine],
+      stats: nowRows,
+      ...registered3,
+      fullRoster: partial([mine]),
+      history: [{ ...past(1, PREVIOUS, 'kOld', 44), roster: wholeRoster([rosterPlayer('op_k', 'kOld', NAME, 'T3')], ['T1', 'T2', 'T3']) }],
+    });
+    const player = intel.ourStats[0];
+    expect(player.key).toBe('oid:t_cur:k1');
+    expect(player.seasons.map((line) => line.seasonIndex)).toEqual([0]);
+    expect(Math.round((player.seasons[0].score * 3) / player.seasons[0].darts)).toBe(60);
+  });
+
+  it('a partial previous season is held back alone; a verified earlier one still joins', () => {
+    const intel = buildIntel({
+      roster: [mine],
+      stats: nowRows,
+      history: [
+        { ...past(1, PREVIOUS, 'kOld', 44), roster: partial([rosterPlayer('op_other', 'o1', '別人')]) },
+        {
+          ...past(2, BEFORE, 'kOlder', 40),
+          roster: wholeRoster([rosterPlayer('op_k', 'kOlder', NAME, 'T3')], ['T1', 'T2', 'T3']),
+        },
+      ],
+    });
+    expect(intel.ourStats[0].seasons.map((line) => line.seasonIndex)).toEqual([0, 2]);
+  });
+
+  it('an opponent’s past line-ups are not credited through the opid in a partial season', () => {
+    const seats = (roster: ReturnType<typeof rosterPlayer>[]): number => {
+      const intel = buildIntel({
+        roster: [rosterPlayer('op_me', 'me1', '自分')],
+        stats: [row('op_me', 'me1', '自分', 50)],
+        withOpponent: true,
+        opponentRoster: [rosterPlayer('op_x', 'x1', '山田 次郎', THEM)],
+        history: [
+          {
+            id: PREVIOUS,
+            title: '2026 2nd',
+            seasonIndex: 1,
+            stats: [row('op_x', 'xOld', '山田 次郎', 70, 1200, THEM)],
+            extraTeams: ['T3'],
+            roster,
+            opponentOrders: [
+              orderEntry('pm1', 's1', [{ opid: 'op_x', oid: 'xOld', name: '山田 次郎' }]),
+              orderEntry('pm2', 's1', [{ opid: 'op_x', oid: 'xOld', name: '山田 次郎' }]),
+            ],
+          },
+        ],
+      });
+      const slot = intel.opponent!.positionModel.slots.find((entry) => entry.signature === 'SINGLES|01|1')!;
+      return slot.players.reduce((total, player) => total + player.appearanceCount, 0);
+    };
+    expect(seats(wholeRoster([rosterPlayer('op_x', 'xOld', '山田 次郎', THEM)], ['T1', 'T2', 'T3']))).toBeGreaterThan(0);
+    expect(seats(partial([rosterPlayer('op_x', 'xOld', '山田 次郎', THEM)]))).toBe(0);
+  });
+
+  it('guard: a response that also names an unregistered team is complete', () => {
+    const intel = buildIntel({
+      roster: [mine],
+      stats: nowRows,
+      history: [
+        {
+          id: PREVIOUS,
+          title: '2026 2nd',
+          seasonIndex: 1,
+          stats: [row('op_k', 'kOld', NAME, 44)],
+          roster: wholeRoster([rosterPlayer('op_k', 'kOld', NAME), rosterPlayer('op_z', 'z1', '登録外', 'T-unregistered')]),
+        },
+      ],
+    });
+    expect(intel.ourStats[0].seasons.map((line) => line.seasonIndex)).toEqual([0, 1]);
+  });
+});
+
+describe('fetching: a partial whole roster is told, the sync goes on, each roster is still one request', () => {
+  const ATDO = 'lg_l3hI_3397';
+  const CURRENT_ID = 't_ABvC_5234';
+
+  /** The real fixture response cut down to its first two teams: well-formed, not every team. */
+  const firstTwoTeams = (request: N01Request): unknown => {
+    const full = fixtureResponse(request, allFixtureDatasets()) as { list: { tpid: string }[] };
+    const keep = new Set([...new Set(full.list.map((entry) => entry.tpid))].slice(0, 2));
+    return { ...full, list: full.list.filter((entry) => keep.has(entry.tpid)) };
+  };
+  /** The real fixture response plus a team that is not registered, as the live API returns. */
+  const withUnregisteredTeam = (request: N01Request): unknown => {
+    const full = fixtureResponse(request, allFixtureDatasets()) as { list: unknown[] };
+    return { ...full, list: [...full.list, { opid: 'zz-0001', oid: 'zzOid', tpid: 'NOT_REGISTERED', oname: '登録外 太郎' }] };
+  };
+  const isWholeRoster = (request: N01Request): boolean => request.operation === 'team/player/list' && request.params.tpid === undefined;
+
+  async function run(override?: (request: N01Request) => unknown, depth = 2) {
+    const log: N01Request[] = [];
+    const client = new N01Client(createFixtureTransport({ log, override }), { now: () => FIXTURE_NOW });
+    const data = await fetchTeamData(client, { leagueId: ATDO, leagueTitle: 'ATDO', tournamentId: CURRENT_ID, teamTpid: 'GpiQ' }, () => FIXTURE_NOW);
+    log.length = 0;
+    const fetched = await fetchIntelligence(client, data, { historyDepth: depth, now: () => FIXTURE_NOW });
+    const intel = buildIntelligenceSnapshot({ teamId: 'team_kv', data, format: managedFormat(), fetched, historyDepth: depth, now: FIXTURE_NOW });
+    return { data, fetched, intel, log };
+  }
+  const tamuraLines = (intel: Awaited<ReturnType<typeof run>>['intel']): number[] =>
+    intel.opponent!.stats.find((entry) => entry.name === '田村 翔')!.seasons.map((line) => line.seasonIndex);
+
+  it('baseline: with every team, 田村 is followed through all three seasons', async () => {
+    const { intel } = await run();
+    expect(tamuraLines(intel)).toEqual([0, 1, 2]);
+  });
+
+  it('guard: unregistered team ids in the response do not make it incomplete', async () => {
+    const { intel, fetched } = await run((request) => (isWholeRoster(request) ? withUnregisteredTeam(request) : undefined));
+    expect(tamuraLines(intel)).toEqual([0, 1, 2]);
+    expect(fetched.notes.filter((note) => note.includes('不完全'))).toEqual([]);
+  });
+
+  it('a previous season that came back with two teams is noted and held back alone', async () => {
+    const first = await run();
+    const partialId = first.fetched.history[0].tournament.tournamentId;
+    const { intel, fetched, log } = await run((request) => (isWholeRoster(request) && request.params.tdid === partialId ? firstTwoTeams(request) : undefined));
+    expect(fetched.notes.some((note) => note.includes(fetched.history[0].summary.title) && note.includes('不完全'))).toBe(true);
+    expect(tamuraLines(intel)).toEqual([0, 2]);
+    // The partial response was not asked for again, and the sync went on to the next season.
+    expect(log.filter((request) => isWholeRoster(request) && request.params.tdid === partialId)).toHaveLength(1);
+    expect(fetched.history).toHaveLength(2);
+  });
+
+  it('a current season that came back with two teams holds every season back, and is noted', async () => {
+    const { intel, fetched, log } = await run((request) => (isWholeRoster(request) && request.params.tdid === CURRENT_ID ? firstTwoTeams(request) : undefined));
+    expect(fetched.notes.some((note) => note.includes('不完全'))).toBe(true);
+    // No past season is reached through the opid. (This season's own line is read by oid in the
+    // buildIntel test above; the generated fixture's stats rows carry no oid for people who
+    // have an opid, so it is not asserted here.)
+    expect(tamuraLines(intel).filter((index) => index > 0)).toEqual([]);
+    expect(log.filter((request) => isWholeRoster(request) && request.params.tdid === CURRENT_ID)).toHaveLength(1);
+  });
+
+  it('a failed roster and a partial one both keep the sync going, one request per season', async () => {
+    const first = await run();
+    const [a, b] = first.fetched.history.map((season) => season.tournament.tournamentId);
+    const { fetched, log } = await run((request) => {
+      if (!isWholeRoster(request)) return undefined;
+      if (request.params.tdid === a) return FAIL;
+      if (request.params.tdid === b) return firstTwoTeams(request);
+      return undefined;
+    });
+    expect(fetched.history).toHaveLength(2);
+    expect(fetched.notes.filter((note) => note.includes('名簿'))).toHaveLength(2);
+    const calls = log.filter(isWholeRoster).map((request) => request.params.tdid);
+    expect(calls).toHaveLength(3);
+    expect(new Set(calls).size).toBe(3);
   });
 });

@@ -17,7 +17,8 @@ import { normalizeName } from './names';
  *    `oid`s, is shared. The same `opid` with different names in *different* seasons is a
  *    rename, and is followed (every season has its own `oid`s, so those never count).
  *
- * A season whose whole roster could not be read proves nothing ({@link unprovenOpids}).
+ * A season whose whole roster could not be read, or came back without every registered
+ * team ({@link rosterCoverage}), proves nothing ({@link unprovenOpids}).
  *
  * Nothing here guesses. A shared `opid` is never resolved to a person; the people who
  * carry it are told apart by `oid` in their own season and have no history beyond it.
@@ -74,6 +75,34 @@ export function sharedOpids(rows: Iterable<IdentityRef>): Set<string> {
 export function isUsableOpid(opid: string | null | undefined, ...shared: (ReadonlySet<string> | undefined)[]): opid is string {
   if (!opid || isSharedLabel(opid)) return false;
   return shared.every((set) => !set?.has(opid));
+}
+
+export interface RosterCoverage {
+  /** True when every registered team has at least one row in the roster. */
+  complete: boolean;
+  /** Registered team ids the roster has no row for. */
+  missing: string[];
+  /** Team ids in the roster that the tournament does not list (the live API returns some). */
+  extra: string[];
+}
+
+/**
+ * Is this roster every registered team's? A `team/player/list` without a team that comes
+ * back well-formed can still be some teams only; an `opid` cannot be judged one person from
+ * it, because a missing team may hold the unplayed namesake. Teams in the roster that the
+ * tournament does not list do not matter, and do not make it incomplete. A tournament that
+ * lists no team gives nothing to check the roster against, so it is not complete either.
+ *
+ * Shared by the snapshot builder and `npm run verify:n01`, so both ask the same question.
+ */
+export function rosterCoverage(roster: Iterable<{ teamId: string }>, registeredTeamIds: Iterable<string>): RosterCoverage {
+  const inRoster = new Set<string>();
+  for (const row of roster) inRoster.add(row.teamId);
+  const registered = [...new Set(registeredTeamIds)];
+  const listed = new Set(registered);
+  const missing = registered.filter((teamId) => !inRoster.has(teamId));
+  const extra = [...inRoster].filter((teamId) => !listed.has(teamId));
+  return { complete: registered.length > 0 && missing.length === 0, missing, extra };
 }
 
 /** Stands for "every `opid`": {@link unprovenOpids}. */

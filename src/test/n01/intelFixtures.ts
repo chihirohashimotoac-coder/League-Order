@@ -29,18 +29,17 @@ export function slot(schid: string, numPart = 1, matchType = '01'): N01ScheduleS
   return { schid, numPart, subtitle: null, matchType, startScore: matchType === '01' ? 501 : null, limitLegCount: 2, group: null };
 }
 
-export function tournament(id: string, title: string): N01Tournament {
+/** `extraTeams`: more registered teams than the two the tests usually need. */
+export function tournament(id: string, title: string, extraTeams: readonly string[] = []): N01Tournament {
+  const teams = [US, THEM, ...extraTeams];
   return {
     tournamentId: id,
     title,
     leagueId: 'lg_test',
     status: id === CURRENT ? 30 : 40,
     softdarts: true,
-    entries: [
-      { teamId: US, name: 'Us' },
-      { teamId: THEM, name: 'Them' },
-    ],
-    divisions: [{ index: 0, title: 'D', teamIds: [US, THEM] }],
+    entries: teams.map((teamId) => ({ teamId, name: teamId === US ? 'Us' : teamId === THEM ? 'Them' : teamId })),
+    divisions: [{ index: 0, title: 'D', teamIds: teams }],
     schedule: [slot('s1'), slot('s2')],
     gameSettings: [],
     results: new Map(),
@@ -110,6 +109,8 @@ export interface HistorySpec {
   seasonIndex: number;
   stats: N01PlayerStats[];
   opponentOrders?: N01OrderEntry[];
+  /** Registered teams beyond `US` and `THEM`. */
+  extraTeams?: string[];
   /**
    * The season's whole roster (`team/player/list` without a team): every team's rows.
    * `null` = the request failed. Omitted = the stats rows' people, which is what the
@@ -126,20 +127,37 @@ export interface IntelSpec {
   opponentOrders?: N01OrderEntry[];
   /** The current season's whole roster: every team (see {@link HistorySpec.roster}). */
   fullRoster?: N01RosterPlayer[] | null;
+  /** Registered teams beyond `US` and `THEM` in the current season. */
+  extraTeams?: string[];
   /** Resolve the next match (an opponent exists) or not. */
   withOpponent?: boolean;
   now?: number;
 }
 
+/**
+ * A whole-roster response as the live API gives it: every registered team has members in
+ * it. Teams the given rows leave out get one bare row (no `opid`, so it is no evidence about
+ * anybody) — a test then states only the people it is about. Teams in `rows` that are not
+ * registered stay (the live API returns some).
+ */
+export function wholeRoster(rows: readonly N01RosterPlayer[], registered: readonly string[] = [US, THEM]): N01RosterPlayer[] {
+  const present = new Set(rows.map((row) => row.teamId));
+  const filler = registered
+    .filter((teamId) => !present.has(teamId))
+    .map((teamId) => ({ opid: null, oid: `bare:${teamId}`, teamId, name: `(${teamId})` }));
+  return [...rows, ...filler];
+}
+
 /** The people a season's stats rows name, as roster rows (the pre-whole-roster evidence). */
-function rosterFromStats(stats: readonly N01PlayerStats[]): N01RosterPlayer[] {
-  return stats.flatMap((row) =>
-    row.oid ? [{ opid: row.opid, oid: row.oid, teamId: row.teamId ?? US, name: row.name ?? '' }] : [],
+function rosterFromStats(stats: readonly N01PlayerStats[], registered: readonly string[]): N01RosterPlayer[] {
+  return wholeRoster(
+    stats.flatMap((row) => (row.oid ? [{ opid: row.opid, oid: row.oid, teamId: row.teamId ?? US, name: row.name ?? '' }] : [])),
+    registered,
   );
 }
 
 export function buildIntel(spec: IntelSpec): N01MatchIntelligenceSnapshot {
-  const current = tournament(CURRENT, '2026 3rd');
+  const current = tournament(CURRENT, '2026 3rd', spec.extraTeams);
   const data: N01TeamData = {
     league: { leagueId: 'lg_test', title: 'L' },
     tournaments: [],
@@ -153,7 +171,7 @@ export function buildIntel(spec: IntelSpec): N01MatchIntelligenceSnapshot {
   const history: HistoricalSeasonData[] = (spec.history ?? []).map((season) => ({
     summary: summary(season.id, season.title, 1_000 - season.seasonIndex * 100, season.seasonIndex),
     seasonIndex: season.seasonIndex,
-    tournament: tournament(season.id, season.title),
+    tournament: tournament(season.id, season.title, season.extraTeams),
     stats: season.stats,
     opponentTeamId: season.opponentOrders ? THEM : null,
     opponentOrders: season.opponentOrders ?? [],
@@ -171,9 +189,13 @@ export function buildIntel(spec: IntelSpec): N01MatchIntelligenceSnapshot {
     opponentOrders: spec.opponentOrders ?? [],
     history,
     rosters: {
-      current: spec.fullRoster === undefined ? rosterFromStats(spec.stats) : spec.fullRoster,
+      current:
+        spec.fullRoster === undefined ? rosterFromStats(spec.stats, [US, THEM, ...(spec.extraTeams ?? [])]) : spec.fullRoster,
       byTournament: Object.fromEntries(
-        (spec.history ?? []).map((season) => [season.id, season.roster === undefined ? rosterFromStats(season.stats) : season.roster]),
+        (spec.history ?? []).map((season) => [
+          season.id,
+          season.roster === undefined ? rosterFromStats(season.stats, [US, THEM, ...(season.extraTeams ?? [])]) : season.roster,
+        ]),
       ),
     },
     notes: [],

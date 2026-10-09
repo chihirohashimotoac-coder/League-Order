@@ -12,7 +12,7 @@ import { buildPositionModel, type OrderObservation } from '../../domain/n01/posi
 import { RECENCY_WEIGHTS, recencyWeight } from '../../domain/n01/recency';
 import { familyOf, formatSignatures, signaturesOf, structureOf, type MatchFamily } from '../../domain/n01/signature';
 import { normalizeName } from '../../domain/n01/names';
-import { isUsableOpid, sharedOpids, unprovenOpids, type IdentityRef } from '../../domain/n01/identity';
+import { isUsableOpid, rosterCoverage, sharedOpids, unprovenOpids, type IdentityRef } from '../../domain/n01/identity';
 import type { N01Client } from './client';
 import { N01Error } from './client';
 import type { N01Fixture, N01OrderEntry, N01PlayerStats, N01RosterPlayer, N01ScheduleSlot, N01Tournament, N01TournamentSummary } from './types';
@@ -37,7 +37,8 @@ import { effectiveSchedule, matchKind, structuralKind } from './formatResolver';
  * Build (pure): the snapshot the predictions read. A failed *historical* request only
  * thins the history (and is listed in `notes`); it never fails the sync, because the
  * current season is what matters most and is already in hand. A season whose whole roster
- * could not be read is not *proven* for any `opid`: nothing joins seasons through it.
+ * could not be read, or came back without every registered team, is not *proven* for any
+ * `opid`: nothing joins seasons through it.
  */
 
 export interface HistoricalSeasonData {
@@ -70,6 +71,15 @@ export interface IntelligenceOptions {
   now: () => number;
   /** The captain's choice when the next match was ambiguous. */
   chosenMatchId?: string;
+}
+
+/** A note when a whole roster came back without every registered team (null when it is complete). */
+function incompleteRosterNote(title: string, roster: readonly N01RosterPlayer[] | null, tournament: N01Tournament): string | null {
+  if (!roster) return null;
+  const coverage = rosterCoverage(roster, tournament.entries.map((entry) => entry.teamId));
+  if (coverage.complete) return null;
+  const registered = tournament.entries.length;
+  return `${title}: 名簿 (全チーム) が不完全でした (登録 ${registered} チーム中 ${registered - coverage.missing.length} チーム分)。この季は選手 ID (opid) による結び付けを行いません。`;
 }
 
 function soft<T>(promise: Promise<T>, fallback: T, notes: string[], note: string): Promise<T> {
@@ -135,6 +145,8 @@ export async function fetchIntelligence(
         ),
       ]);
       byTournament[summary.tournamentId] = roster;
+      const incomplete = incompleteRosterNote(summary.title, roster, tournament);
+      if (incomplete) notes.push(incomplete);
       const opponentEntry = opponentName
         ? tournament.entries.find((entry) => normalizeName(entry.name) === opponentName)
         : undefined;
@@ -156,7 +168,11 @@ export async function fetchIntelligence(
   }
   onProgress('analysis', 'done');
 
-  return { schedule, resolution, opponentRoster, opponentOrders, history, rosters: { current: await currentRoster, byTournament }, notes };
+  const current = await currentRoster;
+  const incomplete = incompleteRosterNote(data.tournament.title, current, data.tournament);
+  if (incomplete) notes.push(incomplete);
+
+  return { schedule, resolution, opponentRoster, opponentOrders, history, rosters: { current, byTournament }, notes };
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +337,8 @@ export function buildIntelligenceSnapshot(input: BuildIntelligenceInput): N01Mat
 
   // Which `opid`s name several people, judged season by season from that season's own rows:
   // the whole roster first (it shows the people who did not play too), then stats and orders.
-  // A season whose whole roster is missing has no proven `opid` at all.
+  // A season whose whole roster is missing, or is not every registered team's, has no proven
+  // `opid` at all.
   const identityRows = new Map<string, IdentityRef[]>([
     [
       currentId,
@@ -335,11 +352,13 @@ export function buildIntelligenceSnapshot(input: BuildIntelligenceInput): N01Mat
     ],
   ]);
   const unproven = new Set<string>();
-  if (!fetched.rosters.current) unproven.add(currentId);
+  const proven = (roster: readonly N01RosterPlayer[] | null | undefined, tournament: N01Tournament): boolean =>
+    !!roster && rosterCoverage(roster, tournament.entries.map((entry) => entry.teamId)).complete;
+  if (!proven(fetched.rosters.current, data.tournament)) unproven.add(currentId);
   for (const season of fetched.history) {
     const id = season.tournament.tournamentId;
     const roster = fetched.rosters.byTournament[id];
-    if (!roster) unproven.add(id);
+    if (!proven(roster, season.tournament)) unproven.add(id);
     identityRows.set(id, [...(roster ?? []), ...season.stats, ...season.opponentOrders.flatMap((entry) => entry.players)]);
   }
   const sharedBySeason = new Map([...identityRows].map(([id, rows]) => [id, sharedOpids(rows)]));
