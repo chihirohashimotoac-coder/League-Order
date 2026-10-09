@@ -59,6 +59,26 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Backtest evidence. `npm run backtest` exits 0 whatever it prints, so this compares its
+      # report with the committed baseline (scripts/backtest.baseline.md) and fails the release
+      # on any difference. The report is deterministic — seeded fixture leagues, fixed clock, no
+      # network, searches bounded by node count not time — and only the two wall-clock timing
+      # lines are masked. The result is in this log ("BACKTEST MATCH … sha256"), in the job
+      # summary, and in the `backtest-report` artifact (raw report, normalized report, baseline,
+      # summary.json). A deliberate model change updates the baseline in the same commit:
+      # `npm run backtest:check -- --update`.
+      - name: Backtest matches the committed baseline
+        run: npm run backtest:check
+
+      - name: Upload the backtest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-report
+          path: backtest-report/
+          retention-days: 30
+          if-no-files-found: warn
+
       # The repo's playwright.config.ts prefers a pre-installed Chromium when one is
       # present and otherwise falls back to Playwright's own, so the runner only needs
       # the browser it does not have.

@@ -15,7 +15,9 @@
     "test:e2e": "playwright test",
     "verify": "npm run lint && npm run test && npm run build",
     "verify:n01": "tsx scripts/verify-n01.ts",
-    "backtest": "tsx scripts/backtest.ts"
+    "verify:analytics-n01": "tsx scripts/verify-analytics-n01.ts",
+    "backtest": "tsx scripts/backtest.ts",
+    "backtest:check": "tsx scripts/backtest-check.ts"
   },
   "dependencies": {
     "react": "^19.1.0",
