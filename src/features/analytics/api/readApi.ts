@@ -12,6 +12,9 @@ import { AnalyticsSchemaError, parsePlayerStats, parseStandings, parseTeamStats 
  * and its request counts are untouched — and it can only issue anonymous GETs to the
  * allow-listed n01 hosts. The same request is never sent twice by one adapter, and a hard
  * request budget stops a runaway "all periods" fetch.
+ *
+ * One adapter serves one load: its memo and request budget live as long as the instance, so a
+ * refresh (or a later screen visit) creates a new one.
  */
 
 export const ANALYTICS_OPERATIONS = [
