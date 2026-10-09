@@ -4001,3 +4001,284 @@ input[type='range'] {
 .strength-basis-panel .basis-row {
   margin: 4px 0;
 }
+
+/* ------------------------------------------------------------- analytics */
+
+.analytics {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.analytics-filters {
+  display: grid;
+  gap: 12px;
+}
+
+.analytics-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.analytics-body {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.analytics-body.stale {
+  opacity: 0.6;
+}
+
+.analytics-columns {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.analytics-col {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  align-content: start;
+}
+
+/* One column on phones: the roster, then the selected player's detail, the ranking last. */
+@media (max-width: 899px) {
+  .analytics-col {
+    display: contents;
+  }
+
+  .analytics-rank {
+    order: 2;
+  }
+}
+
+@media (min-width: 900px) {
+  .analytics-columns {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    align-items: start;
+  }
+}
+
+.analytics .block {
+  display: block;
+}
+
+.analytics-roster .list-row[aria-pressed='true'] {
+  background: var(--color-accent-tint);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.analytics-roster .list-row:disabled {
+  cursor: default;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (min-width: 600px) {
+  .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.metric-card {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+}
+
+.metric-card .k {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.metric-card .v {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-card .s,
+.metric-card .c,
+.metric-card .r {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.metric-card .badge {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+
+.kv-grid dt {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.kv-grid dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.analytics-details > summary {
+  min-height: var(--tap-target, 44px);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.plain-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.plain-list .meta {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.mini-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.insights {
+  display: grid;
+  gap: 12px;
+}
+
+.analytics-table-wrap {
+  min-width: 0;
+}
+
+.analytics-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.analytics-table caption {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  padding-bottom: 6px;
+}
+
+.analytics-table th,
+.analytics-table td {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.analytics-table thead th {
+  background: var(--color-paper);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.analytics-table tbody th {
+  font-weight: 600;
+}
+
+.analytics-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.analytics-table .rank {
+  width: 2.6em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.analytics-table .sample {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.analytics-table .sub {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.analytics-table tr.me {
+  background: var(--color-accent-tint);
+}
+
+.analytics-table td.best {
+  font-weight: 800;
+  color: var(--color-accent-text);
+}
+
+.analytics-table tbody.reference th[colspan] {
+  background: var(--color-paper);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.trend {
+  margin: 8px 0 0;
+}
+
+.trend-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.trend-svg .grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.trend-svg .axis {
+  fill: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.trend-svg .series {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+
+.trend-svg .dot {
+  fill: var(--color-accent);
+}
