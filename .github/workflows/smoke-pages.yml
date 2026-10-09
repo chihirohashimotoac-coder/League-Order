@@ -1,0 +1,64 @@
+name: Smoke test the published site
+
+# Opens the PUBLISHED GitHub Pages site in a real browser (Chromium, phone and desktop
+# viewports) and drives it against the real n01 API: create the ATDO team, open PLAYER and TEAM
+# analytics, generate one order, and prove from the browser's own network log that stats_list,
+# player_stats_list, standings and the whole-league roster all came back HTTP 200 and readable
+# cross-origin. Nothing is mocked. Run it from the Actions tab after a publish; it is not part
+# of the release gate, because it depends on n01 and on Pages having finished deploying.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Published site URL'
+        required: false
+        default: 'https://chihirohashimotoac-coder.github.io/League-Order/'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Published site, real browser, real n01
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke test
+        env:
+          PAGES_URL: ${{ inputs.url }}
+        run: |
+          set -o pipefail
+          mkdir -p smoke-results
+          npm run --silent smoke:pages 2>&1 | tee smoke-results/smoke.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '## Published-site smoke test'
+            echo
+            echo '```'
+            cat smoke-results/smoke.txt 2>/dev/null || echo '(no output)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload screenshots, trace and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: smoke-results/
+          retention-days: 30

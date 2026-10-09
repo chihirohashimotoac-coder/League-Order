@@ -54,6 +54,7 @@ npm run backtest     # 推定勝率モデル / 対戦相手最適化の backtest
 npm run verify:n01   # n01 公開 Read API のライブ契約確認 (任意・要ネットワーク、CI 対象外)
 npm run verify:analytics-n01  # 分析画面用 API (stats_list / standings / 全名簿 / CORS) のライブ契約確認 (読み取りGETのみ・要ネットワーク。到達不可なら終了コード2。Actions の "Verify n01 live contract" でも実行可)
 npm run backtest:check        # backtest をコミット済みベースライン (scripts/backtest.baseline.md) と照合し backtest-report/ に証跡を保存 (公開前CIで実行。意図的なモデル変更は -- --update でベースラインも更新)
+npm run smoke:pages  # 公開済みサイトを実ブラウザ・実 n01 で確認 (PAGES_URL 指定可。Actions の "Smoke test the published site" で実行)
 ```
 
 n01 連携のテストはすべてフィクスチャ (ATDO / TDO / TDA 形のシミュレーション) で動き、

@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "smoke:pages": "playwright test -c playwright.pages.config.ts",
     "verify": "npm run lint && npm run test && npm run build",
     "verify:n01": "tsx scripts/verify-n01.ts",
     "verify:analytics-n01": "tsx scripts/verify-analytics-n01.ts",
