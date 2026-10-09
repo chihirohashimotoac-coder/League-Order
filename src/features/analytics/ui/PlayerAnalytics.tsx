@@ -6,11 +6,10 @@ import { formatSample, formatValue, METRIC_LABEL, RANK_METRICS } from '../format
 import type { RankMetric } from '../format';
 import { MIN_SAMPLE, reliabilityOf } from '../metrics';
 import { buildInsights, buildPopulation, cellText, COMPARE_METRICS, findPerson, metricValue, rankIn, standingOf, trendOf } from '../playerView';
-import type { Insight } from '../playerView';
 import type { PlayerScope } from '../ranking';
 import type { PeriodLoad } from '../service/periodService';
 import type { MetricId } from '../types';
-import { MetricCard, RankingTable, Segmented, TrendChart } from './parts';
+import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './parts';
 
 /**
  * PLAYER ANALYTICS (design §4). Reads a loaded period; computes nothing it cannot show the
@@ -322,37 +321,6 @@ export function PlayerAnalytics({
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-function InsightList({ insights, scopeLabel }: { insights: ReturnType<typeof buildInsights>; scopeLabel: string }): React.JSX.Element {
-  if (insights.held) {
-    return (
-      <p className="small-text" data-testid="insight-held">
-        {insights.held}
-      </p>
-    );
-  }
-  const line = (i: Insight): React.JSX.Element => (
-    <li key={`${i.kind}-${i.metric}`}>
-      <strong>{METRIC_LABEL[i.metric]}</strong> {formatValue(i.metric, i.value)}（{scopeLabel}平均 {formatValue(i.metric, i.average)}、{i.diffText}）
-      <span className="meta">
-        サンプル {i.sample.toLocaleString('ja-JP')} ・ 比較 {i.population}名{i.rank ? ` ・ ${i.rank}位` : ''}
-      </span>
-    </li>
-  );
-  return (
-    <div className="insights">
-      <div>
-        <h3 className="mini-title">強み</h3>
-        {insights.strengths.length > 0 ? <ul className="plain-list">{insights.strengths.map(line)}</ul> : <p className="small-text muted">明確な強みは検出されませんでした。</p>}
-      </div>
-      <div>
-        <h3 className="mini-title">改善候補</h3>
-        {insights.improvements.length > 0 ? <ul className="plain-list">{insights.improvements.map(line)}</ul> : <p className="small-text muted">明確な改善候補は検出されませんでした。</p>}
-      </div>
-      <p className="small-text muted">同じ期間・同じ母集団の平均との数値差です。原因（スコアリング力・フィニッシュ力など）を示すものではありません。</p>
     </div>
   );
 }

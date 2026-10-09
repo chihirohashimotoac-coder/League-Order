@@ -113,3 +113,47 @@ test.describe('PLAYER ANALYTICS', () => {
     await page.screenshot({ path: `test-results/analytics-player-${info.project.name}.png`, fullPage: true });
   });
 });
+
+test.describe('TEAM ANALYTICS', () => {
+  test('switches between player and team views, keeps official and own rankings apart, and survives a period change', async ({ page }) => {
+    const { extras } = await start(page);
+    await createKalavinka(page);
+    await openAnalytics(page);
+    await expect(page.getByTestId('metric-3DA')).toBeVisible();
+
+    await page.getByRole('button', { name: 'チーム', exact: true }).click();
+    await expect(page.getByTestId('team-basis')).toContainText('加算していません');
+    await expect(page.getByTestId('metric-3DA')).toBeVisible();
+    await expect(page.getByTestId('official-table')).toBeVisible();
+    await expect(page.getByTestId('official-basis')).toContainText('この季・このディビジョンだけ');
+    await expect(page.getByTestId('own-ranking-note')).toContainText('公式順位とは別物');
+    expect(extras.log.some((entry) => entry.startsWith('tournament/standings'))).toBe(true);
+
+    await page.getByRole('button', { name: 'リーグ全体' }).click();
+    await expect(page.getByTestId('cross-division-note')).toContainText('優劣を示すものではありません');
+
+    // Same filters, new period: the screen recalculates and the team view stays selected.
+    await page.getByRole('button', { name: '直近3季' }).click();
+    await expect(page.getByTestId('team-basis')).toContainText('シーズンの合算');
+    await expect(page.getByTestId('team-players-table')).toBeVisible();
+
+    // Back to players without losing the shared period.
+    await page.getByRole('button', { name: 'プレイヤー', exact: true }).click();
+    await expect(page.getByTestId('player-basis')).toBeVisible();
+    await noSideScroll(page);
+  });
+
+  test('compare teams, accessibility and layout', async ({ page }, info) => {
+    await start(page);
+    await createKalavinka(page);
+    await openAnalytics(page);
+    await page.getByRole('button', { name: 'チーム', exact: true }).click();
+    await expect(page.getByTestId('official-table')).toBeVisible();
+    await page.getByLabel(/比較するチームを追加/).selectOption({ index: 1 });
+    await expect(page.getByTestId('team-compare-table')).toBeVisible();
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
+    expect(results.violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }))).toEqual([]);
+    await noSideScroll(page);
+    await page.screenshot({ path: `test-results/analytics-team-${info.project.name}.png`, fullPage: true });
+  });
+});

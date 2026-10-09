@@ -6,7 +6,7 @@ import type { PeriodMode } from '../seasons';
 import { describeLoad, periodLabelAllowed } from '../service/periodService';
 import type { PeriodLoad } from '../service/periodService';
 import type { RankingResult } from '../ranking';
-import type { TrendPoint } from '../playerView';
+import type { Insight, Insights, TrendPoint } from '../playerView';
 import type { SeasonOption } from './usePeriodLoad';
 
 /** Presentation pieces shared by the player and team analytics screens. */
@@ -195,12 +195,14 @@ export function RankingTable({
   highlight,
   teamNameOf,
   caption,
+  entityLabel = '選手',
 }: {
   ranking: RankingResult;
   metric: RankMetric;
   highlight?: string;
   teamNameOf?: (id: string) => string;
   caption: string;
+  entityLabel?: string;
 }): React.JSX.Element {
   const row = (entry: RankingResult['ranked'][number], reference: boolean): React.JSX.Element => (
     <tr key={entry.id} className={entry.id === highlight ? 'me' : ''} aria-current={entry.id === highlight ? 'true' : undefined}>
@@ -220,7 +222,7 @@ export function RankingTable({
         <thead>
           <tr>
             <th scope="col">順位</th>
-            <th scope="col">選手</th>
+            <th scope="col">{entityLabel}</th>
             <th scope="col" className="num">
               {METRIC_LABEL[metric]}
             </th>
@@ -234,7 +236,7 @@ export function RankingTable({
           {ranking.ranked.length === 0 ? (
             <tr>
               <td colSpan={4} className="muted">
-                基準を満たす選手がいません。
+                基準を満たす対象がありません。
               </td>
             </tr>
           ) : null}
@@ -251,7 +253,7 @@ export function RankingTable({
         ) : null}
       </table>
       <p className="small-text muted">
-        順位は{ranking.population}名中。{ranking.excluded > 0 ? `${ranking.excluded}名はサンプル不足またはデータなしのため順位から除外。` : ''}
+        順位は{ranking.population}件中。{ranking.excluded > 0 ? `${ranking.excluded}件はサンプル不足またはデータなしのため順位から除外。` : ''}
         n01の公式順位とは別の、League Order独自の並びです。
       </p>
     </div>
@@ -338,5 +340,36 @@ export function TrendChart({ points, metric }: { points: TrendPoint[]; metric: R
         </table>
       </details>
     </figure>
+  );
+}
+
+export function InsightList({ insights, scopeLabel }: { insights: Insights; scopeLabel: string }): React.JSX.Element {
+  if (insights.held) {
+    return (
+      <p className="small-text" data-testid="insight-held">
+        {insights.held}
+      </p>
+    );
+  }
+  const line = (i: Insight): React.JSX.Element => (
+    <li key={`${i.kind}-${i.metric}`}>
+      <strong>{METRIC_LABEL[i.metric]}</strong> {formatValue(i.metric, i.value)}（{scopeLabel}平均 {formatValue(i.metric, i.average)}、{i.diffText}）
+      <span className="meta">
+        サンプル {i.sample.toLocaleString('ja-JP')} ・ 比較 {i.population}名{i.rank ? ` ・ ${i.rank}位` : ''}
+      </span>
+    </li>
+  );
+  return (
+    <div className="insights">
+      <div>
+        <h3 className="mini-title">強み</h3>
+        {insights.strengths.length > 0 ? <ul className="plain-list">{insights.strengths.map(line)}</ul> : <p className="small-text muted">明確な強みは検出されませんでした。</p>}
+      </div>
+      <div>
+        <h3 className="mini-title">改善候補</h3>
+        {insights.improvements.length > 0 ? <ul className="plain-list">{insights.improvements.map(line)}</ul> : <p className="small-text muted">明確な改善候補は検出されませんでした。</p>}
+      </div>
+      <p className="small-text muted">同じ期間・同じ母集団の平均との数値差です。原因（スコアリング力・フィニッシュ力など）を示すものではありません。</p>
+    </div>
   );
 }

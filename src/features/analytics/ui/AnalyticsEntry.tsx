@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { EmptyState } from '../../../components/ui';
 import type { Page } from '../../../navigation';
 import AnalyticsPage from './AnalyticsPage';
+import { TeamAnalytics } from './TeamAnalytics';
 
 /**
  * The only thing the app shell imports from analytics (lazily). A render error inside
@@ -29,7 +30,7 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
 export default function AnalyticsEntry({ onNavigate }: { onNavigate: (page: Page) => void }): React.JSX.Element {
   return (
     <Boundary>
-      <AnalyticsPage onNavigate={onNavigate} />
+      <AnalyticsPage onNavigate={onNavigate} TeamView={TeamAnalytics} />
     </Boundary>
   );
 }

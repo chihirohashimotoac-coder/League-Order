@@ -4006,6 +4006,7 @@ input[type='range'] {
 
 .analytics {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   min-width: 0;
 }
@@ -4025,6 +4026,7 @@ input[type='range'] {
 
 .analytics-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   min-width: 0;
 }
@@ -4035,8 +4037,16 @@ input[type='range'] {
 
 .analytics-columns {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   min-width: 0;
+}
+
+/* Long Japanese labels wrap instead of being cut off at 320px. */
+.analytics .segmented button {
+  white-space: normal;
+  line-height: 1.25;
+  padding-inline: 4px;
 }
 
 .analytics-col {
