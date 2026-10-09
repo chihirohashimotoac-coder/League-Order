@@ -42,6 +42,11 @@ describe('endpoints and league registry', () => {
     expect(parseRequestUrl(N01_API_BASE_URL, 'https://push.n01darts.com/api/v1/team/delete?tpid=x')).toBeNull();
   });
 
+  it('the whole roster is the same operation without a tpid (every team)', () => {
+    const request: N01Request = { operation: 'team/player/list', params: { tdid: 't_ABvC_5234' } };
+    expect(buildUrl(N01_API_BASE_URL, request)).toBe('https://push.n01darts.com/api/v1/team/player/list?tdid=t_ABvC_5234');
+  });
+
   it('knows ATDO, TDO and TDA by league id only', () => {
     expect(KNOWN_LEAGUES.map((league) => league.leagueId)).toEqual([ATDO, TDO, TDA]);
     for (const league of KNOWN_LEAGUES) expect(Object.keys(league).sort()).toEqual(['key', 'leagueId', 'title']);

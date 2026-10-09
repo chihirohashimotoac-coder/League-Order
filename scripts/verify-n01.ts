@@ -5,8 +5,8 @@
  * changes every week. It answers one question — does the live service still return
  * what `src/integrations/n01/validation.ts` expects? — for the three known leagues:
  *
- *   league/tournament/list → tournament/get → team/player/list → tournament/stats
- *   → league/schedule/get → team/order/list
+ *   league/tournament/list → tournament/get → team/player/list → team/player/list (no
+ *   tpid: every team) → tournament/stats → league/schedule/get → team/order/list
  *
  * Only GET requests are made; nothing is written anywhere. Exit code 0 = contract holds.
  */
@@ -15,15 +15,18 @@ import { KNOWN_LEAGUES } from '../src/integrations/n01/leagueRegistry';
 import { seasonPriorityGroups } from '../src/integrations/n01/seasonResolver';
 import { effectiveSchedule, gamesFromSchedule, describeFormat, disciplineOf } from '../src/integrations/n01/formatResolver';
 import { resolveDivision } from '../src/integrations/n01/divisionResolver';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { rosterCoverage, sharedOpids } from '../src/domain/n01/identity';
 
-interface Check {
+export interface Check {
   league: string;
   step: string;
   ok: boolean;
   detail: string;
 }
 
-async function verifyLeague(client: N01Client, leagueId: string, title: string): Promise<Check[]> {
+export async function verifyLeague(client: N01Client, leagueId: string, title: string): Promise<Check[]> {
   const checks: Check[] = [];
   const record = (step: string, ok: boolean, detail: string): void => {
     checks.push({ league: title, step, ok, detail });
@@ -58,6 +61,25 @@ async function verifyLeague(client: N01Client, leagueId: string, title: string):
   await attempt('team/player/list', () => client.roster(tournament.tournamentId, entry.teamId), (value) =>
     `${entry.name}: ${value.length} players, ${value.filter((player) => player.opid).length} with opid`,
   );
+  // The whole roster is what shows whether an `opid` names one person in the season: the
+  // app asks for it once per season, so a response that is not every REGISTERED team's
+  // would silently prove too much. The live API also returns some team ids that are not
+  // registered; those are counted and shown, and do not fail the check.
+  const everyone = await attempt('team/player/list (all)', () => client.fullRoster(tournament.tournamentId), (value) =>
+    `${value.length} players on ${new Set(value.map((player) => player.teamId)).size} teams, ${sharedOpids(value).size} opid(s) under several oids or names`,
+  );
+  if (everyone) {
+    const coverage = rosterCoverage(everyone, tournament.entries.map((entry) => entry.teamId));
+    const registered = tournament.entries.length;
+    const extra = coverage.extra.length > 0 ? ` (+ ${coverage.extra.length} team id(s) not registered)` : '';
+    record(
+      'whole roster',
+      coverage.complete,
+      coverage.complete
+        ? `all ${registered} registered teams${extra}`
+        : `only ${registered - coverage.missing.length} of ${registered} registered teams (missing: ${coverage.missing.join(', ') || 'the tournament lists no team'})${extra}`,
+    );
+  }
   await attempt('tournament/stats', () => client.stats(tournament.tournamentId), (value) => `${value.length} stat rows`);
   await attempt('league/schedule/get', () => client.schedule(tournament.tournamentId), (value) => `${value.length} fixtures`);
   await attempt('team/order/list', () => client.orders(tournament.tournamentId, entry.teamId), (value) => `${value.length} order rows`);
@@ -78,4 +100,6 @@ async function main(): Promise<void> {
   process.exitCode = failed > 0 ? 1 : 0;
 }
 
-void main();
+// Run only as a script: the tests import `verifyLeague` and must not start a live check.
+const invokedDirectly = process.argv[1] !== undefined && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+if (invokedDirectly) void main();

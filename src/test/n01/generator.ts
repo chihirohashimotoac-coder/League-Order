@@ -493,15 +493,18 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
       ),
     });
 
+    // `team/player/list` without a `tpid` is every team's members in one response (as on
+    // the live API); the per-team requests above keep serving one team's.
+    const everyone: unknown[] = [];
     for (const team of teams) {
-      dataset.set(requestKey('team/player/list', { tdid: season.tournamentId, tpid: team.tpid }), {
-        list: team.members.map((opid) => ({
-          ...(opidOf(opid) ? { opid } : {}),
-          oid: oid(opid),
-          tpid: team.tpid,
-          oname: spec.people[opid].name,
-        })),
-      });
+      const rows = team.members.map((opid) => ({
+        ...(opidOf(opid) ? { opid } : {}),
+        oid: oid(opid),
+        tpid: team.tpid,
+        oname: spec.people[opid].name,
+      }));
+      everyone.push(...rows);
+      dataset.set(requestKey('team/player/list', { tdid: season.tournamentId, tpid: team.tpid }), { list: rows });
       const orders = (ordersByTeam.get(team.tpid) ?? []) as { lsid: string; schid: string; position: number; players: unknown[] }[];
       dataset.set(requestKey('team/order/list', { tdid: season.tournamentId, tpid: team.tpid }), {
         list: real
@@ -509,6 +512,8 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
           : orders,
       });
     }
+
+    dataset.set(requestKey('team/player/list', { tdid: season.tournamentId }), { list: everyone });
 
     dataset.set(
       requestKey('league/schedule/get', { tdid: season.tournamentId }),

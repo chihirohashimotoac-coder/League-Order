@@ -109,8 +109,9 @@ describe('opponent and history', () => {
     const { fetched } = await intelligence(2, { log });
     expect(fetched.history.map((season) => season.summary.tournamentId)).toEqual(['t_ATp2_5101', 't_ATp1_4988']);
     expect(log.some((request) => request.params.tdid === 't_ATp0_4870')).toBe(false);
-    // 4 team requests + schedule + opponent roster/orders + 3 per historical season.
-    expect(log.length).toBeLessThanOrEqual(4 + 3 + 2 * 3);
+    // 4 team requests + schedule + opponent roster/orders + 3 per historical season,
+    // plus one whole roster per season (the current one and each past one).
+    expect(log.length).toBeLessThanOrEqual(4 + 3 + 2 * 3 + 3);
   });
 
   it('a failed historical season thins the history but does not fail the sync', async () => {
@@ -118,7 +119,11 @@ describe('opponent and history', () => {
       override: (request) => (request.params.tdid === 't_ATp1_4988' ? new N01Error('http', 'down', request.operation, 503) : undefined),
     });
     expect(fetched.history.map((season) => season.summary.tournamentId)).toEqual(['t_ATp2_5101']);
-    expect(fetched.notes).toEqual(['2026 1st: 過去シーズンのデータを取得できませんでした。']);
+    // The season's data and its whole roster both failed; both are told, neither fails the sync.
+    expect(fetched.notes).toEqual([
+      '2026 1st: 名簿 (全チーム) を取得できなかったため、この季は選手 ID (opid) による結び付けを行いません。',
+      '2026 1st: 過去シーズンのデータを取得できませんでした。',
+    ]);
   });
 
   it('follows a player across seasons and teams by opid', async () => {
