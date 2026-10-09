@@ -151,12 +151,15 @@ function containerKey(raw: unknown, keys: readonly string[]): string | null {
   return keys.find((key) => Array.isArray(raw[key]) || isRec(raw[key])) ?? null;
 }
 
-/** Raw rows of a stats container (object keyed by id, or array). */
-function rawRows(raw: unknown, keys: readonly string[]): Rec[] {
+/** Raw rows of a stats container (object keyed by id, or array); `key` is the id when keyed. */
+function rawRows(raw: unknown, keys: readonly string[]): { key: string | null; row: Rec }[] {
   const key = containerKey(raw, keys);
   if (!isRec(raw) || key === null) return [];
   const container = raw[key];
-  return (Array.isArray(container) ? container : Object.values(container as Rec)).filter(isRec);
+  if (Array.isArray(container)) return container.filter(isRec).map((row) => ({ key: null, row }));
+  return Object.entries(container as Rec)
+    .filter((entry): entry is [string, Rec] => isRec(entry[1]))
+    .map(([id, row]) => ({ key: id, row }));
 }
 
 const numberOf = (value: unknown): number | null => {
@@ -175,21 +178,32 @@ const list = (items: readonly string[], max = 6): string =>
 interface DivisionTally {
   agree: number;
   disagree: number;
+  /** On a registered team, but n01 reports no division (`r_g` absent or 0). */
   unknown: number;
+  /** Not on a registered team (or no team id at all): nothing to compare with. */
+  unplaced: number;
   /** Rows whose `r_g` equals the 0-based `lg_table` index instead of index + 1. */
   zeroBasedLooking: number;
 }
 
-/** Compares each stats row's raw `r_g` (counted from 1) with the `lg_table` division of its team. */
-function tallyDivisions(rows: readonly Rec[], teamKey: string, divisionOfTeam: ReadonlyMap<string, number>): DivisionTally {
-  const tally: DivisionTally = { agree: 0, disagree: 0, unknown: 0, zeroBasedLooking: 0 };
-  for (const row of rows) {
-    const teamId = typeof row[teamKey] === 'string' ? (row[teamKey] as string) : null;
+/**
+ * Compares each stats row's raw `r_g` (counted from 1) with the `lg_table` division of its team.
+ * The team id is the row's `tpid`, or — as in the live `stats_list`, keyed by `tpid` — the
+ * container key, the same fallback the app's parser uses.
+ */
+function tallyDivisions(rows: readonly { key: string | null; row: Rec }[], divisionOfTeam: ReadonlyMap<string, number>): DivisionTally {
+  const tally: DivisionTally = { agree: 0, disagree: 0, unknown: 0, unplaced: 0, zeroBasedLooking: 0 };
+  for (const { key, row } of rows) {
+    const teamId = typeof row.tpid === 'string' && row.tpid !== '' ? row.tpid : key;
     const expected = teamId === null ? undefined : divisionOfTeam.get(teamId);
+    if (expected === undefined) {
+      tally.unplaced += 1;
+      continue;
+    }
     const rg = numberOf(row.r_g);
-    if (expected === undefined || rg === null || rg < 1) {
-      // No such registered team, or n01 reports no division (0 / absent): nothing to compare.
-      if (expected !== undefined) tally.unknown += 1;
+    if (rg === null || rg < 1) {
+      // n01 reports no division (0 / absent): nothing to compare.
+      tally.unknown += 1;
       continue;
     }
     if (rg - 1 === expected) tally.agree += 1;
@@ -271,7 +285,7 @@ export async function verifyAnalyticsLeague(reader: Reader, league: Pick<KnownLe
 
   // 3. stats_list ----------------------------------------------------------------------------
   const teamRaw = await reader.get('tournament/stats', { tdid, kind: 'stats_list' });
-  let teamRows: Rec[] = [];
+  let teamRows: { key: string | null; row: Rec }[] = [];
   if (!teamRaw.ok) record('stats_list', 'fail', teamRaw.reason);
   else {
     try {
@@ -297,7 +311,7 @@ export async function verifyAnalyticsLeague(reader: Reader, league: Pick<KnownLe
 
   // 4. player_stats_list -------------------------------------------------------------------------
   const playerRaw = await reader.get('tournament/stats', { tdid, kind: 'player_stats_list' });
-  let playerRows: Rec[] = [];
+  let playerRows: { key: string | null; row: Rec }[] = [];
   let playerParsed: ReturnType<typeof parsePlayerStats> = [];
   if (!playerRaw.ok) record('player_stats_list', 'fail', playerRaw.reason);
   else {
@@ -355,17 +369,25 @@ export async function verifyAnalyticsLeague(reader: Reader, league: Pick<KnownLe
   // 6. r_g (counted from 1) ↔ lg_table / standings (counted from 0) -----------------------------------
   if (teamRaw.ok || playerRaw.ok) {
     const sources: [string, DivisionTally][] = [];
-    if (teamRaw.ok) sources.push(['stats_list', tallyDivisions(teamRows, 'tpid', divisionOfTeam)]);
-    if (playerRaw.ok) sources.push(['player_stats_list', tallyDivisions(playerRows, 'tpid', divisionOfTeam)]);
+    if (teamRaw.ok) sources.push(['stats_list', tallyDivisions(teamRows, divisionOfTeam)]);
+    if (playerRaw.ok) sources.push(['player_stats_list', tallyDivisions(playerRows, divisionOfTeam)]);
     const disagree = sources.reduce((total, [, tally]) => total + tally.disagree, 0);
     const zeroBased = sources.reduce((total, [, tally]) => total + tally.zeroBasedLooking, 0);
     // The same comparison against the standings group index, for the teams n01 ranks.
-    const viaStandings = [...standingsIndex].filter(([teamId, index]) => teamRows.some((row) => row.tpid === teamId && numberOf(row.r_g) !== null && numberOf(row.r_g)! >= 1 && numberOf(row.r_g)! - 1 !== index));
-    const detail = sources.map(([name, t]) => `${name}: ${t.agree} agree, ${t.disagree} disagree, ${t.unknown} without r_g`).join('; ');
+    const rgOfTeam = new Map<string, number>();
+    for (const { key, row } of teamRows) {
+      const teamId = typeof row.tpid === 'string' && row.tpid !== '' ? row.tpid : key;
+      const rg = numberOf(row.r_g);
+      if (teamId !== null && rg !== null && rg >= 1) rgOfTeam.set(teamId, rg);
+    }
+    const viaStandings = [...standingsIndex].filter(([teamId, index]) => rgOfTeam.has(teamId) && rgOfTeam.get(teamId)! - 1 !== index);
+    // Rows exist but none could be placed in a division: the check would be vacuous, which must not read as a pass.
+    const vacuous = teamRows.length + playerRows.length > 0 && sources.every(([, t]) => t.agree + t.disagree + t.unknown === 0);
+    const detail = sources.map(([name, t]) => `${name}: ${t.agree} agree, ${t.disagree} disagree, ${t.unknown} without r_g, ${t.unplaced} not on a registered team`).join('; ');
     record(
       'r_g ↔ index',
-      disagree === 0 && viaStandings.length === 0 ? 'pass' : 'fail',
-      `r_g − 1 = lg_table index; ${detail}; vs standings index: ${viaStandings.length} disagree${zeroBased > 0 ? `; ${zeroBased} row(s) have r_g equal to the 0-based index (looks 0-based, not 1-based)` : ''}`,
+      disagree === 0 && viaStandings.length === 0 && !vacuous ? 'pass' : 'fail',
+      `r_g − 1 = lg_table index; ${detail}; vs standings index: ${viaStandings.length} of ${rgOfTeam.size} team(s) disagree${vacuous ? '; NOTHING WAS COMPARED (no stats row maps to a registered team)' : ''}${zeroBased > 0 ? `; ${zeroBased} row(s) have r_g equal to the 0-based index (looks 0-based, not 1-based)` : ''}`,
     );
   }
 

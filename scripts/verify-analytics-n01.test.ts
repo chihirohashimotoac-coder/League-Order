@@ -42,7 +42,7 @@ const TEAMS: [string, string, number][] = [
 
 function healthy(): Record<'list' | 'get' | 'stats' | 'players' | 'standings' | 'roster', Json> {
   const teamStats: Json = {};
-  for (const [tpid, , division] of TEAMS) teamStats[tpid] = { tpid, r_g: division + 1, score: 5000, darts: 300, leg: 10, winLeg: 5, match: 2, winMatch: 1 };
+  for (const [tpid, , division] of TEAMS) teamStats[tpid] = { r_g: division + 1, score: 5000, darts: 300, leg: 10, winLeg: 5, match: 2, winMatch: 1 };
   const players: Json = {};
   const roster: Json[] = [];
   for (const [tpid, name, division] of TEAMS) {
@@ -249,6 +249,65 @@ describe('verify:analytics-n01 — division indexes', () => {
     const check = step(checks, 'r_g ↔ index');
     expect(check.status).toBe('pass');
     expect(check.detail).toMatch(/2 agree, 0 disagree, 2 without r_g/);
+  });
+});
+
+describe('verify:analytics-n01 — stats_list keyed by tpid', () => {
+  it('reads the team from the container key when the row has no tpid (the live shape), and from tpid when it has one', async () => {
+    const keyed = await run();
+    expect(step(keyed.checks, 'r_g ↔ index').detail).toMatch(/stats_list: 4 agree, 0 disagree, 0 without r_g, 0 not on a registered team/);
+    const inRow = await run({
+      tweak: {
+        stats: (body) => {
+          for (const [tpid, row] of Object.entries(body.stats as Record<string, Json>)) row.tpid = tpid;
+          return body;
+        },
+      },
+    });
+    expect(step(inRow.checks, 'r_g ↔ index').detail).toMatch(/stats_list: 4 agree/);
+  });
+
+  it('catches a wrong r_g on a keyed team row', async () => {
+    const { checks } = await run({
+      tweak: {
+        stats: (body) => {
+          (body.stats as Record<string, Json>).B1.r_g = 1;
+          return body;
+        },
+      },
+    });
+    const check = step(checks, 'r_g ↔ index');
+    expect(check.status).toBe('fail');
+    expect(check.detail).toMatch(/stats_list: 3 agree, 1 disagree/);
+    expect(check.detail).toMatch(/1 of 4 team\(s\) disagree/);
+  });
+
+  it('does not pass vacuously: rows that map to no registered team compare nothing', async () => {
+    const { checks } = await run({
+      tweak: {
+        stats: (body) => ({ ...body, stats: Object.fromEntries(Object.entries(body.stats as Record<string, Json>).map(([k, v]) => [`X${k}`, v])) }),
+        players: (body) => ({ ...body, stats: Object.fromEntries(Object.entries(body.stats as Record<string, Json>).map(([k, v]) => [k, { ...v, tpid: 'NOPE' }])) }),
+      },
+    });
+    const check = step(checks, 'r_g ↔ index');
+    expect(check.status).toBe('fail');
+    expect(check.detail).toMatch(/NOTHING WAS COMPARED/);
+  });
+
+  it('is not vacuous when n01 reports no division at all (r_g 0): that is unknown, not a failure', async () => {
+    const { checks } = await run({
+      tweak: {
+        stats: (body) => {
+          for (const row of Object.values(body.stats as Record<string, Json>)) row.r_g = 0;
+          return body;
+        },
+        players: (body) => {
+          for (const row of Object.values(body.stats as Record<string, Json>)) row.r_g = 0;
+          return body;
+        },
+      },
+    });
+    expect(step(checks, 'r_g ↔ index').status).toBe('pass');
   });
 });
 
