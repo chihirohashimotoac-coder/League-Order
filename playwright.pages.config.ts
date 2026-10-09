@@ -6,7 +6,9 @@ import { defineConfig, devices } from '@playwright/test';
  * would. Run by the `Smoke test the published site` workflow (`npm run smoke:pages`), not by
  * `npm run test:e2e` (which only looks in ./e2e) and not by the publish gate.
  */
-export const PAGES_URL = process.env.PAGES_URL ?? 'https://chihirohashimotoac-coder.github.io/League-Order/';
+// The trailing slash matters: relative navigation (`goto('./')`) resolves against it.
+const configured = process.env.PAGES_URL || 'https://chihirohashimotoac-coder.github.io/League-Order/';
+export const PAGES_URL = configured.endsWith('/') ? configured : `${configured}/`;
 
 export default defineConfig({
   testDir: './e2e-live',
