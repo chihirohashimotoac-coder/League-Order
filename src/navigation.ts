@@ -10,6 +10,7 @@ export const PAGES = [
   'result',
   'history',
   'settings',
+  'analytics',
 ] as const;
 
 export type Page = (typeof PAGES)[number];
@@ -27,6 +28,7 @@ export const PAGE_TITLES: Record<Page, string> = {
   result: 'オーダー結果',
   history: '履歴',
   settings: '設定',
+  analytics: 'データ分析',
 };
 
 /** Tabs shown in the bottom bar, in order. */
@@ -43,11 +45,13 @@ export const TAB_FOR_PAGE: Partial<Record<Page, Page>> = {
   result: 'setup',
   pairs: 'home',
   settings: 'home',
+  analytics: 'home',
 };
 
 /** Pages reached from another screen rather than from the tab bar. */
 export const BACK_TARGETS: Partial<Record<Page, Page>> = {
   pairs: 'home',
   settings: 'home',
+  analytics: 'home',
   result: 'setup',
 };

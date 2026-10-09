@@ -85,6 +85,7 @@ export function HomePage({
       title: 'ペア相性',
       meta: `${store.teamPairs.length} 件設定済み`,
     },
+    ...(team?.n01 ? [{ page: 'analytics' as Page, icon: 'spark' as IconName, title: 'データ分析', meta: '選手・チームの成績分析' }] : []),
     { page: 'history', icon: 'history', title: '履歴', meta: `${store.teamOrders.length} 件のオーダー` },
     { page: 'settings', icon: 'settings', title: '設定 / バックアップ', meta: '重み調整・JSON 入出力' },
   ];
