@@ -71,7 +71,10 @@ async function createAtdoTeam(page: Page): Promise<string> {
 
 test('published site: ATDO team → PLAYER / TEAM analytics → one order, against the real n01', async ({ page }, info) => {
   const { seen, problems } = watch(page);
-  await page.goto('/');
+  // Relative on purpose: the site lives under a sub-path (…/League-Order/), and `goto('/')`
+  // would resolve to the domain root instead.
+  const response = await page.goto('./');
+  expect(response?.status(), `GET ${page.url()}`).toBe(200);
   await expect(page.getByRole('button', { name: 'n01から作成' })).toBeVisible();
 
   const team = await createAtdoTeam(page);
