@@ -17,3 +17,4 @@ blob-report/
 # TypeScript incremental build artifacts
 *.tsbuildinfo
 backtest-report/
+smoke-results/
