@@ -1,5 +1,6 @@
-import { N01_ERROR_MESSAGES, N01Error } from '../../../integrations/n01/client';
+import { N01_ERROR_MESSAGES, N01Error, createFetchTransport } from '../../../integrations/n01/client';
 import { N01_API_BASE_URL, isAllowedN01Url } from '../../../integrations/n01/endpoints';
+import type { N01Operation } from '../../../integrations/n01/endpoints';
 import { parseLeagueTournaments, parseRoster, parseTournament } from '../../../integrations/n01/validation';
 import { N01SchemaError } from '../../../integrations/n01/validation';
 import type { N01LeagueTournaments, N01RosterPlayer, N01Tournament } from '../../../integrations/n01/types';
@@ -24,37 +25,19 @@ export const ANALYTICS_OPERATIONS = [
 export type AnalyticsOperation = (typeof ANALYTICS_OPERATIONS)[number];
 
 export interface AnalyticsTransport {
-  get(url: string, signal: AbortSignal): Promise<unknown>;
+  request(operation: AnalyticsOperation, params: Record<string, string>, signal: AbortSignal): Promise<unknown>;
 }
 
-export function createAnalyticsFetchTransport(fetchImpl?: typeof fetch): AnalyticsTransport {
+/**
+ * The app's one audited browser transport (anonymous GET, no cookies, no HTTP cache, host
+ * allow-list) serves analytics too, so there is still exactly one place that reaches the
+ * network. It builds `{base}/{operation}?{sorted params}`; the standings operation is
+ * outside the sync's operation union, hence the cast.
+ */
+export function createAnalyticsFetchTransport(options: { baseUrl?: string; fetchImpl?: typeof fetch } = {}): AnalyticsTransport {
+  const inner = createFetchTransport(options);
   return {
-    async get(url, signal) {
-      const run = fetchImpl ?? globalThis.fetch.bind(globalThis);
-      let response: Response;
-      try {
-        response = await run(url, {
-          method: 'GET',
-          credentials: 'omit',
-          cache: 'no-store',
-          referrerPolicy: 'no-referrer',
-          headers: { Accept: 'application/json' },
-          signal,
-        });
-      } catch (error) {
-        if (signal.aborted) throw error;
-        throw new N01Error('network', N01_ERROR_MESSAGES.network);
-      }
-      if (response.status === 404) throw new N01Error('notFound', N01_ERROR_MESSAGES.notFound, undefined, 404);
-      if (response.status === 429) throw new N01Error('http', `${N01_ERROR_MESSAGES.http} (HTTP 429: リクエスト過多)`, undefined, 429);
-      if (!response.ok) throw new N01Error('http', `${N01_ERROR_MESSAGES.http} (HTTP ${response.status})`, undefined, response.status);
-      const body = await response.text();
-      try {
-        return JSON.parse(body) as unknown;
-      } catch {
-        throw new N01Error('schema', `${N01_ERROR_MESSAGES.schema} (JSON ではありません)`);
-      }
-    },
+    request: (operation, params, signal) => inner.request({ operation: operation as N01Operation, params }, signal),
   };
 }
 
@@ -88,28 +71,26 @@ export class AnalyticsApi {
   constructor(private readonly options: AnalyticsApiOptions = {}) {
     this.baseUrl = options.baseUrl ?? N01_API_BASE_URL;
     if (!isAllowedN01Url(this.baseUrl)) throw new N01Error('blocked', `${N01_ERROR_MESSAGES.blocked} (${this.baseUrl})`);
-    this.transport = options.transport ?? createAnalyticsFetchTransport();
+    this.transport = options.transport ?? createAnalyticsFetchTransport({ baseUrl: this.baseUrl });
     this.timeoutMs = options.timeoutMs ?? ANALYTICS_DEFAULT_TIMEOUT_MS;
     this.maxRequests = options.maxRequests ?? ANALYTICS_DEFAULT_MAX_REQUESTS;
   }
 
-  private url(operation: AnalyticsOperation, params: Record<string, string>): string {
-    const url = new URL(`${this.baseUrl.replace(/\/+$/u, '')}/${operation}`);
-    for (const key of Object.keys(params).sort()) url.searchParams.set(key, params[key]);
-    return url.toString();
+  private key(operation: AnalyticsOperation, params: Record<string, string>): string {
+    return `${operation}?${Object.keys(params).sort().map((name) => `${name}=${params[name]}`).join('&')}`;
   }
 
   private raw(operation: AnalyticsOperation, params: Record<string, string>): Promise<unknown> {
-    const url = this.url(operation, params);
-    const cached = this.memo.get(url);
+    const key = this.key(operation, params);
+    const cached = this.memo.get(key);
     if (cached) return cached;
-    const pending = this.send(url, operation);
-    pending.catch(() => this.memo.delete(url));
-    this.memo.set(url, pending);
+    const pending = this.send(operation, params);
+    pending.catch(() => this.memo.delete(key));
+    this.memo.set(key, pending);
     return pending;
   }
 
-  private async send(url: string, operation: AnalyticsOperation): Promise<unknown> {
+  private async send(operation: AnalyticsOperation, params: Record<string, string>): Promise<unknown> {
     const outer = this.options.signal;
     if (outer?.aborted) throw new N01Error('aborted', N01_ERROR_MESSAGES.aborted, operation);
     if (this.requestCount >= this.maxRequests) throw new RequestBudgetError(this.maxRequests);
@@ -123,7 +104,7 @@ export class AnalyticsApi {
     const onAbort = (): void => controller.abort();
     outer?.addEventListener('abort', onAbort);
     try {
-      return await this.transport.get(url, controller.signal);
+      return await this.transport.request(operation, params, controller.signal);
     } catch (error) {
       if (error instanceof N01Error) throw error;
       if (timedOut) throw new N01Error('timeout', N01_ERROR_MESSAGES.timeout, operation);

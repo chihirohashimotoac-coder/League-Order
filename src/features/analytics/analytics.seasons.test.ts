@@ -257,19 +257,19 @@ describe('splitByFormat / teams', () => {
 
 describe('AnalyticsApi', () => {
   const okTransport = (calls: string[]): AnalyticsTransport => ({
-    async get(url) {
-      calls.push(url);
+    async request(operation, params) {
+      calls.push(`${operation}?${Object.keys(params).sort().map((k) => `${k}=${params[k]}`).join('&')}`);
       return { result: 0, stats: {} };
     },
   });
 
-  it('sends anonymous GETs to the allow-listed host, and never the same request twice', async () => {
+  it('never sends the same request twice', async () => {
     const calls: string[] = [];
     const api = new AnalyticsApi({ transport: okTransport(calls) });
     await Promise.all([api.teamStats('t1'), api.teamStats('t1')]);
     await api.playerStats('t1');
     expect(calls).toHaveLength(2);
-    expect(calls[0]).toBe('https://push.n01darts.com/api/v1/tournament/stats?kind=stats_list&tdid=t1');
+    expect(calls[0]).toBe('tournament/stats?kind=stats_list&tdid=t1');
     expect(api.requestCount).toBe(2);
   });
 
@@ -288,7 +288,7 @@ describe('AnalyticsApi', () => {
     let n = 0;
     const api = new AnalyticsApi({
       transport: {
-        async get() {
+        async request() {
           n += 1;
           if (n === 1) throw new Error('boom');
           return { result: 0, stats: {} };
@@ -301,7 +301,25 @@ describe('AnalyticsApi', () => {
   });
 
   it('classifies a changed response shape as a schema error', async () => {
-    const api = new AnalyticsApi({ transport: { get: async () => ({ result: 0, nothing: true }) } });
+    const api = new AnalyticsApi({ transport: { request: async () => ({ result: 0, nothing: true }) } });
     await expect(api.teamStats('t')).rejects.toMatchObject({ kind: 'schema' });
+  });
+});
+
+describe('AnalyticsApi default transport', () => {
+  it('goes out as an anonymous GET to the n01 read API (no cookies, no cache)', async () => {
+    const seen: { url: string; init: RequestInit }[] = [];
+    const { createAnalyticsFetchTransport } = await import('./api/readApi');
+    const api = new AnalyticsApi({
+      transport: createAnalyticsFetchTransport({
+        fetchImpl: async (url, init) => {
+          seen.push({ url: String(url), init: init ?? {} });
+          return new Response(JSON.stringify({ result: 0, groups: [] }), { status: 200 });
+        },
+      }),
+    });
+    await api.standings('t1');
+    expect(seen[0].url).toBe('https://push.n01darts.com/api/v1/tournament/standings?tdid=t1');
+    expect(seen[0].init).toMatchObject({ method: 'GET', credentials: 'omit', cache: 'no-store' });
   });
 });
