@@ -1,0 +1,64 @@
+name: Verify n01 live contract
+
+# Read-only check of the live n01 API for the analytics screens (`npm run verify:analytics-n01`):
+# ATDO, TDO and TDA, the paths and queries the app uses, `r_g` against the lg_table / standings
+# indexes, roster coverage, duplicate / shared opids, and the CORS header for the GitHub Pages
+# origin.
+#
+# Deliberately NOT part of the publish workflow: it depends on a third-party service whose data
+# changes every week, and a release must not be blocked by n01 being down. Run it from the
+# Actions tab (or after n01 announces a change); it also runs on a pull request that touches
+# the verifier itself, so a change to it is exercised against the live service before merge.
+# Anonymous GETs only: no secret is used, and `permissions` below gives the token read access
+# to nothing but this repository's contents.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/verify-analytics-n01*.ts'
+      - '.github/workflows/verify-n01-live.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-analytics-n01:
+    name: Analytics API contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Exit 0 = contract holds, 1 = contract broken, 2 = n01 not reachable from this runner.
+      - name: Verify the analytics API against live n01
+        run: |
+          set -o pipefail
+          mkdir -p n01-live-report
+          npm run --silent verify:analytics-n01 2>&1 | tee n01-live-report/verify-analytics-n01.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '## n01 live contract (verify:analytics-n01)'
+            echo
+            echo '```'
+            cat n01-live-report/verify-analytics-n01.txt 2>/dev/null || echo '(no output)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: n01-live-report
+          path: n01-live-report/
+          retention-days: 30
