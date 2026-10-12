@@ -120,6 +120,24 @@ describe('match/list (per-game records)', () => {
     expect(new RegExp(teamMatchPattern('X6iU')).test('t_yyGi_9918_lg_1_o59a_RcXE_X6iU')).toBe(true);
     expect(new RegExp(teamMatchPattern('X6iU')).test('t_yyGi_9918_lg_1_o59a_RcXE_X6iUz')).toBe(false);
   });
+
+  it('pages on the rows n01 sent, even when some could not be read; an unreadable later page keeps what was read', async () => {
+    const log: N01Request[] = [];
+    const unreadable = { mid: 'bad', statsData: [LIVE_ROW.statsData[0]] };
+    // Page 1: full (100 rows), three of them unreadable. Page 2: full again, all unreadable.
+    const firstPage = { result: 0, list: Array.from({ length: MATCH_LIST_PAGE }, (_, i) => (i < 3 ? { ...unreadable, mid: `bad${i}` } : { ...LIVE_ROW, mid: `m${i}` })) };
+    const secondPage = { result: 0, list: Array.from({ length: MATCH_LIST_PAGE }, (_, i) => ({ ...unreadable, mid: `bad2_${i}` })) };
+    const client = new N01Client(
+      createFixtureTransport({
+        log,
+        override: (request) => (request.operation === 'match/list' ? (request.params.skip ? secondPage : firstPage) : undefined),
+      }),
+      { now: () => FIXTURE_NOW },
+    );
+    const games = await client.teamGames('t_x', 'X6iU');
+    expect(log).toHaveLength(2);
+    expect(games).toHaveLength(MATCH_LIST_PAGE - 3);
+  });
 });
 
 async function snapshotWith(override?: FixtureTransportOptions['override']) {

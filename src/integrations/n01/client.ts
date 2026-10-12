@@ -14,7 +14,7 @@ import {
   N01SchemaError,
   parseLeagueSearch,
   parseLeagueTournaments,
-  parseMatchList,
+  parseMatchListPage,
   parseOrders,
   parseRoster,
   parseSchedule,
@@ -241,9 +241,17 @@ export class N01Client {
     for (let page = 0; page < MATCH_LIST_MAX_PAGES; page += 1) {
       const params: Record<string, string> = { tdid: tournamentId, tmid__regex: teamMatchPattern(teamId), count: String(MATCH_LIST_PAGE) };
       if (page > 0) params.skip = String(page * MATCH_LIST_PAGE);
-      const rows = await this.parsed('match/list', params, parseMatchList);
-      games.push(...rows);
-      if (rows.length < MATCH_LIST_PAGE) break;
+      let result: { games: N01GameRecord[]; rows: number };
+      try {
+        result = await this.parsed('match/list', params, parseMatchListPage);
+      } catch (error) {
+        // A later page none of whose rows can be read ends the list; the games read so far stay.
+        if (page > 0 && error instanceof N01Error && error.kind === 'schema') break;
+        throw error;
+      }
+      games.push(...result.games);
+      // Paging follows the rows n01 sent, not the rows that could be read.
+      if (result.rows < MATCH_LIST_PAGE) break;
     }
     return games;
   }

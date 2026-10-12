@@ -482,7 +482,19 @@ export function parseSchedule(raw: unknown, now: number): N01Fixture[] {
  * has not played yet, not an error.
  */
 export function parseMatchList(raw: unknown): N01GameRecord[] {
+  return parseMatchListPage(raw).games;
+}
+
+/**
+ * One page of `match/list`: the games that could be read, and how many rows n01 sent (paging
+ * goes on while a page is full, whether or not every row on it was readable).
+ */
+export function parseMatchListPage(raw: unknown): { games: N01GameRecord[]; rows: number } {
   const rows = requireList('match/list', raw, ['list', 'matches', 'match_list']);
+  return { games: parseMatchRows(rows), rows: rows.length };
+}
+
+function parseMatchRows(rows: unknown[]): N01GameRecord[] {
   return mapRows('match/list', rows, (row) => {
     const gameId = nonEmpty(first(row, ['mid', 'id']));
     const sideRows = firstList(row, ['statsData', 'stats_data', 'sides']);
