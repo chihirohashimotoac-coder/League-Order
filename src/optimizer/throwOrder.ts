@@ -3,7 +3,7 @@ import { normalizeName } from '../domain/n01/names';
 import { minConfidence, type ConfidenceLevel } from '../domain/prediction/confidence';
 import { partialFinish } from '../domain/prediction/finishing';
 import { orderDecisionConfidence } from '../domain/prediction/predictOrder';
-import type { OpponentGameContext } from '../domain/prediction/opponentContext';
+import { MAX_ORDERED_MEMBERS, type OpponentGameContext } from '../domain/prediction/opponentContext';
 import {
   decideThrowOrder,
   orderedGameWin,
@@ -140,7 +140,7 @@ export function orderedProbability(
 }
 
 /** The largest game the order model enumerates (4! = 24 orders); bigger sides keep the strong order. */
-export const MAX_ORDERED_PLAYERS = 4;
+export const MAX_ORDERED_PLAYERS = MAX_ORDERED_MEMBERS;
 
 function decide(ctx: PreparedContext, gi: number, members: readonly number[], strongOrder: number[]): ThrowOrderDecision {
   const game = ctx.opponentGames[gi]!;

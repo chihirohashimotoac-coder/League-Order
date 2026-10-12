@@ -6,7 +6,7 @@ import { formatSignatures } from '../n01/signature';
 import { effectivePpr } from '../n01/effectivePpr';
 import type { ConfidenceLevel } from './confidence';
 import { aggregateConfidence, lowerConfidence, minConfidence, slotConfidence } from './confidence';
-import { estimateFinish } from './finishing';
+import { estimateFinish, finishPrior } from './finishing';
 import { estimateRole, roleKeyOf, roleStructureOf, type RoleEvidence, type RoleStructure } from './roleStrength';
 import {
   DEFAULT_STRENGTH_PARAMETERS,
@@ -47,8 +47,17 @@ import { gameWinProbability } from './matchup';
 export const LINEUP_PRIOR = 3;
 /** Opponent sides kept per game (the rest is folded in by renormalisation). */
 export const MAX_SIDES = 24;
-/** Ordered sides kept per multi-player game (an order splits a line-up into several sides). */
+/**
+ * Ordered sides kept per multi-player game (an order splits a line-up into several sides). Beyond
+ * it, the least likely sides are folded into one remainder side, so no probability is dropped.
+ */
 export const MAX_ORDERED_SIDES = MAX_SIDES;
+/**
+ * The largest side whose throwing order is modelled (4! = 24 orders). Bigger sides (Team / Gallon
+ * of five or more) are kept without order, as version 1 keeps them: their orders are never
+ * estimated, and enumerating them would grow factorially (8 players: 40 320 orders per line-up).
+ */
+export const MAX_ORDERED_MEMBERS = 4;
 /**
  * How sharply a difference in lead tendency turns into a throwing order: a player with score 1
  * (always first) against one with 0 throws first with probability 1 / (1 + e^−4) ≈ 0.98.
@@ -251,7 +260,7 @@ function orderedSidesFor(
   const firsts = new Map<string, number>();
   const players = slot.players.filter((player) => player.probability > 0);
   const k = slot.numPart;
-  if (players.length < k) return { sides: [], firsts };
+  if (players.length < k || k > MAX_ORDERED_MEMBERS) return { sides: [], firsts };
   const leadScore = new Map((slot.lead ?? []).map((entry: LeadTendency) => [entry.key, entry.score]));
   const lambda = (key: string): number => (orderKnown ? Math.exp(LEAD_SHARPNESS * ((leadScore.get(key) ?? 0.5) - 0.5)) : 1);
   const ordered = slot.orderedLineups ?? [];
@@ -299,13 +308,34 @@ function normaliseOrderedSides(sides: OpponentSide[]): OpponentSide[] {
     if (existing) existing.probability += side.probability;
     else merged.set(key, { ...side, members: side.members?.map((m) => ({ ...m })) });
   }
-  const kept = [...merged.entries()]
+  const sorted = [...merged.entries()]
     .filter(([, side]) => side.probability > 0)
     .sort((a, b) => b[1].probability - a[1].probability || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-    .slice(0, MAX_ORDERED_SIDES)
     .map(([, side]) => side);
+  const kept = sorted.length > MAX_ORDERED_SIDES ? [...sorted.slice(0, MAX_ORDERED_SIDES - 1), remainderSide(sorted.slice(MAX_ORDERED_SIDES - 1))] : sorted;
   const total = kept.reduce((acc, side) => acc + side.probability, 0);
   return total > 0 ? kept.map((side) => ({ ...side, probability: side.probability / total })) : [];
+}
+
+/**
+ * The least likely ordered sides as one side: their total probability, and at each throwing
+ * position the probability-weighted mean strength and finishing. The mixture's mass and its mean
+ * strength are kept exactly, instead of being dropped and spread over the likelier sides.
+ */
+export function remainderSide(sides: readonly OpponentSide[]): OpponentSide {
+  const probability = sides.reduce((acc, side) => acc + side.probability, 0);
+  const size = sides[0]?.members?.length ?? 0;
+  const weighted = (pick: (side: OpponentSide) => number): number =>
+    probability > 0 ? sides.reduce((acc, side) => acc + side.probability * pick(side), 0) / probability : 0;
+  const members = Array.from({ length: size }, (_, position) => ({
+    strength: Math.round(weighted((side) => side.members?.[position]?.strength ?? side.strength) * 1000) / 1000,
+    finish: Math.round(weighted((side) => side.members?.[position]?.finish ?? finishPrior(side.strength)) * 10_000) / 10_000,
+  }));
+  return {
+    strength: Math.round((size > 0 ? sideStrength(members.map((member) => member.strength)) : weighted((side) => side.strength)) * 1000) / 1000,
+    probability,
+    ...(size > 0 ? { members } : {}),
+  };
 }
 
 export interface BuildContextInput {
@@ -376,7 +406,7 @@ export function buildOpponentContext(input: BuildContextInput): OpponentContext 
     const roleStrengthOf = (key: string): number => member(key).strength;
     let sides: OpponentSide[];
     let order: OpponentOrderInfo | undefined;
-    if (slot.numPart >= 2) {
+    if (slot.numPart >= 2 && slot.numPart <= MAX_ORDERED_MEMBERS) {
       const known = teamOrdered > 0 && (slot.lead?.length ?? 0) > 0;
       const built = orderedSidesFor(slot, member, known);
       sides = built.sides;

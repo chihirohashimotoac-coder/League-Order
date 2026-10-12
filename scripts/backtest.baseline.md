@@ -68,53 +68,53 @@ Calibration, matches (ATDO):
 
 | Date | Team | vs | 信頼度 | 推奨 (対戦相手最適化) | 勝利優先 | 実際のオーダー | 差 | 実際の勝ちゲーム |
 |---|---|---|---|---|---|---|---|---|
-| 2026-09-10 | GpiQ | BEyE | LOW | 50.9% | 50.8% | 49.0% | +1.9 pt | 5 / 7 |
-| 2026-09-10 | BEyE | GpiQ | LOW | 50.1% | 50.1% | 51.3% | -1.2 pt | 2 / 7 |
-| 2026-09-10 | 68wv | N9dt | MEDIUM | 68.1% | 67.3% | 64.3% | +3.7 pt | 6 / 7 |
-| 2026-09-10 | N9dt | 68wv | MEDIUM | 41.3% | 41.1% | 38.8% | +2.5 pt | 1 / 7 |
+| 2026-09-10 | GpiQ | BEyE | LOW | 50.9% | 50.9% | 49.0% | +1.9 pt | 5 / 7 |
+| 2026-09-10 | BEyE | GpiQ | LOW | 50.7% | 50.7% | 51.9% | -1.2 pt | 2 / 7 |
+| 2026-09-10 | 68wv | N9dt | MEDIUM | 68.2% | 67.5% | 64.5% | +3.7 pt | 6 / 7 |
+| 2026-09-10 | N9dt | 68wv | MEDIUM | 41.2% | 41.0% | 38.7% | +2.5 pt | 1 / 7 |
 | 2026-09-10 | Rbrl | HtTk | LOW | 51.4% | 51.2% | 51.5% | -0.1 pt | 5 / 5 |
-| 2026-09-10 | HtTk | Rbrl | LOW | 49.5% | 49.5% | 50.3% | -0.7 pt | 0 / 5 |
+| 2026-09-10 | HtTk | Rbrl | LOW | 49.7% | 49.6% | 50.4% | -0.7 pt | 0 / 5 |
 | 2026-09-10 | Phnx | DbTp | LOW | 50.7% | 50.7% | 50.7% | +0.0 pt | 4 / 5 |
 | 2026-09-10 | DbTp | Phnx | LOW | 50.3% | 50.3% | 50.3% | +0.0 pt | 1 / 5 |
-| 2026-09-17 | GpiQ | N9dt | MEDIUM | 55.5% | 55.4% | 56.1% | -0.6 pt | 4 / 7 |
-| 2026-09-17 | N9dt | GpiQ | LOW | 43.1% | 43.1% | 43.2% | -0.1 pt | 3 / 7 |
-| 2026-09-17 | BEyE | T180 | LOW | 56.5% | 56.5% | 59.7% | -3.1 pt | 5 / 7 |
+| 2026-09-17 | GpiQ | N9dt | MEDIUM | 55.6% | 55.5% | 56.2% | -0.6 pt | 4 / 7 |
+| 2026-09-17 | N9dt | GpiQ | LOW | 43.4% | 43.3% | 43.4% | -0.1 pt | 3 / 7 |
+| 2026-09-17 | BEyE | T180 | LOW | 56.6% | 56.6% | 59.7% | -3.1 pt | 5 / 7 |
 | 2026-09-17 | T180 | BEyE | MEDIUM | 44.4% | 44.4% | 43.5% | +0.9 pt | 2 / 7 |
 | 2026-09-17 | Rbrl | Phnx | MEDIUM | 50.2% | 47.6% | 46.6% | +3.6 pt | 2 / 5 |
-| 2026-09-17 | Phnx | Rbrl | MEDIUM | 54.7% | 54.7% | 54.7% | +0.1 pt | 3 / 5 |
+| 2026-09-17 | Phnx | Rbrl | MEDIUM | 54.8% | 54.8% | 54.7% | +0.1 pt | 3 / 5 |
 | 2026-09-17 | HtTk | DbTp | LOW | 49.1% | 49.1% | 49.9% | -0.8 pt | 4 / 5 |
 | 2026-09-17 | DbTp | HtTk | LOW | 53.0% | 53.0% | 52.6% | +0.4 pt | 1 / 5 |
-| 2026-09-24 | GpiQ | T180 | LOW | 58.7% | 58.6% | 56.9% | +1.7 pt | 6 / 7 |
-| 2026-09-24 | T180 | GpiQ | LOW | 42.5% | 42.4% | 40.5% | +2.0 pt | 1 / 7 |
+| 2026-09-24 | GpiQ | T180 | LOW | 58.7% | 58.7% | 57.0% | +1.7 pt | 6 / 7 |
+| 2026-09-24 | T180 | GpiQ | LOW | 42.6% | 42.6% | 40.6% | +2.0 pt | 1 / 7 |
 | 2026-09-24 | 68wv | BEyE | MEDIUM | 62.0% | 61.1% | 57.4% | +4.6 pt | 5 / 7 |
-| 2026-09-24 | BEyE | 68wv | MEDIUM | 44.5% | 44.4% | 45.5% | -0.9 pt | 2 / 7 |
+| 2026-09-24 | BEyE | 68wv | MEDIUM | 44.6% | 44.4% | 45.5% | -0.9 pt | 2 / 7 |
 | 2026-09-24 | Rbrl | DbTp | LOW | 49.2% | 49.1% | 47.5% | +1.8 pt | 1 / 5 |
-| 2026-09-24 | DbTp | Rbrl | MEDIUM | 47.9% | 47.9% | 48.2% | -0.3 pt | 4 / 5 |
+| 2026-09-24 | DbTp | Rbrl | MEDIUM | 48.0% | 47.9% | 48.3% | -0.3 pt | 4 / 5 |
 | 2026-09-24 | HtTk | Phnx | MEDIUM | 43.9% | 43.8% | 44.5% | -0.6 pt | 2 / 5 |
 | 2026-09-24 | Phnx | HtTk | MEDIUM | 57.0% | 56.9% | 55.3% | +1.7 pt | 3 / 5 |
-| 2026-10-01 | 68wv | T180 | LOW | 67.4% | 67.3% | 64.1% | +3.3 pt | 5 / 7 |
-| 2026-10-01 | T180 | 68wv | MEDIUM | 37.4% | 33.6% | 33.1% | +4.3 pt | 2 / 7 |
+| 2026-10-01 | 68wv | T180 | LOW | 67.4% | 67.4% | 64.1% | +3.3 pt | 5 / 7 |
+| 2026-10-01 | T180 | 68wv | MEDIUM | 37.5% | 36.7% | 33.2% | +4.3 pt | 2 / 7 |
 | 2026-10-01 | N9dt | BEyE | MEDIUM | 43.8% | 43.8% | 39.1% | +4.7 pt | 1 / 7 |
-| 2026-10-01 | BEyE | N9dt | MEDIUM | 65.1% | 64.0% | 66.1% | -1.0 pt | 6 / 7 |
-| 2026-10-01 | Rbrl | HtTk | MEDIUM | 56.9% | 56.7% | 50.6% | +6.3 pt | 3 / 5 |
-| 2026-10-01 | HtTk | Rbrl | MEDIUM | 50.5% | 50.5% | 51.2% | -0.7 pt | 2 / 5 |
-| 2026-10-01 | Phnx | DbTp | LOW | 58.8% | 58.6% | 58.6% | +0.2 pt | 4 / 5 |
+| 2026-10-01 | BEyE | N9dt | MEDIUM | 65.2% | 64.1% | 66.2% | -1.0 pt | 6 / 7 |
+| 2026-10-01 | Rbrl | HtTk | MEDIUM | 56.8% | 56.7% | 50.6% | +6.3 pt | 3 / 5 |
+| 2026-10-01 | HtTk | Rbrl | MEDIUM | 50.6% | 50.5% | 51.2% | -0.7 pt | 2 / 5 |
+| 2026-10-01 | Phnx | DbTp | LOW | 58.7% | 58.6% | 58.6% | +0.2 pt | 4 / 5 |
 | 2026-10-01 | DbTp | Phnx | MEDIUM | 43.3% | 43.2% | 41.3% | +2.0 pt | 1 / 5 |
 | 2026-09-08 | Cm1t | Ar1t | LOW | 49.5% | 49.4% | 49.0% | +0.5 pt | 2 / 5 |
 | 2026-09-08 | Ar1t | Cm1t | LOW | 50.9% | 50.9% | 50.9% | +0.0 pt | 3 / 5 |
-| 2026-09-15 | Ow1t | Ar1t | LOW | 52.9% | 52.4% | 53.3% | -0.5 pt | 3 / 5 |
-| 2026-09-15 | Ar1t | Ow1t | LOW | 47.8% | 47.6% | 46.7% | +1.1 pt | 2 / 5 |
-| 2026-09-22 | Ow1t | Cm1t | LOW | 53.4% | 53.0% | 53.9% | -0.4 pt | 4 / 5 |
+| 2026-09-15 | Ow1t | Ar1t | LOW | 52.8% | 52.3% | 53.3% | -0.5 pt | 3 / 5 |
+| 2026-09-15 | Ar1t | Ow1t | LOW | 47.7% | 47.5% | 46.6% | +1.1 pt | 2 / 5 |
+| 2026-09-22 | Ow1t | Cm1t | LOW | 53.4% | 53.0% | 53.8% | -0.4 pt | 4 / 5 |
 | 2026-09-22 | Cm1t | Ow1t | LOW | 46.9% | 46.8% | 45.3% | +1.6 pt | 1 / 5 |
 | 2026-09-10 | Tg1h | Cm1h | LOW | 51.9% | 51.5% | 51.8% | +0.1 pt | 3 / 5 |
-| 2026-09-10 | Cm1h | Tg1h | LOW | 49.0% | 48.8% | 48.5% | +0.5 pt | 2 / 5 |
+| 2026-09-10 | Cm1h | Tg1h | LOW | 49.0% | 48.8% | 48.4% | +0.5 pt | 2 / 5 |
 
 - replays: 40
 - mean model-estimated uplift vs fielded order: 0.96 pt
 - worst: -3.12 pt; recommendation not lower in 65.0% of matches
-- mean uplift vs 勝利優先 candidate: 0.32 pt
+- mean uplift vs 勝利優先 candidate: 0.24 pt
 - fairness of the recommendation: mean spread 0.75, mean most games by one player 2.52, benched participant in 0.0% of matches; bias gate kept a biased split in 8, set one aside in 27
-- fielded orders, estimate vs result: Brier 0.2063 (50%: 0.2500), n = 40 (both sides of each match; small sample)
+- fielded orders, estimate vs result: Brier 0.2065 (50%: 0.2500), n = 40 (both sides of each match; small sample)
 
 ## 3b. Sensitivity of the recommended order (ATDO, 7-game format, 6 replays)
 
@@ -125,7 +125,7 @@ Calibration, matches (ATDO):
 | shrinkage prior 20 legs | 0.00 pt | 0.00 pt | 0.0% |
 | shrinkage prior 45 legs | 0.00 pt | 0.00 pt | 5.6% |
 | logistic k × 0.8 | 0.00 pt | 0.00 pt | 2.8% |
-| logistic k × 1.2 | 0.00 pt | 0.00 pt | 0.0% |
+| logistic k × 1.2 | 0.00 pt | 0.00 pt | 2.8% |
 | confidence one level lower | 0.00 pt | 0.00 pt | 6.9% |
 | confidence one level higher | 0.54 pt | 3.26 pt | 6.9% |
 
@@ -138,7 +138,7 @@ Calibration, matches (ATDO):
 
 | Threshold (per one-game shift) | Mean est. match value | Mean uplift vs fielded | Worst | Not lower | Mean spread | Most games by one player | Benched participant | Biased kept / set aside |
 |---|---|---|---|---|---|---|---|---|
-| off (no gate) | 52.5% | 2.23 pt | -1.96 pt | 92.5% | 0.93 | 2.63 | 0.0% | 0 / 0 |
+| off (no gate) | 52.6% | 2.23 pt | -1.95 pt | 92.5% | 0.93 | 2.63 | 0.0% | 0 / 0 |
 | 0 pt | 52.9% | 2.60 pt | -3.12 pt | 72.5% | 1.98 | 3.35 | 25.0% | 12 / 23 |
 | 1 pt | 51.6% | 1.31 pt | -3.12 pt | 70.0% | 0.95 | 2.65 | 0.0% | 12 / 23 |
 | **2 pt (default)** | 51.3% | 0.96 pt | -3.12 pt | 65.0% | 0.75 | 2.52 | 0.0% | 8 / 27 |
@@ -155,20 +155,20 @@ members in id order — what the throwing order must never follow.
 
 | Order | Mean est. match value | Mean est. game win | Mean P(W≥1) | Mean E[W] |
 |---|---|---|---|---|
-| **New recommendation (throw-order model)** | 51.3% | 50.6% | 97.9% | 2.938 |
-| New recommendation, members in internal-id order | 51.2% | 50.6% | 97.9% | 2.936 |
-| Order-free model recommendation, as written (id order) | 51.2% | 50.6% | 97.9% | 2.936 |
-| Order-free model recommendation, members in strong order | 51.2% | 50.6% | 97.9% | 2.936 |
-| Fielded order, as fielded | 50.3% | 50.1% | 97.8% | 2.909 |
-| Fielded order, members in strong order | 50.3% | 50.2% | 97.8% | 2.910 |
+| **New recommendation (throw-order model)** | 51.3% | 50.6% | 97.9% | 2.940 |
+| New recommendation, members in internal-id order | 51.2% | 50.6% | 97.9% | 2.938 |
+| Order-free model recommendation, as written (id order) | 51.2% | 50.6% | 97.9% | 2.937 |
+| Order-free model recommendation, members in strong order | 51.2% | 50.6% | 97.9% | 2.937 |
+| Fielded order, as fielded | 50.3% | 50.2% | 97.8% | 2.910 |
+| Fielded order, members in strong order | 50.4% | 50.2% | 97.8% | 2.912 |
 
 - new vs order-free recommendation: mean +0.08 pt, min +0.00 pt, max +2.52 pt (match value)
-- strong order vs internal-id order, same members: mean +0.06 pt, max +0.24 pt
+- strong order vs internal-id order, same members: mean +0.06 pt, max +0.23 pt
 - seats changed vs the order-free recommendation: 9.8%; same members, throwing order changed: 1 / 65 (1.5%) games
 - multi-player games decided: 104 (Cricket 24); shown order differs from internal-id order in 63 / 104 (60.6%)
 - non-strong order adopted (投順変更率): 0 / 104 (0.0%); adopted gain mean —, max —
 - best alternative by the estimate (adopted or not): mean +0.00 pt, max +0.00 pt (threshold +2 pt)
-- why the strong order was kept: 強い順が推定でも最善 / 推定で採用 79; 強い順との差が 2pt 未満の 1; Cricket は投順の効果を推定できるデータがない 24
+- why the strong order was kept: 強い順が推定でも最善 / 推定で採用 77; 強い順との差が 2pt 未満の 3; Cricket は投順の効果を推定できるデータがない 24
 - LOW-confidence games: 104; non-strong order adopted among them: 0; adopted under +2 pt: 0
 - fielded orders not in the strong order: 48 / 104 (46.2%) multi-player games
 - fairness, new / order-free: mean spread 0.75 / 0.70, most games by one player 2.52 / 2.50, most games in one role 1.20 / 1.18, benched 0.0% / 0.0%
