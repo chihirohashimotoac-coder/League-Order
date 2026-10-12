@@ -6,7 +6,8 @@
  * what `src/integrations/n01/validation.ts` expects? — for the three known leagues:
  *
  *   league/tournament/list → tournament/get → team/player/list → team/player/list (no
- *   tpid: every team) → tournament/stats → league/schedule/get → team/order/list
+ *   tpid: every team) → tournament/stats → league/schedule/get → team/order/list →
+ *   match/list (the team's played games: the role evidence of docs/THROW_ORDER_MODEL.md §4)
  *
  * Only GET requests are made; nothing is written anywhere. Exit code 0 = contract holds.
  */
@@ -83,6 +84,11 @@ export async function verifyLeague(client: N01Client, leagueId: string, title: s
   await attempt('tournament/stats', () => client.stats(tournament.tournamentId), (value) => `${value.length} stat rows`);
   await attempt('league/schedule/get', () => client.schedule(tournament.tournamentId), (value) => `${value.length} fixtures`);
   await attempt('team/order/list', () => client.orders(tournament.tournamentId, entry.teamId), (value) => `${value.length} order rows`);
+  // Optional in the app (a failure only thins the role evidence), checked here so a change in
+  // its shape is seen. Node does not enforce CORS: a browser may still refuse it (see the doc).
+  await attempt('match/list', () => client.teamGames(tournament.tournamentId, entry.teamId), (value) =>
+    `${value.length} games, ${value.filter((game) => game.sides[0].players.length >= 2).length} multi-player, ${value.filter((game) => game.sides.every((side) => side.darts !== null)).length} with darts`,
+  );
   return checks;
 }
 

@@ -119,7 +119,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.test.ts', '**/*.test.tsx', 'src/test/**/*.ts', 'e2e/**/*.ts', 'scripts/**/*.{ts,mjs}'],
+    files: ['**/*.test.ts', '**/*.test.tsx', 'src/test/**/*.ts', 'e2e/**/*.ts', 'e2e-preview/**/*.ts', 'scripts/**/*.{ts,mjs}'],
     rules: { 'no-console': 'off' },
   },
 );

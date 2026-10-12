@@ -2,7 +2,9 @@ import type {
   N01Division,
   N01Entry,
   N01Fixture,
+  N01GameRecord,
   N01GameResult,
+  N01GameSide,
   N01GameSetting,
   N01LeagueSummary,
   N01LeagueTournaments,
@@ -470,6 +472,65 @@ export function parseSchedule(raw: unknown, now: number): N01Fixture[] {
       awayTeamId: real[1] ?? null,
       date: fixtureDate(dateValue, now) ?? parseDateText(title, now),
       listIndex: index,
+    };
+  });
+}
+
+/**
+ * `match/list`: the games of a team, with each side's players in their registered order and
+ * the side's totals. A row without two readable sides is skipped; an empty list is a team that
+ * has not played yet, not an error.
+ */
+export function parseMatchList(raw: unknown): N01GameRecord[] {
+  return parseMatchListPage(raw).games;
+}
+
+/**
+ * One page of `match/list`: the games that could be read, and how many rows n01 sent (paging
+ * goes on while a page is full, whether or not every row on it was readable).
+ */
+export function parseMatchListPage(raw: unknown): { games: N01GameRecord[]; rows: number } {
+  const rows = requireList('match/list', raw, ['list', 'matches', 'match_list']);
+  return { games: parseMatchRows(rows), rows: rows.length };
+}
+
+function parseMatchRows(rows: unknown[]): N01GameRecord[] {
+  return mapRows('match/list', rows, (row) => {
+    const gameId = nonEmpty(first(row, ['mid', 'id']));
+    const sideRows = firstList(row, ['statsData', 'stats_data', 'sides']);
+    if (!gameId || !sideRows || sideRows.length !== 2) return null;
+    const sides = sideRows.map((side): N01GameSide | null => {
+      if (!isRec(side)) return null;
+      const teamId = nonEmpty(first(side, ['tpid', 'team']));
+      const playerRows = firstList(side, ['order', 'players']);
+      const legsWon = num(first(side, ['winLegs', 'win_legs']));
+      if (!teamId || !playerRows || legsWon === null) return null;
+      const players = playerRows
+        .map((entry) =>
+          isRec(entry)
+            ? { oid: nonEmpty(entry.oid), opid: nonEmpty(entry.opid), name: nonEmpty(first(entry, ['oname', 'name'])) }
+            : { oid: nonEmpty(entry), opid: null, name: null },
+        )
+        .filter((entry) => entry.oid !== null || entry.opid !== null);
+      if (players.length === 0) return null;
+      return {
+        teamId,
+        players,
+        legsWon,
+        score: num(first(side, ['allScore', 'all_score', 'score'])),
+        darts: num(first(side, ['allDarts', 'all_darts', 'darts'])),
+        marks: num(first(side, ['allMarks', 'all_marks', 'marks'])),
+      };
+    });
+    if (sides.some((side) => side === null)) return null;
+    const startTime = num(first(row, ['startTime', 'start_time']));
+    return {
+      gameId,
+      matchId: nonEmpty(first(row, ['tmid', 'match_id'])),
+      schid: nonEmpty(first(row, ['schid', 'sch_id'])),
+      matchType: (nonEmpty(first(row, ['match_type', 'matchType'])) ?? '01').toLowerCase(),
+      startTime: startTime !== null && startTime > 0 ? (startTime > 1e12 ? Math.floor(startTime / 1000) : startTime) : null,
+      sides: sides as [N01GameSide, N01GameSide],
     };
   });
 }

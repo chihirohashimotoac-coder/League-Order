@@ -104,7 +104,7 @@ export function buildBoundContext(
     suffixMaxGameFit[gi] = suffixMaxGameFit[gi + 1] + candidates[gi].maxGameFit;
     suffixMaxPair[gi] = suffixMaxPair[gi + 1] + (isPairGame ? candidates[gi].maxPairFit : 0);
     suffixMaxNovelty[gi] = suffixMaxNovelty[gi + 1] + (isPairGame ? candidates[gi].maxNovelty : 0);
-    suffixMaxOppWin[gi] = suffixMaxOppWin[gi + 1] + candidates[gi].maxOppWin;
+    suffixMaxOppWin[gi] = suffixMaxOppWin[gi + 1] + candidates[gi].maxOppValue;
   }
 
   const remainingEligible: Int32Array[] = [];
@@ -257,7 +257,7 @@ export function applyCombo(
   gi: number,
   state: SearchState,
   members: readonly number[],
-  combo: { strength: number; gameFit: number; pairFit: number; novelty: number; oppWin: number },
+  combo: { strength: number; gameFit: number; pairFit: number; novelty: number; oppValue: number },
 ): PlaceUndo {
   const undo: PlaceUndo = {
     members,
@@ -283,7 +283,7 @@ export function applyCombo(
 
   state.sumStrength += combo.strength;
   state.sumGameFit += combo.gameFit;
-  state.sumOppWin += combo.oppWin;
+  state.sumOppWin += combo.oppValue;
   if (ctx.games[gi].playerCount >= 2) {
     state.sumPair += combo.pairFit;
     state.sumNovelty += combo.novelty;

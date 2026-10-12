@@ -2,6 +2,7 @@ import type { N01Operation, N01Request } from './endpoints';
 import { N01_API_BASE_URL, buildUrl, isAllowedN01Url } from './endpoints';
 import type {
   N01Fixture,
+  N01GameRecord,
   N01LeagueSummary,
   N01LeagueTournaments,
   N01OrderEntry,
@@ -13,6 +14,7 @@ import {
   N01SchemaError,
   parseLeagueSearch,
   parseLeagueTournaments,
+  parseMatchListPage,
   parseOrders,
   parseRoster,
   parseSchedule,
@@ -116,6 +118,22 @@ export interface N01ClientOptions {
 
 export const N01_DEFAULT_TIMEOUT_MS = 12_000;
 
+/** Rows per `match/list` request (n01 returns at most 100). */
+export const MATCH_LIST_PAGE = 100;
+/** A team plays ~70–100 games a season; three pages cover any season seen. */
+export const MATCH_LIST_MAX_PAGES = 3;
+
+/**
+ * The `tmid__regex` filter for a team's own matches (`tmid` ends `…_<tpid>_<tpid>`). n01 compares it
+ * as plain text, not as a regular expression — checked against the live API on 2026-10-12: `_X6iU`
+ * finds the team's matches, while `_X6iU$`, `_X6iU(_|$)` and `_X6i.` find none — so it is the
+ * `_<tpid>` substring. Rows it also catches for another team (a longer tpid starting with the same
+ * letters) are dropped by `teamGames`, which keeps only games one of whose sides is the team.
+ */
+export function teamMatchFilter(teamId: string): string {
+  return `_${teamId}`;
+}
+
 export class N01Client {
   private readonly cache = new Map<string, Promise<unknown>>();
   private readonly timeoutMs: number;
@@ -217,6 +235,31 @@ export class N01Client {
 
   orders(tournamentId: string, teamId: string): Promise<N01OrderEntry[]> {
     return this.parsed('team/order/list', { tdid: tournamentId, tpid: teamId }, parseOrders);
+  }
+
+  /**
+   * The played games of one team in a tournament (`match/list`, filtered to the team matches
+   * whose `tmid` names the team), newest first, `MATCH_LIST_PAGE` per request. A second page is
+   * asked for only when the first one is full, up to `MATCH_LIST_MAX_PAGES`.
+   */
+  async teamGames(tournamentId: string, teamId: string): Promise<N01GameRecord[]> {
+    const games: N01GameRecord[] = [];
+    for (let page = 0; page < MATCH_LIST_MAX_PAGES; page += 1) {
+      const params: Record<string, string> = { tdid: tournamentId, tmid__regex: teamMatchFilter(teamId), count: String(MATCH_LIST_PAGE) };
+      if (page > 0) params.skip = String(page * MATCH_LIST_PAGE);
+      let result: { games: N01GameRecord[]; rows: number };
+      try {
+        result = await this.parsed('match/list', params, parseMatchListPage);
+      } catch (error) {
+        // A later page none of whose rows can be read ends the list; the games read so far stay.
+        if (page > 0 && error instanceof N01Error && error.kind === 'schema') break;
+        throw error;
+      }
+      games.push(...result.games.filter((game) => game.sides.some((side) => side.teamId === teamId)));
+      // Paging follows the rows n01 sent, not the rows that could be read or kept.
+      if (result.rows < MATCH_LIST_PAGE) break;
+    }
+    return games;
   }
 }
 

@@ -49,6 +49,12 @@ export interface PlayerStrength {
   shrunkPpr: number;
   formAdjustment: number;
   first9Adjustment: number;
+  /**
+   * The player's First 9 − PPR gap beyond the league's, shrunk by legs / (legs + prior) and
+   * not capped (`null` without First 9 data). The throw-order model reads it as how much a
+   * player's scoring visits outrun their finishing (docs/THROW_ORDER_MODEL.md §3).
+   */
+  first9Excess: number | null;
   /** Recency-weighted legs behind the estimate. */
   legs: number;
   seasons: number;
@@ -102,6 +108,7 @@ export function playerStrength(
       shrunkPpr: mean,
       formAdjustment: 0,
       first9Adjustment: 0,
+      first9Excess: null,
       legs: 0,
       seasons: 0,
       confidence: 'LOW',
@@ -122,12 +129,17 @@ export function playerStrength(
           FIRST9_CAP,
         )
       : 0;
+  const first9Excess =
+    aggregate.first9 !== null && prior.first9Gap !== null
+      ? (aggregate.first9 - aggregate.ppr - prior.first9Gap) * (aggregate.weightedLegs / (aggregate.weightedLegs + k))
+      : null;
   return {
     strength: shrunk + form + first9,
     rawPpr: aggregate.ppr,
     shrunkPpr: shrunk,
     formAdjustment: form,
     first9Adjustment: first9,
+    first9Excess,
     legs: aggregate.weightedLegs,
     seasons: aggregate.seasonsWithData,
     confidence: playerConfidence(aggregate.weightedLegs),
@@ -151,6 +163,7 @@ export function manualStrength(ppr: number | null, prior: LeaguePrior, priorLegs
     shrunkPpr: shrunk,
     formAdjustment: 0,
     first9Adjustment: 0,
+    first9Excess: null,
     legs: MANUAL_PPR_LEGS,
     seasons: 0,
     confidence: 'LOW',

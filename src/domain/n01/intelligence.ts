@@ -1,4 +1,5 @@
 import type { ConfidenceLevel } from '../prediction/confidence';
+import type { RoleEvidence } from '../prediction/roleStrength';
 import type { HistoricalPlayerStats } from './history';
 import type { OpponentPositionModel } from './positionModel';
 
@@ -39,6 +40,23 @@ export interface OpponentSnapshot {
   players: IntelligencePlayer[];
   stats: HistoricalPlayerStats[];
   positionModel: OpponentPositionModel;
+  /**
+   * Role evidence by player key, from the opponent's n01 games before the match
+   * (docs/THROW_ORDER_MODEL.md §4). Absent on snapshots made before it was read.
+   */
+  roleEvidence?: Record<string, RoleEvidence>;
+}
+
+/** What the role evidence of a snapshot stands on. */
+export interface RoleHistorySummary {
+  /** Games read (both teams, every season), after the date filter. */
+  games: number;
+  /** Games dropped because they were not strictly before the match day. */
+  droppedFuture: number;
+  /** The day games had to be before (`YYYY-MM-DD`), when known. */
+  before: string | null;
+  /** Seasons whose game list could not be read (the evidence is thinner, never wrong). */
+  failedSeasons: number;
 }
 
 export interface IntelligenceGame {
@@ -83,6 +101,9 @@ export interface N01MatchIntelligenceSnapshot {
   historyDepth: number;
   /** Overall confidence of the opponent order model (LOW when there is no opponent). */
   orderConfidence: ConfidenceLevel;
+  /** Role evidence of our players by player key (absent on older snapshots). */
+  ourRoleEvidence?: Record<string, RoleEvidence>;
+  roleHistory?: RoleHistorySummary;
 }
 
 export function intelligenceSnapshotId(teamId: string): string {

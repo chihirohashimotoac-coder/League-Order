@@ -110,8 +110,9 @@ describe('opponent and history', () => {
     expect(fetched.history.map((season) => season.summary.tournamentId)).toEqual(['t_ATp2_5101', 't_ATp1_4988']);
     expect(log.some((request) => request.params.tdid === 't_ATp0_4870')).toBe(false);
     // 4 team requests + schedule + opponent roster/orders + 3 per historical season,
-    // plus one whole roster per season (the current one and each past one).
-    expect(log.length).toBeLessThanOrEqual(4 + 3 + 2 * 3 + 3);
+    // plus one whole roster per season (the current one and each past one),
+    // plus our team's and the opponent's played games per season (role evidence).
+    expect(log.length).toBeLessThanOrEqual(4 + 3 + 2 * 3 + 3 + 2 * 3);
   });
 
   it('a failed historical season thins the history but does not fail the sync', async () => {

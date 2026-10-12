@@ -1,3 +1,5 @@
+import { MATCH_LIST_PAGE, teamMatchFilter } from '../../integrations/n01/client';
+
 /**
  * Deterministic n01 fixture generator (test-only).
  *
@@ -514,6 +516,45 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
     }
 
     dataset.set(requestKey('team/player/list', { tdid: season.tournamentId }), { list: everyone });
+
+    // `match/list` per team (as the client asks for it: `tmid` filtered to the team's matches,
+    // newest first, 100 rows a page). Derived from the simulated games alone — no random draw —
+    // so adding it changes nothing else in the dataset.
+    const seasonGames = games.filter((game) => game.tournamentId === season.tournamentId);
+    const gameRow = (game: SimulatedGame): Record<string, unknown> => {
+      const side = (tpid: string, opids: readonly string[]): Record<string, unknown> => {
+        const lines = opids.map((opid) => game.lines.find((line) => line.opid === opid)!);
+        return {
+          tpid,
+          order: opids.map((opid) => ({ oid: oid(opid), ...(opidOf(opid) ? { opid } : {}), oname: spec.people[opid].name })),
+          winLegs: lines[0].legsWon,
+          allScore: lines.reduce((acc, line) => acc + line.score, 0),
+          allDarts: lines.reduce((acc, line) => acc + line.darts, 0),
+          allMarks: 0,
+        };
+      };
+      return {
+        mid: `${game.matchId}_${game.schid}`,
+        tdid: season.tournamentId,
+        tmid: `${season.tournamentId}_lg_${game.matchId}_${game.homeTpid}_${game.awayTpid}`,
+        schid: game.schid,
+        match_type: game.matchType,
+        startTime: Date.parse(`${game.date}T19:00:00+09:00`) / 1000 + game.gameIndex * 900,
+        endMatch: 1,
+        statsData: [side(game.homeTpid, game.homeOpids), side(game.awayTpid, game.awayOpids)],
+      };
+    };
+    for (const team of teams) {
+      const rows = seasonGames
+        .filter((game) => game.homeTpid === team.tpid || game.awayTpid === team.tpid)
+        .map(gameRow)
+        .sort((a, b) => (b.startTime as number) - (a.startTime as number));
+      for (let page = 0; page === 0 || page * MATCH_LIST_PAGE < rows.length; page += 1) {
+        const params: Record<string, string> = { tdid: season.tournamentId, tmid__regex: teamMatchFilter(team.tpid), count: String(MATCH_LIST_PAGE) };
+        if (page > 0) params.skip = String(page * MATCH_LIST_PAGE);
+        dataset.set(requestKey('match/list', params), { result: 0, list: rows.slice(page * MATCH_LIST_PAGE, (page + 1) * MATCH_LIST_PAGE) });
+      }
+    }
 
     dataset.set(
       requestKey('league/schedule/get', { tdid: season.tournamentId }),

@@ -19,6 +19,17 @@ export function selectionMatchValue(ctx: PreparedContext, selection: readonly Co
 }
 
 /**
+ * The value a run ranks complete line-ups by: the match value, or for an underdog run
+ * P(W ≥ 1) = 1 − Π(1 − p) or E[W] / n — every one a probability-scale number in [0, 1].
+ */
+export function selectionObjectiveValue(ctx: PreparedContext, selection: readonly Combo[]): number {
+  const probabilities = selection.flatMap((combo, gi) => (ctx.opponentGames[gi] ? [combo.oppWin] : []));
+  if (ctx.objective === 'atLeastOne') return 1 - probabilities.reduce((acc, p) => acc * (1 - p), 1);
+  if (ctx.objective === 'expectedWins') return probabilities.length === 0 ? 0 : probabilities.reduce((a, b) => a + b, 0) / probabilities.length;
+  return riskValue(independentGamesModel.outcome(probabilities));
+}
+
+/**
  * Opponent-aware runs: the search ranks by the additive score (expected games won plus
  * the soft terms); the final pick among the near-optimal line-ups is the one with the
  * best estimated *match* outcome, which is not additive in the games.
@@ -40,7 +51,7 @@ export function rerankByMatchOutcome(
     if (!hardFeasible(ctx, selection)) continue;
     const evaluation = evaluateSelection(ctx, selection);
     if (evaluation.breakdown.total < floor - 1e-12) continue;
-    const value = selectionMatchValue(ctx, selection);
+    const value = selectionObjectiveValue(ctx, selection);
     if (
       !chosen ||
       value > chosen.value + 1e-12 ||

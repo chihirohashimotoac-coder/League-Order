@@ -6,7 +6,7 @@ import { BASELINE_PATH, REQUIRED_SECTIONS, check, compare, differences, normaliz
 
 /**
  * The evidence check for `npm run backtest`, run with a canned backtest (no child process):
- * it must pass only on the baseline's exact content, tolerate only the two timing lines, and
+ * it must pass only on the baseline's exact content, tolerate only the timing lines, and
  * leave the proof behind.
  */
 
@@ -25,12 +25,19 @@ const REPORT = [
   '## 3c. Appearance-bias gate: threshold calibration (same replays, 対戦相手最適化 candidate)',
   '- requests: first sync 4, + opponent analysis (2 past seasons) 12, re-sync season resolution 2',
   '- duplicate requests within one sync: 0',
+  '## 5. Throw-order model (same replays, 対戦相手最適化 candidate, model estimates only)',
+  '- non-strong order adopted (投順変更率): 0 / 104 (0.0%); adopted gain mean —, max —',
+  '- time per generation, throw-order model (node-bounded): median 48 ms, max 2171 ms',
+  '## 5b. Throw-order guardrails, synthetic stress test (240 seeded one-game cases, invented teams)',
+  '## 6. Underdog plan (格上対策案; model estimates only)',
   '',
 ].join('\n');
 
 const ok = (stdout: string): BacktestRun => ({ status: 0, stdout, stderr: '' });
 const withTimings = (replay: number, median: number, max: number): string =>
-  REPORT.replace('213 ms total', `${replay} ms total`).replace('median 33 ms, max 1212 ms', `median ${median} ms, max ${max} ms`);
+  REPORT.replace('213 ms total', `${replay} ms total`)
+    .replace('median 33 ms, max 1212 ms', `median ${median} ms, max ${max} ms`)
+    .replace('median 48 ms, max 2171 ms', `median ${median + 1} ms, max ${max + 1} ms`);
 
 function sandbox(baseline: string | null): { baselinePath: string; reportDir: string; summaryPath: string; log: string[] } {
   const dir = mkdtempSync(join(tmpdir(), 'backtest-check-'));
@@ -40,13 +47,19 @@ function sandbox(baseline: string | null): { baselinePath: string; reportDir: st
 }
 
 describe('normalizeReport', () => {
-  it('masks the two timing lines and nothing else', () => {
+  it('masks the timing lines and nothing else', () => {
     const normalized = normalizeReport(REPORT);
     expect(normalized).toContain('- replay (fetch + plan + intelligence) of 40 matches: <ms> ms total');
     expect(normalized).toContain('- optimizer (4 candidates) per match: median <ms> ms, max <ms> ms');
+    expect(normalized).toContain('- time per generation, throw-order model (node-bounded): median <ms> ms, max <ms> ms');
     expect(normalized).toContain('| ATDO | game | 312 | 0.2312 | 0.2500 |');
     expect(normalized).toContain('- replays: 40');
-    expect(differences(REPORT, normalized).total).toBe(2);
+    expect(normalized).toContain('- non-strong order adopted (投順変更率): 0 / 104 (0.0%); adopted gain mean —, max —');
+    expect(differences(REPORT, normalized).total).toBe(3);
+  });
+
+  it('keeps the label of a timing line: a renamed measurement is a real change', () => {
+    expect(normalizeReport(REPORT.replace('throw-order model (node-bounded)', 'other model'))).not.toBe(normalizeReport(REPORT));
   });
 
   it('keeps the match count of the replay line: a different count is a real change', () => {

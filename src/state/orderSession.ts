@@ -8,6 +8,7 @@ import type {
   PlayerId,
   PresetKey,
   ScoreWeights,
+  UnderdogSuggestion,
 } from '../domain/types';
 import { evaluateManualOrder } from '../optimizer/generateOrder';
 import type { HardViolation } from '../optimizer/constraints/validate';
@@ -35,6 +36,13 @@ export interface OrderSessionState {
   violations: HardViolation[];
   /** True while `current` differs from the generated candidate. */
   edited: boolean;
+  /**
+   * The underdog plan offered with the last generation (docs/UNDERDOG_PLAN.md), or `null`. It is
+   * only ever shown on request: `generated` leaves the standard plan on screen.
+   */
+  underdog: UnderdogSuggestion | null;
+  /** True while the underdog plan (or an edit of it) is the order on screen. */
+  showingUnderdog: boolean;
 }
 
 export interface UndoableState {
@@ -47,8 +55,10 @@ export interface UndoableState {
 export const UNDO_DEPTH = 30;
 
 export type OrderSessionAction =
-  | { type: 'generated'; candidates: OrderSolution[] }
+  | { type: 'generated'; candidates: OrderSolution[]; underdog?: UnderdogSuggestion | null }
   | { type: 'selectCandidate'; index: number }
+  | { type: 'applyUnderdog' }
+  | { type: 'restoreStandard' }
   | { type: 'assignPlayer'; gameId: GameId; slotIndex: number; playerId: PlayerId | null }
   | { type: 'swapSlots'; from: { gameId: GameId; slotIndex: number }; to: { gameId: GameId; slotIndex: number } }
   | { type: 'toggleLock'; gameId: GameId; slotIndex: number }
@@ -84,6 +94,8 @@ export function createSession(input: OrderInput): OrderSessionState {
     current: null,
     violations: [],
     edited: false,
+    underdog: null,
+    showingUnderdog: false,
   };
 }
 
@@ -138,6 +150,7 @@ export function sessionReducer(
 ): OrderSessionState {
   switch (action.type) {
     case 'generated': {
+      // The standard plan is always what a generation shows; an underdog plan is only offered.
       const current = action.candidates[0] ?? null;
       return {
         ...state,
@@ -146,6 +159,8 @@ export function sessionReducer(
         current,
         violations: [],
         edited: false,
+        underdog: action.underdog ?? null,
+        showingUnderdog: false,
       };
     }
 
@@ -158,7 +173,20 @@ export function sessionReducer(
         current: candidate,
         violations: [],
         edited: false,
+        showingUnderdog: false,
       };
+    }
+
+    case 'applyUnderdog': {
+      // One tap to the underdog plan; the standard plan stays in `candidates`, one tap away.
+      if (!state.underdog) return state;
+      return { ...state, current: state.underdog.solution, violations: [], edited: false, showingUnderdog: true };
+    }
+
+    case 'restoreStandard': {
+      const candidate = state.candidates[state.selectedCandidate];
+      if (!candidate || !state.showingUnderdog) return state;
+      return { ...state, current: candidate, violations: [], edited: false, showingUnderdog: false };
     }
 
     case 'assignPlayer': {

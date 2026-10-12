@@ -47,7 +47,10 @@ export interface Evaluation {
   gameFitRaw: number;
   pairFitRaw: number;
   noveltyRaw: number;
-  /** Mean estimated game win probability (0.5 per game without opponent data). */
+  /**
+   * Mean of the opponent term per game: the estimated game win probability (0.5 without opponent
+   * data), or its underdog transform when the run maximises P(at least one game).
+   */
   opponentRaw: number;
 }
 
@@ -100,7 +103,7 @@ export function evaluateSelection(
   const multi = selection.filter((_, gi) => ctx.games[gi].playerCount >= 2);
   const pairFitRaw = multi.length === 0 ? 0.5 : mean(multi.map((c) => c.pairFit));
   const noveltyRaw = multi.length === 0 ? 0.5 : mean(multi.map((c) => c.novelty));
-  const opponentRaw = selection.length === 0 ? 0.5 : mean(selection.map((c) => c.oppWin));
+  const opponentRaw = selection.length === 0 ? 0.5 : mean(selection.map((c) => c.oppValue));
 
   const fairness = evaluateFairness(ctx.fairnessBaseline, counts);
   const seasonFairness = evaluateFairness(ctx.seasonBaseline, counts);
@@ -197,12 +200,20 @@ export function compareEvaluations(
   const fairnessDiff = b.evaluation.fairness.score - a.evaluation.fairness.score;
   if (Math.abs(fairnessDiff) > EPSILON) return fairnessDiff;
 
-  // Final tie-break: lexicographic order of the player-index sequence.
+  // Final tie-break: lexicographic order of the player-index sequence (the sets first, then the
+  // throwing order, which is a function of the set within one run).
   for (let gi = 0; gi < Math.min(a.selection.length, b.selection.length); gi += 1) {
     const am = a.selection[gi].members;
     const bm = b.selection[gi].members;
     for (let i = 0; i < Math.min(am.length, bm.length); i += 1) {
       if (am[i] !== bm[i]) return am[i] - bm[i];
+    }
+  }
+  for (let gi = 0; gi < Math.min(a.selection.length, b.selection.length); gi += 1) {
+    const ao = a.selection[gi].order;
+    const bo = b.selection[gi].order;
+    for (let i = 0; i < Math.min(ao.length, bo.length); i += 1) {
+      if (ao[i] !== bo[i]) return ao[i] - bo[i];
     }
   }
   return 0;

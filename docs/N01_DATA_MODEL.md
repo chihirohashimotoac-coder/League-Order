@@ -28,6 +28,7 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 | `tournament/stats` | `tdid`, `kind=player_stats_list` (団体戦で個人行を得る) | `player_stats_list[]`: `opid`, `tpid`, `oname`, `score`, `darts`, `leg`, `winLeg`, `match`, `f9Score`, `f9Darts`, `highOut`, `best`, `ton00`, `ton40`, `ton70`, `ton80` (`set` / `winSet` / `worst` は未使用)。当初形の snake_case (`legs`, `win_legs`, `first9_score`, `best_leg`, `ton` …) も読む。PPR = `score / darts × 3`、欠損は `null` |
 | `league/schedule/get` | `tdid` | マニュアル: `schedule[division][]` = `{ p: [tpid1, tpid2], lsid, t }`。当初形: `list[].lsid`, `title`, `tpid1`, `tpid2`, `date`。空の tpid = bye。`t` は日付文字列またはエポック (秒 / ミリ秒、JST の日付に変換) |
 | `team/order/list` | `tdid`, `tpid` | マニュアル: `list[].tmid`, `position`, `order[]` (選手)。当初形: `list[].lsid`, `schid`, `position`, `players[]`。選手は `oid/opid/oname` のオブジェクトか `oid` 文字列。`schid` が無ければ `position` でゲームに対応付ける |
+| `match/list` (任意、役割の証拠。[`THROW_ORDER_MODEL.md`](./THROW_ORDER_MODEL.md) §4.1) | `tdid`, `tmid__regex=_<tpid>` (n01 は正規表現ではなく部分一致として扱う。2026-10-12 に実 API で確認)、`count=100`, `skip` (2 ページ目以降) | `list[]`: `mid`, `tmid`, `schid`, `match_type`, `startTime` (秒 / ミリ秒)、`statsData[2]` = 各サイドの `tpid`, `order[]` (登録順 = 投順。`oid/opid/oname`), `winLegs`, `allScore`, `allDarts`, `allMarks`。1 ページ 100 行、満杯 (n01 が返した行数で判定) のときだけ次ページ (最大 3)。2 ページ目以降が全行読めなければ読めた分で止める。受け取った行はどちらかのサイドがそのチームのゲームだけを使う。取得失敗は同期を止めない (証拠が薄くなるだけ) |
 
 `schedule[]` (試合形式の 1 ゲーム): `schid`, `num_part`, `subTitle`, `match_type`, `startScore`, `limit_leg_count`, `group`
 (n01 の名前は `startScore` / `subTitle`。当初形の `start_score` / `subtitle` も読む)。
@@ -115,11 +116,12 @@ n01 連携のデータモデル。上位方針は [`N01_MASTER_DESIGN.md`](./N01
 
 既定 `current + 2 previous`。1 同期のリクエスト上限:
 Team 4 (tournament list / tournament / roster / stats) + 日程 1 + 相手 roster・orders 2 + 今季の全チーム名簿 1 +
-過去 Season ごとに最大 4 (tournament / stats / 全チーム名簿 / 相手 orders)。
-既定深さで最大 16。過去 Season の取得失敗は `notes` に記録し同期全体は失敗させない。
-実測 (フィクスチャ、`src/integrations/n01/n01Requests.test.ts`): 「次戦のオーダーを作る」の再同期 1 回 = **16 GET、重複 0**
-(Season 解決 2 + 名簿・成績 2 + 分析 12)。過去 Season 1 つあたりの追加数は一定。チーム情報 (名簿・成績・形式) だけなら 4。
-(全名簿導入前は 13。+3 は今季と過去 2 Season の全チーム名簿。)
+過去 Season ごとに最大 4 (tournament / stats / 全チーム名簿 / 相手 orders) +
+Season ごとに `match/list` を自チーム・相手で各 1–3 ページ (役割の証拠、任意)。
+既定深さで `match/list` を除き最大 16、`match/list` は通常 6 (最大 18)。過去 Season の取得失敗は `notes` に記録し同期全体は失敗させない。
+実測 (フィクスチャ、`src/integrations/n01/n01Requests.test.ts`): 「次戦のオーダーを作る」の再同期 1 回 = **22 GET、重複 0**
+(Season 解決 2 + 名簿・成績 2 + 分析 12 + `match/list` 6)。過去 Season 1 つあたりの追加数は一定。チーム情報 (名簿・成績・形式) だけなら 4。
+(全名簿導入前は 13。+3 は今季と過去 2 Season の全チーム名簿。投順モデル導入で +6。)
 
 ### 5.2 Position model
 
@@ -129,3 +131,6 @@ Team 4 (tournament list / tournament / roster / stats) + 日程 1 + 相手 roste
   各段は外側の観測だけで作り、同じ観測を二重に数えない。β = `POSITION_PRIOR_STRENGTH` (3) 試合分の席数。
 - `probability` は席のシェア (名簿全体で和 1)。k 人ゲームの出場確率はおよそ `min(1, k·probability)`。
 - `lineups`: 現名簿のみで構成された観測済みの組合せ (和 1)。
+- `orderedLineups`: 同じ組合せを **登録順 (= 投順) のまま** 保持 (ソートしない)。投順の無い古いモデルには無い。
+- `lead`: 各選手の先頭傾向 (1 = 常に 1 投目、0 = 常に最後、0.5 = 傾向なし。構造 → チーム → 0.5 へ縮約)、
+  `orderedSamples` / `teamOrderedSamples`: 投順の観測量。投順の分布の作り方は THROW_ORDER_MODEL.md §5。

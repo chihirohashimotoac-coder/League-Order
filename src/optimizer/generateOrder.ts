@@ -20,6 +20,12 @@ import {
 } from '../domain/orders/presets';
 import type { ExplanationFactor, OrderExplanation, SkewGateReport } from '../domain/types';
 import { INDEPENDENCE_NOTE, confidenceText, formatProbability, predictOrder } from '../domain/prediction/predictOrder';
+import { independentGamesModel } from '../domain/prediction/matchWinProbability';
+import type { ThrowOrderRecord, UnderdogObjective, UnderdogPlanMetrics, UnderdogStatus, UnderdogSuggestion } from '../domain/types';
+import { chooseUnderdogPlan, opponentDataConfidence, planMetrics, underdogEligibility } from './underdog';
+import { describeThrowOrder } from '../domain/orders/throwOrderText';
+import { underdogGainText, underdogLossText } from '../domain/orders/underdogText';
+import { throwOrderRecord } from './throwOrder';
 import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
 import { round } from '../utils/math';
 import {
@@ -68,6 +74,11 @@ export interface GenerateOptions {
   timeLimitMs?: number;
   /** Skip the alternative-preset candidates and return only the requested weights. */
   singleCandidate?: boolean;
+  /**
+   * Build the underdog plan when the opponent-optimised standard plan qualifies
+   * (docs/UNDERDOG_PLAN.md). Default true; it is never applied, only offered.
+   */
+  underdog?: boolean;
 }
 
 interface RunOutcome {
@@ -133,31 +144,48 @@ function runOnce(
   };
 }
 
-/** Turns a member-set selection into slot-ordered assignments, honouring locks. */
+/**
+ * Turns a selection into slot-ordered assignments: each game's members in their throwing order
+ * (`Combo.order`, which keeps every locked player in their locked slot — docs/THROW_ORDER_MODEL.md
+ * §6). Never the internal id order.
+ */
 export function materialise(ctx: PreparedContext, selection: readonly Combo[]): GameAssignment[] {
-  return selection.map((combo, gi) => {
-    const game = ctx.games[gi];
-    const slots = new Array<string | undefined>(game.playerCount).fill(undefined);
-    const locks = ctx.locksByGame[gi];
+  return selection.map((combo, gi) => ({
+    gameId: ctx.games[gi].id,
+    playerIds: combo.order.map((pi) => ctx.playerIds[pi]),
+  }));
+}
 
-    // Locked slots first.
-    const placed = new Set<number>();
-    for (let slot = 0; slot < slots.length; slot += 1) {
-      const pi = locks[slot];
-      if (pi === undefined) continue;
-      slots[slot] = ctx.playerIds[pi];
-      placed.add(pi);
-    }
-    // Remaining members fill the remaining slots in ascending player order.
-    const rest = combo.members.filter((pi) => !placed.has(pi));
-    let cursor = 0;
-    for (let slot = 0; slot < slots.length; slot += 1) {
-      if (slots[slot] !== undefined) continue;
-      slots[slot] = ctx.playerIds[rest[cursor]];
-      cursor += 1;
-    }
-    return { gameId: game.id, playerIds: slots.filter((id): id is string => id !== undefined) };
-  });
+/**
+ * How each multi-player game's order was decided, for the solution. Orders made before the
+ * throw-order model (no model version in their input) get none: they keep the order they were
+ * saved in and are explained as before, never as hand edits of a rule they did not follow.
+ */
+export function throwOrderRecords(ctx: PreparedContext, selection: readonly Combo[]): ThrowOrderRecord[] {
+  if (!ctx.throwOrderModel) return [];
+  return selection.flatMap((combo, gi) => (combo.members.length >= 2 ? [throwOrderRecord(ctx, gi, combo.orderChoice)] : []));
+}
+
+/** One reason per multi-player game: which order, and why (docs/THROW_ORDER_MODEL.md §7). */
+function withThrowOrderFactors(ctx: PreparedContext, explanation: OrderExplanation, records: readonly ThrowOrderRecord[]): OrderExplanation {
+  if (records.length === 0) return explanation;
+  const nameOf = (id: string): string => ctx.players[ctx.playerIndex.get(id) ?? -1]?.name ?? id;
+  const byGame = new Map(records.map((record) => [record.gameId, record]));
+  return {
+    ...explanation,
+    games: explanation.games.map((game) => {
+      const record = byGame.get(game.gameId);
+      if (!record) return game;
+      const text = describeThrowOrder(record, nameOf);
+      const factor: ExplanationFactor = {
+        key: 'throwOrder',
+        label: text.summary,
+        detail: text.detail,
+        tone: text.deviates ? 'neutral' : 'positive',
+      };
+      return { ...game, factors: [factor, ...game.factors] };
+    }),
+  };
 }
 
 function buildTallies(ctx: PreparedContext, evaluation: Evaluation): PlayerTally[] {
@@ -350,21 +378,36 @@ function assembleSolution(
   const violations = validateHardConstraints(ctx.input, assignments);
   if (violations.length > 0) return null;
 
-  const comparable = evaluateSelection(referenceCtx, outcome.selection);
-  const prediction = ctx.opponent ? predictOrder(ctx.opponent, assignments, ctx.input.pairs) ?? undefined : undefined;
+  // Reported on the captain's scale: an underdog run's opponent term is a transform of the win
+  // probabilities, so its line-up is re-described under the reference context first.
+  const comparable = evaluateSelection(
+    referenceCtx,
+    ctx.objective === referenceCtx.objective
+      ? outcome.selection
+      : outcome.selection.map((combo, gi) => describeCombo(referenceCtx, gi, combo.members, combo.order)),
+  );
+  const prediction = ctx.opponent
+    ? (predictOrder(ctx.opponent, assignments, ctx.input.pairs, independentGamesModel, ctx.predictionOptions) ?? undefined)
+    : undefined;
 
+  const throwOrder = throwOrderRecords(ctx, outcome.selection);
   return {
     assignments,
     tallies: buildTallies(ctx, outcome.evaluation),
     score: roundScore(comparable.breakdown),
     metrics: buildMetrics(ctx, outcome.evaluation),
-    explanation: withPredictionFactors(
-      withSkewFactor(ctx, buildExplanation(ctx, bctx, outcome.selection, outcome.evaluation), outcome.meta.skewGate),
-      prediction,
+    explanation: withThrowOrderFactors(
+      ctx,
+      withPredictionFactors(
+        withSkewFactor(ctx, buildExplanation(ctx, bctx, outcome.selection, outcome.evaluation), outcome.meta.skewGate),
+        prediction,
+      ),
+      throwOrder,
     ),
     warnings: buildWarnings(ctx, outcome.evaluation, candidates, outcome.meta),
     meta: ctx.opponentPlan ? { ...outcome.meta, opponent: ctx.opponentPlan } : outcome.meta,
     prediction,
+    throwOrder,
   };
 }
 
@@ -507,6 +550,7 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
     return { ok: false, candidates: [], diagnostics };
   }
 
+  const generationStarted = performance.now();
   const timeLimit = options.timeLimitMs ?? input.settings.timeLimitMs;
   const runs: { label: string; presetKey: PresetKey; weights: ScoreWeights }[] = [
     {
@@ -602,7 +646,92 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
     };
   }
 
+  if (input.preset === 'OPPONENT_OPTIMIZED' && options.underdog !== false) {
+    const standard = solutions.find((solution) => solution.meta.presetKey === 'OPPONENT_OPTIMIZED' && !solution.meta.underdog);
+    // The two underdog runs share what is left of the time limit (each at least the per-run
+    // floor), so the whole generation stays within the limit the captain set.
+    const remaining = timeLimit - (performance.now() - generationStarted);
+    const underdogBudget = Math.max(UNDERDOG_MIN_RUN_MS, Math.floor(remaining / 2));
+    const { suggestion, status } = planUnderdog(input, standard, referenceCtx, underdogBudget);
+    return { ok: true, candidates: solutions, diagnostics: [], underdogStatus: status, ...(suggestion ? { underdog: suggestion } : {}) };
+  }
   return { ok: true, candidates: solutions, diagnostics: [] };
+}
+
+/**
+ * The underdog plan (docs/UNDERDOG_PLAN.md): when the standard plan qualifies, the same engine is
+ * run twice more — on the same weights, hard conditions and fairness terms — maximising
+ * P(W ≥ 1) and E[W] instead of the match value, and the better of the two on the common scale is
+ * offered. The standard plan is never touched.
+ */
+function planUnderdog(
+  input: OrderInput,
+  standard: OrderSolution | undefined,
+  referenceCtx: PreparedContext,
+  budget: number,
+): { suggestion: UnderdogSuggestion | null; status: UnderdogStatus } {
+  const status = underdogEligibility(standard?.prediction, referenceCtx.opponent);
+  if (!status.eligible || !standard?.prediction || !referenceCtx.opponent) return { suggestion: null, status };
+  const standardMetrics = planMetrics(standard.prediction);
+  const plans: Partial<Record<UnderdogObjective, UnderdogPlanMetrics>> = {};
+  const solutionsByObjective: Partial<Record<UnderdogObjective, OrderSolution>> = {};
+  for (const objective of ['atLeastOne', 'expectedWins'] as const) {
+    const ctx = prepare({ ...input, searchObjective: objective });
+    const candidates = buildAllCandidates(ctx);
+    if (candidates.some((entry) => entry.combos.length === 0)) continue;
+    const bctx = buildBoundContext(ctx, candidates);
+    const outcome = runOnce(ctx, bctx, candidates, UNDERDOG_LABEL, 'OPPONENT_OPTIMIZED', budget, new Set());
+    if (!outcome) continue;
+    outcome.meta = { ...outcome.meta, underdog: { objective } };
+    const solution = assembleSolution(ctx, bctx, candidates, outcome, referenceCtx);
+    if (!solution?.prediction) continue;
+    plans[objective] = planMetrics(solution.prediction);
+    solutionsByObjective[objective] = solution;
+  }
+  // Neither run produced a plan (no feasible line-up): nothing was compared, so nothing "did not improve".
+  if (Object.keys(plans).length === 0) return { suggestion: null, status: { eligible: false, reason: 'not-run' } };
+  const choice = chooseUnderdogPlan(standardMetrics, plans);
+  if (!choice) return { suggestion: null, status: { eligible: false, reason: 'no-improvement' } };
+  const chosen = solutionsByObjective[choice.objective]!;
+  const plan = plans[choice.objective]!;
+  const solution: OrderSolution = {
+    ...chosen,
+    explanation: {
+      ...chosen.explanation,
+      overall: [
+        {
+          key: 'opponent',
+          label: UNDERDOG_LABEL,
+          detail: describeUnderdogChoice(choice.objective, standardMetrics, plan),
+          tone: 'neutral',
+        },
+        ...chosen.explanation.overall,
+      ],
+    },
+  };
+  return {
+    status,
+    suggestion: {
+      version: 1,
+      objective: choice.objective,
+      solution,
+      standard: standardMetrics,
+      plan,
+      improvement: choice.improvement,
+      compared: choice.compared,
+      matchWinLoss: standardMetrics.win - plan.win,
+      confidence: opponentDataConfidence(referenceCtx.opponent),
+    },
+  };
+}
+
+export const UNDERDOG_LABEL = '格上対策案';
+/** The smallest search budget an underdog run gets, even when the standard runs used the whole limit. */
+export const UNDERDOG_MIN_RUN_MS = 120;
+
+/** Why the underdog plan is what it is, in estimates (docs/UNDERDOG_PLAN.md §5). */
+export function describeUnderdogChoice(objective: UnderdogObjective, standard: UnderdogPlanMetrics, plan: UnderdogPlanMetrics): string {
+  return `標準案 (推定 Match 勝率 ${formatProbability(standard.win)}) に対し、${underdogGainText(objective, standard, plan)}。${underdogLossText(standard, plan)}。推定値であり、結果を保証するものではありません。`;
 }
 
 /**
@@ -644,15 +773,16 @@ export function evaluateManualOrder(
   for (let gi = 0; gi < ctx.gameCount; gi += 1) {
     const assignment = byGame.get(ctx.games[gi].id);
     if (!assignment) return { ok: false, solution: null, violations };
-    const members = assignment.playerIds
+    // The captain's slots are the throwing order: kept exactly as edited, and estimated as such.
+    const order = assignment.playerIds
       .map((id) => ctx.playerIndex.get(id))
-      .filter((index): index is number => index !== undefined)
-      .sort((a, b) => a - b);
+      .filter((index): index is number => index !== undefined);
     // An unknown or duplicated player cannot be scored; the violation list already says so.
-    if (members.length !== assignment.playerIds.length) {
+    if (order.length !== assignment.playerIds.length || new Set(order).size !== order.length) {
       return { ok: false, solution: null, violations };
     }
-    selection.push(describeCombo(ctx, gi, members));
+    const members = [...order].sort((a, b) => a - b);
+    selection.push(describeCombo(ctx, gi, members, order));
   }
 
   const evaluation = evaluateSelection(ctx, selection);
@@ -666,8 +796,12 @@ export function evaluateManualOrder(
     ...(ctx.opponentPlan ? { opponent: ctx.opponentPlan } : {}),
   };
   const copied = assignments.map((a) => ({ ...a, playerIds: [...a.playerIds] }));
-  // A hand edit is re-estimated live, exactly like every other number on the screen.
-  const prediction = ctx.opponent ? predictOrder(ctx.opponent, copied, input.pairs) ?? undefined : undefined;
+  const throwOrder = throwOrderRecords(ctx, selection);
+  // A hand edit is re-estimated live, exactly like every other number on the screen — with the
+  // model the order was generated with (an order saved before the throw-order model keeps its own).
+  const prediction = ctx.opponent
+    ? (predictOrder(ctx.opponent, copied, input.pairs, independentGamesModel, ctx.predictionOptions) ?? undefined)
+    : undefined;
   const solution: OrderSolution = {
     assignments: copied,
     tallies: buildTallies(ctx, evaluation),
@@ -675,10 +809,11 @@ export function evaluateManualOrder(
     metrics: buildMetrics(ctx, evaluation),
     // The reasons are told about the violations, so a hand-edited line-up never gets a
     // "nothing is violated" rationale while the validator says otherwise (spec §15).
-    explanation: withPredictionFactors(buildExplanation(ctx, bctx, selection, evaluation, violations), prediction),
+    explanation: withThrowOrderFactors(ctx, withPredictionFactors(buildExplanation(ctx, bctx, selection, evaluation, violations), prediction), throwOrder),
     warnings: buildWarnings(ctx, evaluation, candidates, meta),
     meta,
     prediction,
+    throwOrder,
   };
   return { ok: violations.length === 0, solution, violations };
 }

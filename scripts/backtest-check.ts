@@ -13,8 +13,8 @@
  * Why it is safe to gate a release on: the report is deterministic. It uses fixture leagues
  * generated from fixed seeds (src/test/n01/generator.ts), a fixed clock, no network, and its
  * searches are bounded by node count, never by the clock (`UNTIMED` in backtest.ts). The only
- * numbers that vary between machines are the two wall-clock timing lines of section 4; they
- * are masked below and nothing else is. It writes only into `backtest-report/`.
+ * numbers that vary between machines are the wall-clock timing lines (section 4 and the
+ * `- time per generation, …` lines of sections 5–6); they are masked below and nothing else is. It writes only into `backtest-report/`.
  *
  * Exit code 0 = the report matches the baseline; 1 = it differs (or the backtest crashed).
  * A deliberate model change updates the baseline in the same commit: `npm run backtest:check -- --update`.
@@ -29,10 +29,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const BASELINE_PATH = join(ROOT, 'scripts', 'backtest.baseline.md');
 export const REPORT_DIR = join(ROOT, 'backtest-report');
 
-/** The wall-clock lines of section 4, which differ on every run and every machine. */
+/** The wall-clock lines (sections 4–6), which differ on every run and every machine. */
 const TIMING_MASKS: [RegExp, string][] = [
   [/^(- replay \(fetch \+ plan \+ intelligence\) of \d+ matches: )\d+ ms total$/u, '$1<ms> ms total'],
   [/^(- optimizer \(4 candidates\) per match: median )\d+ ms, max \d+ ms$/u, '$1<ms> ms, max <ms> ms'],
+  [/^(- time per generation, [^:]+: median )\d+ ms, max \d+ ms$/u, '$1<ms> ms, max <ms> ms'],
 ];
 
 /** The report with line endings unified, trailing blanks dropped and the timing numbers masked. */
@@ -79,6 +80,9 @@ export const REQUIRED_SECTIONS = [
   '## 3. Optimizer backtest',
   '## 3b. Sensitivity',
   '## 3c. Appearance-bias gate',
+  '## 5. Throw-order model',
+  '## 5b. Throw-order guardrails',
+  '## 6. Underdog plan',
   '- requests: first sync',
   '- duplicate requests within one sync: 0',
 ];

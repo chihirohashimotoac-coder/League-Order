@@ -12,6 +12,7 @@ import {
 import { DARTS_PER_LEG_ESTIMATE, playerKey, type HistoricalPlayerStats } from './history';
 import { effectivePpr, pprSourceOf } from './effectivePpr';
 import type { N01MatchIntelligenceSnapshot } from './intelligence';
+import type { RolePlayerContext, RoleStrengthContext } from '../prediction/roleStrength';
 
 /**
  * Our own players' strength when an order is made (F03).
@@ -196,5 +197,35 @@ export function applyHistoryStrength(
       seasons: (snapshot?.seasons ?? []).map((season) => ({ ...season })),
       players: entries,
     },
+  };
+}
+
+/**
+ * The role evidence of our players for an order (docs/THROW_ORDER_MODEL.md §4): each player's
+ * evidence is found by the same key as their history (`ownStatsOf`), so a person's games are
+ * never credited to a namesake. Players without evidence are left out (their role strength falls
+ * back to the aptitude and the overall strength).
+ */
+export function buildRoleStrengthContext(
+  players: readonly Player[],
+  snapshot: N01MatchIntelligenceSnapshot | null,
+): RoleStrengthContext {
+  const evidence = snapshot?.ourRoleEvidence;
+  const result: Record<PlayerId, RolePlayerContext> = {};
+  if (snapshot && evidence) {
+    const own = ownStatsOf(snapshot, players);
+    for (const player of players) {
+      const key = own.get(player.id)?.key;
+      const entry = key ? evidence[key] : undefined;
+      if (entry && Object.keys(entry).length > 0) result[player.id] = { evidence: entry };
+    }
+  }
+  return {
+    version: 1,
+    generatedAt: snapshot?.generatedAt ?? 0,
+    source: evidence ? 'n01' : 'none',
+    gamesObserved: snapshot?.roleHistory?.games ?? 0,
+    before: snapshot?.roleHistory?.before ?? null,
+    players: result,
   };
 }

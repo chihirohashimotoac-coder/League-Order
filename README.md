@@ -14,6 +14,8 @@
 | 管理 | チーム / メンバー (Rating・PPR 任意) / ゲーム適性 / ペア相性 / ゲームフォーマット (Soft / Steel) |
 | 当日設定 | 参加者選択・出場不可ゲーム / 種別・出場可能範囲 (遅刻早退)・最小 / 最大出場回数・最大連続出場・Rating 上書き ・今回だけの助っ人 / 次回から参加するメンバーの追加 |
 | 生成 | 5 プリセット (勝利優先 / バランス / 公平性優先 / 育成重視 / 新ペア試行) ・最大 3 候補の比較 |
+| 投順 | Doubles / Trios / Gallon の **1投目・2投目…** を戦術として扱う (基本は役割別強度の強い順、推定で 2pt 以上・信頼度 中以上などの条件を満たすときだけ別の順) ・投順の入れ替えボタン ・理由の表示。詳細は `docs/THROW_ORDER_MODEL.md` |
+| 格上対策 | 標準案の推定 Match 勝率が 20% 以下の格上相手に、1ゲーム以上取る確率 / 期待勝ちゲーム数を上げる案を 1 タップで提案 (自動適用なし・1 タップで戻せる)。`docs/UNDERDOG_PLAN.md` |
 | 調整 | ロック (スロット単位 / ゲーム単位) ・手動編集 (リアルタイム再評価) ・Undo / Redo ・部分再最適化 |
 | 説明 | ゲームごとの生成理由・評価内訳・警告・解が無い場合の原因と解決候補 |
 | 共有 | LINE 向け縦長 PNG (コンパクト / 詳細) ・プレイヤー別ビュー ・3 種のテキスト ・クリップボード ・端末標準の共有メニュー (Web Share API) |
@@ -55,11 +57,13 @@ npm run verify:n01   # n01 公開 Read API のライブ契約確認 (任意・�
 npm run verify:analytics-n01  # 分析画面用 API (stats_list / standings / 全名簿 / CORS) のライブ契約確認 (読み取りGETのみ・要ネットワーク。到達不可なら終了コード2。Actions の "Verify n01 live contract" でも実行可)
 npm run backtest:check        # backtest をコミット済みベースライン (scripts/backtest.baseline.md) と照合し backtest-report/ に証跡を保存 (公開前CIで実行。意図的なモデル変更は -- --update でベースラインも更新)
 npm run smoke:pages  # 公開済みサイトを実ブラウザ・実 n01 で確認 (PAGES_URL 指定可。Actions の "Smoke test the published site" で実行)
+npm run build:preview # 非本番テストページ (dist-preview/。架空データの投順・格上対策シナリオ。service worker なし。GitHub Pages には出さない)
 ```
 
 n01 連携のテストはすべてフィクスチャ (ATDO / TDO / TDA 形のシミュレーション) で動き、
 ライブの n01 には接続しません。設計と制約は `docs/N01_MASTER_DESIGN.md`、
-予測モデルと限界は `docs/PREDICTION_MODEL.md`、対戦相手最適化は `docs/OPPONENT_OPTIMIZER.md` を参照してください。
+予測モデルと限界は `docs/PREDICTION_MODEL.md`、対戦相手最適化は `docs/OPPONENT_OPTIMIZER.md`、
+投順モデルは `docs/THROW_ORDER_MODEL.md`、格上対策案は `docs/UNDERDOG_PLAN.md` を参照してください。
 
 ---
 

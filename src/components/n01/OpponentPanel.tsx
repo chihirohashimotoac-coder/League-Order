@@ -1,4 +1,6 @@
-import type { GameSlotDef, OrderSolution } from '../../domain/types';
+import { useMemo } from 'react';
+import type { GameSlotDef, OrderInput, OrderSolution } from '../../domain/types';
+import { singlesAceNote } from '../../optimizer/aceMatchup';
 import { CONFIDENCE_LABELS } from '../../domain/prediction/confidence';
 import { INDEPENDENCE_NOTE, formatProbability } from '../../domain/prediction/predictOrder';
 import { StatusBadge } from '../ui';
@@ -15,11 +17,15 @@ export function OpponentPanel({
   solution,
   candidates,
   games,
+  input,
 }: {
   solution: OrderSolution;
   candidates: readonly OrderSolution[];
   games: readonly GameSlotDef[];
+  /** The order's input: needed to explain how the opponent's ace is received (Singles). */
+  input?: OrderInput;
 }): React.JSX.Element | null {
+  const ace = useMemo(() => (input ? singlesAceNote(input, solution) : null), [input, solution]);
   const prediction = solution.prediction;
   if (!prediction) return null;
   const winFirst =
@@ -87,6 +93,7 @@ export function OpponentPanel({
           推定勝率を優先する場合は「勝利優先」の案を選べます。
         </p>
       ) : null}
+      {ace && input ? <AceNoteText note={ace} input={input} games={games} /> : null}
       {reasons.length > 0 ? (
         <>
           <p className="opponent-sub">主な理由</p>
@@ -101,5 +108,31 @@ export function OpponentPanel({
         <Icon name="info" size={14} /> 推定値であり、結果を保証するものではありません。{INDEPENDENCE_NOTE}
       </p>
     </section>
+  );
+}
+
+function AceNoteText({
+  note,
+  input,
+  games,
+}: {
+  note: NonNullable<ReturnType<typeof singlesAceNote>>;
+  input: OrderInput;
+  games: readonly GameSlotDef[];
+}): React.JSX.Element {
+  const name = (id: string): string => input.players.find((player) => player.id === id)?.name ?? id;
+  const label = (gameId: string): string => {
+    const game = games.find((entry) => entry.id === gameId);
+    return game ? `G${String(game.order).padStart(2, '0')} ${game.name}` : gameId;
+  };
+  const versus =
+    note.swapped === null
+      ? '入れ替えた案は出場条件を満たさないため比較していません'
+      : `エースを相手エース枠に当てた場合の推定 Match 勝率 ${formatProbability(note.swapped)} / この案 ${formatProbability(note.current)}`;
+  return (
+    <p className="small-text opponent-ace" data-testid="opponent-ace">
+      相手エース枠 {label(note.aceGameId)} (相手予想 {note.aceStrength.toFixed(1)}{note.aceLikely ? `・${note.aceLikely}` : ''}) は {name(note.receiver)} が受け、
+      自軍エース {name(note.ourAce)} は {label(note.ourAceGameId)} へ。エース同士を当てる固定ルールは使わず、Match 全体の推定勝率で配置しています ({versus})。
+    </p>
   );
 }

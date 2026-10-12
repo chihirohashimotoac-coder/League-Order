@@ -30,13 +30,16 @@ async function fullSync(historyDepth: number): Promise<N01Request[]> {
 }
 
 describe('request budget of a complete sync (Phase 6 §7)', () => {
-  it('resolve + roster + PPR + format + opponent + 2 past seasons + 3 whole rosters = 16 GETs, none repeated', async () => {
+  it('resolve + roster + PPR + format + opponent + 2 past seasons + 3 whole rosters + 6 game lists = 22 GETs, none repeated', async () => {
     const log = await fullSync(2);
     const keys = log.map((request) => `${request.operation}?${new URLSearchParams(request.params).toString()}`);
     expect(new Set(keys).size).toBe(keys.length);
-    // 13 before whole rosters, plus one whole roster for the current season and one per past season.
-    expect(log).toHaveLength(13 + 3);
-    expect(log.every((request) => /^(league|tournament|team)\//.test(request.operation))).toBe(true);
+    // 13 before whole rosters, plus one whole roster for the current season and one per past season,
+    // plus the played games (`match/list`, role evidence — docs/THROW_ORDER_MODEL.md §4) of our team
+    // and of the opponent in each of the three seasons (one page each here).
+    expect(log).toHaveLength(13 + 3 + 6);
+    expect(log.filter((request) => request.operation === 'match/list')).toHaveLength(6);
+    expect(log.every((request) => /^(league|tournament|team|match)\//.test(request.operation))).toBe(true);
   });
 
   it('each past season costs a fixed number of requests; depth 0 reads none', async () => {

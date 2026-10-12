@@ -5,7 +5,15 @@ import { FALLBACK_LEAGUE_PPR, FIRST9_CAP, FORM_CAP, PRIOR_LEGS, manualStrength, 
 import { K_CRICKET_FACTOR, gameWinProbability, legWinProbability, raceProbability } from './matchup';
 import { PAIR_AFFINITY_PPR_BONUS, meanPairBonus, sideStrength } from './teamMatchup';
 import { independentGamesModel, matchValue, poissonBinomial } from './matchWinProbability';
-import { buildOpponentContext, expectedGameWin, type OpponentGameContext } from './opponentContext';
+import {
+  MAX_ORDERED_MEMBERS,
+  MAX_ORDERED_SIDES,
+  buildOpponentContext,
+  expectedGameWin,
+  remainderSide,
+  type OpponentGameContext,
+  type OpponentSide,
+} from './opponentContext';
 import { predictOrder } from './predictOrder';
 import { coinFlipPredictor, metrics, modelPredictor, runBacktest, type BacktestGame } from './backtest';
 import { N01Client } from '../../integrations/n01/client';
@@ -14,6 +22,7 @@ import { buildIntelligenceSnapshot, fetchIntelligence } from '../../integrations
 import { createFixtureTransport } from '../../test/n01/transport';
 import { FIXTURE_NOW, fixtureLeagues } from '../../test/n01/leagues';
 import { backtestGames } from '../../test/n01/backtestData';
+import { formatSignatures as formatSignatureMap } from '../n01/signature';
 
 const line = (seasonIndex: number, score: number, darts: number, legs: number, extra: Partial<SeasonStatLine> = {}): SeasonStatLine => ({
   tournamentId: `t${seasonIndex}`,
@@ -183,6 +192,60 @@ describe('opponent uncertainty', () => {
     const nakamura = players.find((player) => player.name === '中村 蓮')!;
     expect(context.players[nakamura.id]).toMatchObject({ imputed: true, confidence: 'LOW' });
     expect(JSON.stringify(context).length).toBeLessThan(20_000);
+  });
+
+  it('keeps the whole probability of the ordered sides: the unlikely ones are folded, never dropped', async () => {
+    const { snapshot, format, players } = await atdoContext();
+    const context = buildOpponentContext({ snapshot, games: format.games, players })!;
+    const multi = Object.values(context.games).filter((game) => game.numPart >= 2 && game.numPart <= MAX_ORDERED_MEMBERS);
+    expect(multi.length).toBeGreaterThan(0);
+    for (const game of multi) {
+      expect(game.sides.length).toBeLessThanOrEqual(MAX_ORDERED_SIDES);
+      expect(game.sides.reduce((acc, side) => acc + side.probability, 0)).toBeCloseTo(1, 9);
+      expect(game.sides.every((side) => side.members?.length === game.numPart)).toBe(true);
+    }
+  });
+
+  it('a folded remainder keeps the mass, and the mean strength at every throwing position', () => {
+    const tail: OpponentSide[] = Array.from({ length: 37 }, (_, i) => ({
+      strength: 0,
+      probability: (i % 5) + 1,
+      members: [
+        { strength: 40 + (i % 7), finish: 0.2 + (i % 3) * 0.05 },
+        { strength: 55 - (i % 4), finish: 0.3 },
+      ],
+    })).map((side) => ({ ...side, strength: (side.members[0].strength + side.members[1].strength) / 2 }));
+    const folded = remainderSide(tail);
+    const mass = tail.reduce((acc, side) => acc + side.probability, 0);
+    const mean = (pick: (side: OpponentSide) => number) => tail.reduce((acc, side) => acc + side.probability * pick(side), 0) / mass;
+    expect(folded.probability).toBeCloseTo(mass, 12);
+    expect(folded.members![0].strength).toBeCloseTo(mean((side) => side.members![0].strength), 3);
+    expect(folded.members![1].strength).toBeCloseTo(mean((side) => side.members![1].strength), 3);
+    expect(folded.members![0].finish).toBeCloseTo(mean((side) => side.members![0].finish), 4);
+    expect(folded.strength).toBeCloseTo(mean((side) => side.strength), 3);
+  });
+
+  it('a Team of more than four is kept without order, at once, however large the roster (no factorial enumeration)', async () => {
+    const { snapshot, format, players } = await atdoContext();
+    const team = format.games.find((game) => game.playerCount >= 3)!;
+    const signature = [...formatSignatureMap(format.games)].find(([id]) => id === team.id)![1];
+    const opponent = snapshot.opponent!;
+    const slots = opponent.positionModel.slots.map((slot) => {
+      if (slot.signature !== signature) return slot;
+      // Eight seats from a roster of twelve: 12! / 4! orders if every line-up were ordered.
+      const roster = Array.from({ length: 12 }, (_, i) => ({ ...slot.players[i % slot.players.length], key: `${slot.players[i % slot.players.length].key}#${i}`, probability: 1 / 12 }));
+      return { ...slot, numPart: 8, players: roster, lineups: [], orderedLineups: [] };
+    });
+    const eight = { ...snapshot, opponent: { ...opponent, positionModel: { ...opponent.positionModel, slots } } };
+    const games = format.games.map((game) => (game.id === team.id ? { ...game, playerCount: 8, n01: game.n01 ? { ...game.n01, numPart: 8 } : game.n01 } : game));
+    const started = performance.now();
+    const context = buildOpponentContext({ snapshot: eight, games, players })!;
+    expect(performance.now() - started).toBeLessThan(2000);
+    const game = context.games[team.id];
+    expect(game.numPart).toBe(8);
+    expect(game.order).toBeUndefined();
+    expect(game.sides.every((side) => side.members === undefined)).toBe(true);
+    expect(game.sides.reduce((acc, side) => acc + side.probability, 0)).toBeCloseTo(1, 9);
   });
 
   it('maps a hand-made format onto the opponent slots by signature, skipping games that do not fit', async () => {

@@ -29,7 +29,14 @@ export interface OrderObservation {
   seasonIndex: number;
   matchId: string;
   signature: string;
+  /** In the order n01 lists them: for a multi-player game, the registered throwing order. */
   playerKeys: string[];
+  /**
+   * False when the source cannot vouch for the order of `playerKeys` (then only who played is
+   * used). n01's `team/order/list` keeps the registered order, which is the order n01 Live starts
+   * each leg with; absent = ordered.
+   */
+  ordered?: boolean;
 }
 
 export interface PositionSlotInput {
@@ -59,6 +66,19 @@ export interface ObservedLineup {
   probability: number;
 }
 
+/**
+ * How much a player tends to throw early in a multi-player game (docs/THROW_ORDER_MODEL.md §5).
+ * `score` is the shrunk mean position score — 1 when always first, 0 when always last, 0.5 with
+ * no tendency (or no data) — over this structure's ordered observations, shrunk towards the
+ * player's score over all of the team's multi-player games, shrunk towards 0.5.
+ */
+export interface LeadTendency {
+  key: string;
+  score: number;
+  /** Recency-weighted ordered appearances behind the structure-level score. */
+  samples: number;
+}
+
 export interface OpponentSlotDistribution {
   gameId: string;
   signature: string;
@@ -68,8 +88,19 @@ export interface OpponentSlotDistribution {
   /** The same, recency-weighted. */
   weightedSamples: number;
   players: SlotPlayerProbability[];
-  /** Exact line-ups seen (current roster only), for multi-player slots. */
+  /** Exact line-ups seen (current roster only), for multi-player slots — as sets (keys sorted). */
   lineups: ObservedLineup[];
+  /**
+   * The same line-ups in the order they were registered (current roster only). Absent on models
+   * built before throw orders were read.
+   */
+  orderedLineups?: ObservedLineup[];
+  /** Who tends to throw early, per player of the roster (multi-player slots only). */
+  lead?: LeadTendency[];
+  /** Recency-weighted ordered observations of this structure (all its slots); 0 = order unknown. */
+  orderedSamples?: number;
+  /** Recency-weighted ordered multi-player observations of the team (any structure). */
+  teamOrderedSamples?: number;
   confidence: ConfidenceLevel;
 }
 
@@ -154,6 +185,54 @@ export function buildPositionModel(input: PositionModelInput): OpponentPositionM
   }
   const weightedMatches = [...matches.values()].reduce((a, b) => a + b, 0);
 
+  // Throw-order tendencies (multi-player games only, ordered observations only). Position score
+  // (k − 1 − j) / (k − 1): 1 for the first thrower, 0 for the last, 0.5 on average under no tendency.
+  const orderedMulti = input.observations.filter(
+    (observation) => observation.ordered !== false && observation.playerKeys.length >= 2 && new Set(observation.playerKeys).size === observation.playerKeys.length,
+  );
+  const positionScores = (filter: (observation: OrderObservation) => boolean): { scores: Map<string, { sum: number; weight: number }>; samples: number } => {
+    const scores = new Map<string, { sum: number; weight: number }>();
+    let samples = 0;
+    for (const observation of orderedMulti) {
+      if (!filter(observation)) continue;
+      const w = recencyWeight(observation.seasonIndex, weights);
+      samples += w;
+      const k = observation.playerKeys.length;
+      observation.playerKeys.forEach((key, position) => {
+        if (!onRoster.has(key)) return;
+        const entry = scores.get(key) ?? { sum: 0, weight: 0 };
+        entry.sum += w * ((k - 1 - position) / (k - 1));
+        entry.weight += w;
+        scores.set(key, entry);
+      });
+    }
+    return { scores, samples };
+  };
+  const team = positionScores(() => true);
+  const teamScore = (key: string): number => {
+    const entry = team.scores.get(key);
+    return ((entry?.sum ?? 0) + prior * 0.5) / ((entry?.weight ?? 0) + prior);
+  };
+  const leadByStructure = new Map<string, { lead: LeadTendency[]; samples: number }>();
+  const leadFor = (structure: string): { lead: LeadTendency[]; samples: number } => {
+    const cached = leadByStructure.get(structure);
+    if (cached) return cached;
+    const own = positionScores((observation) => structureKey(observation.signature) === structure);
+    const lead = keys
+      .map((key) => {
+        const entry = own.scores.get(key);
+        return {
+          key,
+          score: ((entry?.sum ?? 0) + prior * teamScore(key)) / ((entry?.weight ?? 0) + prior),
+          samples: entry?.weight ?? 0,
+        };
+      })
+      .sort((a, b) => b.score - a.score || (a.key < b.key ? -1 : 1));
+    const result = { lead, samples: own.samples };
+    leadByStructure.set(structure, result);
+    return result;
+  };
+
   const slots = input.slots.map((slot): OpponentSlotDistribution => {
     const structure = structureKey(slot.signature);
     const teamCounts = seatCounts((observation) => structureKey(observation.signature) !== structure);
@@ -178,6 +257,20 @@ export function buildPositionModel(input: PositionModelInput): OpponentPositionM
     }
     const lineupTotal = [...lineupWeights.values()].reduce((a, b) => a + b, 0);
 
+    // The same line-ups in their registered order (the throwing order n01 starts a leg with).
+    const orderedWeights = new Map<string, number>();
+    if (slot.numPart >= 2) {
+      for (const observation of slotObservations) {
+        if (observation.ordered === false) continue;
+        if (!observation.playerKeys.every((key) => onRoster.has(key))) continue;
+        if (new Set(observation.playerKeys).size !== observation.playerKeys.length) continue;
+        const key = observation.playerKeys.join('+');
+        orderedWeights.set(key, (orderedWeights.get(key) ?? 0) + recencyWeight(observation.seasonIndex, weights));
+      }
+    }
+    const orderedTotal = [...orderedWeights.values()].reduce((a, b) => a + b, 0);
+    const tendency = slot.numPart >= 2 ? leadFor(structure) : null;
+
     return {
       gameId: slot.gameId,
       signature: slot.signature,
@@ -190,6 +283,16 @@ export function buildPositionModel(input: PositionModelInput): OpponentPositionM
       lineups: [...lineupWeights.entries()]
         .map(([key, weight]) => ({ keys: key.split('+'), weight, probability: lineupTotal > 0 ? weight / lineupTotal : 0 }))
         .sort((a, b) => b.weight - a.weight || (a.keys.join() < b.keys.join() ? -1 : 1)),
+      ...(slot.numPart >= 2 && tendency
+        ? {
+            orderedLineups: [...orderedWeights.entries()]
+              .map(([key, weight]) => ({ keys: key.split('+'), weight, probability: orderedTotal > 0 ? weight / orderedTotal : 0 }))
+              .sort((a, b) => b.weight - a.weight || (a.keys.join() < b.keys.join() ? -1 : 1)),
+            lead: tendency.lead,
+            orderedSamples: tendency.samples,
+            teamOrderedSamples: team.samples,
+          }
+        : {}),
       confidence: slotConfidence(weightedSamples),
     };
   });

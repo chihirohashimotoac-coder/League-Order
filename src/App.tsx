@@ -175,7 +175,8 @@ export function App(): React.JSX.Element {
           setSession((current) => {
             const base = current && current.present.current ? current : createUndoable(input);
             const withInput = undoableReducer(base, { type: 'setInput', input });
-            return undoableReducer(withInput, { type: 'generated', candidates: result.candidates });
+            // An underdog plan travels with the result but is only offered, never shown first.
+            return undoableReducer(withInput, { type: 'generated', candidates: result.candidates, underdog: result.underdog ?? null });
           });
           setDiagnostics([]);
           setPage('result');

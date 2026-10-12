@@ -17,6 +17,8 @@ import type { OpponentContext } from './prediction/opponentContext';
 import type { MatchPrediction } from './prediction/predictOrder';
 import type { ConfidenceLevel } from './prediction/confidence';
 import type { StrengthBasis } from './n01/historyStrength';
+import type { RoleSource, RoleStrengthContext } from './prediction/roleStrength';
+import type { OrderFallback, ThrowOrderModelVersion } from './prediction/throwOrder';
 
 export type TeamId = string;
 export type PlayerId = string;
@@ -422,7 +424,23 @@ export interface OrderInput {
    * before it existed, which are read as "no evidence" wherever evidence is required.
    */
   strengthBasis?: StrengthBasis;
+  /**
+   * The throw-order model the order was generated with (docs/THROW_ORDER_MODEL.md). Absent on
+   * orders saved before it existed: those keep being predicted with the order-free model they
+   * were made with, so a saved order is never silently re-scored by a newer model.
+   */
+  throwOrderModel?: ThrowOrderModelVersion;
+  /** The role evidence behind each player's role strengths, as it stood at generation time. */
+  roleStrength?: RoleStrengthContext;
+  /**
+   * What the opponent term of one run maximises (docs/UNDERDOG_PLAN.md): the match outcome
+   * (default), or — for the underdog plan only — P(at least one game) or the expected games won.
+   * Set on the engine's own run inputs, never on a stored order.
+   */
+  searchObjective?: SearchObjective;
 }
+
+export type SearchObjective = 'match' | 'atLeastOne' | 'expectedWins';
 
 // ---------------------------------------------------------------------------
 // Order output
@@ -447,7 +465,8 @@ export type ExplanationKey =
   | 'season'
   | 'constraint'
   | 'lock'
-  | 'opponent';
+  | 'opponent'
+  | 'throwOrder';
 
 export interface ExplanationFactor {
   key: ExplanationKey;
@@ -601,6 +620,8 @@ export interface SolutionMeta {
   alternativeTo?: string;
   /** Set when the run's line-up was judged against the even split (勝利優先 and 対戦相手最適化). */
   skewGate?: SkewGateReport;
+  /** Set on the underdog plan (格上対策案): which objective it maximised. */
+  underdog?: { objective: UnderdogObjective };
   /** How opponent data was used by this run (opponent-optimised preset only). */
   opponent?: {
     /** `applied` at full weight, `reduced` for weaker data, `fallback` when there was none. */
@@ -609,6 +630,46 @@ export interface SolutionMeta {
     effectiveWeight: number;
     confidence: ConfidenceLevel | null;
   };
+}
+
+/** One member's role strength, as an order decision used it (for the explanation). */
+export interface ThrowOrderMemberBasis {
+  playerId: PlayerId;
+  /** Strength used to rank the members (PPR points, or the 0..1 blend × 100 without PPR). */
+  strength: number;
+  /** Role adjustment included in `strength` (PPR points). */
+  roleDelta: number;
+  source: RoleSource;
+  confidence: ConfidenceLevel;
+  /** n01 games observed in exactly this role. */
+  games: number;
+}
+
+/**
+ * How the throwing order of one multi-player game was decided (docs/THROW_ORDER_MODEL.md §6).
+ * `order` is the order shown (the assignment); `strongOrder` is what the basic theory gives —
+ * the strongest player in this game first — and is what "通常の順" means on screen.
+ */
+export interface ThrowOrderRecord {
+  gameId: GameId;
+  order: PlayerId[];
+  strongOrder: PlayerId[];
+  /** `strong`: the strong order; `model`: an estimate cleared every guardrail; `manual`: edited by hand. */
+  adopted: 'strong' | 'model' | 'manual';
+  /** Why the strong order was kept (`null` when it is simply the best, or another order was adopted). */
+  fallback: OrderFallback | null;
+  /** Estimated game win with the order shown and with the strong order (`null` without opponent data). */
+  probability: number | null;
+  strongProbability: number | null;
+  /** The best alternative by the estimate, adopted or not (for the explanation and the backtest). */
+  bestGain: number | null;
+  confidence: ConfidenceLevel | null;
+  /** The opponent's expected order in this game, worded for the screen (`null` = not modelled). */
+  opponentTendency: string | null;
+  /** True when the strength ranking is a 0..1 blend (no PPR known), not PPR points. */
+  blendScale?: boolean;
+  /** The members in strong order, with the strengths that ranked them. */
+  basis: ThrowOrderMemberBasis[];
 }
 
 export interface OrderSolution {
@@ -624,6 +685,8 @@ export interface OrderSolution {
    * opponent data. A model estimate, never a certainty.
    */
   prediction?: MatchPrediction;
+  /** How each multi-player game's throwing order was decided. Absent on orders saved before it. */
+  throwOrder?: ThrowOrderRecord[];
 }
 
 // ---------------------------------------------------------------------------
@@ -669,8 +732,67 @@ export interface Diagnostic {
   suggestions: DiagnosticSuggestion[];
 }
 
+// ---------------------------------------------------------------------------
+// Underdog plan (格上対策案, docs/UNDERDOG_PLAN.md)
+// ---------------------------------------------------------------------------
+
+export type UnderdogObjective = 'atLeastOne' | 'expectedWins';
+
+export const UNDERDOG_OBJECTIVE_LABELS: Record<UnderdogObjective, string> = {
+  atLeastOne: '1ゲーム以上取る確率',
+  expectedWins: '期待勝ちゲーム数',
+};
+
+/** Estimated outcome of one plan (model estimates). */
+export interface UnderdogPlanMetrics {
+  win: number;
+  draw: number;
+  /** P(W ≥ 1): at least one game won. */
+  atLeastOne: number;
+  expectedGames: number;
+  gameCount: number;
+}
+
+/**
+ * The one underdog plan offered next to the standard 対戦相手最適化 plan, when the standard plan's
+ * estimated match win is 20% or less against a stronger opponent known with MEDIUM+ confidence.
+ * Never applied automatically.
+ */
+export interface UnderdogSuggestion {
+  version: 1;
+  objective: UnderdogObjective;
+  solution: OrderSolution;
+  standard: UnderdogPlanMetrics;
+  plan: UnderdogPlanMetrics;
+  /** The chosen plan's improvement on the common 0..1 scale (docs/UNDERDOG_PLAN.md §3). */
+  improvement: number;
+  /** Both plans' improvements on that scale (`null` = the plan could not be built). */
+  compared: Record<UnderdogObjective, number | null>;
+  /** Estimated match win given up against the standard plan (standard − plan). */
+  matchWinLoss: number;
+  confidence: ConfidenceLevel;
+}
+
+export type UnderdogReason =
+  | 'no-opponent'
+  | 'not-underdog'
+  | 'low-confidence'
+  | 'not-stronger'
+  | 'no-improvement'
+  | 'not-run';
+
+export type UnderdogStatus = { eligible: true } | { eligible: false; reason: UnderdogReason };
+
 export type GenerateResult =
-  | { ok: true; candidates: OrderSolution[]; diagnostics: Diagnostic[] }
+  | {
+      ok: true;
+      candidates: OrderSolution[];
+      diagnostics: Diagnostic[];
+      /** The underdog plan, when one is offered. */
+      underdog?: UnderdogSuggestion;
+      /** Why an underdog plan is or is not offered (opponent-optimised runs). */
+      underdogStatus?: UnderdogStatus;
+    }
   | { ok: false; candidates: []; diagnostics: Diagnostic[] };
 
 // ---------------------------------------------------------------------------
