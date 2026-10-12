@@ -22,7 +22,12 @@ function commit(): string {
 export default defineConfig({
   base: './',
   plugins: [react()],
-  define: { __PREVIEW_COMMIT__: JSON.stringify(process.env.PREVIEW_COMMIT ?? commit()) },
+  define: {
+    __PREVIEW_COMMIT__: JSON.stringify(process.env.PREVIEW_COMMIT ?? commit()),
+    // `PREVIEW_APP_LINK=0` leaves out the link to the app page, for hosts that publish only the
+    // scenarios page (the app itself needs its own page, storage and worker).
+    __PREVIEW_APP_LINK__: JSON.stringify(process.env.PREVIEW_APP_LINK !== '0'),
+  },
   resolve: {
     // The app registers its service worker through vite-plugin-pwa's virtual module; the preview
     // has none, so the registration is the inert stub the unit tests use.

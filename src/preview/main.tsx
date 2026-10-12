@@ -17,6 +17,7 @@ import '../styles/app.css';
  */
 
 declare const __PREVIEW_COMMIT__: string;
+declare const __PREVIEW_APP_LINK__: boolean;
 
 function ScenarioView({ input }: { input: OrderInput }): React.JSX.Element {
   const result = useMemo(() => generateOrder(input, { timeLimitMs: 4000 }), [input]);
@@ -61,7 +62,13 @@ function Preview(): React.JSX.Element {
           モデルの推定値で、実戦での勝率改善を示すものではありません。n01 には接続しません。
         </p>
         <p className="tiny muted">
-          ビルド: {__PREVIEW_COMMIT__} ・ <a href="./index.html">アプリ本体 (サンプルデータで操作できます)</a>
+          ビルド: {__PREVIEW_COMMIT__}
+          {__PREVIEW_APP_LINK__ ? (
+            <>
+              {' ・ '}
+              <a href="./index.html">アプリ本体 (サンプルデータで操作できます)</a>
+            </>
+          ) : null}
         </p>
       </header>
       <nav className="preview-tabs" aria-label="シナリオ">
