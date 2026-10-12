@@ -171,6 +171,8 @@ test.describe('n01 league native sync (Phase 1)', () => {
 
 test.describe('throw order in the result (docs/THROW_ORDER_MODEL.md §7)', () => {
   test('Doubles show 1投目 / 2投目 and why; a swap button re-estimates, Undo restores', async ({ page }) => {
+    // The audit runs right after the swap: check the settled colours, not the edit flash.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await start(page);
     await createKalavinka(page);
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
