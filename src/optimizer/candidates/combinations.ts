@@ -40,8 +40,19 @@ export interface Combo {
    * functions the result screen's 推定勝率 uses. 0.5 when the game has no opponent data.
    */
   oppWin: number;
+  /**
+   * What the run's opponent term adds up for this game: `oppWin` itself, except for the underdog
+   * plan that maximises P(at least one game), where it is −ln(1 − oppWin) / ln 100 — additive
+   * over games, and maximal exactly when P(W ≥ 1) = 1 − Π(1 − p) is.
+   */
+  oppValue: number;
   /** Static, count-independent part of the score; used for ordering and pruning. */
   localScore: number;
+}
+
+/** −ln(1 − p) / ln 100: 0 at p = 0, 1 at the probability ceiling 0.99. */
+export function atLeastOneValue(p: number): number {
+  return -Math.log(1 - Math.min(0.99, Math.max(0, p))) / Math.log(100);
 }
 
 export interface GameCandidates {
@@ -52,7 +63,7 @@ export interface GameCandidates {
   maxGameFit: number;
   maxPairFit: number;
   maxNovelty: number;
-  maxOppWin: number;
+  maxOppValue: number;
   /** True when the full combination space was enumerated without sampling. */
   complete: boolean;
   /** Number of combos before the cap was applied. */
@@ -118,15 +129,16 @@ export function describeCombo(
     oppWin = expectedGameWin(side, opponentGame);
   }
 
+  const oppValue = ctx.objective === 'atLeastOne' ? atLeastOneValue(oppWin) : oppWin;
   const w = ctx.weights;
   const localScore =
     w.strength * strength +
     w.gameFit * gameFit +
     w.pairFit * pairFit +
     w.novelty * novelty +
-    (w.opponentWin ?? 0) * oppWin;
+    (w.opponentWin ?? 0) * oppValue;
 
-  return { members, order: orderChoice.order, orderChoice, strength, gameFit, pairFit, novelty, oppWin, localScore };
+  return { members, order: orderChoice.order, orderChoice, strength, gameFit, pairFit, novelty, oppWin, oppValue, localScore };
 }
 
 /** True when any member pair is marked FORBIDDEN (a hard constraint). */
@@ -309,7 +321,7 @@ export function buildGameCandidates(ctx: PreparedContext, gameIndex: number): Ga
     maxGameFit: combos.reduce((acc, c) => Math.max(acc, c.gameFit), 0),
     maxPairFit: combos.reduce((acc, c) => Math.max(acc, c.pairFit), 0),
     maxNovelty: combos.reduce((acc, c) => Math.max(acc, c.novelty), 0),
-    maxOppWin: combos.reduce((acc, c) => Math.max(acc, c.oppWin), 0),
+    maxOppValue: combos.reduce((acc, c) => Math.max(acc, c.oppValue), 0),
     complete,
     rawCount,
   };

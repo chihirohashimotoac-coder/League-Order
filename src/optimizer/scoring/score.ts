@@ -47,7 +47,10 @@ export interface Evaluation {
   gameFitRaw: number;
   pairFitRaw: number;
   noveltyRaw: number;
-  /** Mean estimated game win probability (0.5 per game without opponent data). */
+  /**
+   * Mean of the opponent term per game: the estimated game win probability (0.5 without opponent
+   * data), or its underdog transform when the run maximises P(at least one game).
+   */
   opponentRaw: number;
 }
 
@@ -100,7 +103,7 @@ export function evaluateSelection(
   const multi = selection.filter((_, gi) => ctx.games[gi].playerCount >= 2);
   const pairFitRaw = multi.length === 0 ? 0.5 : mean(multi.map((c) => c.pairFit));
   const noveltyRaw = multi.length === 0 ? 0.5 : mean(multi.map((c) => c.novelty));
-  const opponentRaw = selection.length === 0 ? 0.5 : mean(selection.map((c) => c.oppWin));
+  const opponentRaw = selection.length === 0 ? 0.5 : mean(selection.map((c) => c.oppValue));
 
   const fairness = evaluateFairness(ctx.fairnessBaseline, counts);
   const seasonFairness = evaluateFairness(ctx.seasonBaseline, counts);

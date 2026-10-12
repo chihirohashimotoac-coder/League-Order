@@ -10,7 +10,7 @@ import { prepare, type PreparedContext } from './prepare';
 import { compareEvaluations, evaluateSelection, type Evaluation } from './scoring/score';
 import { buildBoundContext } from './search/bound';
 import { hardFeasible, polish } from './search/polish';
-import { rerankByMatchOutcome, selectionMatchValue } from './rerank';
+import { rerankByMatchOutcome, selectionObjectiveValue } from './rerank';
 import { searchOnce } from './searchOnce';
 
 /**
@@ -75,7 +75,8 @@ function valueModel(ctx: PreparedContext): ValueModel | null {
     const opponent = ctx.opponent;
     return {
       basis: 'opponent',
-      value: (selection) => selectionMatchValue(ctx, selection),
+      // The run's own objective: the match value, or the underdog plan's P(W ≥ 1) / E[W] / n.
+      value: (selection) => selectionObjectiveValue(ctx, selection),
       confidenceOf: (pi) => opponent.players[ctx.playerIds[pi]]?.confidence ?? 'LOW',
       base: opponent.confidence,
     };

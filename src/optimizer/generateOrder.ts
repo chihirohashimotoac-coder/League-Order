@@ -21,7 +21,8 @@ import {
 import type { ExplanationFactor, OrderExplanation, SkewGateReport } from '../domain/types';
 import { INDEPENDENCE_NOTE, confidenceText, formatProbability, predictOrder } from '../domain/prediction/predictOrder';
 import { independentGamesModel } from '../domain/prediction/matchWinProbability';
-import type { ThrowOrderRecord } from '../domain/types';
+import type { ThrowOrderRecord, UnderdogObjective, UnderdogPlanMetrics, UnderdogStatus, UnderdogSuggestion } from '../domain/types';
+import { chooseUnderdogPlan, opponentDataConfidence, planMetrics, underdogEligibility } from './underdog';
 import { describeThrowOrder } from '../domain/orders/throwOrderText';
 import { throwOrderRecord } from './throwOrder';
 import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
@@ -72,6 +73,11 @@ export interface GenerateOptions {
   timeLimitMs?: number;
   /** Skip the alternative-preset candidates and return only the requested weights. */
   singleCandidate?: boolean;
+  /**
+   * Build the underdog plan when the opponent-optimised standard plan qualifies
+   * (docs/UNDERDOG_PLAN.md). Default true; it is never applied, only offered.
+   */
+  underdog?: boolean;
 }
 
 interface RunOutcome {
@@ -366,7 +372,14 @@ function assembleSolution(
   const violations = validateHardConstraints(ctx.input, assignments);
   if (violations.length > 0) return null;
 
-  const comparable = evaluateSelection(referenceCtx, outcome.selection);
+  // Reported on the captain's scale: an underdog run's opponent term is a transform of the win
+  // probabilities, so its line-up is re-described under the reference context first.
+  const comparable = evaluateSelection(
+    referenceCtx,
+    ctx.objective === referenceCtx.objective
+      ? outcome.selection
+      : outcome.selection.map((combo, gi) => describeCombo(referenceCtx, gi, combo.members, combo.order)),
+  );
   const prediction = ctx.opponent
     ? (predictOrder(ctx.opponent, assignments, ctx.input.pairs, independentGamesModel, ctx.predictionOptions) ?? undefined)
     : undefined;
@@ -626,7 +639,91 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
     };
   }
 
+  if (input.preset === 'OPPONENT_OPTIMIZED' && options.underdog !== false) {
+    const standard = solutions.find((solution) => solution.meta.presetKey === 'OPPONENT_OPTIMIZED' && !solution.meta.underdog);
+    const { suggestion, status } = planUnderdog(input, standard, referenceCtx, perRunBudget);
+    return { ok: true, candidates: solutions, diagnostics: [], underdogStatus: status, ...(suggestion ? { underdog: suggestion } : {}) };
+  }
   return { ok: true, candidates: solutions, diagnostics: [] };
+}
+
+/**
+ * The underdog plan (docs/UNDERDOG_PLAN.md): when the standard plan qualifies, the same engine is
+ * run twice more — on the same weights, hard conditions and fairness terms — maximising
+ * P(W ≥ 1) and E[W] instead of the match value, and the better of the two on the common scale is
+ * offered. The standard plan is never touched.
+ */
+function planUnderdog(
+  input: OrderInput,
+  standard: OrderSolution | undefined,
+  referenceCtx: PreparedContext,
+  budget: number,
+): { suggestion: UnderdogSuggestion | null; status: UnderdogStatus } {
+  const status = underdogEligibility(standard?.prediction, referenceCtx.opponent);
+  if (!status.eligible || !standard?.prediction || !referenceCtx.opponent) return { suggestion: null, status };
+  const standardMetrics = planMetrics(standard.prediction);
+  const plans: Partial<Record<UnderdogObjective, UnderdogPlanMetrics>> = {};
+  const solutionsByObjective: Partial<Record<UnderdogObjective, OrderSolution>> = {};
+  for (const objective of ['atLeastOne', 'expectedWins'] as const) {
+    const ctx = prepare({ ...input, searchObjective: objective });
+    const candidates = buildAllCandidates(ctx);
+    if (candidates.some((entry) => entry.combos.length === 0)) continue;
+    const bctx = buildBoundContext(ctx, candidates);
+    const outcome = runOnce(ctx, bctx, candidates, UNDERDOG_LABEL, 'OPPONENT_OPTIMIZED', budget, new Set());
+    if (!outcome) continue;
+    outcome.meta = { ...outcome.meta, underdog: { objective } };
+    const solution = assembleSolution(ctx, bctx, candidates, outcome, referenceCtx);
+    if (!solution?.prediction) continue;
+    plans[objective] = planMetrics(solution.prediction);
+    solutionsByObjective[objective] = solution;
+  }
+  const choice = chooseUnderdogPlan(standardMetrics, plans);
+  if (!choice) return { suggestion: null, status: { eligible: false, reason: 'no-improvement' } };
+  const chosen = solutionsByObjective[choice.objective]!;
+  const plan = plans[choice.objective]!;
+  const solution: OrderSolution = {
+    ...chosen,
+    explanation: {
+      ...chosen.explanation,
+      overall: [
+        {
+          key: 'opponent',
+          label: UNDERDOG_LABEL,
+          detail: describeUnderdogChoice(choice.objective, standardMetrics, plan),
+          tone: 'neutral',
+        },
+        ...chosen.explanation.overall,
+      ],
+    },
+  };
+  return {
+    status,
+    suggestion: {
+      version: 1,
+      objective: choice.objective,
+      solution,
+      standard: standardMetrics,
+      plan,
+      improvement: choice.improvement,
+      compared: choice.compared,
+      matchWinLoss: standardMetrics.win - plan.win,
+      confidence: opponentDataConfidence(referenceCtx.opponent),
+    },
+  };
+}
+
+export const UNDERDOG_LABEL = '格上対策案';
+
+const pointText = (value: number): string => `${(value * 100).toFixed(1)}pt`;
+
+/** Why the underdog plan is what it is, in estimates (docs/UNDERDOG_PLAN.md §5). */
+export function describeUnderdogChoice(objective: UnderdogObjective, standard: UnderdogPlanMetrics, plan: UnderdogPlanMetrics): string {
+  const gain =
+    objective === 'atLeastOne'
+      ? `1ゲーム以上取る推定確率を ${pointText(plan.atLeastOne - standard.atLeastOne)} 改善 (${formatProbability(standard.atLeastOne)} → ${formatProbability(plan.atLeastOne)})`
+      : `期待勝ちゲーム数を ${(plan.expectedGames - standard.expectedGames).toFixed(2)} 改善 (${standard.expectedGames.toFixed(2)} → ${plan.expectedGames.toFixed(2)} / ${standard.gameCount})`;
+  const loss = standard.win - plan.win;
+  return `標準案 (推定 Match 勝率 ${formatProbability(standard.win)}) に対し、${gain}。推定 Match 勝率は ${loss >= 0 ? `${pointText(loss)} 下がります` : `${pointText(-loss)} 上がります`} (${formatProbability(plan.win)})。推定値であり、結果を保証するものではありません。`;
 }
 
 /**

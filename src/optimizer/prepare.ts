@@ -1,4 +1,5 @@
 import type {
+  SearchObjective,
   DartsDiscipline,
   GameSlotDef,
   LockEntry,
@@ -138,6 +139,8 @@ export interface PreparedContext {
   startKnown: boolean[];
   /** Order decisions per member set, shared by every search stage of the run. */
   orderMemo: Map<string, ComboOrder>;
+  /** What the opponent term maximises (the match outcome, unless this is an underdog run). */
+  objective: SearchObjective;
 }
 
 /**
@@ -421,5 +424,6 @@ export function prepare(rawInput: OrderInput): PreparedContext {
     startScore,
     startKnown,
     orderMemo: new Map(),
+    objective: input.searchObjective ?? 'match',
   };
 }
