@@ -71,14 +71,16 @@ export function buildExplanation(
     const combo = selection[gi];
     const game = ctx.games[gi];
     const factors: ExplanationFactor[] = [];
-    const names = combo.members.map((pi) => ctx.players[pi].name);
+    // Players are listed in the throwing order the game is shown in (1投目 first), never by index.
+    const seated = combo.order ?? combo.members;
+    const names = seated.map((pi) => ctx.players[pi].name);
 
     // --- Strength -----------------------------------------------------------
     factors.push(...strengthFactors(ctx, combo));
 
     // --- Game aptitude -----------------------------------------------------
     const kindLabels = game.kinds.map((kind) => GAME_KIND_LABELS[kind]).join(' / ');
-    const skillParts = combo.members.map((pi) => {
+    const skillParts = seated.map((pi) => {
       const levels = game.kinds
         .map((kind) => ctx.players[pi].skills[kind])
         .filter((level): level is NonNullable<typeof level> => level !== undefined);
@@ -134,7 +136,7 @@ export function buildExplanation(
     }
 
     // --- Fairness ----------------------------------------------------------
-    const fairnessParts = combo.members.map((pi) => {
+    const fairnessParts = seated.map((pi) => {
       const count = evaluation.counts[pi];
       const ideal = bctx.idealCounts[pi];
       const diff = count - ideal;
@@ -155,7 +157,7 @@ export function buildExplanation(
     if (group && group.gameIndices.length > 1) {
       const share = roleFairShare(group, ctx.playerCount);
       const roleLabel = GAME_KIND_LABELS[group.role];
-      const parts = combo.members.map((pi) => {
+      const parts = seated.map((pi) => {
         const count = evaluation.roleCounts[groupIndex]?.[pi] ?? 0;
         return `${ctx.players[pi].name} ${count}回`;
       });
@@ -170,7 +172,7 @@ export function buildExplanation(
 
     // --- Consecutive appearances -------------------------------------------
     const consecutiveNotes: string[] = [];
-    for (const pi of combo.members) {
+    for (const pi of seated) {
       const indices = evaluation.appearances[pi];
       const runs = runLengths(indices);
       const limit = ctx.maxConsecutive[pi];
@@ -221,7 +223,7 @@ export function buildExplanation(
           },
     );
 
-    games.push({ gameId: game.id, playerIds: combo.members.map((pi) => ctx.playerIds[pi]), factors });
+    games.push({ gameId: game.id, playerIds: seated.map((pi) => ctx.playerIds[pi]), factors });
   }
 
   // --- Order-level summary --------------------------------------------------
@@ -361,7 +363,7 @@ function strengthFactors(ctx: PreparedContext, combo: Combo): ExplanationFactor[
 
   const useRating = ctx.strengthWeights.rating > 0;
   const usePpr = ctx.strengthWeights.ppr > 0;
-  const parts = combo.members.map((pi) => {
+  const parts = (combo.order ?? combo.members).map((pi) => {
     const id = ctx.playerIds[pi];
     const pieces: string[] = [];
     if (useRating) {

@@ -1,7 +1,7 @@
 import type { OrderSolution, UnderdogSuggestion } from '../../domain/types';
-import { UNDERDOG_OBJECTIVE_LABELS } from '../../domain/types';
 import { CONFIDENCE_LABELS } from '../../domain/prediction/confidence';
 import { formatProbability } from '../../domain/prediction/predictOrder';
+import { underdogGainText as gainText, underdogLossText as lossText } from '../../domain/orders/underdogText';
 import { Icon } from '../icons';
 
 /**
@@ -12,20 +12,12 @@ import { Icon } from '../icons';
  * standard plan is never replaced. Every number is an estimate and is called one.
  */
 
-const points = (value: number): string => `${value >= 0 ? '+' : '−'}${Math.abs(value * 100).toFixed(1)}pt`;
-
 export function underdogGainText(suggestion: UnderdogSuggestion): string {
-  const { standard, plan } = suggestion;
-  return suggestion.objective === 'atLeastOne'
-    ? `${UNDERDOG_OBJECTIVE_LABELS.atLeastOne}を ${points(plan.atLeastOne - standard.atLeastOne)} 改善 (${formatProbability(standard.atLeastOne)} → ${formatProbability(plan.atLeastOne)})`
-    : `${UNDERDOG_OBJECTIVE_LABELS.expectedWins}を ${(plan.expectedGames - standard.expectedGames).toFixed(2)} 改善 (${standard.expectedGames.toFixed(2)} → ${plan.expectedGames.toFixed(2)} / ${standard.gameCount})`;
+  return gainText(suggestion.objective, suggestion.standard, suggestion.plan);
 }
 
 export function underdogLossText(suggestion: UnderdogSuggestion): string {
-  const loss = suggestion.matchWinLoss;
-  return loss >= 0
-    ? `標準案から失われる推定 Match 勝率 ${points(-loss)} (${formatProbability(suggestion.standard.win)} → ${formatProbability(suggestion.plan.win)})`
-    : `推定 Match 勝率は標準案より ${points(-loss)} (${formatProbability(suggestion.standard.win)} → ${formatProbability(suggestion.plan.win)})`;
+  return lossText(suggestion.standard, suggestion.plan);
 }
 
 function benched(solution: OrderSolution | null): number {

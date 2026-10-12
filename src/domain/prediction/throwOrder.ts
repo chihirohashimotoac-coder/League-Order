@@ -4,7 +4,7 @@ import type { ConfidenceLevel } from './confidence';
 import { finishPrior } from './finishing';
 import { gameWinProbability } from './matchup';
 import type { OpponentGameContext, OpponentSide } from './opponentContext';
-import { expectedGameWin } from './opponentContext';
+import { MAX_ORDERED_MEMBERS, expectedGameWin } from './opponentContext';
 import { cachedVisitDistribution, legRace, visitSd, type RaceMember } from './raceModel';
 import type { RoleStructure } from './roleStrength';
 import { sideStrength } from './teamMatchup';
@@ -17,14 +17,18 @@ import { sideStrength } from './teamMatchup';
  * says what an order changes, and that change is expressed in the logistic model's own unit,
  * PPR points:
  *
- *   effect = (logit P_race(ordered sides) − logit P_race(same members, no order)) / slope
- *   slope  = d logit P_race / d(PPR) of the unordered sides
- *   P_game = race_m( logistic(k · (side mean + pair bonus − opponent + effect)) )
+ *   L(o, t) = logit P_race(our side in order o, theirs in order t)
+ *   effect  = (L(o, t) − mean_{o'} L(o', t̄) − mean_{t'} L(ō, t') + L(ō, t̄)) / slope
+ *   slope   = d logit P_race / d(PPR) of the averaged sides (ō, t̄: each member replaced by the
+ *             side's average member)
+ *   P_game  = race_m( logistic(k · (side mean + pair bonus − opponent + effect)) )
  *
- * Both sides' orders count: our arrangement raises our effect, the opponent's lowers it. The
- * effect is capped at ±ORDER_EFFECT_CAP points. Singles have no order, and Cricket is not
- * modelled (a shared board, and PPR says little about it): their probability is exactly the
- * order-free one, and their order is always the strong order.
+ * The two means remove what the members' make-up does whatever their order (a side with one fast
+ * finisher races differently from a side of average finishers in every order): averaged over our
+ * orders, the effect is zero, so it is only the order. Both sides' orders count: our arrangement
+ * raises our effect, the opponent's lowers it. The effect is capped at ±ORDER_EFFECT_CAP points.
+ * Singles have no order, and Cricket and sides of more than MAX_ORDERED_MEMBERS are not modelled:
+ * their probability is exactly the order-free one, and their order is always the strong order.
  *
  * The decision (`decideThrowOrder`) keeps the basic theory — the stronger player in this game
  * throws first — and only lets an estimate overrule it when the improvement in the estimated
@@ -73,22 +77,60 @@ function shifted(members: readonly RaceMember[], delta: number): RaceMember[] {
   return members.map((m) => ({ ...m, mu: m.mu + delta }));
 }
 
+function permutations<T>(items: readonly T[]): T[][] {
+  if (items.length <= 1) return [[...items]];
+  return items.flatMap((item, index) => permutations([...items.slice(0, index), ...items.slice(index + 1)]).map((rest) => [item, ...rest]));
+}
+
+function sideKey(members: readonly RaceMember[]): string {
+  return members.map((m) => `${m.mu}:${m.finish}:${m.sd ?? ''}`).join(',');
+}
+
+/** Mean logit over every order of `side` against `other` (memoised: it is the same for every order of `side`). */
+const orderMeanCache = new Map<string, number>();
+const ORDER_MEAN_CACHE_LIMIT = 20_000;
+
+function meanOverOrders(
+  side: readonly RaceMember[],
+  other: readonly RaceMember[],
+  sideIsOurs: boolean,
+  startScore: number,
+  race: (ours: readonly RaceMember[], theirs: readonly RaceMember[]) => number,
+): number {
+  const key = `${startScore}|${sideIsOurs ? 'o' : 't'}|${sideKey([...side].sort((a, b) => a.mu - b.mu || a.finish - b.finish || (a.sd ?? 0) - (b.sd ?? 0)))}|${sideKey(other)}`;
+  const hit = orderMeanCache.get(key);
+  if (hit !== undefined) return hit;
+  const orders = permutations(side);
+  const value = orders.reduce((acc, order) => acc + (sideIsOurs ? race(order, other) : race(other, order)), 0) / orders.length;
+  if (orderMeanCache.size >= ORDER_MEAN_CACHE_LIMIT) orderMeanCache.clear();
+  orderMeanCache.set(key, value);
+  return value;
+}
+
 /**
- * The PPR-equivalent effect of how both sides are ordered, against the same members thrown in no
- * particular order (each side replaced by its average member). 0 when neither side has an order.
+ * The PPR-equivalent effect of how both sides are ordered (module comment): the logit of the
+ * ordered race, less what each side's members do in any order. 0 when neither side has an order.
  */
 export function orderEffect(ours: readonly RaceMember[], theirs: readonly RaceMember[], startScore: number): number {
   if (ours.length < 2 && theirs.length < 2) return 0;
   const dist = (members: readonly RaceMember[]): Float64Array => cachedVisitDistribution(members, startScore);
+  const race = (a: readonly RaceMember[], b: readonly RaceMember[]): number => logit(legRace(dist(a), dist(b)).average);
   const flatOurs = flat(ours);
   const flatTheirs = flat(theirs);
-  const ordered = legRace(dist(ours), dist(theirs)).average;
-  const neutral = legRace(dist(flatOurs), dist(flatTheirs)).average;
+  const neutral = race(flatOurs, flatTheirs);
+  const oursAnyOrder = ours.length >= 2 ? meanOverOrders(ours, flatTheirs, true, startScore, race) : neutral;
+  const theirsAnyOrder = theirs.length >= 2 ? meanOverOrders(theirs, flatOurs, false, startScore, race) : neutral;
   const up = legRace(dist(shifted(flatOurs, 1)), dist(flatTheirs)).average;
   const down = legRace(dist(shifted(flatOurs, -1)), dist(flatTheirs)).average;
   const slope = (logit(up) - logit(down)) / 2;
   if (!(slope > 1e-6)) return 0;
-  return clamp((logit(ordered) - logit(neutral)) / slope, -ORDER_EFFECT_CAP, ORDER_EFFECT_CAP);
+  const effect = race(ours, theirs) - oursAnyOrder - theirsAnyOrder + neutral;
+  return clamp(effect / slope, -ORDER_EFFECT_CAP, ORDER_EFFECT_CAP);
+}
+
+/** Test hook: the cache is an optimisation only. */
+export function clearOrderEffectCache(): void {
+  orderMeanCache.clear();
 }
 
 export interface OrderModelOptions {
@@ -120,12 +162,13 @@ export function opponentMembers(side: OpponentSide, numPart: number, options: Or
 
 /**
  * Estimated probability that our ordered side wins the game against the opponent distribution.
- * Singles and Cricket: exactly `expectedGameWin` of the side's strength (no order effect).
+ * Singles, Cricket and sides of more than MAX_ORDERED_MEMBERS: exactly `expectedGameWin` of the
+ * side's strength (no order effect).
  */
 export function orderedGameWin(side: OrderedSideInput, game: OpponentGameContext, options: OrderModelOptions): number {
   const base = sideStrength(side.strengths, side.pairBonus);
   const k = side.strengths.length;
-  if (game.cricket || k < 2) return expectedGameWin(base, game);
+  if (game.cricket || k < 2 || k > MAX_ORDERED_MEMBERS) return expectedGameWin(base, game);
   const ours = side.strengths.map((mu, index) => withSd({ mu, finish: side.finish[index] }, options.sdScale));
   let total = 0;
   for (const opponent of game.sides) {
@@ -146,6 +189,7 @@ export function orderedGameWin(side: OrderedSideInput, game: OpponentGameContext
 export type OrderFallback =
   | 'single-player'
   | 'cricket'
+  | 'large-side'
   | 'no-model'
   | 'small-gain'
   | 'low-confidence'
@@ -156,6 +200,7 @@ export type OrderFallback =
 export const ORDER_FALLBACK_LABELS: Record<OrderFallback, string> = {
   'single-player': '1 人のゲーム',
   cricket: 'Cricket は投順の効果を推定できるデータがないため強い順',
+  'large-side': '5 人以上のゲームは投順の効果を推定しないため強い順',
   'no-model': '推定勝率を計算できないため強い順',
   'small-gain': '強い順との差が 2pt 未満のため強い順',
   'low-confidence': 'データの信頼度が低いため強い順',

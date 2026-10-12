@@ -274,7 +274,7 @@ function estimateRow(name: string, estimates: readonly (OrderEstimate | null)[])
 }
 
 function fallbackText(tally: DecisionTally): string {
-  const order: (OrderFallback | 'best')[] = ['best', 'small-gain', 'low-confidence', 'no-order-data', 'opponent-order-unknown', 'unstable', 'cricket', 'no-model'];
+  const order: (OrderFallback | 'best')[] = ['best', 'small-gain', 'low-confidence', 'no-order-data', 'opponent-order-unknown', 'unstable', 'cricket', 'large-side', 'no-model'];
   return order
     .filter((key) => (tally.fallbacks[key] ?? 0) > 0)
     .map((key) => `${key === 'best' ? '強い順が推定でも最善 / 推定で採用' : ORDER_FALLBACK_LABELS[key as OrderFallback].replace(/ため強い順$/u, '')} ${tally.fallbacks[key]}`)

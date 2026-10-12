@@ -118,7 +118,11 @@ export interface MemberBasis {
   strength: number;
   role: RoleStrengthEntry;
   finish: FinishEstimate;
-  /** The weaker of the player's data confidence and the role estimate's. */
+  /**
+   * The player's data confidence. The role adjustment is shrunk towards the next level and capped,
+   * so thin role evidence leaves the strength close to the base one: it does not make the player's
+   * estimate less reliable (the role entry keeps its own confidence for the explanation).
+   */
   confidence: ConfidenceLevel;
 }
 
@@ -141,7 +145,7 @@ export function memberBasis(
     strength,
     role,
     finish: estimateFinish(strength, ours?.first9Excess ?? null, ours?.legs ?? 0, options.discipline ?? context.discipline ?? 'UNSPECIFIED'),
-    confidence: minConfidence(baseConfidence, role.confidence),
+    confidence: baseConfidence,
   };
 }
 

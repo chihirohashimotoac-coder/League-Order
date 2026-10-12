@@ -67,6 +67,19 @@ export function describeThrowOrder(record: ThrowOrderRecord, nameOf: (id: Player
   }
 
   if (record.adopted === 'manual') {
+    const toStrong = record.order.length === record.strongOrder.length && record.order.every((id, index) => id === record.strongOrder[index]);
+    if (toStrong) {
+      // Set back to the strong order by hand, where the estimate had chosen another order.
+      const chosen =
+        record.fallback === null && record.bestGain !== null && record.bestGain > 0
+          ? `推定では別の投順が強い順より ${pt(record.bestGain)} 高い見込みでした。`
+          : '';
+      return {
+        summary: '投順: 手動で強い順に変更',
+        detail: `手動で強い順 (${strong}) にしています。${chosen}役割別強度: ${basis}`,
+        deviates: true,
+      };
+    }
     const gain =
       record.probability !== null && record.strongProbability !== null ? `推定ゲーム勝率は強い順と比べて ${pt(record.probability - record.strongProbability)}。` : '';
     return {

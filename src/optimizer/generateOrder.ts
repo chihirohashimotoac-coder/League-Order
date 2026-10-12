@@ -24,6 +24,7 @@ import { independentGamesModel } from '../domain/prediction/matchWinProbability'
 import type { ThrowOrderRecord, UnderdogObjective, UnderdogPlanMetrics, UnderdogStatus, UnderdogSuggestion } from '../domain/types';
 import { chooseUnderdogPlan, opponentDataConfidence, planMetrics, underdogEligibility } from './underdog';
 import { describeThrowOrder } from '../domain/orders/throwOrderText';
+import { underdogGainText, underdogLossText } from '../domain/orders/underdogText';
 import { throwOrderRecord } from './throwOrder';
 import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
 import { round } from '../utils/math';
@@ -155,8 +156,13 @@ export function materialise(ctx: PreparedContext, selection: readonly Combo[]): 
   }));
 }
 
-/** How each multi-player game's order was decided, for the solution. */
+/**
+ * How each multi-player game's order was decided, for the solution. Orders made before the
+ * throw-order model (no model version in their input) get none: they keep the order they were
+ * saved in and are explained as before, never as hand edits of a rule they did not follow.
+ */
 export function throwOrderRecords(ctx: PreparedContext, selection: readonly Combo[]): ThrowOrderRecord[] {
+  if (!ctx.throwOrderModel) return [];
   return selection.flatMap((combo, gi) => (combo.members.length >= 2 ? [throwOrderRecord(ctx, gi, combo.orderChoice)] : []));
 }
 
@@ -544,6 +550,7 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
     return { ok: false, candidates: [], diagnostics };
   }
 
+  const generationStarted = performance.now();
   const timeLimit = options.timeLimitMs ?? input.settings.timeLimitMs;
   const runs: { label: string; presetKey: PresetKey; weights: ScoreWeights }[] = [
     {
@@ -641,7 +648,11 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
 
   if (input.preset === 'OPPONENT_OPTIMIZED' && options.underdog !== false) {
     const standard = solutions.find((solution) => solution.meta.presetKey === 'OPPONENT_OPTIMIZED' && !solution.meta.underdog);
-    const { suggestion, status } = planUnderdog(input, standard, referenceCtx, perRunBudget);
+    // The two underdog runs share what is left of the time limit (each at least the per-run
+    // floor), so the whole generation stays within the limit the captain set.
+    const remaining = timeLimit - (performance.now() - generationStarted);
+    const underdogBudget = Math.max(UNDERDOG_MIN_RUN_MS, Math.floor(remaining / 2));
+    const { suggestion, status } = planUnderdog(input, standard, referenceCtx, underdogBudget);
     return { ok: true, candidates: solutions, diagnostics: [], underdogStatus: status, ...(suggestion ? { underdog: suggestion } : {}) };
   }
   return { ok: true, candidates: solutions, diagnostics: [] };
@@ -677,6 +688,8 @@ function planUnderdog(
     plans[objective] = planMetrics(solution.prediction);
     solutionsByObjective[objective] = solution;
   }
+  // Neither run produced a plan (no feasible line-up): nothing was compared, so nothing "did not improve".
+  if (Object.keys(plans).length === 0) return { suggestion: null, status: { eligible: false, reason: 'not-run' } };
   const choice = chooseUnderdogPlan(standardMetrics, plans);
   if (!choice) return { suggestion: null, status: { eligible: false, reason: 'no-improvement' } };
   const chosen = solutionsByObjective[choice.objective]!;
@@ -713,17 +726,12 @@ function planUnderdog(
 }
 
 export const UNDERDOG_LABEL = '格上対策案';
-
-const pointText = (value: number): string => `${(value * 100).toFixed(1)}pt`;
+/** The smallest search budget an underdog run gets, even when the standard runs used the whole limit. */
+export const UNDERDOG_MIN_RUN_MS = 120;
 
 /** Why the underdog plan is what it is, in estimates (docs/UNDERDOG_PLAN.md §5). */
 export function describeUnderdogChoice(objective: UnderdogObjective, standard: UnderdogPlanMetrics, plan: UnderdogPlanMetrics): string {
-  const gain =
-    objective === 'atLeastOne'
-      ? `1ゲーム以上取る推定確率を ${pointText(plan.atLeastOne - standard.atLeastOne)} 改善 (${formatProbability(standard.atLeastOne)} → ${formatProbability(plan.atLeastOne)})`
-      : `期待勝ちゲーム数を ${(plan.expectedGames - standard.expectedGames).toFixed(2)} 改善 (${standard.expectedGames.toFixed(2)} → ${plan.expectedGames.toFixed(2)} / ${standard.gameCount})`;
-  const loss = standard.win - plan.win;
-  return `標準案 (推定 Match 勝率 ${formatProbability(standard.win)}) に対し、${gain}。推定 Match 勝率は ${loss >= 0 ? `${pointText(loss)} 下がります` : `${pointText(-loss)} 上がります`} (${formatProbability(plan.win)})。推定値であり、結果を保証するものではありません。`;
+  return `標準案 (推定 Match 勝率 ${formatProbability(standard.win)}) に対し、${underdogGainText(objective, standard, plan)}。${underdogLossText(standard, plan)}。推定値であり、結果を保証するものではありません。`;
 }
 
 /**

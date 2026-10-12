@@ -1,5 +1,7 @@
 import type { GameId, OrderInput, OrderSolution, PlayerId } from '../domain/types';
-import { evaluateManualOrder } from './generateOrder';
+import { predictOrder, predictionOptionsOf } from '../domain/prediction/predictOrder';
+import { independentGamesModel } from '../domain/prediction/matchWinProbability';
+import { validateHardConstraints } from './constraints/validate';
 
 /**
  * "Who takes the opponent's ace?" (docs/THROW_ORDER_MODEL.md §7, Singles).
@@ -58,7 +60,12 @@ export function singlesAceNote(input: OrderInput, solution: OrderSolution): AceN
     if (assignment.gameId === ours.game.id) return { ...assignment, playerIds: [ace.playerId] };
     return assignment;
   });
-  const evaluation = evaluateManualOrder(input, swappedAssignments);
+  // Only the swapped line-up's estimate is needed: the hard conditions are checked and the match
+  // predicted directly (the same model as the solution), without rebuilding every candidate.
+  const allowed = validateHardConstraints(input, swappedAssignments).length === 0;
+  const swapped = allowed
+    ? (predictOrder(input.opponent, swappedAssignments, input.pairs, independentGamesModel, predictionOptionsOf(input))?.win ?? null)
+    : null;
   const likely = input.opponent.games[ace.game.id]?.likely[0];
   return {
     aceGameId: ace.game.id,
@@ -68,6 +75,6 @@ export function singlesAceNote(input: OrderInput, solution: OrderSolution): AceN
     ourAceGameId: ours.game.id,
     receiver: ace.playerId,
     current: prediction.win,
-    swapped: evaluation.ok && evaluation.solution?.prediction ? evaluation.solution.prediction.win : null,
+    swapped,
   };
 }

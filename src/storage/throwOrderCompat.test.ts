@@ -103,6 +103,9 @@ describe('orders saved before the throw-order model', () => {
     expect(edited.games.find((g) => g.gameId === 'd1')!.probability).toBeCloseTo(before.games.find((g) => g.gameId === 'd1')!.probability, 12);
     expect(edited.win).toBeCloseTo(before.win, 12);
     expect(edited.games.every((game) => game.orderEffect === undefined)).toBe(true);
+    // Its saved (id-ordered) Doubles is not explained as a hand edit of a rule it was never made with.
+    expect(evaluateManualOrder(order.input, reordered).solution!.throwOrder).toEqual([]);
+    expect(evaluateManualOrder(order.input, order.solution.assignments).solution!.throwOrder).toEqual([]);
   });
 
   it('survive a backup round trip unchanged, and share in their saved slot order', () => {

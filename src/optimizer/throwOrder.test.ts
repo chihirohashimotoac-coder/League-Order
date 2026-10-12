@@ -145,7 +145,8 @@ describe('throw order: the strong order is the rule', () => {
       { id: 'd', order: 1, name: 'Doubles 501', kinds: ['DOUBLES', 'G501'], playerCount: 2 },
       { id: 't', order: 2, name: 'Trios 701', kinds: ['TRIOS', 'G501'], playerCount: 2 },
     ];
-    const input = orderInput([a, b], games, { preset: 'WIN_FIRST' });
+    // A new order (made with the throw-order model), without opponent data.
+    const input: OrderInput = { ...orderInput([a, b], games, { preset: 'WIN_FIRST' }), throwOrderModel: THROW_ORDER_MODEL_VERSION };
     const solution = only(input);
     const doubles = solution.assignments.find((entry) => entry.gameId === 'd')!;
     const other = solution.assignments.find((entry) => entry.gameId === 't')!;
@@ -278,6 +279,41 @@ describe('throw order: candidates, roles and manual edits', () => {
     expect(solution.throwOrder![0].probability).toBeCloseTo(combo.oppWin, 12);
   });
 
+  it('a Singles game is scored with the role strength too: the number optimised is the number shown', () => {
+    // Equal PPR; one has a Singles aptitude (+2 PPR in Singles). The optimizer must see what the screen shows.
+    const roster = [player({ id: 'a', name: '適性あり', ppr: 55, skills: { SINGLES: 5 } }), player({ id: 'b', name: '適性なし', ppr: 55 })];
+    const games: GameSlotDef[] = [{ id: 's1', order: 1, name: 'Singles 501', kinds: ['SINGLES', 'G501'], playerCount: 1 }];
+    const opponent = context({ a: ours(55), b: ours(55) }, { s1: { numPart: 1, sides: [{ strength: 55, probability: 1 }], legsToWin: 2 } });
+    const input = withModel(orderInput(roster, games, { preset: 'OPPONENT_OPTIMIZED' }), opponent);
+    const ctx = prepare(input);
+    for (const id of ['a', 'b']) {
+      const combo = describeCombo(ctx, 0, [ctx.playerIndex.get(id)!]);
+      const shown = predictOrder(opponent, [{ gameId: 's1', playerIds: [id] }], [], independentGamesModel, predictionOptionsOf(input))!;
+      expect(combo.oppWin).toBeCloseTo(shown.games[0].probability, 12);
+    }
+    expect(describeCombo(ctx, 0, [ctx.playerIndex.get('a')!]).oppWin).toBeGreaterThan(describeCombo(ctx, 0, [ctx.playerIndex.get('b')!]).oppWin);
+  });
+
+  it('an aptitude, or thin role evidence, never lowers the confidence of a player with good data', () => {
+    const roster = [player({ id: 'a', name: '適性あり', ppr: 55, skills: { SINGLES: 5 } }), player({ id: 'b', name: '適性なし', ppr: 55 })];
+    const games: GameSlotDef[] = [{ id: 's1', order: 1, name: 'Singles 501', kinds: ['SINGLES', 'G501'], playerCount: 1 }];
+    const opponent = context({ a: ours(55), b: ours(55) }, { s1: { numPart: 1, sides: [{ strength: 55, probability: 1 }], legsToWin: 2 } });
+    const thin: RoleStrengthContext = { version: 1, generatedAt: 0, source: 'n01', gamesObserved: 1, before: '2026-10-20', players: { b: { evidence: { 'SINGLES|01': { games: 1, weight: 3, sum: 3 * 4 } } } } };
+    const input = withModel(orderInput(roster, games, { preset: 'OPPONENT_OPTIMIZED' }), opponent, { roleStrength: thin });
+    const options = predictionOptionsOf(input);
+    for (const id of ['a', 'b']) {
+      const shown = predictOrder(opponent, [{ gameId: 's1', playerIds: [id] }], [], independentGamesModel, options)!;
+      expect(shown.games[0].confidence).toBe('HIGH');
+    }
+  });
+
+  it('the reasons list each game\'s players in its throwing order, never by index', () => {
+    const input = trioCase({ reverseOpponent: true });
+    const solution = only(input);
+    expect(solution.throwOrder![0].adopted).toBe('model');
+    expect(solution.explanation.games[0].playerIds).toEqual(solution.assignments[0].playerIds);
+  });
+
   it('[7] a Singles player and a Doubles player are placed by their strength in each role', () => {
     const roster = [player({ id: 's', name: 'シングルス型', ppr: 55 }), player({ id: 'd', name: 'ダブルス型', ppr: 55 }), player({ id: 'x', name: '控え', ppr: 50 })];
     const games: GameSlotDef[] = [
@@ -329,14 +365,23 @@ describe('throw order: candidates, roles and manual edits', () => {
     expect(edited.prediction!.win).not.toBeCloseTo(before.win, 6);
     expect(edited.throwOrder![0].adopted).toBe('manual');
     expect(session.present.violations).toEqual([]);
-    // Moving the players back into the strong order by hand is recognised as the strong order.
+    // Moving the players back into the strong order by hand is a hand edit (the estimate had chosen
+    // another order), and is said to be the strong order, with what the estimate had chosen.
     const strong = solution.throwOrder![0].strongOrder;
     const byStrong = undoableReducer(session, {
       type: 'setInput',
       input: session.present.input,
     });
     const restored = evaluateManualOrder(byStrong.present.input, [{ gameId: 'tr', playerIds: strong }]).solution!;
-    expect(restored.throwOrder![0].adopted).toBe('strong');
+    expect(restored.throwOrder![0].adopted).toBe('manual');
+    const restoredText = describeThrowOrder(restored.throwOrder![0], (id) => names(input, [id])[0]);
+    expect(restoredText.summary).toBe('投順: 手動で強い順に変更');
+    expect(restoredText.detail).toMatch(/推定では別の投順が強い順より \+\d+\.\dpt 高い見込みでした/u);
+    expect(restoredText.detail).not.toContain('推定でも強い順が最も高い');
+    // Re-evaluating the generated order unchanged (any edit elsewhere does that) keeps it the model's choice.
+    const untouched = evaluateManualOrder(input, solution.assignments).solution!;
+    expect(untouched.throwOrder![0].adopted).toBe('model');
+    expect(untouched.throwOrder![0].order).toEqual(solution.throwOrder![0].order);
     // Undo restores the generated order and its numbers.
     session = undoableReducer(session, { type: 'undo' });
     expect(session.present.current!.assignments[0].playerIds).toEqual(solution.assignments[0].playerIds);

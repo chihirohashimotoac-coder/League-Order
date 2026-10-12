@@ -112,9 +112,38 @@ describe('order effect (PPR points)', () => {
     expect(theirsStrongFirst).toBeLessThan(theirsWeakFirst);
   });
 
+  it('is only the order: averaged over our orders it is zero, so what the members do in any order is not credited', () => {
+    // A fast and a slow finisher against average finishers: the race favours this pair in either
+    // order, which is the members' make-up, not their order.
+    const flatOpponent = [member(50, 0.3), member(50, 0.3)];
+    const ab = orderEffect([member(50, 0.6), member(50, 0.1)], flatOpponent, 501);
+    const ba = orderEffect([member(50, 0.1), member(50, 0.6)], flatOpponent, 501);
+    expect(ab + ba).toBeCloseTo(0, 9);
+    const trio = [member(60, 0.4), member(52, 0.2), member(45, 0.3)];
+    const orders = [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ].map((order) => orderEffect(order.map((index) => trio[index]), [member(52), member(52), member(52)], 701));
+    expect(orders.reduce((a, b) => a + b, 0)).toBeCloseTo(0, 9);
+  });
+
   it('is capped', () => {
     const effect = orderEffect([member(110, 0.7), member(10, 0.08)], [member(60), member(60)], 301);
     expect(Math.abs(effect)).toBeLessThanOrEqual(ORDER_EFFECT_CAP);
+  });
+
+  it('sides of more than four (order not modelled) are exactly the order-free estimate: no one-sided order bonus', () => {
+    const team = game(5, [{ strength: 50, probability: 1 }], { startScore: 1001 });
+    const strengths = [60, 55, 50, 45, 40];
+    const options = { startScore: 1001, discipline: 'STEEL' as const };
+    const strongFirst = orderedGameWin({ strengths, finish: strengths.map((s) => finishPrior(s)), pairBonus: 0 }, team, options);
+    const weakFirst = orderedGameWin({ strengths: [...strengths].reverse(), finish: [...strengths].reverse().map((s) => finishPrior(s)), pairBonus: 0 }, team, options);
+    expect(strongFirst).toBe(expectedGameWin(50, team));
+    expect(weakFirst).toBe(strongFirst);
   });
 
   it('Singles and Cricket are exactly the order-free estimate', () => {

@@ -89,7 +89,8 @@ export function strongOrderFor(ctx: PreparedContext, gi: number, members: readon
   return order.filter((pi): pi is number => pi !== undefined);
 }
 
-function pairBonusOf(ctx: PreparedContext, members: readonly number[]): number {
+/** The mean pair-affinity bonus (PPR points) over every pair of the members. */
+export function pairBonusOf(ctx: PreparedContext, members: readonly number[]): number {
   let bonus = 0;
   let pairs = 0;
   for (let i = 0; i < members.length; i += 1) {
@@ -164,51 +165,21 @@ function decide(ctx: PreparedContext, gi: number, members: readonly number[], st
 }
 
 /**
- * The order for a member set (`explicit`: a hand-edited order, kept as given and estimated as is).
- * Memoised per prepared context: the same set is asked for by every search stage.
+ * The order for a member set by the rule (strong order, or an estimate that clears every
+ * guardrail). Memoised per prepared context: the same set is asked for by every search stage.
  */
-export function chooseOrder(ctx: PreparedContext, gi: number, members: readonly number[], explicit?: readonly number[]): ComboOrder {
-  const strongOrder = strongOrderFor(ctx, gi, members);
-  const modelled = ctx.throwOrderModel && ctx.opponentGames[gi] !== null && ctx.memberBases[gi].every((basis) => basis !== null);
-  if (explicit) {
-    const order = [...explicit];
-    if (members.length < 2 || !modelled) {
-      return { order, strongOrder, decision: null, probability: null, manual: true };
-    }
-    const probability = orderedProbability(ctx, gi, order);
-    const strongProbability = orderedProbability(ctx, gi, strongOrder);
-    const confidence: ConfidenceLevel = orderDecisionConfidence(
-      minConfidence(ctx.opponentGames[gi]!.confidence, ...members.map((pi) => ctx.memberBases[gi][pi]!.confidence)),
-      ctx.startKnown[gi],
-    );
-    const same = order.length === strongOrder.length && order.every((pi, index) => pi === strongOrder[index]);
-    return {
-      order,
-      strongOrder,
-      decision: {
-        order,
-        strongOrder,
-        adopted: same ? 'strong' : 'model',
-        gain: probability - strongProbability,
-        bestOrder: order,
-        bestGain: probability - strongProbability,
-        probability,
-        strongProbability,
-        confidence,
-        fallback: null,
-      },
-      probability,
-      manual: !same,
-    };
-  }
-
+function ruleOrder(ctx: PreparedContext, gi: number, members: readonly number[]): ComboOrder {
   const key = `${gi}|${[...members].sort((a, b) => a - b).join(',')}`;
   const memo = ctx.orderMemo.get(key);
   if (memo) return memo;
 
+  const strongOrder = strongOrderFor(ctx, gi, members);
+  const modelled = isModelled(ctx, gi);
   let result: ComboOrder;
   if (members.length < 2) {
-    result = { order: [...members], strongOrder, decision: null, probability: null, manual: false };
+    // A Singles player has no order, but is still estimated in the game's role (the same number
+    // the screen shows), not with the order-free strength.
+    result = { order: [...members], strongOrder, decision: null, probability: modelled ? orderedProbability(ctx, gi, members) : null, manual: false };
   } else if (!modelled) {
     result = { order: strongOrder, strongOrder, decision: null, probability: null, manual: false };
   } else {
@@ -228,7 +199,7 @@ export function chooseOrder(ctx: PreparedContext, gi: number, members: readonly 
           probability,
           strongProbability: probability,
           confidence: game.confidence,
-          fallback: game.cricket ? 'cricket' : 'no-model',
+          fallback: game.cricket ? 'cricket' : 'large-side',
         },
         probability,
         manual: false,
@@ -240,6 +211,57 @@ export function chooseOrder(ctx: PreparedContext, gi: number, members: readonly 
   }
   ctx.orderMemo.set(key, result);
   return result;
+}
+
+function isModelled(ctx: PreparedContext, gi: number): boolean {
+  return ctx.throwOrderModel && ctx.opponentGames[gi] !== null && ctx.memberBases[gi].every((basis) => basis !== null);
+}
+
+/**
+ * The order for a member set. `explicit` is the order in the captain's slots: when it is the
+ * order the rule chooses, it is the rule's (re-evaluating an untouched game never turns it into
+ * a hand edit); otherwise it is a hand edit, kept as given and estimated as is, next to what the
+ * rule would have chosen.
+ */
+export function chooseOrder(ctx: PreparedContext, gi: number, members: readonly number[], explicit?: readonly number[]): ComboOrder {
+  const rule = ruleOrder(ctx, gi, members);
+  if (!explicit || sameOrder(explicit, rule.order)) return rule;
+  const order = [...explicit];
+  const strongOrder = rule.strongOrder;
+  if (!isModelled(ctx, gi)) {
+    return { order, strongOrder, decision: null, probability: null, manual: true };
+  }
+  const probability = orderedProbability(ctx, gi, order);
+  const strongProbability = orderedProbability(ctx, gi, strongOrder);
+  const confidence: ConfidenceLevel =
+    rule.decision?.confidence ??
+    orderDecisionConfidence(
+      minConfidence(ctx.opponentGames[gi]!.confidence, ...members.map((pi) => ctx.memberBases[gi][pi]!.confidence)),
+      ctx.startKnown[gi],
+    );
+  return {
+    order,
+    strongOrder,
+    decision: {
+      order,
+      strongOrder,
+      adopted: sameOrder(order, strongOrder) ? 'strong' : 'model',
+      gain: probability - strongProbability,
+      // What the rule would have chosen, for the explanation of the hand edit.
+      bestOrder: rule.decision?.bestOrder ?? strongOrder,
+      bestGain: rule.decision?.bestGain ?? 0,
+      probability,
+      strongProbability,
+      confidence,
+      fallback: rule.decision?.fallback ?? null,
+    },
+    probability,
+    manual: true,
+  };
+}
+
+function sameOrder(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +295,7 @@ export function throwOrderRecord(ctx: PreparedContext, gi: number, chosen: Combo
     gameId: ctx.games[gi].id,
     order: ids(chosen.order),
     strongOrder: ids(chosen.strongOrder),
-    adopted: chosen.manual && !sameAsStrong ? 'manual' : sameAsStrong ? 'strong' : 'model',
+    adopted: chosen.manual ? 'manual' : sameAsStrong ? 'strong' : 'model',
     fallback: decision?.fallback ?? null,
     probability: decision?.probability ?? null,
     strongProbability: decision?.strongProbability ?? null,

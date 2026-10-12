@@ -2,7 +2,7 @@ import { mean } from '../../utils/math';
 import { expectedGameWin } from '../../domain/prediction/opponentContext';
 import { sideStrength } from '../../domain/prediction/teamMatchup';
 import type { PreparedContext } from '../prepare';
-import { chooseOrder, type ComboOrder } from '../throwOrder';
+import { chooseOrder, pairBonusOf, type ComboOrder } from '../throwOrder';
 
 /**
  * Per-game candidate line-ups (docs/DESIGN.md §6.3 Stage 0).
@@ -114,17 +114,9 @@ export function describeCombo(
     // The throw-order model: the estimate of this order (the same function the screen uses).
     oppWin = orderChoice.probability;
   } else if (opponentGame) {
-    let bonus = 0;
-    let pairsCount = 0;
-    for (let i = 0; i < members.length; i += 1) {
-      for (let j = i + 1; j < members.length; j += 1) {
-        bonus += ctx.pairBonusPpr[members[i]][members[j]];
-        pairsCount += 1;
-      }
-    }
     const side = sideStrength(
       members.map((pi) => ctx.predictionStrength[pi]),
-      pairsCount > 0 ? bonus / pairsCount : 0,
+      pairBonusOf(ctx, members),
     );
     oppWin = expectedGameWin(side, opponentGame);
   }

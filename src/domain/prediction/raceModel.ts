@@ -157,11 +157,12 @@ export function legRace(ours: Float64Array, theirs: Float64Array): LegRace {
  * side many times — every candidate run, every opponent line-up — so they are kept. The cache
  * never changes a number: a hit returns exactly what a miss computes.
  */
-const CACHE_LIMIT = 40_000;
+const CACHE_LIMIT = 10_000;
 const cache = new Map<string, Float64Array>();
 
+/** The exact numbers (no rounding), so a hit is always the value a miss would compute. */
 function memberKey(member: RaceMember): string {
-  return `${member.mu.toFixed(3)}:${member.finish.toFixed(5)}${member.sd === undefined ? '' : `:${member.sd.toFixed(3)}`}`;
+  return `${member.mu}:${member.finish}${member.sd === undefined ? '' : `:${member.sd}`}`;
 }
 
 export function cachedVisitDistribution(members: readonly RaceMember[], startScore: number): Float64Array {
