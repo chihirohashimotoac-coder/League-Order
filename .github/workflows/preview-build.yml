@@ -1,0 +1,61 @@
+name: Non-production preview (pull requests only)
+
+# Builds the non-production preview page of a pull request (`npm run build:preview` →
+# `dist-preview/`: the throw-order and underdog scenarios on synthetic data, plus the app with
+# its sample team), checks it in a real browser (`npm run test:e2e:preview`, mobile and desktop,
+# axe WCAG 2.1 AA, 360 / 390 px) and keeps the built page as a workflow artifact.
+#
+# It never publishes anything: no GitHub Pages, no `gh-pages` push, no deployment environment,
+# no secret, read-only token. The production site is only ever published by deploy.yml from `main`.
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'preview.html'
+      - 'index.html'
+      - 'vite.preview.config.ts'
+      - 'playwright.preview.config.ts'
+      - 'e2e-preview/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/preview-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: Build and check the preview page
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_COMMIT: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      # The web server of playwright.preview.config.ts builds dist-preview/ first.
+      - name: Preview page end-to-end (mobile and desktop)
+        run: npm run test:e2e:preview
+
+      - name: Keep the built preview page
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-site
+          path: dist-preview/
+          retention-days: 14
+          if-no-files-found: error
