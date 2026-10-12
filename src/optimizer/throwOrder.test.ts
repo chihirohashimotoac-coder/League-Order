@@ -343,3 +343,52 @@ describe('throw order: candidates, roles and manual edits', () => {
     expect(session.present.current!.prediction!.win).toBe(before.win);
   });
 });
+
+describe('throw order: generation time', () => {
+  it('[24] a league night (Team 1001 ×1, Doubles ×2, Singles ×4, 8 players, ordered opponent sides) generates in practical time', () => {
+    const strengths = [64, 61, 58, 56, 54, 52, 50, 47];
+    const roster = strengths.map((ppr, index) => player({ id: `q${index + 1}`, name: `選手${index + 1}`, ppr }));
+    const games: GameSlotDef[] = [
+      { id: 'team', order: 1, name: 'Team 1001', kinds: ['TEAM', 'G501'], playerCount: 4, n01: { schid: 'team', numPart: 4, matchType: '01', startScore: 1001, limitLegCount: 2, group: null, subtitle: null } },
+      { id: 'd1', order: 2, name: 'Doubles 501', kinds: ['DOUBLES', 'G501'], playerCount: 2, n01: { schid: 'd1', numPart: 2, matchType: '01', startScore: 501, limitLegCount: 2, group: null, subtitle: null } },
+      { id: 'd2', order: 3, name: 'Doubles 501', kinds: ['DOUBLES', 'G501'], playerCount: 2, n01: { schid: 'd2', numPart: 2, matchType: '01', startScore: 501, limitLegCount: 2, group: null, subtitle: null } },
+      ...[1, 2, 3, 4].map((n): GameSlotDef => ({ id: `s${n}`, order: 3 + n, name: `Singles 501`, kinds: ['SINGLES', 'G501'], playerCount: 1 })),
+    ];
+    const theirs = [62, 59, 57, 55, 53, 50];
+    const member = (strength: number, finish = finishPrior(strength)): OpponentSideMember => ({ strength, finish });
+    // Every order of the opponent's likely members, as version-2 contexts carry them.
+    const orders = (keys: number[]): number[][] =>
+      keys.length <= 1 ? [keys] : keys.flatMap((key) => orders(keys.filter((other) => other !== key)).map((rest) => [key, ...rest]));
+    const sidesOf = (keys: number[]): OpponentContext['games'][string]['sides'] => {
+      const all = orders(keys);
+      return all.map((order) => side(order.map((index) => member(theirs[index])), 1 / all.length));
+    };
+    const opponent = context(
+      Object.fromEntries(roster.map((p, index) => [p.id, ours(strengths[index], { first9Excess: index % 2 === 0 ? 4 : -4 })])),
+      {
+        team: { numPart: 4, sides: sidesOf([0, 1, 2, 3]), startScore: 1001, order: HIGH_ORDER },
+        d1: { numPart: 2, sides: [...sidesOf([0, 4]), ...sidesOf([1, 5])].map((s) => ({ ...s, probability: s.probability / 2 })), startScore: 501, order: HIGH_ORDER },
+        d2: { numPart: 2, sides: sidesOf([2, 3]), startScore: 501, order: { ...HIGH_ORDER, known: false, confidence: 'LOW' } },
+        s1: { numPart: 1, sides: [{ strength: 62, probability: 1 }] },
+        s2: { numPart: 1, sides: [{ strength: 58, probability: 1 }] },
+        s3: { numPart: 1, sides: [{ strength: 55, probability: 0.5 }, { strength: 51, probability: 0.5 }] },
+        s4: { numPart: 1, sides: [{ strength: 53, probability: 1 }] },
+      },
+    );
+    const input = withModel(orderInput(roster, games, { preset: 'OPPONENT_OPTIMIZED' }), opponent);
+    const started = performance.now();
+    const result = generateOrder(input);
+    const elapsed = performance.now() - started;
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidates.length).toBeGreaterThan(1);
+    for (const candidate of result.candidates) {
+      expect(evaluateManualOrder(input, candidate.assignments).violations).toEqual([]);
+      // Every multi-player game has its order decided and recorded.
+      expect(candidate.throwOrder!.map((record) => record.gameId).sort()).toEqual(['d1', 'd2', 'team']);
+    }
+    // Four candidates, each bounded by the 1.2 s time limit, plus the order estimates: well under
+    // what a captain waits for at the venue (the backtest reports the distribution, §8.3).
+    expect(elapsed).toBeLessThan(12_000);
+  });
+});

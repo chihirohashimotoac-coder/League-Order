@@ -42,7 +42,8 @@ test.describe('PLAYER ANALYTICS', () => {
     await createKalavinka(page);
     // The sync never asks for the analytics-only operations.
     expect(extras.log).toEqual([]);
-    expect(n01.log.every((entry) => /^(league|tournament|team)\//.test(entry))).toBe(true);
+    // Read-only operations only (`match/list`: the role evidence of docs/THROW_ORDER_MODEL.md §4.1).
+    expect(n01.log.every((entry) => /^(league|tournament|team|match)\//.test(entry))).toBe(true);
     const syncRequests = n01.log.length;
 
     await openAnalytics(page);

@@ -59,8 +59,9 @@ test.describe('n01 league native sync (Phase 1)', () => {
     await expect(page.getByRole('heading', { name: 'kalavinka', level: 1 })).toBeVisible();
     await expect(page.getByTestId('n01-team-status')).toContainText('ATDO ・ 2026 3rd ・ A Division');
     await expect(page.getByTestId('n01-team-status')).toContainText('最終同期 たった今');
-    // Read-only API only.
-    expect(server.log.every((entry) => /^(league|tournament|team)\//.test(entry))).toBe(true);
+    // Read-only API only (`match/list` is the played-games read behind the role evidence,
+    // docs/THROW_ORDER_MODEL.md §4.1).
+    expect(server.log.every((entry) => /^(league|tournament|team|match)\//.test(entry))).toBe(true);
 
     await tab(page, 'フォーマット').click();
     await expect(page.getByText('n01 管理')).toBeVisible();
@@ -165,6 +166,39 @@ test.describe('n01 league native sync (Phase 1)', () => {
     await expect(panel).toContainText('通常の勝利優先');
     await expect(page.locator('.tag.predict')).toHaveCount(7);
     await audit(page, 'RESULT (opponent-optimised)');
+  });
+});
+
+test.describe('throw order in the result (docs/THROW_ORDER_MODEL.md §7)', () => {
+  test('Doubles show 1投目 / 2投目 and why; a swap button re-estimates, Undo restores', async ({ page }) => {
+    await start(page);
+    await createKalavinka(page);
+    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('radio', { name: /対戦相手最適化/ }).click();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
+
+    const doubles = page.locator('.order-game').filter({ hasText: 'Doubles 501' }).first();
+    await expect(doubles.locator('.slot-top > span:first-child')).toHaveText(['1投目', '2投目']);
+    await expect(doubles.getByRole('combobox', { name: /Doubles 501 の1投目$/u })).toBeVisible();
+    await expect(doubles.getByRole('combobox', { name: /Doubles 501 の2投目$/u })).toBeVisible();
+    const note = doubles.getByTestId('throw-order-note');
+    // The fixture's role evidence is thin (LOW): the strong order, by role strength, never by id.
+    await expect(note).toContainText('投順: 強い順 (このゲームの役割別強度の高い順)');
+    await expect(page.locator('body')).not.toContainText(/PLAYER \d/u);
+
+    const values = () => doubles.locator('select').evaluateAll((selects) => selects.map((select) => (select as HTMLSelectElement).value));
+    const before = await values();
+    await doubles.getByRole('button', { name: /1投目と2投目を入れ替え/u }).click();
+    expect(await values()).toEqual([...before].reverse());
+    await expect(note).toContainText('投順: 手動で変更');
+    await expect(note).toContainText('推定ゲーム勝率は強い順と比べて');
+    await expect(page.getByTestId('opponent-panel')).toContainText('推定 Match 勝率');
+    await audit(page, 'RESULT throw order (hand-swapped)');
+
+    await page.getByRole('button', { name: '元に戻す' }).click();
+    expect(await values()).toEqual(before);
+    await expect(note).toContainText('投順: 強い順');
   });
 });
 
