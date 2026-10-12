@@ -2,6 +2,7 @@ import { mean } from '../../utils/math';
 import { expectedGameWin } from '../../domain/prediction/opponentContext';
 import { sideStrength } from '../../domain/prediction/teamMatchup';
 import type { PreparedContext } from '../prepare';
+import { chooseOrder, type ComboOrder } from '../throwOrder';
 
 /**
  * Per-game candidate line-ups (docs/DESIGN.md §6.3 Stage 0).
@@ -14,10 +15,18 @@ import type { PreparedContext } from '../prepare';
  * - no duplicate player inside a game (combos are sets)
  * - forbidden pairs (combos containing one are never emitted)
  * - locked assignments (combos missing a locked player are never emitted)
+ *
+ * The *order* the members throw in is not a search dimension: it is decided per set by
+ * `throwOrder.ts` (strongest first unless an estimate clears the guardrails) and carried here,
+ * so the same members in another order are another candidate with its own estimate.
  */
 export interface Combo {
-  /** Player indices, ascending. */
+  /** Player indices, ascending (the set: every fairness and constraint check reads this). */
   members: number[];
+  /** The same players in throwing order (1投目 first): what the slots show. */
+  order: number[];
+  /** How the order was decided. */
+  orderChoice: ComboOrder;
   /** Mean composite strength (Rating / PPR blend, 0..1) of the members. */
   strength: number;
   /** Mean game aptitude of the members. */
@@ -61,8 +70,14 @@ function binomial(n: number, k: number): number {
 }
 
 /** Builds the scored descriptor for an arbitrary member set (also used by the local
- * search, which explores member sets that are not in the pre-built candidate lists). */
-export function describeCombo(ctx: PreparedContext, gameIndex: number, members: number[]): Combo {
+ * search, which explores member sets that are not in the pre-built candidate lists).
+ * `explicitOrder` keeps a hand-edited throwing order instead of the rule's. */
+export function describeCombo(
+  ctx: PreparedContext,
+  gameIndex: number,
+  members: number[],
+  explicitOrder?: readonly number[],
+): Combo {
   const strength = mean(members.map((pi) => ctx.strength[pi]));
   const gameFit = mean(members.map((pi) => ctx.gameFit[gameIndex][pi]));
 
@@ -81,9 +96,13 @@ export function describeCombo(ctx: PreparedContext, gameIndex: number, members: 
     novelty = mean(novelties);
   }
 
+  const orderChoice = chooseOrder(ctx, gameIndex, members, explicitOrder);
   let oppWin = 0.5;
   const opponentGame = ctx.opponentGames[gameIndex];
-  if (opponentGame) {
+  if (opponentGame && orderChoice.probability !== null) {
+    // The throw-order model: the estimate of this order (the same function the screen uses).
+    oppWin = orderChoice.probability;
+  } else if (opponentGame) {
     let bonus = 0;
     let pairsCount = 0;
     for (let i = 0; i < members.length; i += 1) {
@@ -107,7 +126,7 @@ export function describeCombo(ctx: PreparedContext, gameIndex: number, members: 
     w.novelty * novelty +
     (w.opponentWin ?? 0) * oppWin;
 
-  return { members, strength, gameFit, pairFit, novelty, oppWin, localScore };
+  return { members, order: orderChoice.order, orderChoice, strength, gameFit, pairFit, novelty, oppWin, localScore };
 }
 
 /** True when any member pair is marked FORBIDDEN (a hard constraint). */
@@ -246,7 +265,7 @@ export function buildGameCandidates(ctx: PreparedContext, gameIndex: number): Ga
     const picked: Combo[] = [];
     const seen = new Set<string>();
     const push = (combo: Combo): void => {
-      const key = combo.members.join(',');
+      const key = combo.order.join(',');
       if (seen.has(key)) return;
       seen.add(key);
       picked.push(combo);
@@ -314,8 +333,9 @@ export function selectionSignature(
   ctx: PreparedContext,
   selection: readonly Combo[],
 ): string {
+  // In throwing order: the same members in another order are another line-up.
   return selection
-    .map((combo) => combo.members.map((pi) => ctx.playerIds[pi]).join('.'))
+    .map((combo) => combo.order.map((pi) => ctx.playerIds[pi]).join('.'))
     .join('|');
 }
 

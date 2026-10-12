@@ -25,8 +25,19 @@ import {
 import { checkEligibility } from './constraints/eligibility';
 import type { SolutionMeta } from '../domain/types';
 import type { OpponentContext, OpponentGameContext } from '../domain/prediction/opponentContext';
+import { isReadableContext } from '../domain/prediction/opponentContext';
 import { PAIR_AFFINITY_PPR_BONUS } from '../domain/prediction/teamMatchup';
 import { CONFIDENCE_WEIGHT_FACTOR, PRESETS } from '../domain/orders/presets';
+import {
+  memberBasis,
+  predictionOptionsOf,
+  startScoreOf,
+  usesThrowOrderModel,
+  type MemberBasis,
+  type PredictionModelOptions,
+} from '../domain/prediction/predictOrder';
+import { aptitudeDelta, estimateRole, roleKeyOf, type RoleStrengthEntry } from '../domain/prediction/roleStrength';
+import type { ComboOrder } from './throwOrder';
 
 /**
  * Immutable, index-based view of an order input, built once per generation run.
@@ -105,6 +116,28 @@ export interface PreparedContext {
   pairBonusPpr: number[][];
   /** How the opponent weight was applied (set only when the weights ask for it). */
   opponentPlan: SolutionMeta['opponent'];
+  /** The order was generated with the throw-order model (docs/THROW_ORDER_MODEL.md). */
+  throwOrderModel: boolean;
+  /** What `predictOrder` needs to reproduce this run's estimates. */
+  predictionOptions: PredictionModelOptions;
+  /**
+   * `rankStrength[gameIndex][playerIndex]`: the strength that ranks members for the strong order
+   * — the role strength in that game (PPR points; the 0..1 blend × 100 when no PPR is known).
+   * With opponent data and the throw-order model it is also the strength the estimate uses.
+   */
+  rankStrength: number[][];
+  /** The role adjustment inside `rankStrength` (PPR points). */
+  rankDelta: number[][];
+  rankRole: RoleStrengthEntry[][];
+  /** True when `rankStrength` is the 0..1 blend (no PPR known for anyone, no opponent). */
+  rankBlend: boolean;
+  /** Opponent data + throw-order model: each member's role strength and finishing per game. */
+  memberBases: (MemberBasis | null)[][];
+  /** Start score per game (n01's, or the documented default) and whether n01 stated it. */
+  startScore: number[];
+  startKnown: boolean[];
+  /** Order decisions per member set, shared by every search stage of the run. */
+  orderMemo: Map<string, ComboOrder>;
 }
 
 /**
@@ -268,7 +301,7 @@ export function prepare(rawInput: OrderInput): PreparedContext {
   const multiPlayerGameCount = games.filter((game) => game.playerCount >= 2).length;
 
   // Opponent data: only games whose opponent slot has the same head count are usable.
-  const opponent = input.opponent && input.opponent.version === 1 ? input.opponent : null;
+  const opponent = isReadableContext(input.opponent) ? input.opponent : null;
   const opponentGames = games.map((game) => {
     const entry = opponent?.games[game.id];
     return entry && entry.numPart === game.playerCount && entry.sides.length > 0 ? entry : null;
@@ -287,6 +320,54 @@ export function prepare(rawInput: OrderInput): PreparedContext {
   }
   const usable = opponentGames.filter((entry) => entry !== null).length;
   const { weights, plan: opponentPlan } = opponentWeights(input.weights, opponent, usable);
+
+  // Throw order (docs/THROW_ORDER_MODEL.md). Members are ranked by their strength in each game's
+  // role; with opponent data and the model, that is the estimate's own strength.
+  const predictionOptions = predictionOptionsOf(input);
+  const throwOrderModel = usesThrowOrderModel(predictionOptions);
+  const usableOpponent = usable > 0 ? opponent : null;
+  const rankBlend = !usableOpponent && pprs.knownCount === 0;
+  const evidence = throwOrderModel ? input.roleStrength?.players : undefined;
+  const basisConfidence = (id: string) => input.strengthBasis?.players[id]?.confidence ?? 'LOW';
+  const memberBases: (MemberBasis | null)[][] = games.map(() => new Array<MemberBasis | null>(n).fill(null));
+  const rankStrength = buildMatrix(g, n, 0);
+  const rankDelta = buildMatrix(g, n, 0);
+  const rankRole: RoleStrengthEntry[][] = [];
+  const startScore: number[] = [];
+  const startKnown: boolean[] = [];
+  for (let gi = 0; gi < g; gi += 1) {
+    const game = games[gi];
+    const start = startScoreOf(game, opponentGames[gi] ?? undefined);
+    startScore.push(start.startScore);
+    startKnown.push(start.known);
+    const roles: RoleStrengthEntry[] = [];
+    for (let pi = 0; pi < n; pi += 1) {
+      const player = players[pi];
+      if (usableOpponent && throwOrderModel) {
+        const basis = memberBasis(usableOpponent, predictionOptions, player.id, game, player);
+        memberBases[gi][pi] = basis;
+        rankStrength[gi][pi] = basis.strength;
+        rankDelta[gi][pi] = basis.role.delta;
+        roles.push(basis.role);
+        continue;
+      }
+      const role = estimateRole(
+        evidence?.[player.id]?.evidence,
+        roleKeyOf(game),
+        aptitudeDelta(player, game),
+        usableOpponent ? (usableOpponent.players[player.id]?.confidence ?? 'LOW') : basisConfidence(player.id),
+      );
+      const base = usableOpponent
+        ? predictionStrength[pi]
+        : rankBlend
+          ? (strength[pi] ?? 0.5) * 100
+          : (pprs.effective.get(player.id) ?? 0);
+      rankStrength[gi][pi] = base + role.delta;
+      rankDelta[gi][pi] = role.delta;
+      roles.push(role);
+    }
+    rankRole.push(roles);
+  }
 
   return {
     games,
@@ -325,10 +406,20 @@ export function prepare(rawInput: OrderInput): PreparedContext {
     effectiveSeasonWeight: useSeasonFairness ? 0 : weights.season,
     input,
     invalidLocks,
-    opponent: usable > 0 ? opponent : null,
+    opponent: usableOpponent,
     opponentGames,
     predictionStrength,
     pairBonusPpr,
     opponentPlan,
+    throwOrderModel,
+    predictionOptions,
+    rankStrength,
+    rankDelta,
+    rankRole,
+    rankBlend,
+    memberBases,
+    startScore,
+    startKnown,
+    orderMemo: new Map(),
   };
 }

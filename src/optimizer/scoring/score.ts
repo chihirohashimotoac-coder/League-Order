@@ -197,12 +197,20 @@ export function compareEvaluations(
   const fairnessDiff = b.evaluation.fairness.score - a.evaluation.fairness.score;
   if (Math.abs(fairnessDiff) > EPSILON) return fairnessDiff;
 
-  // Final tie-break: lexicographic order of the player-index sequence.
+  // Final tie-break: lexicographic order of the player-index sequence (the sets first, then the
+  // throwing order, which is a function of the set within one run).
   for (let gi = 0; gi < Math.min(a.selection.length, b.selection.length); gi += 1) {
     const am = a.selection[gi].members;
     const bm = b.selection[gi].members;
     for (let i = 0; i < Math.min(am.length, bm.length); i += 1) {
       if (am[i] !== bm[i]) return am[i] - bm[i];
+    }
+  }
+  for (let gi = 0; gi < Math.min(a.selection.length, b.selection.length); gi += 1) {
+    const ao = a.selection[gi].order;
+    const bo = b.selection[gi].order;
+    for (let i = 0; i < Math.min(ao.length, bo.length); i += 1) {
+      if (ao[i] !== bo[i]) return ao[i] - bo[i];
     }
   }
   return 0;

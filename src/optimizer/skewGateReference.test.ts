@@ -138,7 +138,7 @@ describe('the gate still judges when the shown line-ups leave the search no star
     for (const candidate of result.candidates) {
       const key = selectionSignature(
         ctx,
-        candidate.assignments.map((assignment) => ({ members: assignment.playerIds.map((id) => ctx.playerIndex.get(id)!).sort((a, b) => a - b), strength: 0, gameFit: 0, pairFit: 0, novelty: 0, oppWin: 0, localScore: 0 })),
+        candidate.assignments.map((assignment, gi) => describeCombo(ctx, gi, assignment.playerIds.map((id) => ctx.playerIndex.get(id)!).sort((a, b) => a - b))),
       );
       expect(seen.has(key)).toBe(false);
       seen.add(key);
