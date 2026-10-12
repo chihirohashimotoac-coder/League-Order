@@ -1,4 +1,4 @@
-import { MATCH_LIST_PAGE, teamMatchPattern } from '../../integrations/n01/client';
+import { MATCH_LIST_PAGE, teamMatchFilter } from '../../integrations/n01/client';
 
 /**
  * Deterministic n01 fixture generator (test-only).
@@ -550,7 +550,7 @@ export function generateLeague(spec: FixtureLeagueSpec): GeneratedLeague {
         .map(gameRow)
         .sort((a, b) => (b.startTime as number) - (a.startTime as number));
       for (let page = 0; page === 0 || page * MATCH_LIST_PAGE < rows.length; page += 1) {
-        const params: Record<string, string> = { tdid: season.tournamentId, tmid__regex: teamMatchPattern(team.tpid), count: String(MATCH_LIST_PAGE) };
+        const params: Record<string, string> = { tdid: season.tournamentId, tmid__regex: teamMatchFilter(team.tpid), count: String(MATCH_LIST_PAGE) };
         if (page > 0) params.skip = String(page * MATCH_LIST_PAGE);
         dataset.set(requestKey('match/list', params), { result: 0, list: rows.slice(page * MATCH_LIST_PAGE, (page + 1) * MATCH_LIST_PAGE) });
       }

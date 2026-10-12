@@ -123,9 +123,15 @@ export const MATCH_LIST_PAGE = 100;
 /** A team plays ~70–100 games a season; three pages cover any season seen. */
 export const MATCH_LIST_MAX_PAGES = 3;
 
-/** `tmid` names both teams as `…_<tpid>_<tpid>`: this matches the team's own matches only. */
-export function teamMatchPattern(teamId: string): string {
-  return `_${teamId.replace(/[^A-Za-z0-9]/gu, (char) => `\\${char}`)}(_|$)`;
+/**
+ * The `tmid__regex` filter for a team's own matches (`tmid` ends `…_<tpid>_<tpid>`). n01 compares it
+ * as plain text, not as a regular expression — checked against the live API on 2026-10-12: `_X6iU`
+ * finds the team's matches, while `_X6iU$`, `_X6iU(_|$)` and `_X6i.` find none — so it is the
+ * `_<tpid>` substring. Rows it also catches for another team (a longer tpid starting with the same
+ * letters) are dropped by `teamGames`, which keeps only games one of whose sides is the team.
+ */
+export function teamMatchFilter(teamId: string): string {
+  return `_${teamId}`;
 }
 
 export class N01Client {
@@ -239,7 +245,7 @@ export class N01Client {
   async teamGames(tournamentId: string, teamId: string): Promise<N01GameRecord[]> {
     const games: N01GameRecord[] = [];
     for (let page = 0; page < MATCH_LIST_MAX_PAGES; page += 1) {
-      const params: Record<string, string> = { tdid: tournamentId, tmid__regex: teamMatchPattern(teamId), count: String(MATCH_LIST_PAGE) };
+      const params: Record<string, string> = { tdid: tournamentId, tmid__regex: teamMatchFilter(teamId), count: String(MATCH_LIST_PAGE) };
       if (page > 0) params.skip = String(page * MATCH_LIST_PAGE);
       let result: { games: N01GameRecord[]; rows: number };
       try {
@@ -249,8 +255,8 @@ export class N01Client {
         if (page > 0 && error instanceof N01Error && error.kind === 'schema') break;
         throw error;
       }
-      games.push(...result.games);
-      // Paging follows the rows n01 sent, not the rows that could be read.
+      games.push(...result.games.filter((game) => game.sides.some((side) => side.teamId === teamId)));
+      // Paging follows the rows n01 sent, not the rows that could be read or kept.
       if (result.rows < MATCH_LIST_PAGE) break;
     }
     return games;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MATCH_LIST_PAGE, N01Client, N01Error, teamMatchPattern } from './client';
+import { MATCH_LIST_PAGE, N01Client, N01Error, teamMatchFilter } from './client';
 import type { N01Request } from './endpoints';
 import { fetchTeamData, planN01Sync } from './sync';
 import { buildIntelligenceSnapshot, fetchIntelligence } from './intelligence';
@@ -114,11 +114,21 @@ describe('match/list (per-game records)', () => {
     const games = await client.teamGames('t_x', 'X6iU');
     expect(games).toHaveLength(MATCH_LIST_PAGE + 5);
     expect(log.map((request) => request.params)).toEqual([
-      { tdid: 't_x', tmid__regex: '_X6iU(_|$)', count: '100' },
-      { tdid: 't_x', tmid__regex: '_X6iU(_|$)', count: '100', skip: '100' },
+      { tdid: 't_x', tmid__regex: '_X6iU', count: '100' },
+      { tdid: 't_x', tmid__regex: '_X6iU', count: '100', skip: '100' },
     ]);
-    expect(new RegExp(teamMatchPattern('X6iU')).test('t_yyGi_9918_lg_1_o59a_RcXE_X6iU')).toBe(true);
-    expect(new RegExp(teamMatchPattern('X6iU')).test('t_yyGi_9918_lg_1_o59a_RcXE_X6iUz')).toBe(false);
+  });
+
+  it('asks n01 for the plain `_<tpid>` text (it does not read regular expressions) and keeps only the team\'s own games', async () => {
+    // As the live API behaves: the filter is plain text, so a longer tpid starting with the same letters is caught too.
+    expect(teamMatchFilter('X6iU')).toBe('_X6iU');
+    const other = { ...LIVE_ROW, mid: 'other', tmid: 't_yyGi_9918_lg_1_o59a_RcXE_X6iUz', statsData: LIVE_ROW.statsData.map((side, i) => ({ ...side, tpid: i === 0 ? 'RcXE' : 'X6iUz' })) };
+    const client = new N01Client(
+      createFixtureTransport({ override: (request) => (request.operation === 'match/list' ? { result: 0, list: [LIVE_ROW, other] } : undefined) }),
+      { now: () => FIXTURE_NOW },
+    );
+    const games = await client.teamGames('t_yyGi_9918', 'X6iU');
+    expect(games.map((game) => game.gameId)).toEqual([LIVE_ROW.mid]);
   });
 
   it('pages on the rows n01 sent, even when some could not be read; an unreadable later page keeps what was read', async () => {
