@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5" />
+    <meta name="color-scheme" content="light" />
+    <meta name="robots" content="noindex" />
+    <title>投順モデル プレビュー</title>
+    <style>
+      html,
+      body {
+        background: #f4f3ef;
+        color: #172026;
+      }
+      .preview-shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 16px 16px 120px;
+      }
+      .preview-header h1 {
+        font-size: 22px;
+        margin: 4px 0 8px;
+      }
+      .preview-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+      }
+      .preview-shell .preview-tabs .btn[aria-pressed='true'] {
+        background: #087f8c;
+        border-color: #087f8c;
+        color: #ffffff;
+        opacity: 1;
+      }
+      .preview-summary {
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        border-left: 4px solid #2d62a3;
+        background: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/preview/main.tsx"></script>
+  </body>
+</html>

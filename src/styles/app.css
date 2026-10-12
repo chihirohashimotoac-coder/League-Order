@@ -3774,6 +3774,146 @@ input[type='range'] {
   font-weight: 800;
 }
 
+.opponent-ace {
+  margin: 10px 0 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Throw order (docs/THROW_ORDER_MODEL.md §7) */
+
+.slot-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Button alternative to dragging: swap two neighbouring throwers. Full tap target, quiet look. */
+.swap-throw {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  align-self: center;
+  min-height: var(--tap-target);
+  padding: 0 14px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-surface-3);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.swap-throw:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.swap-throw:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.throw-order {
+  margin: 0 10px 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.throw-order summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap-target);
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+
+.throw-order summary::-webkit-details-marker {
+  display: none;
+}
+
+.throw-order .throw-order-detail {
+  display: block;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+/* Only an order that differs from the strong one is made to stand out. */
+.throw-order.deviates {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-updated);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-updated) 8%, var(--color-surface-2));
+  color: var(--color-text);
+}
+
+.throw-order.deviates > .icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-updated);
+}
+
+/* ---- Underdog plan (docs/UNDERDOG_PLAN.md §5) */
+
+.underdog-panel {
+  margin: 0 0 14px;
+  padding: 14px;
+  border: 1px solid var(--color-border-strong);
+  border-left: 4px solid var(--color-season);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+
+.underdog-panel.showing {
+  border-left-color: var(--color-updated);
+}
+
+.underdog-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.underdog-head strong {
+  font-size: 16px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.underdog-reason {
+  margin: 8px 0 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.underdog-fairness {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+}
+
+.underdog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.underdog-note {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0 0;
+}
+
 .c-conf {
   font-weight: 600;
   color: var(--color-text-muted);

@@ -10,7 +10,10 @@ import type {
   Player,
   SavedOrder,
   SeasonCommitStatus,
+  ThrowOrderRecord,
 } from '../domain/types';
+import { describeThrowOrder, throwSlotLabel } from '../domain/orders/throwOrderText';
+import { UnderdogPanel } from '../components/n01/UnderdogPanel';
 import { GAME_KIND_LABELS } from '../domain/types';
 import { describeStrengthWeights, formatPpr } from '../domain/players/strength';
 import { sortedGames } from '../domain/games/format';
@@ -146,8 +149,16 @@ export function ResultPage({
       })
     : null;
 
-  // Slots that differ from the generated candidate are marked as hand-edited.
-  const baseline = state.edited ? state.candidates[state.selectedCandidate] : null;
+  // Slots that differ from the generated candidate (or the underdog plan being edited) are marked
+  // as hand-edited.
+  const baseline = state.edited
+    ? state.showingUnderdog && state.underdog
+      ? state.underdog.solution
+      : state.candidates[state.selectedCandidate]
+    : null;
+  const standardIndex = state.candidates.findIndex((candidate) => candidate.meta.presetKey === 'OPPONENT_OPTIMIZED');
+  const offerUnderdog =
+    showPredictions && state.underdog !== null && (state.showingUnderdog || (!state.edited && state.selectedCandidate === standardIndex));
   const baselineByGame = new Map(baseline?.assignments.map((entry) => [entry.gameId, entry.playerIds]));
   const hasViolations = state.violations.length > 0;
 
@@ -182,13 +193,25 @@ export function ResultPage({
           {state.candidates.length > 1 ? (
             <CandidateGrid
               candidates={state.candidates}
-              selected={state.edited ? -1 : state.selectedCandidate}
+              selected={state.edited || state.showingUnderdog ? -1 : state.selectedCandidate}
               onSelect={(index) => dispatch({ type: 'selectCandidate', index })}
               showPredictions={showPredictions}
             />
           ) : null}
 
-          {showPredictions ? <OpponentPanel solution={solution} candidates={state.candidates} games={ordered} /> : null}
+          {showPredictions ? <OpponentPanel solution={solution} candidates={state.candidates} games={ordered} input={state.input} /> : null}
+
+          {offerUnderdog && state.underdog ? (
+            <UnderdogPanel
+              suggestion={state.underdog}
+              showing={state.showingUnderdog}
+              edited={state.edited}
+              standard={state.candidates[standardIndex] ?? null}
+              nameById={nameById}
+              onApply={() => dispatch({ type: 'applyUnderdog' })}
+              onRestore={() => dispatch({ type: 'restoreStandard' })}
+            />
+          ) : null}
 
           <StrengthBasis solution={solution} />
 
@@ -237,6 +260,8 @@ export function ResultPage({
                 <GameCard
                   key={game.id}
                   game={game}
+                  throwOrder={solution.throwOrder?.find((entry) => entry.gameId === game.id)}
+                  nameById={nameById}
                   playerIds={assignment.playerIds}
                   players={players}
                   playerById={playerById}
@@ -645,6 +670,8 @@ const TAG_ORDER: GameKind[] = ['SINGLES', 'DOUBLES', 'TRIOS', 'TEAM', 'G501', 'C
 
 function GameCard({
   game,
+  throwOrder,
+  nameById,
   playerIds,
   players,
   playerById,
@@ -658,6 +685,9 @@ function GameCard({
   onReoptimise,
 }: {
   game: GameSlotDef;
+  /** How this game's throwing order was decided (multi-player games of newer orders). */
+  throwOrder?: ThrowOrderRecord;
+  nameById: Map<string, string>;
   playerIds: readonly string[];
   players: Player[];
   playerById: Map<string, Player>;
@@ -673,6 +703,15 @@ function GameCard({
 }): React.JSX.Element {
   const number = String(game.order).padStart(2, '0');
   const tags = TAG_ORDER.filter((kind) => game.kinds.includes(kind));
+  const multi = game.playerCount > 1;
+  // A record describes the order it was made for; after a hand edit it may describe another one.
+  const record = throwOrder && throwOrder.order.join('.') === playerIds.join('.') ? throwOrder : undefined;
+  const throwText = record ? describeThrowOrder(record, (id) => nameById.get(id) ?? id) : null;
+  const slotLabel = (slotIndex: number): string => (multi ? throwSlotLabel(slotIndex) : '選手');
+  const slotAria = (slotIndex: number): string =>
+    multi ? `Game ${game.order} ${game.name} の${throwSlotLabel(slotIndex)}` : `Game ${game.order} ${game.name} のスロット ${slotIndex + 1}`;
+  const lockAria = (slotIndex: number): string =>
+    multi ? `Game ${game.order} ${game.name} ${throwSlotLabel(slotIndex)} のロック` : `Game ${game.order} ${game.name} スロット ${slotIndex + 1} のロック`;
   const classes = ['order-game', violating ? 'violating' : '', gameLocked ? 'all-locked' : '']
     .filter(Boolean)
     .join(' ');
@@ -728,6 +767,23 @@ function GameCard({
 
       <div className="slots">
         {playerIds.map((playerId, slotIndex) => {
+          const swapBlocked = isLocked(slotIndex) || isLocked(slotIndex - 1) || !playerId || !playerIds[slotIndex - 1];
+          const swap =
+            multi && slotIndex > 0 ? (
+              <button
+                type="button"
+                className="swap-throw"
+                disabled={swapBlocked}
+                aria-label={`Game ${game.order} ${game.name}: ${throwSlotLabel(slotIndex - 1)}と${throwSlotLabel(slotIndex)}を入れ替え`}
+                title={swapBlocked ? 'ロック中または空席のため入れ替えできません' : '投順を入れ替え'}
+                onClick={() =>
+                  dispatch({ type: 'swapSlots', from: { gameId: game.id, slotIndex: slotIndex - 1 }, to: { gameId: game.id, slotIndex } })
+                }
+              >
+                <Icon name="swap" size={15} />
+                <span>{throwSlotLabel(slotIndex - 1)} ⇄ {throwSlotLabel(slotIndex)}</span>
+              </button>
+            ) : null;
           const locked = isLocked(slotIndex);
           const edited = isEdited(slotIndex, playerId);
           const player = playerId ? playerById.get(playerId) : undefined;
@@ -740,10 +796,12 @@ function GameCard({
             .filter(Boolean)
             .join(' ');
           return (
-            <div className={classes} key={slotIndex}>
+            <div className="slot-group" key={slotIndex}>
+            {swap}
+            <div className={classes}>
               <div className="slot-field">
                 <span className="slot-top" aria-hidden="true">
-                  <span>{game.playerCount > 1 ? `PLAYER ${slotIndex + 1}` : 'PLAYER'}</span>
+                  <span>{slotLabel(slotIndex)}</span>
                   {locked ? (
                     <span className="slot-flag locked">
                       <Icon name="lock" size={12} strokeWidth={2.6} />
@@ -769,7 +827,7 @@ function GameCard({
                 <select
                   value={playerId}
                   disabled={locked}
-                  aria-label={`Game ${game.order} ${game.name} のスロット ${slotIndex + 1}`}
+                  aria-label={slotAria(slotIndex)}
                   onChange={(event) =>
                     dispatch({
                       type: 'assignPlayer',
@@ -791,17 +849,37 @@ function GameCard({
                 type="button"
                 className="lock-toggle"
                 aria-pressed={locked}
-                aria-label={`Game ${game.order} ${game.name} スロット ${slotIndex + 1} のロック`}
+                aria-label={lockAria(slotIndex)}
                 title={locked ? 'ロック中 (タップで解除)' : 'この選手で固定'}
                 onClick={() => dispatch({ type: 'toggleLock', gameId: game.id, slotIndex })}
               >
                 <Icon name={locked ? 'lock' : 'unlock'} size={19} />
               </button>
             </div>
+            </div>
           );
         })}
       </div>
 
+      {throwText ? (
+        throwText.deviates ? (
+          <div className="throw-order deviates" data-testid="throw-order-note" role="note">
+            <Icon name="alert" size={16} />
+            <span>
+              <strong>{throwText.summary}</strong>
+              <span className="throw-order-detail">{throwText.detail}</span>
+            </span>
+          </div>
+        ) : (
+          <details className="throw-order" data-testid="throw-order-note">
+            <summary>
+              <Icon name="info" size={15} />
+              <span>{throwText.summary}</span>
+            </summary>
+            <p className="throw-order-detail">{throwText.detail}</p>
+          </details>
+        )
+      ) : null}
     </article>
   );
 }
