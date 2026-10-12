@@ -15,7 +15,14 @@ import { normalizeName } from '../../domain/n01/names';
 import { isUsableOpid, rosterCoverage, sharedOpids, unprovenOpids, type IdentityRef } from '../../domain/n01/identity';
 import type { N01Client } from './client';
 import { N01Error } from './client';
-import type { N01Fixture, N01OrderEntry, N01PlayerStats, N01RosterPlayer, N01ScheduleSlot, N01Tournament, N01TournamentSummary } from './types';
+import type { N01Fixture, N01GameRecord, N01OrderEntry, N01PlayerStats, N01RosterPlayer, N01ScheduleSlot, N01Tournament, N01TournamentSummary } from './types';
+import {
+  aggregateRoleEvidence,
+  familyOfMatchType,
+  jstDayStart,
+  structureOfHeadCount,
+  type RoleGameRecord,
+} from '../../domain/n01/roleHistory';
 import type { N01ProgressListener, N01TeamData } from './sync';
 import { previousSeasons } from './seasonResolver';
 import { resolveNextMatch, type NextMatchResolution } from './scheduleResolver';
@@ -50,6 +57,16 @@ export interface HistoricalSeasonData {
   opponentOrders: N01OrderEntry[];
 }
 
+/** One team's played games in one season (`match/list`), for the role evidence. */
+export interface RoleGamesFetch {
+  tournamentId: string;
+  seasonIndex: number;
+  teamId: string;
+  /** Whose games: our team's or the next opponent's. */
+  team: 'ours' | 'opponent';
+  games: N01GameRecord[];
+}
+
 /** Every team's members, per season; `null` = the request failed (nothing is proven there). */
 export interface SeasonRosters {
   current: N01RosterPlayer[] | null;
@@ -63,6 +80,10 @@ export interface IntelligenceFetch {
   opponentOrders: N01OrderEntry[];
   history: HistoricalSeasonData[];
   rosters: SeasonRosters;
+  /** Our team's and the opponent's games per season (absent on fetches made before it). */
+  roleGames?: RoleGamesFetch[];
+  /** Requests for games that failed (the role evidence is thinner for them, never wrong). */
+  roleGameFailures?: number;
   notes: string[];
 }
 
@@ -127,6 +148,27 @@ export async function fetchIntelligence(
   }
   onProgress('opponent', resolution.kind === 'resolved' ? 'done' : 'skipped');
 
+  // Role history (docs/THROW_ORDER_MODEL.md §4): the games our team and the opponent played,
+  // season by season. Optional — a failed request only thins the evidence, and the role
+  // strengths fall back to the nearest roles, the aptitudes and the overall strength.
+  const roleRequests: Promise<RoleGamesFetch | null>[] = [];
+  let roleGameFailures = 0;
+  const teamGames = (tournamentId: string, teamId: string, seasonIndex: number, team: RoleGamesFetch['team']): void => {
+    const request = client
+      .teamGames(tournamentId, teamId)
+      .then((games): RoleGamesFetch => ({ tournamentId, seasonIndex, teamId, team, games }))
+      .catch((error: unknown) => {
+        if (error instanceof N01Error && error.kind === 'aborted') throw error;
+        roleGameFailures += 1;
+        return null;
+      });
+    // An abort rejects it; if something else throws first it must not go unhandled.
+    request.catch(() => undefined);
+    roleRequests.push(request);
+  };
+  teamGames(tournamentId, data.entry.teamId, 0, 'ours');
+  if (resolution.kind === 'resolved') teamGames(tournamentId, resolution.match.opponentTeamId, 0, 'opponent');
+
   onProgress('analysis', 'running');
   const opponentName = resolution.kind === 'resolved' ? normalizeName(resolution.match.opponentName) : null;
   const history: HistoricalSeasonData[] = [];
@@ -153,6 +195,10 @@ export async function fetchIntelligence(
       const orders = opponentEntry
         ? await soft(client.orders(summary.tournamentId, opponentEntry.teamId), [] as N01OrderEntry[], notes, `${summary.title}: 相手の過去オーダーを取得できませんでした。`)
         : [];
+      const ourName = normalizeName(data.entry.name);
+      const ourEntry = tournament.entries.find((entry) => normalizeName(entry.name) === ourName);
+      if (ourEntry) teamGames(summary.tournamentId, ourEntry.teamId, index + 1, 'ours');
+      if (opponentEntry) teamGames(summary.tournamentId, opponentEntry.teamId, index + 1, 'opponent');
       history.push({
         summary,
         seasonIndex: index + 1,
@@ -171,8 +217,14 @@ export async function fetchIntelligence(
   const current = await currentRoster;
   const incomplete = incompleteRosterNote(data.tournament.title, current, data.tournament);
   if (incomplete) notes.push(incomplete);
+  const roleGames = (await Promise.all(roleRequests)).filter((entry): entry is RoleGamesFetch => entry !== null);
+  if (roleGameFailures > 0) {
+    notes.push(
+      `ゲーム別の成績 (役割別の強さの根拠) を ${roleGameFailures} 件取得できませんでした。その分は近い役割・ゲーム適性・総合の強さで代用します。`,
+    );
+  }
 
-  return { schedule, resolution, opponentRoster, opponentOrders, history, rosters: { current, byTournament }, notes };
+  return { schedule, resolution, opponentRoster, opponentOrders, history, rosters: { current, byTournament }, roleGames, roleGameFailures, notes };
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +465,96 @@ export function buildIntelligenceSnapshot(input: BuildIntelligenceInput): N01Mat
   const allLines = seasons.flatMap((season) =>
     season.stats.map((row) => ({ score: row.score, darts: row.darts, seasonIndex: season.seasonIndex })),
   );
+  const leagueMean = leagueMeanPpr(allLines, weights);
+
+  // Role evidence (docs/THROW_ORDER_MODEL.md §4): each game credited to the people who played it,
+  // keyed exactly as their history is (the current season by roster oid, earlier seasons only
+  // through an opid that names one person), against their PPR that season.
+  const fetchedGames = fetched.roleGames ?? [];
+  let roleHistory: N01MatchIntelligenceSnapshot['roleHistory'];
+  let ourRoleEvidence: N01MatchIntelligenceSnapshot['ourRoleEvidence'];
+  if (fetchedGames.length > 0 || (fetched.roleGameFailures ?? 0) > 0) {
+    const rosterKey = new Map<string, string>(ourPlayers.map((player) => [player.oid, player.key]));
+    for (const player of opponent?.players ?? []) rosterKey.set(player.oid, player.key);
+    const seasonById = new Map(seasons.map((season) => [season.tournamentId, season]));
+    // A member's PPR that season: by their tournament-scoped oid, else by an opid that names one
+    // person in that season (stats rows may carry either).
+    const pprIn = new Map(
+      seasons.map((season) => {
+        const byOid = new Map<string, number>();
+        const byOpid = new Map<string, number>();
+        const shared = identity(season.tournamentId);
+        for (const row of season.stats) {
+          if (!(row.darts > 0)) continue;
+          const ppr = (3 * row.score) / row.darts;
+          if (row.oid) byOid.set(row.oid, ppr);
+          if (isUsableOpid(row.opid, shared)) byOpid.set(row.opid as string, ppr);
+        }
+        return [
+          season.tournamentId,
+          (player: { oid: string | null; opid: string | null }): number | null =>
+            (player.oid ? byOid.get(player.oid) : undefined) ?? (isUsableOpid(player.opid, shared) ? byOpid.get(player.opid as string) : undefined) ?? null,
+        ] as const;
+      }),
+    );
+    const keyOf = (tournamentId: string, player: { oid: string | null; opid: string | null }): string =>
+      tournamentId === currentId
+        ? ((player.oid ? rosterKey.get(player.oid) : undefined) ?? playerKey(player.opid, currentId, player.oid, currentShared))
+        : isUsableOpid(player.opid, currentShared, identity(tournamentId))
+          ? (player.opid as string)
+          : `oid:${tournamentId}:${player.oid ?? '?'}`;
+    const recordsOf = (team: RoleGamesFetch['team']): { records: RoleGameRecord[]; teamOf: Map<number, string> } => {
+      const records: RoleGameRecord[] = [];
+      const teamOf = new Map<number, string>();
+      for (const entry of fetchedGames) {
+        if (entry.team !== team || !seasonById.has(entry.tournamentId)) continue;
+        teamOf.set(entry.seasonIndex, entry.teamId);
+        const pprOf = pprIn.get(entry.tournamentId);
+        for (const game of entry.games) {
+          const numPart = game.sides[0].players.length;
+          if (game.sides[1].players.length !== numPart) continue;
+          records.push({
+            gameId: game.gameId,
+            seasonIndex: entry.seasonIndex,
+            startTime: game.startTime,
+            structure: structureOfHeadCount(numPart),
+            family: familyOfMatchType(game.matchType),
+            sides: game.sides.map((side) => ({
+              teamId: side.teamId,
+              members: side.players.map((player) => ({
+                key: keyOf(entry.tournamentId, player),
+                base: pprOf ? pprOf(player) : null,
+              })),
+              legsWon: side.legsWon,
+              score: side.score,
+              darts: side.darts,
+            })) as RoleGameRecord['sides'],
+          });
+        }
+      }
+      return { records, teamOf };
+    };
+    const before = jstDayStart(fetched.resolution.kind === 'resolved' ? fetched.resolution.match.date : null) ?? Math.floor(input.now / 1000);
+    const options = { before, leagueMean: leagueMean ?? 45, weights };
+    const ourGames = recordsOf('ours');
+    const ourResult = aggregateRoleEvidence(ourGames.records, (seasonIndex) => ourGames.teamOf.get(seasonIndex) ?? null, options);
+    ourRoleEvidence = ourResult.evidence;
+    let theirGames = 0;
+    let theirDropped = 0;
+    if (opponent) {
+      const theirs = recordsOf('opponent');
+      const theirResult = aggregateRoleEvidence(theirs.records, (seasonIndex) => theirs.teamOf.get(seasonIndex) ?? null, options);
+      opponent = { ...opponent, roleEvidence: theirResult.evidence };
+      theirGames = theirResult.games;
+      theirDropped = theirResult.droppedFuture;
+    }
+    roleHistory = {
+      games: ourResult.games + theirGames,
+      droppedFuture: ourResult.droppedFuture + theirDropped,
+      before: fetched.resolution.kind === 'resolved' ? fetched.resolution.match.date : null,
+      failedSeasons: fetched.roleGameFailures ?? 0,
+    };
+  }
 
   return {
     id: intelligenceSnapshotId(input.teamId),
@@ -429,7 +571,7 @@ export function buildIntelligenceSnapshot(input: BuildIntelligenceInput): N01Mat
     ourPlayers,
     ourStats,
     opponent,
-    leagueMeanPpr: leagueMeanPpr(allLines, weights),
+    leagueMeanPpr: leagueMean,
     seasons: seasons.map((season) => ({
       tournamentId: season.tournamentId,
       title: season.title,
@@ -438,5 +580,7 @@ export function buildIntelligenceSnapshot(input: BuildIntelligenceInput): N01Mat
     })),
     historyDepth: input.historyDepth,
     orderConfidence: opponent?.positionModel.confidence ?? 'LOW',
+    ...(ourRoleEvidence ? { ourRoleEvidence } : {}),
+    ...(roleHistory ? { roleHistory } : {}),
   };
 }

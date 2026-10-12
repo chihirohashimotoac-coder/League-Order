@@ -12,7 +12,8 @@ import type {
 import { formatDiscipline } from '../types';
 import { createParticipantConfig } from '../orders/participants';
 import { scopeForPreset, weightsForPreset } from '../orders/presets';
-import { applyHistoryStrength } from './historyStrength';
+import { applyHistoryStrength, buildRoleStrengthContext } from './historyStrength';
+import { THROW_ORDER_MODEL_VERSION } from '../prediction/throwOrder';
 import type { N01MatchIntelligenceSnapshot } from './intelligence';
 import { buildOpponentContext } from '../prediction/opponentContext';
 
@@ -71,8 +72,9 @@ export interface NextMatchOrder {
 
 export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder {
   const { players, basis } = applyHistoryStrength([...source.players, ...(source.guests ?? [])], source.intel);
+  const discipline = formatDiscipline(source.format);
   const opponent = source.intel
-    ? buildOpponentContext({ snapshot: source.intel, games: source.format.games, players })
+    ? buildOpponentContext({ snapshot: source.intel, games: source.format.games, players, discipline })
     : null;
   const preset = opponent ? 'OPPONENT_OPTIMIZED' : 'WIN_FIRST';
   const kept = new Map((source.previous ?? []).map((config) => [config.playerId, config]));
@@ -104,9 +106,12 @@ export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder
         ...source.settings.optimizer,
         fairnessScope: scopeForPreset(preset, source.settings.optimizer.fairnessScope),
       },
-      discipline: formatDiscipline(source.format),
+      discipline,
       ...(opponent ? { opponent } : {}),
       strengthBasis: basis,
+      // New orders are made with the throw-order model and keep the role evidence they used.
+      throwOrderModel: THROW_ORDER_MODEL_VERSION,
+      roleStrength: buildRoleStrengthContext(players, source.intel),
     },
   };
 }

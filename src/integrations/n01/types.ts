@@ -183,3 +183,35 @@ export interface N01OrderEntry {
   /** The players fielded, as tournament-scoped ids (`oid`) with `opid` when present. */
   players: { oid: string | null; opid: string | null; name: string | null }[];
 }
+
+/** One side of a played game (`match/list` → `statsData[i]`). */
+export interface N01GameSide {
+  /** `tpid` of the team. */
+  teamId: string;
+  /** The players in the order n01 lists them (`order[]`: the registered throwing order). */
+  players: { oid: string | null; opid: string | null; name: string | null }[];
+  /** `winLegs`: legs this side won in the game. */
+  legsWon: number;
+  /** `allScore` / `allDarts` / `allMarks`, when reported (`null`, never 0, when not). */
+  score: number | null;
+  darts: number | null;
+  marks: number | null;
+}
+
+/**
+ * One played game of a team match (`match/list`, filtered by team): who played it in which
+ * order, and how it went. The only n01 source of per-game results by role
+ * (docs/THROW_ORDER_MODEL.md §4) — `lg_result` holds match totals only.
+ */
+export interface N01GameRecord {
+  /** `mid` */
+  gameId: string;
+  /** `tmid`: the team match the game belongs to. */
+  matchId: string | null;
+  schid: string | null;
+  /** `match_type` lower-cased (`01`, `cricket`); `01` when missing, as n01 documents. */
+  matchType: string;
+  /** `startTime`, epoch seconds, when given. */
+  startTime: number | null;
+  sides: [N01GameSide, N01GameSide];
+}

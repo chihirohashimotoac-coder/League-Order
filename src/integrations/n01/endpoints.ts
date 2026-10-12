@@ -32,6 +32,7 @@ export const N01_OPERATIONS = [
   'tournament/stats',
   'team/player/list',
   'team/order/list',
+  'match/list',
 ] as const;
 
 export type N01Operation = (typeof N01_OPERATIONS)[number];

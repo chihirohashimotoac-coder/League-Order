@@ -39,7 +39,8 @@ import {
 import { describeStrengthWeights, resolveStrength } from '../domain/players/strength';
 import { Icon, type IconName } from '../components/icons';
 import { effectivePpr, withEffectivePpr } from '../domain/n01/effectivePpr';
-import { applyHistoryStrength } from '../domain/n01/historyStrength';
+import { applyHistoryStrength, buildRoleStrengthContext } from '../domain/n01/historyStrength';
+import { THROW_ORDER_MODEL_VERSION } from '../domain/prediction/throwOrder';
 import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
 import { buildOpponentContext } from '../domain/prediction/opponentContext';
 import { CONFIDENCE_LABELS } from '../domain/prediction/confidence';
@@ -133,9 +134,14 @@ export function SetupPage({
     [everyone, intel],
   );
   const opponent = useMemo(
-    () => (intel && format ? buildOpponentContext({ snapshot: intel, games: format.games, players: effectivePlayers }) : null),
+    () =>
+      intel && format
+        ? buildOpponentContext({ snapshot: intel, games: format.games, players: effectivePlayers, discipline: formatDiscipline(format) })
+        : null,
     [intel, format, effectivePlayers],
   );
+  // The role evidence behind each player's strength per kind of game (docs/THROW_ORDER_MODEL.md §4).
+  const roleStrength = useMemo(() => buildRoleStrengthContext(effectivePlayers, intel), [effectivePlayers, intel]);
   const n01Team = !!store.activeTeam?.n01;
   // No opponent at all → the preset is not offered. An opponent whose data cannot be
   // used here → offered, labelled 対戦データ不足, and generated as 勝利優先.
@@ -218,6 +224,10 @@ export function SetupPage({
       discipline: formatDiscipline(format),
       ...(opponent ? { opponent } : {}),
       strengthBasis,
+      // New orders are made with the throw-order model and keep the evidence they used, so a
+      // saved order is re-evaluated exactly as it was generated (docs/THROW_ORDER_MODEL.md §9).
+      throwOrderModel: THROW_ORDER_MODEL_VERSION,
+      roleStrength,
     };
   };
 

@@ -2,6 +2,7 @@ import type { N01Operation, N01Request } from './endpoints';
 import { N01_API_BASE_URL, buildUrl, isAllowedN01Url } from './endpoints';
 import type {
   N01Fixture,
+  N01GameRecord,
   N01LeagueSummary,
   N01LeagueTournaments,
   N01OrderEntry,
@@ -13,6 +14,7 @@ import {
   N01SchemaError,
   parseLeagueSearch,
   parseLeagueTournaments,
+  parseMatchList,
   parseOrders,
   parseRoster,
   parseSchedule,
@@ -116,6 +118,16 @@ export interface N01ClientOptions {
 
 export const N01_DEFAULT_TIMEOUT_MS = 12_000;
 
+/** Rows per `match/list` request (n01 returns at most 100). */
+export const MATCH_LIST_PAGE = 100;
+/** A team plays ~70–100 games a season; three pages cover any season seen. */
+export const MATCH_LIST_MAX_PAGES = 3;
+
+/** `tmid` names both teams as `…_<tpid>_<tpid>`: this matches the team's own matches only. */
+export function teamMatchPattern(teamId: string): string {
+  return `_${teamId.replace(/[^A-Za-z0-9]/gu, (char) => `\\${char}`)}(_|$)`;
+}
+
 export class N01Client {
   private readonly cache = new Map<string, Promise<unknown>>();
   private readonly timeoutMs: number;
@@ -217,6 +229,23 @@ export class N01Client {
 
   orders(tournamentId: string, teamId: string): Promise<N01OrderEntry[]> {
     return this.parsed('team/order/list', { tdid: tournamentId, tpid: teamId }, parseOrders);
+  }
+
+  /**
+   * The played games of one team in a tournament (`match/list`, filtered to the team matches
+   * whose `tmid` names the team), newest first, `MATCH_LIST_PAGE` per request. A second page is
+   * asked for only when the first one is full, up to `MATCH_LIST_MAX_PAGES`.
+   */
+  async teamGames(tournamentId: string, teamId: string): Promise<N01GameRecord[]> {
+    const games: N01GameRecord[] = [];
+    for (let page = 0; page < MATCH_LIST_MAX_PAGES; page += 1) {
+      const params: Record<string, string> = { tdid: tournamentId, tmid__regex: teamMatchPattern(teamId), count: String(MATCH_LIST_PAGE) };
+      if (page > 0) params.skip = String(page * MATCH_LIST_PAGE);
+      const rows = await this.parsed('match/list', params, parseMatchList);
+      games.push(...rows);
+      if (rows.length < MATCH_LIST_PAGE) break;
+    }
+    return games;
   }
 }
 
