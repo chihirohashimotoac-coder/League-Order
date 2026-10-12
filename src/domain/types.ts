@@ -17,6 +17,8 @@ import type { OpponentContext } from './prediction/opponentContext';
 import type { MatchPrediction } from './prediction/predictOrder';
 import type { ConfidenceLevel } from './prediction/confidence';
 import type { StrengthBasis } from './n01/historyStrength';
+import type { RoleSource, RoleStrengthContext } from './prediction/roleStrength';
+import type { OrderFallback, ThrowOrderModelVersion } from './prediction/throwOrder';
 
 export type TeamId = string;
 export type PlayerId = string;
@@ -422,6 +424,14 @@ export interface OrderInput {
    * before it existed, which are read as "no evidence" wherever evidence is required.
    */
   strengthBasis?: StrengthBasis;
+  /**
+   * The throw-order model the order was generated with (docs/THROW_ORDER_MODEL.md). Absent on
+   * orders saved before it existed: those keep being predicted with the order-free model they
+   * were made with, so a saved order is never silently re-scored by a newer model.
+   */
+  throwOrderModel?: ThrowOrderModelVersion;
+  /** The role evidence behind each player's role strengths, as it stood at generation time. */
+  roleStrength?: RoleStrengthContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -447,7 +457,8 @@ export type ExplanationKey =
   | 'season'
   | 'constraint'
   | 'lock'
-  | 'opponent';
+  | 'opponent'
+  | 'throwOrder';
 
 export interface ExplanationFactor {
   key: ExplanationKey;
@@ -611,6 +622,46 @@ export interface SolutionMeta {
   };
 }
 
+/** One member's role strength, as an order decision used it (for the explanation). */
+export interface ThrowOrderMemberBasis {
+  playerId: PlayerId;
+  /** Strength used to rank the members (PPR points, or the 0..1 blend × 100 without PPR). */
+  strength: number;
+  /** Role adjustment included in `strength` (PPR points). */
+  roleDelta: number;
+  source: RoleSource;
+  confidence: ConfidenceLevel;
+  /** n01 games observed in exactly this role. */
+  games: number;
+}
+
+/**
+ * How the throwing order of one multi-player game was decided (docs/THROW_ORDER_MODEL.md §6).
+ * `order` is the order shown (the assignment); `strongOrder` is what the basic theory gives —
+ * the strongest player in this game first — and is what "通常の順" means on screen.
+ */
+export interface ThrowOrderRecord {
+  gameId: GameId;
+  order: PlayerId[];
+  strongOrder: PlayerId[];
+  /** `strong`: the strong order; `model`: an estimate cleared every guardrail; `manual`: edited by hand. */
+  adopted: 'strong' | 'model' | 'manual';
+  /** Why the strong order was kept (`null` when it is simply the best, or another order was adopted). */
+  fallback: OrderFallback | null;
+  /** Estimated game win with the order shown and with the strong order (`null` without opponent data). */
+  probability: number | null;
+  strongProbability: number | null;
+  /** The best alternative by the estimate, adopted or not (for the explanation and the backtest). */
+  bestGain: number | null;
+  confidence: ConfidenceLevel | null;
+  /** The opponent's expected order in this game, worded for the screen (`null` = not modelled). */
+  opponentTendency: string | null;
+  /** True when the strength ranking is a 0..1 blend (no PPR known), not PPR points. */
+  blendScale?: boolean;
+  /** The members in strong order, with the strengths that ranked them. */
+  basis: ThrowOrderMemberBasis[];
+}
+
 export interface OrderSolution {
   assignments: GameAssignment[];
   tallies: PlayerTally[];
@@ -624,6 +675,8 @@ export interface OrderSolution {
    * opponent data. A model estimate, never a certainty.
    */
   prediction?: MatchPrediction;
+  /** How each multi-player game's throwing order was decided. Absent on orders saved before it. */
+  throwOrder?: ThrowOrderRecord[];
 }
 
 // ---------------------------------------------------------------------------
