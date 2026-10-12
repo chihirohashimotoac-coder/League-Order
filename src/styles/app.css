@@ -2555,9 +2555,11 @@ input[type='range'] {
   animation: edit-flash 1.1s ease-out;
 }
 
+/* The flash rings the slot rather than tinting it, so the text keeps its contrast throughout. */
 @keyframes edit-flash {
   from {
-    background: color-mix(in srgb, var(--color-accent) 20%, var(--color-input));
+    border-color: var(--color-accent);
+    box-shadow: inset 3px 0 0 var(--color-accent), 0 0 0 3px color-mix(in srgb, var(--color-accent) 40%, transparent);
   }
 }
 
