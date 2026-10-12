@@ -189,11 +189,18 @@ test.describe('throw order in the result (docs/THROW_ORDER_MODEL.md §7)', () =>
 
     const values = () => doubles.locator('select').evaluateAll((selects) => selects.map((select) => (select as HTMLSelectElement).value));
     const before = await values();
+    // Hold the edit flash at its first, strongest frame, so the audit sees it whatever the runner's speed.
+    const hold = await page.addStyleTag({ content: '.slot.edited .slot-field { animation-play-state: paused !important; }' });
+    const flashes = () => page.evaluate(() => document.getAnimations().filter((animation) => (animation as CSSAnimation).animationName === 'edit-flash').length);
     await doubles.getByRole('button', { name: /1投目と2投目を入れ替え/u }).click();
     expect(await values()).toEqual([...before].reverse());
     await expect(note).toContainText('投順: 手動で変更');
     await expect(note).toContainText('推定ゲーム勝率は強い順と比べて');
     await expect(page.getByTestId('opponent-panel')).toContainText('推定 Match 勝率');
+    expect(await flashes()).toBe(2);
+    await audit(page, 'RESULT throw order (hand-swapped, edit flash)');
+    await hold.evaluate((style) => style.remove());
+    await expect.poll(flashes).toBe(0);
     await audit(page, 'RESULT throw order (hand-swapped)');
 
     await page.getByRole('button', { name: '元に戻す' }).click();
