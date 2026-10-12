@@ -122,8 +122,9 @@ excess   = (First9 − PPR − リーグの通常差) · legs / (legs + 30)    (
 - **任意の取得**: 失敗しても同期は続行し、証拠が薄くなるだけ (`notes` には出さず役割の `source` に表れる)。
 - 同期 1 回の GET: 16 → **22** (`match/list` が自チーム・相手 × 3 Season)。フィクスチャで重複 0
   (`n01Requests.test.ts`)。
-- 実 n01 での CORS (ブラウザから直接) は **未確認** (サーバ間の読み取りでは確認済み)。公開後のスモークテスト
-  (`Smoke test the published site`) で、ブラウザからの全 n01 応答が 200 で読めることを確認する。
+- 実 n01 での CORS (ブラウザから直接) も **確認済み**: 公開サイトのスモークテスト (`Smoke test the published site`、
+  2026-10-12、run 38274358835) で、mobile・desktop とも `match/list` 6 件 (自チーム・相手 × 3 Season) を含む
+  全 n01 応答が HTTP 200・`Access-Control-Allow-Origin: *` で読めた。
 
 ## 5. 相手の投順の分布 (`positionModel.ts`, `opponentContext.ts`)
 
@@ -271,6 +272,5 @@ excess   = (First9 − PPR − リーグの通常差) · legs / (legs + 30)    (
 - 01 のレースは正規近似と「上がり区間で毎訪問一定確率」の単純化。バスト・残り点数・ダブルの選択はモデル化しない。
 - Cricket の投順はモデル化しない (常に強い順)。
 - 相手の当日の戦術 (投順の変更・欠場) は過去データからは分からない。分布は過去の傾向に過ぎない。
-- `match/list` のブラウザからの CORS は公開後のスモークテストで確認する (サーバ間の応答形・絞り込み・ページングは実 API で確認済み)。
 - 01 の役割の証拠はそのゲームの PPR 残差で、相手の強さでは補正していない (PPR は得点率で、相手への依存は
   小さいという仮定)。Cricket の証拠だけが相手の Season PPR を使う。
