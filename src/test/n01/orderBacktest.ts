@@ -1,5 +1,6 @@
 import type { GameAssignment, OrderInput, OrderSolution } from '../../domain/types';
-import { predictOrder } from '../../domain/prediction/predictOrder';
+import { predictOrder, predictionOptionsOf } from '../../domain/prediction/predictOrder';
+import { independentGamesModel } from '../../domain/prediction/matchWinProbability';
 import { buildOpponentContext, type OpponentContext } from '../../domain/prediction/opponentContext';
 import type { ConfidenceLevel } from '../../domain/prediction/confidence';
 import { PRIOR_LEGS } from '../../domain/prediction/playerStrength';
@@ -12,7 +13,8 @@ import type { ReplayedMatch } from './replay';
  * For each replayed match: the model's estimated match win for the recommended order and
  * for the order actually fielded, both under the same pre-match opponent context. The
  * difference is an estimate of the *model's* view, not a claim about what would have
- * happened on the night.
+ * happened on the night. The fielded order is estimated with the same model as the
+ * recommendation (the throw-order model when the input carries it), in its fielded order.
  */
 
 export interface OrderBacktestRow {
@@ -63,7 +65,7 @@ export function orderBacktestSummary(
       actual: replay.actual,
       recommended: matchValue(candidates[0].prediction),
       winFirst: matchValue(winFirst?.prediction),
-      fielded: matchValue(predictOrder(context, replay.actual)),
+      fielded: matchValue(predictOrder(context, replay.actual, replay.order.input.pairs, independentGamesModel, predictionOptionsOf(replay.order.input))),
       gamesWonActually: replay.actualGamesWon,
       gameCount: replay.actual.length,
       optimizerMs,
@@ -169,7 +171,9 @@ export function sensitivity(
     const base = solve(replay.order.input);
     const context = perturbation.apply(replay, replay.order.input.opponent!);
     const perturbed = solve({ ...replay.order.input, opponent: context });
-    const regret = Math.max(0, predictOrder(context, perturbed.assignments)!.win - predictOrder(context, base.assignments)!.win);
+    const options = predictionOptionsOf(replay.order.input);
+    const winOf = (assignments: readonly GameAssignment[]): number => predictOrder(context, assignments, [], independentGamesModel, options)!.win;
+    const regret = Math.max(0, winOf(perturbed.assignments) - winOf(base.assignments));
     regretSum += regret;
     maxRegret = Math.max(maxRegret, regret);
     changeSum += seatChange(base.assignments, perturbed.assignments);
