@@ -4,9 +4,10 @@ import { requestKey } from '../src/test/n01/generator';
 import { allFixtureDatasets } from '../src/test/n01/transport';
 
 /**
- * The two analytics-only read operations the fixture n01 does not serve:
- * `tournament/stats?kind=stats_list` and `tournament/standings`. Both are derived from the
- * fixture's own player rows, so the numbers the browser shows can be recomputed in the test.
+ * The analytics-only read operations the fixture n01 does not serve:
+ * `tournament/stats?kind=stats_list`, `tournament/standings`, the season's league games
+ * (`match/list` with `tmid__regex=_lg_`, paged) and `match/get`. All are derived from the
+ * fixture's own rows, so the numbers the browser shows can be recomputed in the test.
  * Everything else falls through to the shared fixture server (`serveN01`).
  */
 export interface AnalyticsServerControl {
@@ -81,6 +82,29 @@ export function standings(tdid: string): Row {
   return { result: 0, tdid, groups };
 }
 
+/**
+ * Every league game of a season, as the live `match/list` returns it to analytics: the
+ * fixture's per-team rows merged, oldest first, `tmid` in the live shape
+ * (`<tdid>_lg_<division>_<lsid>_<tpid>_<tpid>`).
+ */
+export function seasonGames(tdid: string): Row[] {
+  const body = tournamentBody(tdid);
+  const table = (body?.lg_table as string[][] | undefined) ?? [];
+  const divisionOf = (tpid: string): number => Math.max(0, table.findIndex((ids) => ids.includes(tpid)));
+  const byMid = new Map<string, Row>();
+  for (const dataset of allFixtureDatasets()) {
+    for (const [key, value] of dataset) {
+      if (!key.startsWith('match/list?') || !key.includes(`tdid=${tdid}&`)) continue;
+      for (const row of ((value as { list?: Row[] }).list ?? [])) {
+        const sides = row.statsData as { tpid: string }[];
+        const lsid = String(row.tmid).split('_lg_')[1]?.replace(`${tdid}_`, '').split('_').slice(0, 2).join('') ?? 'x';
+        byMid.set(String(row.mid), { ...row, tmid: `${tdid}_lg_${divisionOf(sides[0].tpid)}_${lsid}_${sides[0].tpid}_${sides[1].tpid}` });
+      }
+    }
+  }
+  return [...byMid.values()].sort((a, b) => Number(a.startTime) - Number(b.startTime));
+}
+
 export async function serveAnalyticsExtras(page: Page): Promise<AnalyticsServerControl> {
   const control: AnalyticsServerControl = { log: [], failExtras: false };
   await page.route(`${N01_API_BASE_URL}/**`, async (route) => {
@@ -91,6 +115,20 @@ export async function serveAnalyticsExtras(page: Page): Promise<AnalyticsServerC
     const headers = { 'Access-Control-Allow-Origin': '*' };
     const isStatsList = operation === 'tournament/stats' && kind === 'stats_list';
     const isPlayerList = operation === 'tournament/stats' && kind === 'player_stats_list';
+    const isSeasonGames = operation === 'match/list' && url.searchParams.get('tmid__regex') === '_lg_';
+    if (isSeasonGames || operation === 'match/get') {
+      control.log.push(`${operation}?${url.searchParams.toString()}`);
+      if (control.failExtras) {
+        await route.abort('internetdisconnected');
+        return;
+      }
+      const skip = Number(url.searchParams.get('skip') ?? 0);
+      const count = Number(url.searchParams.get('count') ?? 100);
+      // The fixture keeps no leg detail: `match/get` answers "not found", as n01 does for an unknown id.
+      const body = isSeasonGames ? { result: 0, list: seasonGames(tdid).slice(skip, skip + count) } : { result: -1, error: 'not found' };
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body), headers });
+      return;
+    }
     if (!isStatsList && !isPlayerList && operation !== 'tournament/standings') {
       await route.fallback();
       return;

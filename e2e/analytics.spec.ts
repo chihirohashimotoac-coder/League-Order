@@ -79,9 +79,48 @@ test.describe('PLAYER ANALYTICS', () => {
     // Trend over the seasons (or an honest "needs 2 seasons" message).
     await expect(page.locator('.trend-svg, :text("2シーズン以上")').first()).toBeVisible();
 
-    // The empty/low-sample states are explained, not blank.
-    await page.getByRole('button', { name: '全期間' }).click();
+    // 直近12季: the fixture league has fewer seasons, so the figure is labelled partial.
+    await page.getByRole('button', { name: '直近12季' }).click();
+    await expect(page.getByTestId('analysis-summary')).toContainText('直近12季');
+    await expect(page.getByTestId('summary-missing')).toBeVisible();
     await expect(page.getByTestId('analytics-page')).toBeVisible();
+    await noSideScroll(page);
+  });
+
+  test('game-kind switch: singles / doubles / others, honest about per-player data, details folded', async ({ page }, info) => {
+    const { extras } = await start(page);
+    await createKalavinka(page);
+    await openAnalytics(page);
+    await expect(page.getByTestId('metric-3DA')).toBeVisible();
+    // The fixture season has a Cricket slot in division 1, so 01全体 already reads the game rows
+    // to recount legs/sets there (an all-01 season needs none: unit-tested).
+    await expect(page.getByTestId('analysis-summary')).toContainText('対象外・未検証の指標あり');
+
+    await page.getByRole('button', { name: 'シングルス', exact: true }).click();
+    await expect(page.getByTestId('analysis-summary')).toContainText('シングルス01');
+    await expect(page.getByTestId('player-basis')).toContainText('シングルス01のゲームのみ');
+    await expect.poll(() => extras.log.filter((entry) => entry.startsWith('match/list')).length).toBeGreaterThan(0);
+    // Read-only and bounded: league games only, paged.
+    expect(extras.log.filter((e) => e.startsWith('match/list')).every((e) => e.includes('tmid__regex=_lg_') && e.includes('count=100'))).toBe(true);
+
+    await page.getByRole('button', { name: 'ダブルス', exact: true }).click();
+    await expect(page.getByTestId('metric-3DA')).toContainText('個人別に復元できません');
+    await expect(page.getByTestId('reconstruction')).toBeVisible();
+    await page.screenshot({ path: `test-results/analytics-doubles-${info.project.name}.png`, fullPage: true });
+    // Switching back and forth does not refetch the game rows already loaded.
+    const listed = extras.log.filter((e) => e.startsWith('match/list')).length;
+    await page.getByRole('button', { name: 'その他', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'チーム戦' })).toBeVisible();
+    await page.getByRole('button', { name: '01全体', exact: true }).click();
+    expect(extras.log.filter((e) => e.startsWith('match/list')).length).toBe(listed);
+
+    // The reasons are folded away until asked for.
+    const details = page.getByTestId('analysis-details');
+    await expect(details.getByTestId('season-adoption')).toBeHidden();
+    await details.locator('summary').click();
+    await expect(details.getByTestId('season-adoption')).toBeVisible();
+    await expect(details.getByTestId('metric-adoption')).toContainText('3DA');
+    await page.screenshot({ path: `test-results/analytics-details-${info.project.name}.png` });
     await noSideScroll(page);
   });
 

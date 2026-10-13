@@ -112,7 +112,12 @@ export function PlayerAnalytics({
 
   const ranking = rankIn(population.scoped.members, metric);
   const rankingFor = (m: MetricId) => rankIn(population.scoped.members, m);
-  const insights = person ? buildInsights(person, population, rankingFor) : null;
+  // In doubles / others views a player's Leg and Set rates are the pair's results: no personal verdict.
+  const insights = person
+    ? multiThrower
+      ? { strengths: [], improvements: [], held: 'この表示ではLeg/Set勝率がペア・チームとしての結果のため、個人の強み・改善候補は判定しません。' }
+      : buildInsights(person, population, rankingFor)
+    : null;
   const myStanding = person ? standingOf(ranking, person.personKey) : null;
   const teamNameOf = (id: string): string => {
     const p = byKey.get(id);

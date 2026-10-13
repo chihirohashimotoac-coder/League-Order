@@ -172,11 +172,16 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
 
     if (scope === 'all01' && composition === 'mixed') {
       const legSet: MetricAdoption = lines ? { state: 'recomputed', reason: '公式のLeg/SetにはCricketが含まれるため、01のゲームから数え直しました' } : { state: 'excluded', reason: gamesState === 'partial' ? PARTIAL_GAMES : NO_GAMES };
+      // Only rows of a division whose schedule has a Cricket slot are corrected; the season's
+      // games must also show no Cricket there (a row's division is the team's).
+      const cricketDivisions = new Set(classified?.filter((g) => g.family.family === 'cricket').map((g) => g.division) ?? []);
+      const pureDivision = (division: number | null): boolean =>
+        division !== null && season.divisionComposition[division] === 'pure01' && !cricketDivisions.has(division) && !cricketDivisions.has(null);
       projected.push(
         withLines(
           season,
-          (t) => (t.line ? mixedLine(t.line, lines ? (lines.teams.get(t.teamId) ?? zeroGames()) : null) : null),
-          (p) => mixedLine(p.line, lines ? (lines.players.get(p.oid) ?? zeroGames()) : null),
+          (t) => (!t.line || pureDivision(t.divisionIndex) ? t.line : mixedLine(t.line, lines ? (lines.teams.get(t.teamId) ?? zeroGames()) : null)),
+          (p) => (pureDivision(p.divisionIndex) ? p.line : mixedLine(p.line, lines ? (lines.players.get(p.oid) ?? zeroGames()) : null)),
         ),
       );
       adoption.push({
@@ -185,7 +190,7 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
           ppr: { state: 'official', reason: 'n01はCricketを別の項目で集計するため、得点・投数は01のみ' },
           first9: { state: 'official' },
           legSet,
-          keepBreak: { state: 'excluded', reason: 'Cricketを含むシーズンのため、01のみと確認できません' },
+          keepBreak: { state: 'excluded', reason: 'Cricketを含むディビジョンの成績は01のみと確認できないため使いません（Cricketのないディビジョンは公式値）' },
           records: { state: 'official' },
           match: { state: 'official', reason: 'Match勝敗はCricketのゲームを含む公式の試合結果です' },
         },
