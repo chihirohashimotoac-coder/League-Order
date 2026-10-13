@@ -2,14 +2,18 @@ import { useId, useMemo, useState } from 'react';
 import { Card } from '../../../components/ui';
 import type { Player, Team } from '../../../domain/types';
 import { normalizeName } from '../../../domain/n01/names';
-import { formatSample, formatValue, METRIC_LABEL, RANK_METRICS } from '../format';
+import { formatSample, formatValue, METRIC_LABEL } from '../format';
 import type { RankMetric } from '../format';
 import { MIN_SAMPLE, reliabilityOf } from '../metrics';
 import { buildInsights, buildPopulation, cellText, COMPARE_METRICS, findPerson, metricValue, rankIn, standingOf, trendOf } from '../playerView';
 import type { PlayerScope } from '../ranking';
 import type { PeriodLoad } from '../service/periodService';
 import type { MetricId } from '../types';
+import { SCOPE_LABEL as GAME_SCOPE_LABEL } from '../roleGames';
+import { scopeMetrics } from '../scopeMetrics';
+import type { RoleViewProps } from './AnalyticsPage';
 import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './parts';
+import { ReconstructionPanel } from './scopeParts';
 
 /**
  * PLAYER ANALYTICS (design §4). Reads a loaded period; computes nothing it cannot show the
@@ -18,7 +22,6 @@ import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './
 
 type ScopeKind = 'team' | 'division' | 'league';
 const SCOPE_LABEL: Record<ScopeKind, string> = { team: 'チーム内', division: 'ディビジョン', league: 'リーグ全体' };
-const CARD_METRICS: MetricId[] = ['ppr', 'first9', 'legRate', 'setRate', 'keep', 'break'];
 const TREND_METRICS: MetricId[] = ['ppr', 'first9', 'legRate'];
 const MAX_COMPARE = 3;
 
@@ -28,13 +31,20 @@ export function PlayerAnalytics({
   load,
   baseTournamentId,
   onOpenMembers,
+  role,
 }: {
   team: Team;
   players: Player[];
   load: PeriodLoad;
   baseTournamentId: string;
   onOpenMembers?: () => void;
+  role?: RoleViewProps;
 }): React.JSX.Element {
+  const gameScope = role?.scope ?? 'all01';
+  const roleView = gameScope !== 'all01';
+  const multiThrower = roleView && gameScope !== 'singles';
+  const available_ = useMemo(() => scopeMetrics(gameScope, load.seasons, 'player'), [gameScope, load.seasons]);
+  const CARD_METRICS = available_.cards;
   const base = load.seasons.find((s) => s.tournamentId === baseTournamentId) ?? null;
   const binding = team.n01;
 
@@ -85,7 +95,8 @@ export function PlayerAnalytics({
   const selectedKey = selected && byKey.has(selected) ? selected : (roster.find((r) => r.period)?.personKey ?? null);
   const person = selectedKey ? (byKey.get(selectedKey) ?? null) : null;
 
-  const [metric, setMetric] = useState<RankMetric>('ppr');
+  const [metricChoice, setMetric] = useState<RankMetric>('ppr');
+  const metric: RankMetric = available_.rank.includes(metricChoice) ? metricChoice : available_.rank[0];
   const [trendMetric, setTrendMetric] = useState<MetricId>('ppr');
   const [compare, setCompare] = useState<string[]>([]);
   const compareSelectId = useId();
@@ -148,7 +159,7 @@ export function PlayerAnalytics({
               <span>指標</span>
             </label>
             <select id={metricSelectId} value={metric} onChange={(event) => setMetric(event.target.value as RankMetric)}>
-              {RANK_METRICS.map((m) => (
+              {available_.rank.map((m) => (
                 <option key={m} value={m}>
                   {METRIC_LABEL[m]}
                 </option>
@@ -161,6 +172,11 @@ export function PlayerAnalytics({
             </p>
           ) : null}
           {activeScope === 'league' && load.request.mode !== 'current' ? <p className="small-text muted">期間内にディビジョンや試合形式が異なる成績を含む場合があります。</p> : null}
+          {available_.notes.map((note) => (
+            <p key={note} className="small-text muted" data-testid="scope-rank-note">
+              {note}
+            </p>
+          ))}
           <RankingTable
             ranking={ranking}
             metric={metric}
@@ -180,8 +196,11 @@ export function PlayerAnalytics({
           <>
             <Card title={person.name} kicker="PLAYER">
               <p className="small-text muted" data-testid="player-basis">
-                {person.seasons.length}シーズンの合算
-                {person.linked ? '（n01のIDが一意と確認できた季のみ結合）' : ''} ・ 出場 {person.metrics.counts.match ?? '—'} 試合（勝利数ではありません）
+                {person.metrics.seasons}シーズンの合算{roleView ? `（${GAME_SCOPE_LABEL[gameScope]}のゲームのみ）` : ''}
+                {person.linked ? '（n01のIDが一意と確認できた季のみ結合）' : ''}
+                {roleView
+                  ? ` ・ ${person.metrics.setRate.den}ゲーム`
+                  : ` ・ 出場 ${person.metrics.counts.match ?? '—'} 試合（勝利数ではありません）`}
               </p>
               <div className="metric-grid">
                 {CARD_METRICS.map((m) => {
@@ -193,7 +212,20 @@ export function PlayerAnalytics({
                         ? `平均 ${formatValue(m, avg.value)}（${ratio.value - avg.value >= 0 ? '+' : ''}${(ratio.value - avg.value).toFixed(2)}）`
                         : `平均 ${formatValue(m, avg.value)}（${ratio.value - avg.value >= 0 ? '+' : ''}${((ratio.value - avg.value) * 100).toFixed(1)}pt）`
                       : undefined;
-                  const st = standingOf(rankIn(population.scoped.members, m), person.personKey);
+                  const ranked = available_.rank.includes(m);
+                  const st = ranked ? standingOf(rankIn(population.scoped.members, m), person.personKey) : null;
+                  const note =
+                    ratio.value !== null
+                      ? m === 'legRate' || m === 'setRate'
+                        ? multiThrower
+                          ? 'ペア・チームとしての結果'
+                          : undefined
+                        : undefined
+                      : m === 'ppr' && multiThrower
+                        ? '個人別に復元できません（Leg明細から復元し、公式値と一致した場合のみ表示）'
+                        : roleView
+                          ? 'データ不足（ゲーム記録に含まれません。Leg明細の復元で検証できた場合のみ表示）'
+                          : 'データ不足';
                   return (
                     <MetricCard
                       key={m}
@@ -202,7 +234,8 @@ export function PlayerAnalytics({
                       sample={sampleText(m)}
                       reliability={reliabilityOf(m, ratio)}
                       compare={diff}
-                      rank={st.rank ? `${SCOPE_LABEL[activeScope]} ${st.rank}位 / ${st.population}名` : undefined}
+                      rank={st?.rank ? `${SCOPE_LABEL[activeScope]} ${st.rank}位 / ${st.population}名` : undefined}
+                      note={note}
                     />
                   );
                 })}
@@ -234,10 +267,27 @@ export function PlayerAnalytics({
                     <dd>{person.metrics.extremes.bestLeg !== null ? `${person.metrics.extremes.bestLeg}本` : '記録なし'}</dd>
                   </div>
                 </dl>
-                <p className="small-text muted">100+/140+/170+/180 は n01 が区分ごとに報告する回数です。区分の重なりは未確認のため合計していません。</p>
+                <p className="small-text muted">
+                  100+/140+/170+/180 は n01 が区分ごとに報告する回数です（100–139・140–169・170–179・180 の排他区分であることを実データで確認）。
+                  {roleView ? 'この表示ではLeg明細の復元で公式値と一致した場合のみ表示します。' : ''}
+                  {!roleView && person.metrics.extremes.bestLeg !== null ? ' Best Leg は n01 公式値で、開始点数（501/1001等）の区別はありません。' : ''}
+                </p>
               </details>
               {myStanding?.state === 'reference' ? <p className="small-text muted">この指標はサンプル数が基準({MIN_SAMPLE[metric as MetricId] ?? '—'})未満のため、順位に含めていません。</p> : null}
             </Card>
+
+            {multiThrower && role ? (
+              <Card title="個人別の復元" kicker="RECONSTRUCT">
+                <ReconstructionPanel
+                  personName={person.name}
+                  result={role.detail.results.get(person.personKey)}
+                  running={role.detail.running === person.personKey}
+                  disabled={role.games.status !== 'done' || role.detail.running !== null}
+                  onRun={() => role.detail.run(person.personKey)}
+                  titleOf={(id) => load.seasons.find((s) => s.tournamentId === id)?.title ?? id}
+                />
+              </Card>
+            ) : null}
 
             <Card title="強みと改善候補" kicker="INSIGHT">
               {insights ? <InsightList insights={insights} scopeLabel={SCOPE_LABEL[activeScope]} /> : null}

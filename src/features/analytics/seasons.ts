@@ -51,11 +51,12 @@ export function formatSignature(tournament: Pick<N01Tournament, 'schedule' | 'ga
   return `soft=${tournament.softdarts ?? '?'};base=${base};div=${overrides}`;
 }
 
-export type PeriodMode = 'current' | 'specified' | 'last3' | 'all';
+/** `last12` replaced the former unbounded "全期間": the newest 12 regular seasons from the anchor. */
+export type PeriodMode = 'current' | 'specified' | 'last3' | 'last12';
 
 export interface PeriodRequest {
   mode: PeriodMode;
-  /** The linked/current season (`current`, and the anchor of `last3`/`all`). */
+  /** The linked/current season (`current`, and the anchor of `last3`/`last12`). */
   currentTournamentId: string;
   /** The chosen season for `specified`. */
   specifiedTournamentId?: string;
@@ -71,18 +72,24 @@ export interface SeasonSelection {
   seasons: N01TournamentSummary[];
   /** Seasons passed over, with the reason shown to the user. */
   skipped: { tournamentId: string; title: string; reason: string }[];
-  /** `all`/`last3` asked for more seasons than the cap allows, or one was unclassified. */
+  /** `last3`/`last12` could not be filled from the anchor, or a season was unclassified. */
   complete: boolean;
 }
 
 export const LAST_N = 3;
+export const LAST_12 = 12;
+
+/** Seasons a multi-season period asks for. */
+export function wantedSeasons(mode: PeriodMode): number {
+  return mode === 'last3' ? LAST_N : mode === 'last12' ? LAST_12 : 1;
+}
 
 /**
  * Chooses the seasons of a period from the league's tournament list.
  *
- * - `last3` = the anchor season plus the two newest earlier eligible ones.
- * - `all` = every eligible season, at most `maxSeasons`; when the cap cuts it, `complete`
- *   is false so the UI cannot call it a full-history figure.
+ * - `last3` / `last12` = the anchor season plus the newest earlier eligible ones, 3 / 12 in all.
+ *   Fewer than that available (a short history or an anchor outside the list) → `complete`
+ *   is false, so the UI cannot call it a full figure.
  * - A season whose classification is `unknown` (details not fetched) is never silently
  *   treated as eligible: `complete` turns false and it is listed under `skipped`.
  */
@@ -91,7 +98,7 @@ export function selectSeasons(
   request: PeriodRequest,
   options: { maxSeasons?: number } = {},
 ): SeasonSelection {
-  const maxSeasons = options.maxSeasons ?? 12;
+  const wanted = Math.min(wantedSeasons(request.mode), options.maxSeasons ?? LAST_12);
   const byId = new Map(candidates.map((c) => [c.summary.tournamentId, c]));
   const skipped: SeasonSelection['skipped'] = [];
   const nonEligible = (c: SeasonCandidate): boolean => c.classification.kind !== 'league';
@@ -110,10 +117,12 @@ export function selectSeasons(
   const ordered = newestFirst(candidates.map((c) => c.summary));
   const anchorIndex = ordered.findIndex((s) => s.tournamentId === request.currentTournamentId);
   // An anchor outside the list falls back to the whole list rather than guessing a position.
-  const fromAnchor = request.mode === 'all' ? ordered : anchorIndex >= 0 ? ordered.slice(anchorIndex) : ordered;
-  if (request.mode === 'last3' && anchorIndex < 0) complete = false;
+  const fromAnchor = anchorIndex >= 0 ? ordered.slice(anchorIndex) : ordered;
+  if (anchorIndex < 0) complete = false;
   const eligible: N01TournamentSummary[] = [];
   for (const summary of fromAnchor) {
+    // Seasons older than the window are not part of the period, eligible or not.
+    if (eligible.length >= wanted) break;
     const candidate = byId.get(summary.tournamentId)!;
     if (nonEligible(candidate)) {
       skipped.push({ tournamentId: summary.tournamentId, title: summary.title, reason: candidate.classification.reason });
@@ -122,7 +131,6 @@ export function selectSeasons(
     }
     eligible.push(summary);
   }
-  if (request.mode === 'last3') return { seasons: eligible.slice(0, LAST_N), skipped, complete };
-  if (eligible.length > maxSeasons) complete = false;
-  return { seasons: eligible.slice(0, maxSeasons), skipped, complete };
+  if (eligible.length < wanted) complete = false;
+  return { seasons: eligible.slice(0, wanted), skipped, complete };
 }

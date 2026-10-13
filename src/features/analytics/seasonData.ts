@@ -2,6 +2,8 @@ import { normalizeName } from '../../domain/n01/names';
 import { isUsableOpid, rosterCoverage, sharedOpids, unprovenOpids } from '../../domain/n01/identity';
 import type { RosterCoverage } from '../../domain/n01/identity';
 import type { N01RosterPlayer, N01Tournament } from '../../integrations/n01/types';
+import { seasonComposition } from './gameKind';
+import type { CompositionVerdict, SlotEvidence } from './gameKind';
 import { formatSignature } from './seasons';
 import type { OfficialStandingGroup, OfficialStandingRow, PlayerStatsRow, StatLine, TeamStatsRow } from './types';
 
@@ -49,7 +51,12 @@ export interface SeasonData {
   leagueId: string | null;
   title: string;
   status: number | null;
+  /** Informational fingerprint of the format. It no longer decides whether seasons pool. */
   signature: string;
+  /** Schedule slots as n01 wrote them (base + division overrides). */
+  slots: SlotEvidence[];
+  /** Whether every slot in force is a 01 game: decides which official counters are 01-only. */
+  composition: CompositionVerdict;
   divisions: { index: number; title: string; teamIds: string[] }[];
   teams: TeamSeason[];
   players: PlayerSeason[];
@@ -71,6 +78,8 @@ export interface SeasonInput {
   standings: readonly OfficialStandingGroup[];
   /** The whole-season roster, or `null` when it could not be read. */
   roster: readonly N01RosterPlayer[] | null;
+  /** Schedule slots as written. */
+  slots: readonly SlotEvidence[];
 }
 
 export function buildSeasonData(input: SeasonInput): SeasonData {
@@ -151,6 +160,8 @@ export function buildSeasonData(input: SeasonInput): SeasonData {
     title: tournament.title,
     status: tournament.status,
     signature: formatSignature(tournament),
+    slots: [...input.slots],
+    composition: seasonComposition(input.slots, tournament.divisions.map((d) => d.index)),
     divisions: tournament.divisions.map((d) => ({ index: d.index, title: d.title, teamIds: d.teamIds })),
     teams,
     players,

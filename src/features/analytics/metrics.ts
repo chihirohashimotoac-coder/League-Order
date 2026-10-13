@@ -76,7 +76,9 @@ export function aggregateLines(lines: readonly StatLine[]): Metrics {
     }
     ratios[key] = ratioOf(num, den);
   }
-  return { ...ratios, extremes: extremesOf(lines), counts: countsOf(lines), seasons: lines.length };
+  // A season that supplies no counter at all (excluded for this view) is not a contributing season.
+  const contributing = lines.filter((line) => Object.values(line).some((value) => ok(value))).length;
+  return { ...ratios, extremes: extremesOf(lines), counts: countsOf(lines), seasons: contributing };
 }
 
 function sumOrNull(lines: readonly StatLine[], pick: (line: StatLine) => number | null): number | null {

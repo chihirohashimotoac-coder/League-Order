@@ -153,22 +153,25 @@ describe('loadPeriod', () => {
     expect(load.complete).toBe(true);
   });
 
-  it('all: every eligible season; the second run is served from the cache with no requests', async () => {
+  it('last12: every eligible season up to 12; the second run is served from the cache with no requests', async () => {
     const { api, cache, fake } = setup();
-    const req = { mode: 'all', currentTournamentId: 's5' } as const;
+    const req = { mode: 'last12', currentTournamentId: 's5' } as const;
     const first = await loadPeriod({ ...base, api, cache, request: req });
     expect(first.seasons.map((s) => s.tournamentId)).toEqual(['s5', 's4', 's2', 's1']);
-    expect(periodLabelAllowed(first)).toBe('full');
+    // Only 4 regular seasons exist: "直近12季" is shown as partial, never as 12 seasons.
+    expect(first.wanted).toBe(12);
+    expect(periodLabelAllowed(first)).toBe('partial');
+    expect(describeLoad(first).message).toContain('12季のうち4季');
     const calls = fake.calls.length;
     const second = await loadPeriod({ ...base, api, cache, request: req });
     expect(second.seasons).toHaveLength(4);
     expect(fake.calls).toHaveLength(calls);
   });
 
-  it('a season that cannot be read makes "all" partial — never labelled as full history', async () => {
+  it('a season that cannot be read makes "last12" partial — never labelled as complete', async () => {
     const { api, cache, fake } = setup();
     fake.failing.add('tournament/stats:s2'.replace(':s2', ''));
-    const load = await loadPeriod({ ...base, api, cache, request: { mode: 'all', currentTournamentId: 's5' } });
+    const load = await loadPeriod({ ...base, api, cache, request: { mode: 'last12', currentTournamentId: 's5' } });
     expect(load.seasons).toHaveLength(0);
     expect(load.failures.length).toBeGreaterThan(0);
     const { fake: fake2, api: api2, cache: cache2 } = setup();
@@ -177,7 +180,7 @@ describe('loadPeriod', () => {
       if (op === 'tournament/get' && params.tdid === 's2') throw new Error('boom');
       return original(op, params);
     };
-    const partial = await loadPeriod({ ...base, api: api2, cache: cache2, request: { mode: 'all', currentTournamentId: 's5' } });
+    const partial = await loadPeriod({ ...base, api: api2, cache: cache2, request: { mode: 'last12', currentTournamentId: 's5' } });
     expect(partial.seasons.map((s) => s.tournamentId)).toEqual(['s5', 's4', 's1']);
     expect(partial.complete).toBe(false);
     expect(periodLabelAllowed(partial)).toBe('partial');
@@ -186,26 +189,41 @@ describe('loadPeriod', () => {
 
   it('the request budget stops the fetch and the result says it is partial', async () => {
     const { api, cache } = setup(SEASONS, { maxRequests: 8 });
-    const load = await loadPeriod({ ...base, api, cache, request: { mode: 'all', currentTournamentId: 's5' } });
+    const load = await loadPeriod({ ...base, api, cache, request: { mode: 'last12', currentTournamentId: 's5' } });
     expect(api.requestCount).toBeLessThanOrEqual(8);
     expect(load.complete).toBe(false);
     expect(load.failures.some((f) => f.kind === 'budget')).toBe(true);
   });
 
-  it('a season cap cuts "all" short and marks it incomplete', async () => {
-    const { api, cache } = setup();
-    const load = await loadPeriod({ ...base, api, cache, maxSeasons: 2, request: { mode: 'all', currentTournamentId: 's5' } });
-    expect(load.seasons).toHaveLength(2);
-    expect(load.complete).toBe(false);
+  it('the window never exceeds the cap, and seasons past it are never fetched', async () => {
+    const { api, cache, fake } = setup();
+    const load = await loadPeriod({ ...base, api, cache, maxSeasons: 2, request: { mode: 'last12', currentTournamentId: 's5' } });
+    expect(load.seasons.map((s) => s.tournamentId)).toEqual(['s5', 's4']);
+    expect(load.wanted).toBe(2);
+    expect(fake.calls.some((c) => c.includes('s2') || c.includes('s1'))).toBe(false);
   });
 
-  it('seasons with another format are not pooled and are reported', async () => {
+  it('seasons with another format are pooled, not dropped (P0)', async () => {
     const seasons = SEASONS.map((s) => (s.id === 's2' ? { ...s, startScore: 701 } : s));
     const { api, cache } = setup(seasons);
     const load = await loadPeriod({ ...base, api, cache, request: { mode: 'last3', currentTournamentId: 's5' } });
-    expect(load.seasons.map((s) => s.tournamentId)).toEqual(['s5', 's4']);
-    expect(load.formatExcluded.map((s) => s.tournamentId)).toEqual(['s2']);
+    expect(load.seasons.map((s) => s.tournamentId)).toEqual(['s5', 's4', 's2']);
+    expect(periodLabelAllowed(load)).toBe('full');
+  });
+
+  it('a failed season keeps its place in the window: it is not replaced by an older one (P1)', async () => {
+    const { fake, api, cache } = setup();
+    const original = fake.request.bind(fake);
+    fake.request = async (op, params) => {
+      if (op === 'tournament/get' && params.tdid === 's4') throw new Error('boom');
+      return original(op, params);
+    };
+    const load = await loadPeriod({ ...base, api, cache, request: { mode: 'last3', currentTournamentId: 's5' } });
+    expect(load.seasons.map((s) => s.tournamentId)).toEqual(['s5', 's2']);
+    expect(load.window.map((w) => [w.tournamentId, w.state])).toEqual([['s5', 'loaded'], ['s4', 'failed'], ['s2', 'loaded']]);
+    expect(fake.calls.some((c) => c.includes('s1'))).toBe(false);
     expect(periodLabelAllowed(load)).toBe('partial');
+    expect(describeLoad(load).message).toContain('部分集計');
   });
 
   it('league list failure is a state, not an exception; offline with a warm cache still works', async () => {

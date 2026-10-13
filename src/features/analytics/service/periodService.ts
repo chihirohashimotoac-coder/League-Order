@@ -1,11 +1,10 @@
 import { newestFirst } from '../../../integrations/n01/seasonResolver';
 import type { N01TournamentSummary } from '../../../integrations/n01/types';
-import { splitByFormat } from '../aggregate';
 import type { AnalyticsApi } from '../api/readApi';
 import type { AnalyticsCache } from '../cache/analyticsCache';
 import { buildSeasonData } from '../seasonData';
 import type { SeasonData } from '../seasonData';
-import { classifySeason, LAST_N } from '../seasons';
+import { classifySeason, LAST_12, wantedSeasons } from '../seasons';
 import type { PeriodRequest } from '../seasons';
 import { loadLeagueList, loadSeason } from './seasonLoader';
 import type { DataSource, LoaderContext, SeasonFailed, SeasonLoaded } from './seasonLoader';
@@ -26,7 +25,7 @@ export interface PeriodServiceOptions {
   request: PeriodRequest;
   /** Seasons fetched in parallel. Each season is up to 5 requests, so keep this small. */
   concurrency?: number;
-  /** Cap on seasons for `all`. */
+  /** Upper bound on the seasons of a multi-season period (tests); never above 12. */
   maxSeasons?: number;
   isOnline?: () => boolean;
   now?: () => number;
@@ -44,18 +43,31 @@ export interface SeasonMeta {
   error?: string;
 }
 
+/** One position of the period's window, newest first. */
+export interface WindowSlot {
+  tournamentId: string;
+  title: string;
+  state: 'loaded' | 'failed' | 'not-fetched';
+  reason?: string;
+}
+
 export interface PeriodLoad {
   request: PeriodRequest;
-  /** Eligible, format-compatible seasons, newest first. */
+  /** Seasons the period asks for (1, 3 or 12). */
+  wanted: number;
+  /** Eligible seasons that were read, newest first. Formats may differ: they still pool. */
   seasons: SeasonData[];
   meta: SeasonMeta[];
   failures: { tournamentId: string; title: string; reason: string; kind: SeasonFailed['kind'] }[];
   skipped: { tournamentId: string; title: string; reason: string }[];
-  /** Seasons passed over because their format differs from the base season's. */
-  formatExcluded: { tournamentId: string; title: string; reason: string }[];
   /**
-   * True only when every season the period calls for was read and none was dropped for
-   * being unreadable. `all` must not be shown as full history unless this is true.
+   * The period's window: every season position, read or not. A season that failed keeps its
+   * place — it is never silently replaced by an older one.
+   */
+  window: WindowSlot[];
+  /**
+   * True only when every season the period calls for was read. A multi-season period must
+   * not be shown as complete unless this is true.
    */
   complete: boolean;
   /** The season list itself could not be read (nothing else can be shown). */
@@ -69,14 +81,15 @@ export interface PeriodLoad {
 
 const DEFAULT_CONCURRENCY = 3;
 
-function emptyLoad(request: PeriodRequest, extra: Partial<PeriodLoad>): PeriodLoad {
+export function emptyLoad(request: PeriodRequest, extra: Partial<PeriodLoad>): PeriodLoad {
   return {
     request,
+    wanted: wantedSeasons(request.mode),
     seasons: [],
     meta: [],
     failures: [],
     skipped: [],
-    formatExcluded: [],
+    window: [],
     complete: false,
     listError: null,
     offline: false,
@@ -87,17 +100,23 @@ function emptyLoad(request: PeriodRequest, extra: Partial<PeriodLoad>): PeriodLo
   };
 }
 
+/** Lets the browser paint between seasons, so parsing twelve seasons never freezes the screen. */
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 export async function loadPeriod(options: PeriodServiceOptions): Promise<PeriodLoad> {
   const { api, cache, leagueId, request } = options;
   const isOnline = options.isOnline ?? (() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false));
   const ctx: LoaderContext = { api, cache, isOnline, now: options.now ?? (() => Date.now()), forceRefresh: options.forceRefresh };
   const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
-  const maxSeasons = options.maxSeasons ?? 12;
   const offline = !isOnline();
+  const wanted = Math.min(wantedSeasons(request.mode), Math.max(1, options.maxSeasons ?? LAST_12));
 
   const listing = await loadLeagueList(ctx, leagueId);
   if (!listing.ok || !listing.list) {
     return emptyLoad(request, {
+      wanted,
       offline,
       listError: { reason: listing.reason ?? 'シーズン一覧を取得できません。', kind: listing.kind ?? 'network' },
       requestsSent: api.requestCount,
@@ -109,18 +128,19 @@ export async function loadPeriod(options: PeriodServiceOptions): Promise<PeriodL
   const skipped: PeriodLoad['skipped'] = [];
   const failures: PeriodLoad['failures'] = [];
   const meta: SeasonMeta[] = [];
-  const loaded: { summary: N01TournamentSummary; data: SeasonData }[] = [];
+  const window: WindowSlot[] = [];
+  const loaded: SeasonData[] = [];
   let complete = true;
   let usedStale = listing.source === 'stale-cache';
 
-  // The ids to try, newest first, and how many eligible seasons are wanted.
+  // The ids to try, newest first.
   let queue: N01TournamentSummary[];
-  let wanted: number;
   if (request.mode === 'current' || request.mode === 'specified') {
     const id = request.mode === 'current' ? request.currentTournamentId : (request.specifiedTournamentId ?? '');
     const found = byId.get(id);
     if (!found) {
       return emptyLoad(request, {
+        wanted,
         offline,
         skipped: [{ tournamentId: id, title: '', reason: '大会がリーグの一覧にありません' }],
         usedStaleCache: usedStale,
@@ -128,15 +148,11 @@ export async function loadPeriod(options: PeriodServiceOptions): Promise<PeriodL
       });
     }
     queue = [found];
-    wanted = 1;
-  } else if (request.mode === 'last3') {
+  } else {
     const index = summaries.findIndex((s) => s.tournamentId === request.currentTournamentId);
+    // An anchor outside the list falls back to the newest seasons, and says so.
     if (index < 0) complete = false;
     queue = index >= 0 ? summaries.slice(index) : summaries;
-    wanted = LAST_N;
-  } else {
-    queue = summaries;
-    wanted = maxSeasons;
   }
 
   // Seasons that cannot be a league season from the list alone are never fetched.
@@ -147,21 +163,25 @@ export async function loadPeriod(options: PeriodServiceOptions): Promise<PeriodL
     else candidates.push(summary);
   }
 
+  // Window positions are filled by seasons that were read *or failed*: a failure is a gap in
+  // the period, not a reason to reach further back in time.
+  const filled = (): number => loaded.length + failures.length;
   let cursor = 0;
   let stopped = false;
-  while (loaded.length < wanted && cursor < candidates.length && !stopped) {
+  while (filled() < wanted && cursor < candidates.length && !stopped) {
     if (options.signal?.aborted) {
       complete = false;
       break;
     }
-    // Never fetch more than are still needed: `last3` stops after three eligible seasons.
-    const batch = candidates.slice(cursor, cursor + Math.min(concurrency, wanted - loaded.length));
+    const batch = candidates.slice(cursor, cursor + Math.min(concurrency, wanted - filled()));
     cursor += batch.length;
     const results = await Promise.all(batch.map((summary) => loadSeason(ctx, summary.tournamentId)));
     results.forEach((result, i) => {
       const summary = batch[i];
       if (!result.ok) {
+        if (filled() >= wanted) return;
         failures.push({ tournamentId: summary.tournamentId, title: summary.title, reason: result.reason, kind: result.kind });
+        window.push({ tournamentId: summary.tournamentId, title: summary.title, state: 'failed', reason: result.reason });
         complete = false;
         if (result.kind === 'budget' || result.kind === 'aborted') stopped = true;
         return;
@@ -172,29 +192,32 @@ export async function loadPeriod(options: PeriodServiceOptions): Promise<PeriodL
         if (classification.kind === 'unknown') complete = false;
         return;
       }
-      if (loaded.length >= wanted) return;
+      if (filled() >= wanted) return;
       if (result.source === 'stale-cache') usedStale = true;
       meta.push(toMeta(summary, result));
-      loaded.push({ summary, data: buildSeasonData(result.input) });
+      loaded.push(buildSeasonData(result.input));
+      window.push({ tournamentId: summary.tournamentId, title: summary.title, state: 'loaded' });
     });
+    await yieldToBrowser();
   }
 
-  // A cap that cut `all` short means the figure is not the full history.
-  if (request.mode === 'all' && loaded.length >= wanted && cursor < candidates.length) complete = false;
-  if ((request.mode === 'current' || request.mode === 'specified') && loaded.length === 0) complete = false;
-
-  const ordered = loaded.map((l) => l.data);
-  const base = request.mode === 'specified' ? request.specifiedTournamentId : request.currentTournamentId;
-  const split = splitByFormat(ordered, ordered.some((s) => s.tournamentId === base) ? base : undefined);
+  // Positions nobody filled: the history is shorter, or fetching stopped (budget / cancel).
+  if (filled() < wanted) {
+    complete = false;
+    for (const summary of candidates.slice(cursor, cursor + (wanted - filled()))) {
+      window.push({ tournamentId: summary.tournamentId, title: summary.title, state: 'not-fetched', reason: stopped ? '通信の上限または中断のため未取得' : undefined });
+    }
+  }
 
   const times = meta.map((m) => m.fetchedAt);
   return {
     request,
-    seasons: split.compatible,
-    meta: meta.filter((m) => split.compatible.some((s) => s.tournamentId === m.tournamentId)),
+    wanted,
+    seasons: loaded,
+    meta,
     failures,
     skipped,
-    formatExcluded: split.excluded,
+    window,
     complete,
     listError: null,
     offline,
@@ -215,10 +238,10 @@ function toMeta(summary: N01TournamentSummary, result: SeasonLoaded): SeasonMeta
   };
 }
 
-/** What the UI may call the figure. Full history needs a complete, gap-free fetch. */
+/** What the UI may call the figure. A full period needs every wanted season, read without gaps. */
 export function periodLabelAllowed(load: PeriodLoad): 'full' | 'partial' | 'none' {
   if (load.seasons.length === 0) return 'none';
-  return load.complete && load.failures.length === 0 && load.formatExcluded.length === 0 ? 'full' : 'partial';
+  return load.complete && load.failures.length === 0 && load.seasons.length >= load.wanted ? 'full' : 'partial';
 }
 
 /** Plain-language state for the screens. */
@@ -231,12 +254,13 @@ export function describeLoad(load: PeriodLoad): { kind: LoadStateKind; message: 
     return { kind: load.failures.length > 0 ? 'error' : 'empty', message: why };
   }
   if (load.offline) return { kind: 'offline-cache', message: 'オフラインのため、保存済みのデータで表示しています。' };
-  if (load.failures.length > 0 || !load.complete || load.formatExcluded.length > 0) {
+  if (periodLabelAllowed(load) !== 'full') {
+    const missing = load.wanted - load.seasons.length;
     const parts: string[] = [];
-    if (load.failures.length > 0) parts.push(`${load.failures.length} シーズンを取得できませんでした`);
-    if (load.formatExcluded.length > 0) parts.push(`${load.formatExcluded.length} シーズンは試合形式が異なるため合算していません`);
+    if (load.failures.length > 0) parts.push(`${load.failures.length}季を取得できませんでした`);
+    else if (missing > 0) parts.push(`${load.wanted}季のうち${load.seasons.length}季のみ取得できました`);
     if (parts.length === 0) parts.push('一部のシーズンを確認できていません');
-    return { kind: 'partial', message: `${parts.join('。')}。取得できた範囲のみの集計です。` };
+    return { kind: 'partial', message: `${parts.join('。')}。取得できた範囲のみの集計（部分集計）です。` };
   }
   if (load.usedStaleCache) return { kind: 'stale', message: '最新の取得に失敗したため、保存済みのデータを表示しています。' };
   return { kind: 'ready', message: '' };

@@ -1,4 +1,5 @@
 import type { N01RosterPlayer, N01Tournament } from '../../integrations/n01/types';
+import type { SlotEvidence } from './gameKind';
 import type { SeasonInput } from './seasonData';
 import type { PlayerStatsRow, StatLine, TeamStatsRow } from './types';
 
@@ -70,6 +71,21 @@ export function teamRow(teamId: string, lineValue: StatLine, division: number | 
   return { teamId, divisionIndex: division, line: lineValue };
 }
 
+/** Slot evidence as a 2026-style season writes it: every slot with an explicit `match_type`. */
+export function slotsOf(t: Pick<N01Tournament, 'schedule' | 'gameSettings'>): SlotEvidence[] {
+  const toEvidence = (division: number | null) => (slot: N01Tournament['schedule'][number]): SlotEvidence => ({
+    schid: slot.schid,
+    division,
+    numPart: slot.numPart,
+    subtitle: slot.subtitle,
+    startScore: slot.startScore,
+    limitLegCount: slot.limitLegCount,
+    matchType: slot.matchType,
+    settingMatchType: null,
+  });
+  return [...t.schedule.map(toEvidence(null)), ...t.gameSettings.flatMap((g) => g.schedule.map(toEvidence(g.round)))];
+}
+
 export function season(input: Partial<SeasonInput> & { tournament: N01Tournament }): SeasonInput {
-  return { teamStats: [], playerStats: [], standings: [], roster: null, ...input };
+  return { teamStats: [], playerStats: [], standings: [], roster: null, slots: slotsOf(input.tournament), ...input };
 }

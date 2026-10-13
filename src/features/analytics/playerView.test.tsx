@@ -138,7 +138,7 @@ function loadOf(seasons: SeasonData[]): PeriodLoad {
     meta: [],
     failures: [],
     skipped: [],
-    formatExcluded: [],
+    window: [], wanted: 1,
     complete: true,
     listError: null,
     offline: false,

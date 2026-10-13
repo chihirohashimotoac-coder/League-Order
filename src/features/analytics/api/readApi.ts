@@ -5,7 +5,9 @@ import { parseLeagueTournaments, parseRoster, parseTournament } from '../../../i
 import { N01SchemaError } from '../../../integrations/n01/validation';
 import type { N01LeagueTournaments, N01RosterPlayer, N01Tournament } from '../../../integrations/n01/types';
 import type { OfficialStandingGroup, PlayerStatsRow, TeamStatsRow } from '../types';
-import { AnalyticsSchemaError, parsePlayerStats, parseStandings, parseTeamStats } from './parse';
+import type { SlotEvidence } from '../gameKind';
+import { AnalyticsSchemaError, parseGameDetail, parseGameList, parsePlayerStats, parseSlotEvidence, parseStandings, parseTeamStats } from './parse';
+import type { RawGame, RawGameDetail } from './parse';
 
 /**
  * Analytics read adapter. It is its own client — the sync's `N01Client`, its operation list
@@ -23,6 +25,8 @@ export const ANALYTICS_OPERATIONS = [
   'tournament/stats',
   'tournament/standings',
   'team/player/list',
+  'match/list',
+  'match/get',
 ] as const;
 
 export type AnalyticsOperation = (typeof ANALYTICS_OPERATIONS)[number];
@@ -61,7 +65,15 @@ export class RequestBudgetError extends Error {
 }
 
 export const ANALYTICS_DEFAULT_TIMEOUT_MS = 15_000;
-export const ANALYTICS_DEFAULT_MAX_REQUESTS = 60;
+/**
+ * Requests one period load may send. "直近12季" needs 1 (league list) + 12 × 5 (tournament,
+ * team stats, player stats, standings, whole roster) = 61, so 80 leaves headroom for retries
+ * of optional parts without allowing an unbounded crawl. Role games and leg details are
+ * fetched by their own adapters with their own budgets.
+ */
+export const ANALYTICS_DEFAULT_MAX_REQUESTS = 80;
+/** Rows per `match/list` page (n01 returns at most 100). */
+export const GAME_LIST_PAGE = 100;
 
 export class AnalyticsApi {
   private readonly memo = new Map<string, Promise<unknown>>();
@@ -149,6 +161,29 @@ export class AnalyticsApi {
 
   standings(tournamentId: string): Promise<OfficialStandingGroup[]> {
     return this.parsed('tournament/standings', { tdid: tournamentId }, parseStandings);
+  }
+
+  /**
+   * The schedule slots as written (a missing `match_type` stays missing). Reads the same
+   * `tournament/get` response as {@link tournament}: no extra request.
+   */
+  slotEvidence(tournamentId: string): Promise<SlotEvidence[]> {
+    return this.parsed('tournament/get', { tdid: tournamentId }, parseSlotEvidence);
+  }
+
+  /**
+   * One page of the season's league games (`tmid` containing `_lg_`: playoffs and other
+   * event parts are left out), oldest first so paging stays stable while a season runs.
+   */
+  gamesPage(tournamentId: string, page: number): Promise<{ games: RawGame[]; rows: number; unreadable: number }> {
+    const params: Record<string, string> = { tdid: tournamentId, tmid__regex: '_lg_', sort: 'startTime', order: 'asc', count: String(GAME_LIST_PAGE) };
+    if (page > 0) params.skip = String(page * GAME_LIST_PAGE);
+    return this.parsed('match/list', params, parseGameList);
+  }
+
+  /** One game with its per-leg visits (`match/get`). */
+  gameDetail(gameId: string): Promise<RawGameDetail> {
+    return this.parsed('match/get', { mid: gameId }, parseGameDetail);
   }
 
   /** Every team's roster of one season in a single request (the evidence for opid uniqueness). */
