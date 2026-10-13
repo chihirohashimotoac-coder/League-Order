@@ -6,8 +6,8 @@ import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../domain/orders/pr
 import { parseBackup, serialiseBackup } from '../storage/backup';
 import { downloadText } from '../share';
 import { useAppStore } from '../state/appStore';
-import { Card, ConfirmDialog, Field, Sheet, Stepper, useToast } from '../components/ui';
-import { CHANGELOG } from '../data/changelog';
+import { Card, ConfirmDialog, Field, Stepper, useToast } from '../components/ui';
+import { ChangelogSheet } from '../components/ChangelogSheet';
 
 // The opponent term is not a custom weight: it only means something with opponent data,
 // which the opponent-optimised preset brings along.
@@ -265,46 +265,7 @@ export function SettingsPage(): React.JSX.Element {
         />
       ) : null}
 
-      {showChangelog ? (
-        <Sheet title="更新履歴" onClose={() => setShowChangelog(false)}>
-          <div style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-            {CHANGELOG.map((entry) => (
-              <div key={entry.version} style={{ marginBottom: 24 }}>
-                <div className="row between" style={{ marginBottom: 4 }}>
-                  <span className="small-text" style={{ fontWeight: 600 }} data-version={entry.version}>v{entry.version}</span>
-                  <span className="tiny muted">{entry.date}</span>
-                </div>
-                {entry.note ? (
-                  <p className="tiny muted" style={{ margin: '0 0 6px' }}>{entry.note}</p>
-                ) : null}
-                <ul style={{ margin: 0, paddingLeft: 20 }}>
-                  {entry.items.map((item, i) => (
-                    <li key={i} className="small-text" style={{ marginBottom: 4 }}>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-                {entry.prLinks && entry.prLinks.length > 0 ? (
-                  <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {entry.prLinks.map((link) => (
-                      <a
-                        key={link.url}
-                        href={link.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="tiny"
-                        style={{ color: 'var(--color-accent, #0070c9)' }}
-                      >
-                        {link.label}
-                      </a>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </Sheet>
-      ) : null}
+      {showChangelog ? <ChangelogSheet onClose={() => setShowChangelog(false)} /> : null}
 
       {confirmReset ? (
         <ConfirmDialog

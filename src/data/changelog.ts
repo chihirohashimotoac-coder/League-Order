@@ -1,51 +1,189 @@
-/** One version entry in the update history. */
+/** One entry in the update history: the user-visible content of one merged change. */
 export interface ChangelogEntry {
-  /** Semantic version string, e.g. "1.1.0" */
-  version: string;
-  /** ISO date string (YYYY-MM-DD) of the release. */
+  /** Stable key, e.g. "pr-17". */
+  id: string;
+  /** Date of the change (YYYY-MM-DD, Japan time). */
   date: string;
-  /** User-facing summary of this version's changes (2–5 items). */
+  /** Short heading shown to users. */
+  title: string;
+  /** User-facing summary of what changed (2–5 items). */
   items: string[];
-  /** Optional context note shown below the items. */
-  note?: string;
-  /** Optional GitHub PR links related to this release. */
-  prLinks?: { label: string; url: string }[];
+  /** Semantic version, only for changes released under a version number. */
+  version?: string;
+  /** True for changes that leave the app's behaviour as it was (tests, docs, tooling). */
+  internal?: boolean;
 }
 
 /**
- * App update history, newest first.
+ * App update history, newest first, one entry per merged pull request.
  *
- * Versions must match the value in package.json (checked by the version-consistency test).
- * When adding a new release: prepend an entry here and bump package.json.
+ * Only changes released under a version number carry `version`; earlier ones are listed by
+ * content alone. When adding a release: prepend an entry here and bump package.json.
  */
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '1.1.0',
+    id: 'v1.2.0',
+    version: '1.2.0',
     date: '2026-10-13',
+    title: '更新履歴をホーム画面から開けるように',
     items: [
-      '設定画面にアプリバージョンを表示するようにしました',
-      '更新履歴をいつでも設定画面から確認できるようにしました',
-      'オフライン環境でも更新履歴を表示できます',
+      'ホーム画面の一覧に「更新履歴」を追加し、現在のバージョンを表示しました',
+      '更新履歴を、変更ごとの内容でまとめ直しました',
+      '設定画面の「このアプリについて」からも、これまでどおり開けます',
     ],
   },
   {
-    version: '1.0.0',
-    date: '2026-10-05',
-    note: '以下は履歴管理を開始した時点でのアプリの主な機能です。',
+    id: 'pr-20',
+    version: '1.1.0',
+    date: '2026-10-13',
+    title: 'アプリバージョンと更新履歴の表示',
     items: [
-      '1投目を誰が担当するかを考慮した投順最適化と、格上チーム相手の1タップ作戦提案を追加しました',
-      '編集中のスロットで文字のコントラストが失われる表示不具合を修正しました',
-      '選手・チームの詳細データ分析画面（勝率・PPR・シーズン推移）を追加しました',
-      'n01との連携で対戦相手データを自動取得し、オーダー最適化に活用できるようになりました',
-      'PPR・Soft/Steel強度モデル、役割分散、リーグマッチシートUIを導入しました',
+      '設定画面の「このアプリについて」にバージョンを表示しました',
+      '「更新履歴を見る」から、変更内容をいつでも確認できるようにしました（オフラインでも表示できます）',
+      '著作権表示（© 2026 Chihiro Hashimoto）を追加しました',
     ],
-    prLinks: [
-      { label: 'PR #17 投順最適化・格上対策', url: 'https://github.com/chihirohashimotoac-coder/League-Order/pull/17' },
-      { label: 'PR #18 UIアクセシビリティ修正', url: 'https://github.com/chihirohashimotoac-coder/League-Order/pull/18' },
-      { label: 'PR #13 データ分析画面', url: 'https://github.com/chihirohashimotoac-coder/League-Order/pull/13' },
+  },
+  {
+    id: 'pr-19',
+    date: '2026-10-13',
+    title: 'n01 の試合記録の取得を確認（ドキュメント更新）',
+    internal: true,
+    items: [
+      'アプリの動作に変更はありません',
+      '公開サイトを実ブラウザ・実際の n01 で確認し、試合記録（match/list）をブラウザから読めることをドキュメントに反映しました',
+    ],
+  },
+  {
+    id: 'pr-18',
+    date: '2026-10-13',
+    title: '編集直後の文字の見づらさを修正',
+    items: [
+      'オーダーの枠を編集した直後の約1秒間、枠内の淡い文字（「Rt. —」「1投目」「EDITED」）が読みにくくなる表示を修正しました',
+      '編集した枠は、背景を染めずに枠線と外側のリングで示すようにしました',
+    ],
+  },
+  {
+    id: 'pr-17',
+    date: '2026-10-12',
+    title: '投順の最適化と格上対策の1タップ提案',
+    items: [
+      'Doubles / Trios / Gallon の投順（1投目・2投目…）を、メンバーの組合せとは別の戦術として最適化するようにしました',
+      '基本は強い順です。推定勝率が2pt以上良くなり、信頼度も十分なときだけ別の順を採用し、理由と信頼度を表示します',
+      '格上の相手に対して、1タップで格上対策案を作れるようにしました',
+      '画面の「PLAYER 1 / PLAYER 2」を「1投目 / 2投目」の表記にしました',
+      'n01 の試合記録（match/list）を任意で取得し、相手の投順の傾向を使うようにしました',
+    ],
+  },
+  {
+    id: 'pr-16',
+    date: '2026-10-09',
+    title: '公開サイト確認テストの修正',
+    internal: true,
+    items: [
+      'アプリの動作に変更はありません',
+      '公開サイトは /League-Order/ 配下にあるため、確認テストがアプリを開けていなかった不具合を修正しました',
+    ],
+  },
+  {
+    id: 'pr-15',
+    date: '2026-10-09',
+    title: '公開サイトの確認テストを追加',
+    internal: true,
+    items: [
+      'アプリの動作に変更はありません',
+      '公開済みのサイトを実ブラウザ・実際の n01 で確かめる手動テストを追加しました',
+    ],
+  },
+  {
+    id: 'pr-14',
+    date: '2026-10-09',
+    title: 'データ分析の検証スクリプトを追加',
+    internal: true,
+    items: [
+      'アプリの動作に変更はありません',
+      '実際の n01 データでデータ分析を検証するスクリプトと、バックテストの基準値を追加しました',
+    ],
+  },
+  {
+    id: 'pr-13',
+    date: '2026-10-09',
+    title: '選手・チームのデータ分析画面',
+    items: [
+      'ホーム画面に「データ分析」を追加しました（n01 連携チームのみ）',
+      'プレイヤー分析: 3DA・First 9・Leg / Set 勝率・Keep / Break・100+ / 140+ / 170+ / 180・High Finish・Best Leg を、順位やシーズン推移とあわせて確認できます',
+      'チーム分析: チーム成績、n01 公式順位、League Order 独自の順位、他チームとの比較を確認できます',
+      '今季・指定シーズン・直近3シーズン・全期間を切り替えられ、データが足りない指標は判定を保留します',
+    ],
+  },
+  {
+    id: 'pr-7',
+    date: '2026-10-09',
+    title: 'シーズンをまたぐ選手照合を厳格化',
+    items: [
+      '過去シーズンの成績を同じ選手に結び付けるのは、同一人物と確認できたときだけにしました',
+      '全チームの名簿が一部しか返らないときは、その季の結び付けを行わず、低信頼として扱います',
+      '別人の成績が混ざることを防ぎます',
+    ],
+  },
+  {
+    id: 'pr-6',
+    date: '2026-10-08',
+    title: '出場の偏り・同じIDの別人・助っ人への対応',
+    items: [
+      '出場の偏りは、均等な案と比べて利得が十分あるときだけ採用するようにしました',
+      '同じ選手ID（opid）を持つ別人の成績が混ざらないよう、別人として扱うようにしました',
+      '戦力評価を過去シーズンの履歴から求め、「戦力の根拠」をオーダー作成画面と結果画面に表示します',
+      '助っ人（一時メンバー）を追加でき、名簿やシーズン累計には残りません',
+      '次戦の確認画面から継続メンバーを名簿に追加でき、n01 の選手との照合は本人確認を経て行います',
+    ],
+  },
+  {
+    id: 'pr-5',
+    date: '2026-10-07',
+    title: 'n01 連携と対戦相手を考慮したオーダー最適化',
+    items: [
+      'League とチームを選ぶだけで、チーム・名簿・PPR・フォーマットを n01 から同期できます',
+      '次戦の相手を分析し、推定勝率が高くなるオーダーをワンボタンで作れます',
+      '推定値は「推定勝率」「参考値」と信頼度（高 / 中 / 低）で表示します',
+      '従来の手動のチーム・フォーマットの作り方もそのまま使えます',
+    ],
+  },
+  {
+    id: 'pr-4',
+    date: '2026-10-07',
+    title: 'PPR・Soft / Steel・役割の分散・表示の見直し',
+    items: [
+      'シート内でテキストを選択しようとするとシートが閉じてしまう不具合を修正しました',
+      '選手に PPR を登録でき、フォーマットで Soft / Steel を選べます。戦力評価の配分は Soft = Rating 70 / PPR 30、Steel = PPR 70 / Rating 30 です',
+      '同じ選手に Singles などが集中しないよう、役割の分散を評価に加えました',
+      'プリセットごとにオーダーの傾向が変わるようにし、同じ最適解のときは「次点」と明示します',
+      'Light Match Sheet の表示に刷新しました',
+    ],
+  },
+  {
+    id: 'pr-3',
+    date: '2026-10-06',
+    title: 'Arena Scoreboard デザインへ全面刷新',
+    items: [
+      '画面全体を、スコアボード風の競技向けデザインに作り直しました',
+      'ホームに「新しいオーダーを作る」と作業中オーダーの再開カードを置きました',
+      'オーダーの状態（DRAFT / FINALIZED / UPDATED）を、アイコン・文字・色で示します',
+      '共有画像は、試合カード形式にしました',
+      '初回は自分のチームを作るか、サンプル（DEMO）で試すかを選べます',
+    ],
+  },
+  {
+    id: 'pr-1',
+    date: '2026-10-06',
+    title: '最終受入監査での不具合修正',
+    items: [
+      'シーズンに反映済みのオーダーは削除できないようにし、「シーズン反映を取り消す」を別の操作として用意しました',
+      '手で直したオーダーが絶対条件に違反しているとき、理由パネルが「違反していません」と矛盾して表示される不具合を修正しました',
+      '保存に失敗したのに成功に見える不具合を修正し、失敗をその場でお知らせします',
+      '幅320pxの画面で、下のタブの文字が折り返して操作ボタンと重なる表示を修正しました',
     ],
   },
 ];
 
-/** The version string of the latest entry. Must equal __APP_VERSION__ at runtime. */
-export const CHANGELOG_LATEST_VERSION = CHANGELOG[0].version;
+/** The newest version number in the history. Must equal __APP_VERSION__. */
+export const CHANGELOG_LATEST_VERSION: string = CHANGELOG.find((entry) => entry.version !== undefined)?.version ?? '';
