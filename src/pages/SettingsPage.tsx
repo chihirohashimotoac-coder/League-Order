@@ -6,7 +6,8 @@ import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../domain/orders/pr
 import { parseBackup, serialiseBackup } from '../storage/backup';
 import { downloadText } from '../share';
 import { useAppStore } from '../state/appStore';
-import { Card, ConfirmDialog, Field, Stepper, useToast } from '../components/ui';
+import { Card, ConfirmDialog, Field, Sheet, Stepper, useToast } from '../components/ui';
+import { CHANGELOG } from '../data/changelog';
 
 // The opponent term is not a custom weight: it only means something with opponent data,
 // which the opponent-optimised preset brings along.
@@ -35,6 +36,7 @@ export function SettingsPage(): React.JSX.Element {
     warnings: string[];
   } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [showChangelog, setShowChangelog] = useState(false);
 
   const settings = store.settings;
   const n01 = settings.n01 ?? DEFAULT_N01_SETTINGS;
@@ -219,8 +221,29 @@ export function SettingsPage(): React.JSX.Element {
         <p className="small-text muted" style={{ marginTop: 0 }}>
           Darts League Order Optimizer — オフライン対応の PWA です。ネットワークが無くても、登録済みデータの参照・オーダー生成・編集ができます。
         </p>
-        <p className="tiny muted" style={{ marginBottom: 0 }}>
+        <p className="tiny muted">
           Rating 未入力は 0 として扱わず、参加者の既知 Rating の中央値を暫定値として評価します。出場不可・最大出場回数・ロック・禁止ペアは絶対条件であり、違反する配置は生成しません。
+        </p>
+        <div className="row between" style={{ marginTop: 8 }}>
+          <span className="small-text muted">アプリバージョン</span>
+          <span className="small-text" data-testid="app-version">v{__APP_VERSION__}</span>
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className="btn small ghost"
+            style={{ padding: '10px 0', minHeight: 44, width: '100%', textAlign: 'left' }}
+            onClick={() => setShowChangelog(true)}
+            aria-label="更新履歴を見る"
+          >
+            <span className="row between" style={{ width: '100%' }}>
+              <span className="small-text">更新履歴を見る</span>
+              <span aria-hidden="true">›</span>
+            </span>
+          </button>
+        </div>
+        <p className="tiny muted" style={{ marginTop: 8, marginBottom: 0, textAlign: 'right' }}>
+          © 2026 Chihiro Hashimoto
         </p>
       </Card>
 
@@ -240,6 +263,47 @@ export function SettingsPage(): React.JSX.Element {
             });
           }}
         />
+      ) : null}
+
+      {showChangelog ? (
+        <Sheet title="更新履歴" onClose={() => setShowChangelog(false)}>
+          <div style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+            {CHANGELOG.map((entry) => (
+              <div key={entry.version} style={{ marginBottom: 24 }}>
+                <div className="row between" style={{ marginBottom: 4 }}>
+                  <span className="small-text" style={{ fontWeight: 600 }} data-version={entry.version}>v{entry.version}</span>
+                  <span className="tiny muted">{entry.date}</span>
+                </div>
+                {entry.note ? (
+                  <p className="tiny muted" style={{ margin: '0 0 6px' }}>{entry.note}</p>
+                ) : null}
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {entry.items.map((item, i) => (
+                    <li key={i} className="small-text" style={{ marginBottom: 4 }}>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+                {entry.prLinks && entry.prLinks.length > 0 ? (
+                  <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {entry.prLinks.map((link) => (
+                      <a
+                        key={link.url}
+                        href={link.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="tiny"
+                        style={{ color: 'var(--color-accent, #0070c9)' }}
+                      >
+                        {link.label}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </Sheet>
       ) : null}
 
       {confirmReset ? (
