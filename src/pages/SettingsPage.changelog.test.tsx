@@ -36,19 +36,24 @@ describe('changelog data', () => {
     }
   });
 
-  it('CHANGELOG_LATEST_VERSION matches CHANGELOG[0].version', () => {
-    expect(CHANGELOG_LATEST_VERSION).toBe(CHANGELOG[0].version);
-  });
-
-  it('__APP_VERSION__ matches CHANGELOG_LATEST_VERSION', () => {
+  it('CHANGELOG_LATEST_VERSION is the newest versioned entry and matches the app version', () => {
+    expect(CHANGELOG_LATEST_VERSION).toBe(CHANGELOG.find((entry) => entry.version)?.version);
     expect(__APP_VERSION__).toBe(CHANGELOG_LATEST_VERSION);
   });
 
-  it('each entry has 2–5 items', () => {
+  it('entries have unique ids and titles, and 2–5 items each', () => {
+    expect(new Set(CHANGELOG.map((entry) => entry.id)).size).toBe(CHANGELOG.length);
     for (const entry of CHANGELOG) {
+      expect(entry.title.length).toBeGreaterThan(0);
       expect(entry.items.length).toBeGreaterThanOrEqual(2);
       expect(entry.items.length).toBeLessThanOrEqual(5);
     }
+  });
+
+  it('versions are not repeated and carry no link or PR URL anywhere', () => {
+    const versions = CHANGELOG.flatMap((entry) => (entry.version ? [entry.version] : []));
+    expect(new Set(versions).size).toBe(versions.length);
+    expect(JSON.stringify(CHANGELOG)).not.toMatch(/https?:\/\//);
   });
 });
 
@@ -82,13 +87,20 @@ describe('SettingsPage: changelog sheet', () => {
     expect(screen.getByRole('dialog', { name: '更新履歴' })).toBeTruthy();
   });
 
-  it('shows all changelog versions in the sheet', async () => {
+  it('shows every changelog entry in the sheet', async () => {
     await renderSettings();
     fireEvent.click(screen.getByRole('button', { name: '更新履歴を見る' }));
     const dialog = screen.getByRole('dialog', { name: '更新履歴' });
     for (const entry of CHANGELOG) {
-      expect(dialog.querySelector(`[data-version="${entry.version}"]`)).toBeTruthy();
+      expect(dialog.querySelector(`[data-entry="${entry.id}"]`)).toBeTruthy();
+      if (entry.version) expect(dialog.querySelector(`[data-version="${entry.version}"]`)).toBeTruthy();
     }
+  });
+
+  it('renders no links in the sheet', async () => {
+    await renderSettings();
+    fireEvent.click(screen.getByRole('button', { name: '更新履歴を見る' }));
+    expect(screen.getByRole('dialog', { name: '更新履歴' }).querySelectorAll('a').length).toBe(0);
   });
 
   it('closes the sheet with the close button', async () => {

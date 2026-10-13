@@ -13,6 +13,7 @@ import {
   useToast,
 } from '../components/ui';
 import { Icon, type IconName } from '../components/icons';
+import { ChangelogSheet } from '../components/ChangelogSheet';
 import { N01TeamWizard, type N01WizardMode } from '../components/n01/N01TeamWizard';
 import { N01SyncSheet } from '../components/n01/N01SyncSheet';
 import { freshness, isLatest } from '../domain/n01/freshness';
@@ -66,6 +67,7 @@ export function HomePage({
   const [wizard, setWizard] = useState<N01WizardMode | null>(null);
   const [syncing, setSyncing] = useState<Team | null>(null);
   const [nextMatchFlow, setNextMatchFlow] = useState<Team | null>(null);
+  const [showChangelog, setShowChangelog] = useState(false);
 
   // Switching teams detaches the working order (it belongs to the old team), so unsaved
   // work there is confirmed first, exactly like starting a new order.
@@ -78,16 +80,46 @@ export function HomePage({
   const format = store.teamFormats[0];
   const team = store.activeTeam;
 
-  const tertiary: { page: Page; icon: IconName; title: string; meta: string }[] = [
+  const tertiary: { key: string; icon: IconName; title: string; meta: string; onSelect: () => void }[] = [
     {
-      page: 'pairs',
+      key: 'pairs',
       icon: 'pair',
       title: 'ペア相性',
       meta: `${store.teamPairs.length} 件設定済み`,
+      onSelect: () => onNavigate('pairs'),
     },
-    ...(team?.n01 ? [{ page: 'analytics' as Page, icon: 'spark' as IconName, title: 'データ分析', meta: '選手・チームの成績分析' }] : []),
-    { page: 'history', icon: 'history', title: '履歴', meta: `${store.teamOrders.length} 件のオーダー` },
-    { page: 'settings', icon: 'settings', title: '設定 / バックアップ', meta: '重み調整・JSON 入出力' },
+    ...(team?.n01
+      ? [
+          {
+            key: 'analytics',
+            icon: 'spark' as IconName,
+            title: 'データ分析',
+            meta: '選手・チームの成績分析',
+            onSelect: () => onNavigate('analytics'),
+          },
+        ]
+      : []),
+    {
+      key: 'history',
+      icon: 'history',
+      title: '履歴',
+      meta: `${store.teamOrders.length} 件のオーダー`,
+      onSelect: () => onNavigate('history'),
+    },
+    {
+      key: 'settings',
+      icon: 'settings',
+      title: '設定 / バックアップ',
+      meta: '重み調整・JSON 入出力',
+      onSelect: () => onNavigate('settings'),
+    },
+    {
+      key: 'changelog',
+      icon: 'info',
+      title: '更新履歴',
+      meta: `v${__APP_VERSION__} ・ アプリの変更点`,
+      onSelect: () => setShowChangelog(true),
+    },
   ];
 
   return (
@@ -198,8 +230,8 @@ export function HomePage({
           <Card flush>
             <ul className="list">
               {tertiary.map((entry) => (
-                <li key={entry.page}>
-                  <button type="button" className="list-row" onClick={() => onNavigate(entry.page)}>
+                <li key={entry.key}>
+                  <button type="button" className="list-row" onClick={entry.onSelect}>
                     <span className="lead" aria-hidden="true">
                       <Icon name={entry.icon} size={18} />
                     </span>
@@ -233,6 +265,8 @@ export function HomePage({
           ) : null}
         </div>
       </div>
+
+      {showChangelog ? <ChangelogSheet onClose={() => setShowChangelog(false)} /> : null}
 
       {teamSheet ? (
         <Sheet
