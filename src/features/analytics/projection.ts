@@ -59,6 +59,8 @@ export interface SeasonAdoption {
   tally: GameTally | null;
   /** 01 games counted for this view. */
   gamesCounted: number;
+  /** Rows of the season's game list n01 sent but that could not be read (any → the list is partial). */
+  unreadableGames: number;
   metrics: Record<MetricGroup, MetricAdoption>;
   /** Per-player 3DA for multi-thrower games in this view. */
   playerPpr: 'exact' | 'partly-verified' | 'not-applicable' | 'unavailable';
@@ -94,6 +96,7 @@ const ALL_OFFICIAL: Record<MetricGroup, MetricAdoption> = {
 
 const NO_GAMES = 'ゲーム別データを取得できませんでした';
 const PARTIAL_GAMES = 'ゲーム一覧を最後まで取得できなかったため、この季は使いません';
+const unreadableGames = (n: number): string => `読めない試合記録が${n}件あり、欠けたゲームを含めずに集計すると不正確になるため、この季は使いません`;
 const NEEDS_LEGS = 'Leg明細が必要なため、この表示では集計しません';
 
 function effectiveComposition(season: SeasonData, classified: readonly ClassifiedGame[] | null): Composition {
@@ -149,6 +152,7 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
     const composition = effectiveComposition(season, classified);
     const gamesState: GamesState = raw ? (raw.complete ? 'loaded' : 'partial') : source.failed.has(season.tournamentId) ? 'missing' : 'not-needed';
     const usable = raw?.complete ? classified : null;
+    const partialReason = raw && raw.dropped.unreadable > 0 ? unreadableGames(raw.dropped.unreadable) : PARTIAL_GAMES;
     const lines = usable ? linesFromGames(usable, scope, perPlayer) : null;
     const notes: string[] = [];
     if (raw && (raw.dropped.unfinished > 0 || raw.dropped.unreadable > 0)) {
@@ -161,6 +165,7 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
       gamesState,
       tally: classified ? tallyGames(classified) : null,
       gamesCounted: lines?.games ?? 0,
+      unreadableGames: raw?.dropped.unreadable ?? 0,
       notes,
     };
 
@@ -171,7 +176,7 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
     }
 
     if (scope === 'all01' && composition === 'mixed') {
-      const legSet: MetricAdoption = lines ? { state: 'recomputed', reason: '公式のLeg/SetにはCricketが含まれるため、01のゲームから数え直しました' } : { state: 'excluded', reason: gamesState === 'partial' ? PARTIAL_GAMES : NO_GAMES };
+      const legSet: MetricAdoption = lines ? { state: 'recomputed', reason: '公式のLeg/SetにはCricketが含まれるため、01のゲームから数え直しました' } : { state: 'excluded', reason: gamesState === 'partial' ? partialReason : NO_GAMES };
       // Only rows of a division whose schedule has a Cricket slot are corrected; the season's
       // games must also show no Cricket there (a row's division is the team's).
       const cricketDivisions = new Set(classified?.filter((g) => g.family.family === 'cricket').map((g) => g.division) ?? []);
@@ -201,7 +206,7 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
 
     // `all01` with an unknown slot, or a game-kind view: the 01 game rows are the only source.
     const roleView = scope !== 'all01';
-    const missingReason = gamesState === 'partial' ? PARTIAL_GAMES : NO_GAMES;
+    const missingReason = gamesState === 'partial' ? partialReason : NO_GAMES;
     const multi = scope !== 'singles';
     const anyMulti = multi && lines !== null && [...lines.players.values()].length > 0;
     const verifiedAll = anyMulti && [...lines!.players.values()].every((l) => l.darts !== null);

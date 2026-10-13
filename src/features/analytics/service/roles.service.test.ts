@@ -58,6 +58,30 @@ describe('game rows loader', () => {
     expect(result.games.complete).toBe(true);
   });
 
+  it('an unreadable row on the short last page makes the list incomplete; the readable rows are kept (Codex P1)', async () => {
+    const broken = { mid: 'bad', tmid: 't_lg_0_bad_A_B', schid: 's', endMatch: 1, statsData: [{ tpid: 'A' }] };
+    const fake = new FakeGames({ t: synthetic(130, [broken]) });
+    const cache = new AnalyticsCache({ memoryOnly: true, now: () => 1_000 });
+    const result = await loadSeasonGames(ctxOf(fake, { cache }), 't', 40);
+    expect(fake.calls).toHaveLength(2); // page 2 has 31 rows (< 100): the end was reached
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.complete).toBe(false);
+    expect(result.games.dropped.unreadable).toBe(1);
+    expect(result.games.games).toHaveLength(130);
+    // Kept briefly only (10 minutes), so the next visit retries instead of trusting it for a week.
+    const entry = await cache.get('games:t');
+    expect(entry!.expiresAt - entry!.fetchedAt).toBe(10 * 60 * 1000);
+  });
+
+  it('an unreadable row on an earlier full page also makes the list incomplete', async () => {
+    const broken = { mid: 'bad', statsData: [] };
+    const rows = synthetic(150);
+    rows.splice(10, 0, broken);
+    const result = await loadSeasonGames(ctxOf(new FakeGames({ t: rows })), 't', 40);
+    expect(result.ok && result.games.complete).toBe(false);
+    expect(result.ok && result.games.games.length).toBe(150);
+  });
+
   it('serves the second load from the cache, and offline from a stale cache', async () => {
     const fake = new FakeGames({ t: synthetic(10) });
     const cache = new AnalyticsCache({ memoryOnly: true });
@@ -123,6 +147,83 @@ describe('leg reconstruction service (real 2024 2nd data)', () => {
     }
   });
 
+  const personOf = (oid: string) => season2024Data().players.find((p) => p.oid === oid)!.personKey;
+
+  it('Best Leg is confirmed when every singles game of the player was rebuilt (伊集院: 501 → 26 darts)', async () => {
+    const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById);
+    const result = await reconstructPerson(ctxOf(fake), { seasons: [season2024Data()], games: seasonGames, personKey: personOf('6s5w') });
+    expect([...result.bestLegs]).toEqual([[501, 26]]);
+    expect(result.bestLegHeld).toEqual({ all: false, starts: [], reasons: [] });
+  });
+
+  it('budget runs out after the multi-thrower games: 3DA still verified, Best Leg withheld (Codex P2)', async () => {
+    // 和田: 8 multi-thrower games are fetched first; a budget of 8 leaves his 6 singles unfetched.
+    const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, { ...detailsById, ...singlesDetailsFor63Cz() });
+    const result = await reconstructPerson(ctxOf(fake, { maxRequests: 8 }), { seasons: [season2024Data()], games: seasonGames, personKey: personOf('63Cz') });
+    expect(fake.calls.filter((c) => c.operation === 'match/get')).toHaveLength(8);
+    expect(result.checks[0].verified.score).toBe(true); // singles score/darts come exactly from the rows
+    expect(result.bestLegs.size).toBe(0);
+    expect(result.bestLegHeld.starts).toEqual([501]);
+    expect(result.bestLegHeld.reasons[0]).toContain('シングルス6ゲーム中6ゲーム');
+  });
+
+  it('a singles detail that cannot be fetched (network / not found) withholds Best Leg; the 3DA display is kept', async () => {
+    const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById); // 和田's singles details are absent
+    const result = await reconstructPerson(ctxOf(fake), { seasons: [season2024Data()], games: seasonGames, personKey: personOf('63Cz') });
+    expect(result.checks[0]).toMatchObject({ state: 'partly-verified', verified: { score: true } });
+    expect(result.contributions.size).toBeGreaterThan(0);
+    expect(result.bestLegs.size).toBe(0);
+    expect(result.bestLegHeld.starts).toEqual([501]);
+  });
+
+  it('the Codex scenario: one singles game rebuilt, the next stopped by the budget → no partial Best Leg', async () => {
+    // 伊集院 has 2 singles games. Order the list so the won game (best 26) is fetched first and the
+    // budget (1 request) stops the other: 3DA still verifies from the rows, Best Leg must not publish 26.
+    const reversed = new Map([[TDID_2024_2ND, { ...seasonGames.get(TDID_2024_2ND)!, games: [...games].reverse() }]]);
+    const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById);
+    const result = await reconstructPerson(ctxOf(fake, { maxRequests: 1 }), { seasons: [season2024Data()], games: reversed, personKey: personOf('6s5w') });
+    expect(fake.calls.filter((c) => c.operation === 'match/get').map((c) => c.params.mid)).toEqual(['ddPShVZI_1720702983621']);
+    expect(result.checks[0].verified.score).toBe(true);
+    expect(result.bestLegs.size).toBe(0);
+    expect(result.bestLegHeld.starts).toEqual([501]);
+    expect(result.bestLegHeld.reasons[0]).toContain('シングルス2ゲーム中1ゲーム');
+  });
+
+  it('the same with a network failure on the other singles game', async () => {
+    const { wcDQJSji_1721911865826: _missing, ...withoutOne } = detailsById;
+    void _missing;
+    const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, withoutOne);
+    const result = await reconstructPerson(ctxOf(fake), { seasons: [season2024Data()], games: seasonGames, personKey: personOf('6s5w') });
+    expect(result.checks[0].verified.score).toBe(true);
+    expect(result.failures.length).toBe(1);
+    expect(result.bestLegs.size).toBe(0);
+    expect(result.bestLegHeld.starts).toEqual([501]);
+  });
+
+  it('a corrupt singles detail (legs not adding up to the game) withholds Best Leg', async () => {
+    const corrupt = details().find((d) => d.gameId === 'wcDQJSji_1721911865826')!;
+    const tampered = wireDetail({ ...corrupt, sides: [{ ...corrupt.sides[0], score: 999 }, corrupt.sides[1]] });
+    const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, { ...detailsById, wcDQJSji_1721911865826: tampered });
+    const result = await reconstructPerson(ctxOf(fake), { seasons: [season2024Data()], games: seasonGames, personKey: personOf('6s5w') });
+    expect(result.bestLegs.size).toBe(0);
+    expect(result.bestLegHeld.starts).toEqual([501]);
+  });
+
+  it('a season the budget never reached withholds Best Leg for the whole period', async () => {
+    const s = season2024Data();
+    const later = { ...s, tournamentId: 'later', title: 'later season' };
+    const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById);
+    // Budget 0: nothing can be fetched; the first season stops, the second is not attempted.
+    const result = await reconstructPerson(ctxOf(fake, { maxRequests: 0 }), {
+      seasons: [s, later],
+      games: new Map([...seasonGames, ['later', { ...seasonGames.get(TDID_2024_2ND)!, tournamentId: 'later' }]]),
+      personKey: personOf('6s5w'),
+    });
+    expect(result.notAttempted.map((x) => x.title)).toEqual(['later season']);
+    expect(result.bestLegHeld.all).toBe(true);
+    expect(result.bestLegs.size).toBe(0);
+  });
+
   it('a budget that runs out leaves the season "incomplete" — nothing is estimated', async () => {
     const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById);
     const s = season2024Data();
@@ -132,3 +233,15 @@ describe('leg reconstruction service (real 2024 2nd data)', () => {
     expect(result.contributions.size).toBe(0);
   });
 });
+
+/** 和田's 6 singles games as readable details (score / darts matching their rows), for the budget test. */
+function singlesDetailsFor63Cz(): Record<string, unknown> {
+  const rows = withDetailSides(desperadoGames()).filter((g) => g.sides[0].players.length === 1 && g.sides[0].players[0].oid === '63Cz');
+  return Object.fromEntries(
+    rows.map((g) => {
+      const side = g.sides[0];
+      // One leg per game is enough for this test: it is never fetched (budget), only offered.
+      return [g.gameId, wireDetail({ gameId: g.gameId, matchId: g.matchId, schid: g.schid, matchType: null, startScore: 501, finished: true, legs: [], sides: [side, { ...g.sides[1], score: 0, darts: 0 }] })];
+    }),
+  );
+}

@@ -26,8 +26,13 @@ export interface PlayerDetailResult {
   personKey: string;
   checks: SeasonCheck[];
   contributions: PlayerContributions;
-  /** Best Leg per start score from rebuilt singles legs of verified seasons. */
+  /**
+   * Best Leg per start score, only for start scores whose singles games were **all** rebuilt in
+   * every season of the period the player appears in. Independent of the 3DA checksum.
+   */
   bestLegs: Map<number, number>;
+  /** Start scores whose Best Leg is withheld (`all` when a season could not be examined at all). */
+  bestLegHeld: { all: boolean; starts: number[]; reasons: string[] };
   /** Seasons not attempted because the budget ran out or the load was cancelled. */
   notAttempted: { tournamentId: string; title: string }[];
   failures: string[];
@@ -47,7 +52,12 @@ export async function reconstructPerson(
   ctx: GamesContext,
   input: { seasons: readonly SeasonData[]; games: ReadonlyMap<string, SeasonGames>; personKey: string; concurrency?: number },
 ): Promise<PlayerDetailResult> {
-  const result: PlayerDetailResult = { personKey: input.personKey, checks: [], contributions: new Map(), bestLegs: new Map(), notAttempted: [], failures: [], requestsSent: 0 };
+  const result: PlayerDetailResult = { personKey: input.personKey, checks: [], contributions: new Map(), bestLegs: new Map(), bestLegHeld: { all: false, starts: [], reasons: [] }, notAttempted: [], failures: [], requestsSent: 0 };
+  const held = new Set<number>();
+  const holdAll = (reason: string): void => {
+    result.bestLegHeld.all = true;
+    result.bestLegHeld.reasons.push(reason);
+  };
   let stopped = false;
   const concurrency = Math.max(1, input.concurrency ?? 3);
   for (const season of input.seasons) {
@@ -56,10 +66,12 @@ export async function reconstructPerson(
     const raw = input.games.get(season.tournamentId);
     if (!raw?.complete) {
       result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'incomplete', games: 0, reconstructed: 0, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: 'ゲーム一覧を取得できていません' });
+      holdAll(`${season.title}: ゲーム一覧を取得できていません`);
       continue;
     }
     if (stopped) {
       result.notAttempted.push({ tournamentId: season.tournamentId, title: season.title });
+      holdAll(`${season.title}: 通信の上限のため未確認`);
       continue;
     }
     const classified = classifyGames(season, raw.games);
@@ -87,6 +99,25 @@ export async function reconstructPerson(
       const ttl = season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
       await ctx.cache.put(detailKey(season.tournamentId), Object.fromEntries(rebuilt), ttl);
     }
+    // Best Leg: per start score, every singles game of the season must have been rebuilt. A game
+    // not fetched (budget / network) or unreadable leaves that start score unconfirmed.
+    const singlesByStart = new Map<number | null, ClassifiedGame[]>();
+    for (const g of mine) {
+      if (!g.sides.some((side) => side.players.length === 1 && side.players[0].oid === me.oid)) continue;
+      singlesByStart.set(g.startScore, [...(singlesByStart.get(g.startScore) ?? []), g]);
+    }
+    for (const [start, list] of singlesByStart) {
+      const missing = list.filter((g) => !rebuilt.get(g.gameId)?.ok).length;
+      if (missing === 0) continue;
+      const reason = `${season.title}: シングルス${list.length}ゲーム中${missing}ゲームのLeg明細を確認できていません`;
+      if (start === null) holdAll(reason);
+      else {
+        held.add(start);
+        result.bestLegHeld.reasons.push(reason);
+      }
+    }
+    for (const [start, darts] of bestLegsByStart(me.oid, mine, rebuilt)) result.bestLegs.set(start, Math.min(result.bestLegs.get(start) ?? Infinity, darts));
+
     const composition = season.composition.composition;
     if (composition === 'unknown') {
       result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'mismatch', games: mine.length, reconstructed: mine.filter((g) => rebuilt.get(g.gameId)?.ok).length, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: '種別不明のゲーム枠を含むため、n01公式値と照合できません' });
@@ -95,10 +126,11 @@ export async function reconstructPerson(
     const check = checkPlayerSeason(season.tournamentId, me.oid, me.line, classified, rebuilt, composition === 'pure01');
     result.checks.push(check);
     addVerified(result.contributions, check, classified, rebuilt);
-    if (check.verified.score) {
-      for (const [start, darts] of bestLegsByStart(me.oid, mine, rebuilt)) result.bestLegs.set(start, Math.min(result.bestLegs.get(start) ?? Infinity, darts));
-    }
   }
+  // Only confirmed start scores are published; a partial minimum could be worse than the real one.
+  if (result.bestLegHeld.all) result.bestLegs.clear();
+  for (const start of held) result.bestLegs.delete(start);
+  result.bestLegHeld.starts = [...held].sort((a, b) => a - b);
   result.requestsSent = ctx.api.requestCount;
   return result;
 }

@@ -4337,6 +4337,13 @@ input[type='range'] {
   color: var(--color-text-secondary);
 }
 
+.kv-grid .sub {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+
 .kv-grid dd {
   margin: 0;
   font-variant-numeric: tabular-nums;

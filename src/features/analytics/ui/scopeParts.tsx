@@ -91,7 +91,7 @@ export function AnalysisSummary({ load, projection, scope, games }: { load: Peri
         <span>
           <strong>{PERIOD_LABEL[load.request.mode]}</strong> ・ {SCOPE_LABEL[scope]} ・ 集計 <strong data-testid="summary-used">{used}</strong>季{multi ? ` / ${load.wanted}季` : ''}
           {notObtained > 0 ? <span className="badge warn" data-testid="summary-missing">未取得 {notObtained}季</span> : null}
-          {gamesMissing > 0 ? <span className="badge warn">ゲーム記録なし {gamesMissing}季</span> : null}
+          {gamesMissing > 0 ? <span className="badge warn">ゲーム記録が不完全・未取得 {gamesMissing}季</span> : null}
           {flagged ? <span className="badge" data-testid="summary-flag">対象外・未検証の指標あり</span> : null}
           {games.status === 'loading' ? <span className="badge">ゲーム記録を取得中…</span> : null}
         </span>
@@ -123,7 +123,11 @@ export function AnalysisSummary({ load, projection, scope, games }: { load: Peri
                     <td>
                       {a ? COMPOSITION_LABEL[a.composition] : '—'}
                       {a && a.gamesState === 'missing' ? <span className="sub">ゲーム記録を取得できません</span> : null}
-                      {a && a.gamesState === 'partial' ? <span className="sub">ゲーム一覧が途中まで</span> : null}
+                      {a && a.gamesState === 'partial' ? (
+                        <span className="sub" data-testid="games-partial-reason">
+                          {a.unreadableGames > 0 ? `読めない試合記録 ${a.unreadableGames}件のため部分集計（この季は不使用）` : 'ゲーム一覧が途中まで（この季は不使用）'}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="num">{a && a.gamesState !== 'not-needed' ? a.gamesCounted : '—'}</td>
                   </tr>
@@ -224,6 +228,12 @@ export function ReconstructionPanel({
           {result.failures.slice(0, 3).map((f) => (
             <li key={f}>{f}</li>
           ))}
+          {result.bestLegHeld.all || result.bestLegHeld.starts.length > 0 ? (
+            <li data-testid="best-leg-held">
+              Best Leg{result.bestLegHeld.all ? '' : `（${result.bestLegHeld.starts.join('・')}）`}：一部のシングルスのLeg明細を確認できていないため保留
+              <span className="meta">{result.bestLegHeld.reasons.slice(0, 2).join(' / ')}</span>
+            </li>
+          ) : null}
           {result.bestLegs.size > 0 ? (
             <li>
               Best Leg（シングルス・開始点数別）: {[...result.bestLegs].sort((a, b) => a[0] - b[0]).map(([start, darts]) => `${start}: ${darts}本`).join(' ・ ')}

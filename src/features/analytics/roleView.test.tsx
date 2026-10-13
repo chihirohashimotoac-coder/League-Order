@@ -114,3 +114,53 @@ describe('game-kind views on screen', () => {
     expect(within(screen.getByTestId('metric-adoption')).getByText(/Keep \/ Break/).parentElement!.textContent).toContain('対象外');
   });
 });
+
+describe('final review fixes on screen', () => {
+  /** 2024 2nd with n01's official standings row for Desperado (8 played, 2 won), so the Match record shows. */
+  function seasonWithStandings(allZeroOne: boolean) {
+    const base = season2024Data();
+    const official = { teamId: 'pzDR', name: 'Desperado', rank: 4, played: 8, won: 2, drawn: 0, lost: 6, points: 4 };
+    const slots = allZeroOne ? base.slots.filter((x) => x.schid !== '8kxb') : base.slots;
+    return {
+      ...base,
+      slots,
+      composition: { composition: allZeroOne ? ('pure01' as const) : ('mixed' as const), nonZeroOne: [] },
+      divisionComposition: { 0: allZeroOne ? ('pure01' as const) : ('mixed' as const), 1: allZeroOne ? ('pure01' as const) : ('mixed' as const) },
+      standings: [{ divisionIndex: 1, title: 'B', rows: [official] }],
+      teams: base.teams.map((t) => (t.teamId === 'pzDR' ? { ...t, official, matchReconciled: true } : t)),
+    };
+  }
+
+  function teamLoad(s: ReturnType<typeof seasonWithStandings>): { load: PeriodLoad; role: RoleViewProps } {
+    const projection = projectSeasons([s], 'all01', games);
+    const load = { ...emptyLoad({ mode: 'current', currentTournamentId: TDID_2024_2ND }, {}), seasons: projection.seasons, complete: true, window: [{ tournamentId: TDID_2024_2ND, title: s.title, state: 'loaded' as const }] };
+    return { load, role: { scope: 'all01', adoption: projection.adoption, games: gamesState, detail: { running: null, results: new Map(), contributions: new Map(), run: vi.fn() } } };
+  }
+
+  it('the official Match rate of a Cricket-mixed season says it includes Cricket results (numbers unchanged)', () => {
+    const { load, role } = teamLoad(seasonWithStandings(false));
+    render(<TeamAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
+    expect(screen.getByTestId('team-match').textContent).toContain('2勝0分6敗（8試合）');
+    expect(screen.getByTestId('match-includes-cricket').textContent).toBe('Cricketの結果を含む（公式）');
+  });
+
+  it('no Cricket note for an all-01 season', () => {
+    const { load, role } = teamLoad(seasonWithStandings(true));
+    render(<TeamAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
+    expect(screen.getByTestId('team-match').textContent).toContain('2勝0分6敗');
+    expect(screen.queryByTestId('match-includes-cricket')).toBeNull();
+  });
+
+  it('a game list with an unreadable row is shown as partial, with the reason, in the folded details', () => {
+    const partial: GamesSource = {
+      games: new Map([[TDID_2024_2ND, { ...games.games.get(TDID_2024_2ND)!, dropped: { unfinished: 0, unreadable: 2, nonLeague: 0 }, complete: false }]]),
+      failed: new Set(),
+    };
+    const projection = projectSeasons([s], 'doubles', partial);
+    const load: PeriodLoad = { ...emptyLoad({ mode: 'current', currentTournamentId: TDID_2024_2ND }, {}), seasons: [s], complete: true, window: [{ tournamentId: TDID_2024_2ND, title: s.title, state: 'loaded' }] };
+    render(<AnalysisSummary load={load} projection={projection} scope="doubles" games={gamesState} />);
+    expect(screen.getByTestId('analysis-summary').querySelector('.summary-line')!.textContent).toContain('ゲーム記録が不完全・未取得 1季');
+    expect(screen.getByTestId('games-partial-reason').textContent).toContain('読めない試合記録 2件のため部分集計');
+    expect(screen.getByTestId('summary-used').textContent).toBe('0');
+  });
+});

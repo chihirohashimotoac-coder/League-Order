@@ -222,6 +222,19 @@ describe('role lines and projection (P2)', () => {
     expect(p.adoption[0].metrics.legSet.state).toBe('excluded');
   });
 
+  it('a list with an unreadable row: Leg / Set / role figures of that season are withheld, and the reason says why (Codex P1)', () => {
+    const s = seasonOf('s1');
+    const withGap: SeasonGames = { ...complete('s1', games('s1')), dropped: { unfinished: 0, unreadable: 1, nonLeague: 0 }, complete: false };
+    for (const scope of ['singles', 'doubles', 'all01'] as const) {
+      const p = projectSeasons([s], scope, source([['s1', withGap]]));
+      expect(p.adoption[0]).toMatchObject({ gamesState: 'partial', unreadableGames: 1 });
+      expect(p.adoption[0].metrics.legSet).toMatchObject({ state: 'excluded', reason: expect.stringContaining('読めない試合記録が1件') });
+      const a = p.seasons[0].teams.find((t) => t.teamId === 'A')!.line;
+      expect(a?.leg ?? null).toBeNull();
+      expect(a?.set ?? null).toBeNull();
+    }
+  });
+
   it('an unknown-type slot: n01 totals are not adopted in 01全体; only the 01 game rows count', () => {
     const s = seasonOf('s1', { slots: [slot({ schid: 'sgl', numPart: 1, matchType: '01' }), slot({ schid: 'dbl', numPart: 2, matchType: '01' }), slot({ schid: 'x', numPart: 1, startScore: null })] });
     expect(s.composition.composition).toBe('unknown');

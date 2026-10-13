@@ -76,7 +76,9 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
         else seen.set(game.gameId, compact(game));
       }
       if (result.rows < GAME_LIST_PAGE) {
-        complete = true;
+        // The last page was reached. A row n01 sent that could not be read is a game we cannot
+        // account for: the list is then not the whole season, however short the last page was.
+        complete = dropped.unreadable === 0;
         break;
       }
     }
@@ -86,7 +88,8 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
   }
   const games: SeasonGames = { tournamentId, games: [...seen.values()], dropped, complete };
   const ttl = status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
-  // An incomplete list is kept briefly only, so the next visit retries it.
+  // An incomplete list keeps the rows that were read (nothing correct is thrown away), but only
+  // briefly, so the next visit retries it; projection never uses it as the season.
   await ctx.cache.put(key, games, complete ? ttl : Math.min(ttl, 10 * 60 * 1000));
   return { ok: true, games, source: 'network', fetchedAt: ctx.now() };
 }

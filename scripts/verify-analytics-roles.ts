@@ -42,14 +42,17 @@ export interface RoleReport {
   unreachable: boolean;
 }
 
-async function allGames(api: AnalyticsApi, tdid: string): Promise<{ games: RawGame[]; complete: boolean }> {
+async function allGames(api: AnalyticsApi, tdid: string): Promise<{ games: RawGame[]; complete: boolean; unreadable: number }> {
   const games = new Map<string, RawGame>();
+  let unreadable = 0;
   for (let page = 0; page < 20; page += 1) {
     const result = await api.gamesPage(tdid, page);
+    unreadable += result.unreadable;
     for (const g of result.games) if (g.finished && isLeagueGame(g.matchId)) games.set(g.gameId, g);
-    if (result.rows < GAME_LIST_PAGE) return { games: [...games.values()], complete: true };
+    // Same rule as the app: an unreadable row means the list is not the whole season.
+    if (result.rows < GAME_LIST_PAGE) return { games: [...games.values()], complete: unreadable === 0, unreadable };
   }
-  return { games: [...games.values()], complete: false };
+  return { games: [...games.values()], complete: false, unreadable };
 }
 
 /** Checks one season; `playerSample` players are reconstructed (fewest multi-thrower games first). */
@@ -71,8 +74,8 @@ export async function verifySeasonRoles(api: AnalyticsApi, tdid: string, playerS
     const v = slotFamily(s);
     say('note', `  slot ${s.schid}${s.division !== null ? `@div${s.division}` : ''} ${s.subtitle ?? ''} num_part=${s.numPart} start=${s.startScore} legs=${s.limitLegCount} match_type=${s.matchType ?? '(なし)'} → ${v.family} (${v.basis})`);
   }
-  const { games: raw, complete } = await allGames(api, tdid);
-  if (!complete) say('fail', 'ゲーム一覧を最後まで取得できませんでした');
+  const { games: raw, complete, unreadable } = await allGames(api, tdid);
+  if (!complete) say('fail', unreadable > 0 ? `読めない試合記録が${unreadable}件あります（ゲーム一覧は不完全）` : 'ゲーム一覧を最後まで取得できませんでした');
   const games = classifyGames(season, raw);
   const tally = tallyGames(games);
   say('note', `ゲーム ${games.length}件: 01=${tally.byFamily['01']} cricket=${tally.byFamily.cricket} unknown=${tally.byFamily.unknown} / singles=${tally.byRole.singles} doubles=${tally.byRole.doubles} trios=${tally.byRole.trios} gallon=${tally.byRole.gallon} team=${tally.byRole.team} 分類不能=${tally.byRole.unknown}`);

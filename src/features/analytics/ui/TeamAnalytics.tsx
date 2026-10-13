@@ -94,6 +94,15 @@ export function TeamAnalytics({
   const m = myPeriod.metrics;
   const hasLine = baseTeam.line !== null || myPeriod.seasons.some((s) => s.line !== null);
   const match = myPeriod.match;
+  // n01's official Match result counts every game of the match card. Where the team's division
+  // played Cricket (or a slot of unknown type), the official Match rate includes those games.
+  const matchNonZeroOne = myPeriod.seasons.some((entry) => {
+    if (!entry.matchReconciled || !entry.official) return false;
+    const season = load.seasons.find((s) => s.tournamentId === entry.tournamentId);
+    if (!season) return false;
+    const composition = entry.divisionIndex !== null ? (season.divisionComposition[entry.divisionIndex] ?? season.composition.composition) : season.composition.composition;
+    return composition !== 'pure01';
+  });
 
   return (
     <div className="analytics-columns">
@@ -149,7 +158,14 @@ export function TeamAnalytics({
                   </div>
                   <div>
                     <dt>Match勝率</dt>
-                    <dd>{match?.winRate !== null && match?.winRate !== undefined ? formatValue('legRate', match.winRate) : '—'}</dd>
+                    <dd>
+                      {match?.winRate !== null && match?.winRate !== undefined ? formatValue('legRate', match.winRate) : '—'}
+                      {match && matchNonZeroOne ? (
+                        <span className="sub" data-testid="match-includes-cricket">
+                          Cricketの結果を含む（公式）
+                        </span>
+                      ) : null}
+                    </dd>
                   </div>
                 </>
               )}
