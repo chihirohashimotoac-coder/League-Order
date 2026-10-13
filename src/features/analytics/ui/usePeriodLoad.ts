@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { newestFirst } from '../../../integrations/n01/seasonResolver';
 import { AnalyticsApi } from '../api/readApi';
 import { AnalyticsCache } from '../cache/analyticsCache';
-import { loadPeriod } from '../service/periodService';
+import { emptyLoad, loadPeriod } from '../service/periodService';
 import type { PeriodLoad } from '../service/periodService';
 import { loadLeagueList } from '../service/seasonLoader';
 import { classifySeason } from '../seasons';
@@ -22,6 +22,8 @@ export interface SeasonOption {
 
 export interface AnalyticsServices {
   createApi: (signal: AbortSignal) => AnalyticsApi;
+  /** Adapter for the lazy game-row / leg-detail loads, each with its own request budget. */
+  createRoleApi?: (signal: AbortSignal, maxRequests: number) => AnalyticsApi;
   cache: AnalyticsCache;
 }
 
@@ -29,7 +31,11 @@ let sharedCache: AnalyticsCache | null = null;
 
 export function defaultServices(): AnalyticsServices {
   sharedCache ??= new AnalyticsCache();
-  return { createApi: (signal) => new AnalyticsApi({ signal }), cache: sharedCache };
+  return {
+    createApi: (signal) => new AnalyticsApi({ signal }),
+    createRoleApi: (signal, maxRequests) => new AnalyticsApi({ signal, maxRequests }),
+    cache: sharedCache,
+  };
 }
 
 export interface PeriodState {
@@ -87,18 +93,5 @@ export function usePeriodLoad(
 }
 
 function failedLoad(request: PeriodRequest, reason: string): PeriodLoad {
-  return {
-    request,
-    seasons: [],
-    meta: [],
-    failures: [],
-    skipped: [],
-    formatExcluded: [],
-    complete: false,
-    listError: { reason, kind: 'network' },
-    offline: false,
-    usedStaleCache: false,
-    fetchedAt: null,
-    requestsSent: 0,
-  };
+  return emptyLoad(request, { listError: { reason, kind: 'network' } });
 }

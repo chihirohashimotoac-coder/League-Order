@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregatePlayers, aggregateTeams, splitByFormat } from './aggregate';
+import { aggregatePlayers, aggregateTeams } from './aggregate';
 import { AnalyticsApi, RequestBudgetError } from './api/readApi';
 import type { AnalyticsTransport } from './api/readApi';
 import { scopePlayers, scopeTeams } from './ranking';
@@ -202,13 +202,15 @@ describe('aggregatePlayers across seasons', () => {
   });
 });
 
-describe('splitByFormat / teams', () => {
-  it('seasons with another format are excluded with a reason, not pooled', () => {
-    const a = buildSeasonData(season({ tournament: tournament('s2', TEAMS_A) }));
-    const b = buildSeasonData(season({ tournament: tournament('s1', TEAMS_A, { startScore: 701 }) }));
-    const split = splitByFormat([a, b]);
-    expect(split.compatible.map((s) => s.tournamentId)).toEqual(['s2']);
-    expect(split.excluded[0]).toMatchObject({ tournamentId: 's1' });
+describe('pooling across formats / teams', () => {
+  it('seasons with another start score or leg count pool by Σ score / Σ darts (P0)', () => {
+    const a = buildSeasonData(season({ tournament: tournament('s2', TEAMS_A, { legs: 2 }), teamStats: [teamRow('A1', simpleLine(5010, 300, 6, 10))] }));
+    const b = buildSeasonData(season({ tournament: tournament('s1', TEAMS_A, { startScore: 1001, legs: 3 }), teamStats: [teamRow('A1', simpleLine(3003, 150, 4, 5))] }));
+    const pooled = aggregateTeams([a, b]).find((t) => t.seasons.some((s) => s.teamId === 'A1'))!;
+    // (5010 + 3003) × 3 / (300 + 150), not the mean of 50.10 and 60.06.
+    expect(pooled.metrics.ppr.value).toBeCloseTo((8013 * 3) / 450, 10);
+    expect(pooled.metrics.legRate).toMatchObject({ num: 10, den: 15 });
+    expect(pooled.seasons).toHaveLength(2);
   });
 
   it('links teams by a unique strict-normalised name; namesakes and renames stay apart until an alias', () => {

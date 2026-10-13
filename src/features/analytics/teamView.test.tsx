@@ -134,7 +134,7 @@ describe('teamView', () => {
 
 function loadOf(seasons: SeasonData[]): PeriodLoad {
   return {
-    request: { mode: 'current', currentTournamentId: seasons[0].tournamentId }, seasons, meta: [], failures: [], skipped: [], formatExcluded: [],
+    request: { mode: 'current', currentTournamentId: seasons[0].tournamentId }, seasons, meta: [], failures: [], skipped: [], window: [], wanted: 1,
     complete: true, listError: null, offline: false, usedStaleCache: false, fetchedAt: { oldest: 0, newest: 0 }, requestsSent: 0,
   };
 }

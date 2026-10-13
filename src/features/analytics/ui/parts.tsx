@@ -3,7 +3,7 @@ import { Icon } from '../../../components/icons';
 import { formatDateTime, formatValue, METRIC_LABEL } from '../format';
 import type { RankMetric } from '../format';
 import type { PeriodMode } from '../seasons';
-import { describeLoad, periodLabelAllowed } from '../service/periodService';
+import { describeLoad } from '../service/periodService';
 import type { PeriodLoad } from '../service/periodService';
 import type { RankingResult } from '../ranking';
 import type { Insight, Insights, TrendPoint } from '../playerView';
@@ -15,7 +15,7 @@ export const PERIOD_LABEL: Record<PeriodMode, string> = {
   current: '今季',
   specified: '指定季',
   last3: '直近3季',
-  all: '全期間',
+  last12: '直近12季',
 };
 
 const SOURCE_LABEL = { network: '最新取得', cache: '保存済み', 'stale-cache': '保存済み（期限切れ）' } as const;
@@ -101,7 +101,11 @@ export function PeriodBar({
   );
 }
 
-/** Loading / empty / offline / partial / error: always says which, and what is missing. */
+/**
+ * Loading / empty / offline / stale / error. A *partial* period is not a banner any more: the
+ * compact {@link AnalysisSummary} says how many seasons were used and folds the reasons away,
+ * so warnings never push the figures off a small screen.
+ */
 export function LoadBanner({ load, loading }: { load: PeriodLoad | null; loading: boolean }): React.JSX.Element | null {
   if (loading && !load) {
     return (
@@ -113,29 +117,12 @@ export function LoadBanner({ load, loading }: { load: PeriodLoad | null; loading
   }
   if (!load) return null;
   const state = describeLoad(load);
-  const notes: string[] = [];
-  const missingStandings = load.meta.filter((m) => m.missing.includes('standings')).length;
-  const missingRoster = load.meta.filter((m) => m.missing.includes('roster')).length;
-  if (missingStandings > 0) notes.push(`${missingStandings}シーズンで公式順位を取得できませんでした。`);
-  if (missingRoster > 0) notes.push(`${missingRoster}シーズンで名簿を取得できず、その季の選手は他の季と結び付けていません。`);
-  if (load.request.mode === 'all' && periodLabelAllowed(load) !== 'full' && load.seasons.length > 0) {
-    notes.push('取得できた範囲のみの集計です（全期間の完全な集計ではありません）。');
-  }
-  for (const failure of load.failures.slice(0, 3)) notes.push(`${failure.title || failure.tournamentId}: ${failure.reason}`);
-  for (const excluded of load.formatExcluded) notes.push(`${excluded.title}: ${excluded.reason}`);
-  if (state.kind === 'ready' && notes.length === 0) return null;
+  if (state.kind === 'ready' || state.kind === 'partial') return null;
   const tone = state.kind === 'error' ? 'danger' : state.kind === 'empty' ? 'info' : 'warn';
   return (
     <div className={`notice ${tone}`} role="status" data-testid={`analytics-banner-${state.kind}`}>
       <Icon name="alert" size={18} />
-      <span className="small-text">
-        {state.message ? <span>{state.message} </span> : null}
-        {notes.map((note) => (
-          <span key={note} className="block">
-            {note}
-          </span>
-        ))}
-      </span>
+      <span className="small-text">{state.message}</span>
     </div>
   );
 }
@@ -168,6 +155,7 @@ export function MetricCard({
   reliability,
   compare,
   rank,
+  note,
 }: {
   label: string;
   value: string;
@@ -175,6 +163,8 @@ export function MetricCard({
   reliability: 'none' | 'reference' | 'sufficient';
   compare?: string;
   rank?: string;
+  /** Why a value is missing, or what it means in this view. */
+  note?: string;
 }): React.JSX.Element {
   const badge = reliability === 'sufficient' ? '基準充足' : reliability === 'reference' ? '参考' : 'データなし';
   return (
@@ -184,6 +174,7 @@ export function MetricCard({
       <span className="s">{sample || '—'}</span>
       {compare ? <span className="c">{compare}</span> : null}
       {rank ? <span className="r">{rank}</span> : null}
+      {note ? <span className="n">{note}</span> : null}
       <span className={`badge ${reliability === 'sufficient' ? 'ok' : reliability === 'reference' ? 'warn' : ''}`}>{badge}</span>
     </div>
   );

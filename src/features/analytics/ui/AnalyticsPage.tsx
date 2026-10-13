@@ -3,10 +3,17 @@ import { EmptyState } from '../../../components/ui';
 import type { Page } from '../../../navigation';
 import { useAppStore } from '../../../state/appStore';
 import type { PeriodMode, PeriodRequest } from '../seasons';
+import { projectSeasons } from '../projection';
+import type { Projection, SeasonAdoption } from '../projection';
+import type { GameScope } from '../roleGames';
 import { PlayerAnalytics } from './PlayerAnalytics';
 import { LoadBanner, PeriodBar, Segmented, SourceNote } from './parts';
+import { AnalysisSummary, effectiveScope, ScopeBar } from './scopeParts';
+import type { MainScope, OthersPart } from './scopeParts';
 import { defaultServices, usePeriodLoad } from './usePeriodLoad';
 import type { AnalyticsServices } from './usePeriodLoad';
+import { useGamesLoad, usePlayerDetail } from './useRoleData';
+import type { DetailState, GamesState } from './useRoleData';
 
 /**
  * データ分析: PLAYER / TEAM analytics behind one shell.
@@ -37,12 +44,23 @@ export default function AnalyticsPage({
   const [mode, setMode] = useState<PeriodMode>('current');
   const [specified, setSpecified] = useState('');
   const [reload, setReload] = useState(0);
+  const [mainScope, setMainScope] = useState<MainScope>('all01');
+  const [othersPart, setOthersPart] = useState<OthersPart>('others');
+  const scope = effectiveScope(mainScope, othersPart);
 
   const currentId = binding?.lastTournamentId ?? '';
   const request: PeriodRequest | null = binding
     ? { mode, currentTournamentId: currentId, specifiedTournamentId: mode === 'specified' ? specified || currentId : undefined }
     : null;
   const state = usePeriodLoad(resolved, binding?.leagueId ?? null, request, reload);
+  const rawLoad = state.status === 'done' ? state.load : null;
+  const games = useGamesLoad(resolved, rawLoad, scope, reload);
+  const detail = usePlayerDetail(resolved, rawLoad, games.load);
+  // The chosen game kind's view of the seasons: which counters each season contributes.
+  const projection = useMemo<Projection | null>(
+    () => (state.load ? projectSeasons(state.load.seasons, scope, { games: games.load?.games ?? new Map(), failed: games.load?.failed ?? new Set() }, detail.contributions) : null),
+    [state.load, scope, games.load, detail.contributions],
+  );
 
   if (!team || !binding) {
     return (
@@ -53,8 +71,9 @@ export default function AnalyticsPage({
   }
 
   const baseId = mode === 'specified' ? specified || currentId : currentId;
-  const load = state.load;
+  const load = state.load && projection ? { ...state.load, seasons: projection.seasons } : state.load;
   const loading = state.status === 'loading';
+  const roleView: RoleViewProps = { scope, adoption: projection?.adoption ?? [], games, detail };
 
   return (
     <div className="analytics" data-testid="analytics-page">
@@ -78,7 +97,9 @@ export default function AnalyticsPage({
         load={load}
         currentTournamentId={currentId}
       />
-      <LoadBanner load={load} loading={loading} />
+      <ScopeBar main={mainScope} part={othersPart} onMain={setMainScope} onPart={setOthersPart} />
+      <LoadBanner load={state.load} loading={loading} />
+      {state.load && projection && state.load.seasons.length > 0 ? <AnalysisSummary load={state.load} projection={projection} scope={scope} games={games} /> : null}
       {load && load.seasons.length > 0 ? (
         <div className={loading ? 'analytics-body stale' : 'analytics-body'} aria-busy={loading}>
           {view === 'player' ? (
@@ -88,9 +109,10 @@ export default function AnalyticsPage({
               load={load}
               baseTournamentId={baseId}
               onOpenMembers={() => onNavigate('players')}
+              role={roleView}
             />
           ) : TeamView ? (
-            <TeamView team={team} players={store.teamPlayers} load={load} baseTournamentId={baseId} />
+            <TeamView team={team} players={store.teamPlayers} load={load} baseTournamentId={baseId} role={roleView} />
           ) : (
             <p className="small-text muted">チーム分析は準備中です。</p>
           )}
@@ -101,9 +123,18 @@ export default function AnalyticsPage({
   );
 }
 
+/** What the game-kind switch adds to both views. Optional so the views also render on their own (tests). */
+export interface RoleViewProps {
+  scope: GameScope;
+  adoption: SeasonAdoption[];
+  games: GamesState;
+  detail: DetailState & { run: (personKey: string) => void };
+}
+
 export interface TeamViewProps {
   team: NonNullable<ReturnType<typeof useAppStore>['activeTeam']>;
   players: ReturnType<typeof useAppStore>['teamPlayers'];
   load: NonNullable<ReturnType<typeof usePeriodLoad>['load']>;
   baseTournamentId: string;
+  role?: RoleViewProps;
 }

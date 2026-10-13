@@ -4277,6 +4277,53 @@ input[type='range'] {
   margin-top: 4px;
 }
 
+.metric-card .n {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Game-kind switch (01全体 / シングルス / ダブルス / その他). */
+.analytics-scope {
+  display: grid;
+  gap: 8px;
+}
+
+/* One compact line under the filters; the reasons fold into "集計の内訳". */
+.analysis-summary {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+}
+
+.analysis-summary.warn {
+  border-left: 3px solid var(--color-warning);
+}
+
+.analysis-summary .summary-line {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.analysis-summary .summary-line .badge {
+  margin-left: 6px;
+}
+
+.analysis-summary .analytics-details > summary {
+  font-size: 13px;
+}
+
+.reconstruction {
+  display: grid;
+  gap: 8px;
+}
+
 .kv-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4287,6 +4334,13 @@ input[type='range'] {
 .kv-grid dt {
   font-size: 12px;
   font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.kv-grid .sub {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
   color: var(--color-text-secondary);
 }
 

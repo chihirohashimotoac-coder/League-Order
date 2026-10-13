@@ -16,7 +16,7 @@ export const ANALYTICS_DB_VERSION = 1;
 const STORE = 'entries';
 
 /** Bump when the cached shapes change; older entries are then treated as misses. */
-export const ANALYTICS_CACHE_SCHEMA = 1;
+export const ANALYTICS_CACHE_SCHEMA = 2;
 
 export interface CacheEntry<T = unknown> {
   key: string;

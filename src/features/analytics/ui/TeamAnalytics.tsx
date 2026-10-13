@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from 'react';
 import { Card } from '../../../components/ui';
 import type { Player, Team } from '../../../domain/types';
 import { aggregatePlayers } from '../aggregate';
-import { formatSample, formatValue, METRIC_LABEL, RANK_METRICS } from '../format';
+import { formatSample, formatValue, METRIC_LABEL } from '../format';
 import type { RankMetric } from '../format';
 import { MIN_SAMPLE, reliabilityOf } from '../metrics';
 import { buildInsightsFor, cellText, COMPARE_METRICS, metricValue, standingOf } from '../playerView';
@@ -10,6 +10,9 @@ import type { TeamScope } from '../ranking';
 import type { PeriodLoad } from '../service/periodService';
 import { buildTeamPopulation, findTeamPeriod, officialOf, officialPerSeason, rankTeams, resolveBaseTeam, teamPlayerRows, teamTrend, unlinkedSeasons } from '../teamView';
 import type { MetricId } from '../types';
+import { SCOPE_LABEL as GAME_SCOPE_LABEL } from '../roleGames';
+import { scopeMetrics } from '../scopeMetrics';
+import type { RoleViewProps } from './AnalyticsPage';
 import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './parts';
 
 /**
@@ -20,7 +23,6 @@ import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './
 
 type ScopeKind = 'division' | 'league';
 const SCOPE_LABEL: Record<ScopeKind, string> = { division: 'ディビジョン', league: 'リーグ全体' };
-const CARD_METRICS: MetricId[] = ['ppr', 'first9', 'legRate', 'setRate', 'keep', 'break'];
 const TREND_METRICS: MetricId[] = ['ppr', 'first9', 'legRate'];
 const MAX_COMPARE = 3;
 
@@ -28,12 +30,18 @@ export function TeamAnalytics({
   team,
   load,
   baseTournamentId,
+  role,
 }: {
   team: Team;
   players: Player[];
   load: PeriodLoad;
   baseTournamentId: string;
+  role?: RoleViewProps;
 }): React.JSX.Element {
+  const gameScope = role?.scope ?? 'all01';
+  const roleView = gameScope !== 'all01';
+  const available_ = useMemo(() => scopeMetrics(gameScope, load.seasons, 'team'), [gameScope, load.seasons]);
+  const CARD_METRICS = available_.cards;
   const base = load.seasons.find((s) => s.tournamentId === baseTournamentId) ?? null;
   const binding = team.n01;
   const baseTeam = useMemo(() => (base && binding ? resolveBaseTeam(base, binding) : null), [base, binding]);
@@ -55,7 +63,8 @@ export function TeamAnalytics({
   const myPeriod = useMemo(() => (baseTeam ? findTeamPeriod(population.teams, baseTournamentId, baseTeam.teamId) : null), [population.teams, baseTournamentId, baseTeam]);
   const people = useMemo(() => aggregatePlayers(load.seasons), [load.seasons]);
 
-  const [metric, setMetric] = useState<RankMetric>('ppr');
+  const [metricChoice, setMetric] = useState<RankMetric>('ppr');
+  const metric: RankMetric = available_.rank.includes(metricChoice) ? metricChoice : available_.rank[0];
   const [trendMetric, setTrendMetric] = useState<MetricId>('ppr');
   const [compare, setCompare] = useState<string[]>([]);
   const metricSelectId = useId();
@@ -85,13 +94,22 @@ export function TeamAnalytics({
   const m = myPeriod.metrics;
   const hasLine = baseTeam.line !== null || myPeriod.seasons.some((s) => s.line !== null);
   const match = myPeriod.match;
+  // n01's official Match result counts every game of the match card. Where the team's division
+  // played Cricket (or a slot of unknown type), the official Match rate includes those games.
+  const matchNonZeroOne = myPeriod.seasons.some((entry) => {
+    if (!entry.matchReconciled || !entry.official) return false;
+    const season = load.seasons.find((s) => s.tournamentId === entry.tournamentId);
+    if (!season) return false;
+    const composition = entry.divisionIndex !== null ? (season.divisionComposition[entry.divisionIndex] ?? season.composition.composition) : season.composition.composition;
+    return composition !== 'pure01';
+  });
 
   return (
     <div className="analytics-columns">
       <div className="analytics-col">
         <Card title={myPeriod.name} kicker="TEAM">
           <p className="small-text muted" data-testid="team-basis">
-            {myPeriod.seasons.filter((s) => s.line !== null).length}シーズンの合算（チームの成績行のみ。選手個人の成績は加算していません）
+            {myPeriod.metrics.seasons}シーズンの合算{roleView ? `（${GAME_SCOPE_LABEL[gameScope]}のゲームのみ、チーム側の合計）` : ''}（チームの成績行のみ。選手個人の成績は加算していません）
           </p>
           {!hasLine ? (
             <p className="small-text" data-testid="team-unmeasured">
@@ -108,7 +126,7 @@ export function TeamAnalytics({
                       ? `${SCOPE_LABEL[activeScope]}平均 ${formatValue(id, avg.value)}（${ratio.value - avg.value >= 0 ? '+' : ''}${(ratio.value - avg.value).toFixed(2)}）`
                       : `${SCOPE_LABEL[activeScope]}平均 ${formatValue(id, avg.value)}（${ratio.value - avg.value >= 0 ? '+' : ''}${((ratio.value - avg.value) * 100).toFixed(1)}pt）`
                     : undefined;
-                const st = standingOf(rankTeams(population.scoped.members, id), myKey);
+                const st = available_.rank.includes(id) ? standingOf(rankTeams(population.scoped.members, id), myKey) : null;
                 return (
                   <MetricCard
                     key={id}
@@ -117,7 +135,8 @@ export function TeamAnalytics({
                     sample={formatSample(id, ratio.den)}
                     reliability={reliabilityOf(id, ratio)}
                     compare={diff}
-                    rank={st.rank ? `独自 ${st.rank}位 / ${st.population}チーム` : undefined}
+                    rank={st?.rank ? `独自 ${st.rank}位 / ${st.population}チーム` : undefined}
+                    note={ratio.value === null ? (roleView ? 'データ不足（ゲーム記録に含まれません）' : 'データ不足') : undefined}
                   />
                 );
               })}
@@ -126,18 +145,32 @@ export function TeamAnalytics({
           <details className="analytics-details" open>
             <summary>Match / Set / Leg 実績とスコア記録</summary>
             <dl className="kv-grid">
+              {roleView ? (
+                <div>
+                  <dt>Match</dt>
+                  <dd data-testid="team-match">公式のMatch勝敗は「01全体」で表示します</dd>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <dt>Match</dt>
+                    <dd data-testid="team-match">{match ? `${match.won}勝${match.drawn}分${match.lost}敗（${match.played}試合）` : '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Match勝率</dt>
+                    <dd>
+                      {match?.winRate !== null && match?.winRate !== undefined ? formatValue('legRate', match.winRate) : '—'}
+                      {match && matchNonZeroOne ? (
+                        <span className="sub" data-testid="match-includes-cricket">
+                          Cricketの結果を含む（公式）
+                        </span>
+                      ) : null}
+                    </dd>
+                  </div>
+                </>
+              )}
               <div>
-                <dt>Match</dt>
-                <dd data-testid="team-match">
-                  {match ? `${match.won}勝${match.drawn}分${match.lost}敗（${match.played}試合）` : '—'}
-                </dd>
-              </div>
-              <div>
-                <dt>Match勝率</dt>
-                <dd>{match?.winRate !== null && match?.winRate !== undefined ? formatValue('legRate', match.winRate) : '—'}</dd>
-              </div>
-              <div>
-                <dt>Set</dt>
+                <dt>{roleView ? 'ゲーム（Set）' : 'Set'}</dt>
                 <dd>{m.setRate.den > 0 ? `${m.setRate.num}勝 / ${m.setRate.den}` : '—'}</dd>
               </div>
               <div>
@@ -176,6 +209,7 @@ export function TeamAnalytics({
         </Card>
 
         <Card title="公式順位（n01）" kicker="OFFICIAL">
+          {roleView ? <p className="small-text muted">公式順位はゲーム種別に関係なく、シーズン・ディビジョン単位のn01の結果です。</p> : null}
           {official.group ? (
             <>
               <p className="small-text muted" data-testid="official-basis">
@@ -250,7 +284,7 @@ export function TeamAnalytics({
               <span>指標</span>
             </label>
             <select id={metricSelectId} value={metric} onChange={(event) => setMetric(event.target.value as RankMetric)}>
-              {RANK_METRICS.map((id) => (
+              {available_.rank.map((id) => (
                 <option key={id} value={id}>
                   {METRIC_LABEL[id]}
                 </option>
@@ -262,6 +296,11 @@ export function TeamAnalytics({
               他のディビジョンでの成績を含みます（純粋な同一ディビジョン比較ではありません）。
             </p>
           ) : null}
+          {available_.notes.map((note) => (
+            <p key={note} className="small-text muted" data-testid="scope-rank-note">
+              {note}
+            </p>
+          ))}
           {activeScope === 'league' ? (
             <p className="small-text muted" data-testid="cross-division-note">
               ディビジョンや対戦相手の水準が異なるため、この並びはディビジョン間の強さの優劣を示すものではありません。
@@ -394,6 +433,7 @@ export function TeamAnalytics({
             </table>
           </div>
           <p className="small-text muted">
+            {roleView ? `${GAME_SCOPE_LABEL[gameScope]}のゲームのみ。ダブルス等の3DAはチーム合計を選手に配分しないため「—」です（プレイヤー分析で個人別に復元できます）。` : ''}
             「関与Leg」はチームのLeg数のうち、その選手が出場したLegの割合です（基準シーズン）。ダブルスのLegは両者に数えるため合計は100%を超え、勝利への貢献度ではありません。選手の成績をチームの成績に加算することはしていません。
           </p>
         </Card>

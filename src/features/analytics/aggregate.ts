@@ -4,26 +4,11 @@ import { teamKeys } from './seasonData';
 import type { Metrics, OfficialStandingRow, StatLine } from './types';
 
 /**
- * Multi-season pooling (design §3, 合算). Seasons are given newest first and must share one
- * game format; {@link splitByFormat} separates the ones that do not, with the reason.
+ * Multi-season pooling (design §3, 合算). Seasons are given newest first. Seasons with a
+ * different format (legs, start score, division settings) are pooled too: every figure is
+ * Σ numerator / Σ denominator of counters that mean the same thing in every season, and
+ * `projection.ts` decides beforehand which counters a season may contribute.
  */
-
-export interface FormatSplit {
-  compatible: SeasonData[];
-  excluded: { tournamentId: string; title: string; reason: string }[];
-}
-
-/** Keeps the seasons whose format matches the base season's (default: the newest). */
-export function splitByFormat(seasons: readonly SeasonData[], baseTournamentId?: string): FormatSplit {
-  const base = seasons.find((s) => s.tournamentId === baseTournamentId) ?? seasons[0];
-  const compatible: SeasonData[] = [];
-  const excluded: FormatSplit['excluded'] = [];
-  for (const season of seasons) {
-    if (!base || season.signature === base.signature) compatible.push(season);
-    else excluded.push({ tournamentId: season.tournamentId, title: season.title, reason: '試合形式（ゲーム種別・スコア・レッグ数）が基準の季と異なるため合算しません' });
-  }
-  return { compatible, excluded };
-}
 
 export interface PlayerSeasonEntry {
   tournamentId: string;

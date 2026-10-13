@@ -231,17 +231,19 @@ describe('seasons', () => {
 
   it('an unclassified season makes the period incomplete rather than silently eligible', () => {
     const cands = [league(list[0]), { summary: list[1], classification: { kind: 'unknown', reason: '未取得' } } as SeasonCandidate, league(list[2])];
-    const sel = selectSeasons(cands, { mode: 'all', currentTournamentId: 's4' });
+    const sel = selectSeasons(cands, { mode: 'last12', currentTournamentId: 's4' });
     expect(sel.seasons.map((s) => s.tournamentId)).toEqual(['s4', 's2']);
     expect(sel.complete).toBe(false);
   });
 
-  it('all is capped, and a cut makes it incomplete', () => {
-    const cands = list.map(league);
-    expect(selectSeasons(cands, { mode: 'all', currentTournamentId: 's4' }).complete).toBe(true);
-    const capped = selectSeasons(cands, { mode: 'all', currentTournamentId: 's4' }, { maxSeasons: 2 });
-    expect(capped.seasons).toHaveLength(2);
-    expect(capped.complete).toBe(false);
+  it('last12 takes at most 12 seasons from the anchor; a shorter history is not "complete"', () => {
+    const many = Array.from({ length: 15 }, (_, i) => summary(`m${i}`, 10_000 - i * 100, 40, `Season ${i}`));
+    const cands = many.map(league);
+    const sel = selectSeasons(cands, { mode: 'last12', currentTournamentId: 'm1' });
+    expect(sel.seasons.map((s) => s.tournamentId)).toEqual(many.slice(1, 13).map((s) => s.tournamentId));
+    expect(sel.complete).toBe(true);
+    // Only 4 seasons exist from s4 down: the period is partial, never "12 seasons".
+    expect(selectSeasons(list.map(league), { mode: 'last12', currentTournamentId: 's4' }).complete).toBe(false);
   });
 
   it('format signature differs by start score, legs and division overrides', () => {

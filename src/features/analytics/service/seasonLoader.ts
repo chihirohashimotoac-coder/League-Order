@@ -5,6 +5,7 @@ import type { AnalyticsApi } from '../api/readApi';
 import { RequestBudgetError } from '../api/readApi';
 import type { AnalyticsCache, CacheEntry } from '../cache/analyticsCache';
 import { TTL } from '../cache/analyticsCache';
+import type { SlotEvidence } from '../gameKind';
 import type { SeasonInput } from '../seasonData';
 import type { OfficialStandingGroup, PlayerStatsRow, TeamStatsRow } from '../types';
 
@@ -24,6 +25,8 @@ export interface CachedSeason {
   playerStats: PlayerStatsRow[];
   standings: OfficialStandingGroup[] | null;
   roster: N01RosterPlayer[] | null;
+  /** Schedule slots as written (`match_type` absence kept). */
+  slots: SlotEvidence[];
 }
 
 export type DataSource = 'network' | 'cache' | 'stale-cache';
@@ -69,6 +72,7 @@ export function toCached(input: SeasonInput, missing: readonly string[]): Cached
     playerStats: [...input.playerStats],
     standings: missing.includes('standings') ? null : [...input.standings],
     roster: input.roster ? [...input.roster] : null,
+    slots: [...input.slots],
   };
 }
 
@@ -83,6 +87,7 @@ export function fromCached(cached: CachedSeason): { input: SeasonInput; missing:
       playerStats: cached.playerStats,
       standings: cached.standings ?? [],
       roster: cached.roster,
+      slots: cached.slots,
     },
     missing,
   };
@@ -119,6 +124,7 @@ export async function loadSeason(ctx: LoaderContext, tournamentId: string): Prom
 
   try {
     const tournament = await ctx.api.tournament(tournamentId);
+    const slots = await ctx.api.slotEvidence(tournamentId);
     const [teamStats, playerStats] = await Promise.all([ctx.api.teamStats(tournamentId), ctx.api.playerStats(tournamentId)]);
     const missing: ('standings' | 'roster')[] = [];
     let standings: OfficialStandingGroup[] = [];
@@ -135,7 +141,7 @@ export async function loadSeason(ctx: LoaderContext, tournamentId: string): Prom
       if (error instanceof N01Error && error.kind === 'aborted') throw error;
       missing.push('roster');
     }
-    const input: SeasonInput = { tournament, teamStats, playerStats, standings, roster };
+    const input: SeasonInput = { tournament, teamStats, playerStats, standings, roster, slots };
     const ttl = tournament.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
     // A partial season is kept briefly only: the missing part should be retried soon.
     await ctx.cache.put(key, toCached(input, missing), missing.length > 0 ? Math.min(ttl, 10 * 60 * 1000) : ttl);
