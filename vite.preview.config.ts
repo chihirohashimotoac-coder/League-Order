@@ -1,7 +1,10 @@
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string };
 
 /**
  * Non-production preview build (`npm run build:preview` → `dist-preview/`).
@@ -23,6 +26,7 @@ export default defineConfig({
   base: './',
   plugins: [react()],
   define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
     __PREVIEW_COMMIT__: JSON.stringify(process.env.PREVIEW_COMMIT ?? commit()),
     // `PREVIEW_APP_LINK=0` leaves out the link to the app page, for hosts that publish only the
     // scenarios page (the app itself needs its own page, storage and worker).
