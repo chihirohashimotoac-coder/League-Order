@@ -23,11 +23,6 @@ vi.mock('../state/appStore', () => ({
   }),
 }));
 
-vi.mock('../components/ui', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../components/ui')>();
-  return actual;
-});
-
 async function renderSettings() {
   const { SettingsPage } = await import('../pages/SettingsPage');
   return render(<SettingsPage />);
