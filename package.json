@@ -1,7 +1,7 @@
 {
   "name": "darts-league-order",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Darts League Order Optimizer - offline-first PWA for generating fair, strong darts league line-ups",
   "scripts": {
