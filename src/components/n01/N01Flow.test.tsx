@@ -105,7 +105,7 @@ describe('n01 team creation', () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
-    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'フォーマット' }));
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'フォーマット' }));
     await user.click(await screen.findByRole('button', { name: /ATDO 2026 3rd A Division.*n01 管理/ }));
     const viewer = await screen.findByRole('dialog', { name: 'n01 管理フォーマット' });
     expect(within(viewer).getByTestId('managed-format-source')).toHaveTextContent('ATDO');
@@ -118,7 +118,7 @@ describe('n01 team creation', () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
-    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'メンバー' }));
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'メンバー' }));
     const row = (await screen.findByText('中村 蓮')).closest('.list-row')!;
     expect(row).toHaveTextContent('戦力データ未設定');
     expect(row).not.toHaveTextContent('PPR 0');
@@ -260,7 +260,7 @@ describe('next match order in one flow (Phase 5)', () => {
     expect(fielded.some((name) => name.includes('伊藤 由佳'))).toBe(false);
 
     // The next time, today's attendance starts from last time's.
-    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'ホーム' }));
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
     const again = await startNextMatch(user);
     const second = await within(again).findByTestId('flow-attendance', {}, { timeout: 10_000 });
     expect((within(second).getByRole('checkbox', { name: /伊藤 由佳/ }) as HTMLInputElement).checked).toBe(false);

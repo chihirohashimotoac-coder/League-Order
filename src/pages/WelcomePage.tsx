@@ -3,7 +3,7 @@ import type { Player, Team } from '../domain/types';
 import { createId } from '../utils/id';
 import { FORMAT_TEMPLATES, formatFromTemplate } from '../storage/seed';
 import { useAppStore } from '../state/appStore';
-import { Field, useToast } from '../components/ui';
+import { Field, onRadioGroupKeyDown, rovingTabIndex, useToast } from '../components/ui';
 import { Icon } from '../components/icons';
 import { N01TeamWizard } from '../components/n01/N01TeamWizard';
 
@@ -243,17 +243,23 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
           <p className="body-text lead">
             リーグのゲーム構成です。あとから自由に編集・追加できます。
           </p>
-          <div className="template-list" role="radiogroup" aria-label="フォーマット">
-            {FORMAT_TEMPLATES.map((template) => (
+          <div className="template-list" role="radiogroup" aria-label="フォーマット" onKeyDown={onRadioGroupKeyDown}>
+            {FORMAT_TEMPLATES.map((template, index) => (
               <button
                 type="button"
                 key={template.key}
                 role="radio"
                 aria-checked={templateKey === template.key}
+                tabIndex={rovingTabIndex(
+                  templateKey === template.key,
+                  index,
+                  FORMAT_TEMPLATES.some((entry) => entry.key === templateKey),
+                )}
                 className="preset"
                 onClick={() => setTemplateKey(template.key)}
               >
                 <span className="p-head">
+                  <span className="p-radio" aria-hidden="true" />
                   <Icon name="format" size={18} />
                   {template.name}
                   {templateKey === template.key ? (

@@ -29,6 +29,9 @@ import { BACK_TARGETS, PAGE_TITLES, TAB_FOR_PAGE, TABS, type Page } from './navi
 import { onUpdateAvailable } from './pwa';
 import { ConfirmDialog, EmptyState, STATE_META, StatusBadge, useToast } from './components/ui';
 import { Icon } from './components/icons';
+import { Breadcrumbs, MenuButton, MenuDrawer } from './components/AppNav';
+import { KineticText } from './components/motion';
+import { ChangelogSheet } from './components/ChangelogSheet';
 import { HomePage, type WorkingOrderSummary } from './pages/HomePage';
 import { PlayersPage } from './pages/PlayersPage';
 import { PairsPage } from './pages/PairsPage';
@@ -73,6 +76,8 @@ export function App(): React.JSX.Element {
   const [applyUpdate, setApplyUpdate] = useState<(() => void) | null>(null);
   /** What to do once the captain agrees to discard unsaved work (null = no dialog). */
   const [confirmDiscard, setConfirmDiscard] = useState<(() => void) | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showChangelog, setShowChangelog] = useState(false);
 
   // A new build is never applied automatically — the captain decides when.
   useEffect(() => onUpdateAvailable((apply) => setApplyUpdate(() => apply)), []);
@@ -521,7 +526,10 @@ export function App(): React.JSX.Element {
             LEAGUE ORDER
             {page !== 'home' ? <span className="team"> / {teamName}</span> : null}
           </span>
-          <h1>{title}</h1>
+          {/* Keyed by the title, so every screen change replays the kinetic entrance. */}
+          <h1 key={title}>
+            <KineticText text={title} step={22} />
+          </h1>
         </span>
         {page === 'result' && solution ? (
           <StatusBadge tone={stateMeta.tone} icon={stateMeta.icon}>
@@ -529,6 +537,7 @@ export function App(): React.JSX.Element {
           </StatusBadge>
         ) : null}
         {page === 'home' && store.activeTeam?.demo ? <span className="demo-badge">DEMO</span> : null}
+        <MenuButton open={menuOpen} onClick={() => setMenuOpen(true)} />
       </header>
 
       <main
@@ -536,6 +545,7 @@ export function App(): React.JSX.Element {
           .filter(Boolean)
           .join(' ')}
       >
+        <Breadcrumbs page={page} onNavigate={setPage} />
         {applyUpdate ? (
           <div className="notice info">
             <Icon name="refresh" size={18} />
@@ -545,6 +555,8 @@ export function App(): React.JSX.Element {
             </button>
           </div>
         ) : null}
+        {/* Keyed by the screen: its sections enter in a short stagger (CSS, `.page-view`). */}
+        <div className="page-view" key={page}>
         {page === 'home' ? (
           <HomePage
             onNavigate={setPage}
@@ -553,6 +565,7 @@ export function App(): React.JSX.Element {
             onResume={() => setPage('result')}
             onNextMatch={generateNextMatch}
             currentParticipants={draft?.participants ?? null}
+            onOpenOrder={openSavedOrder}
           />
         ) : null}
         {page === 'players' ? <PlayersPage /> : null}
@@ -620,6 +633,7 @@ export function App(): React.JSX.Element {
             <AnalyticsEntry onNavigate={setPage} />
           </Suspense>
         ) : null}
+        </div>
       </main>
 
       <nav className="tab-bar" aria-label="メインナビゲーション">
@@ -642,6 +656,22 @@ export function App(): React.JSX.Element {
           </button>
         ))}
       </nav>
+
+      {menuOpen ? (
+        <MenuDrawer
+          page={page}
+          teamName={teamName}
+          leagueName={store.activeTeam?.leagueName}
+          showAnalytics={!!store.activeTeam?.n01}
+          working={solution ? { lifecycle, version: latest?.version ?? 0 } : null}
+          onNavigate={setPage}
+          onNewOrder={() => startNewOrder()}
+          onShowChangelog={() => setShowChangelog(true)}
+          onClose={() => setMenuOpen(false)}
+        />
+      ) : null}
+
+      {showChangelog ? <ChangelogSheet onClose={() => setShowChangelog(false)} /> : null}
 
       {confirmDiscard ? (
         <ConfirmDialog

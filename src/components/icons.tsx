@@ -50,6 +50,8 @@ const PATHS = {
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   swap: 'M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7',
   calendar: 'M4 5h16v15H4zM4 10h16M9 3v4M15 3v4',
+  menu: 'M4 6h16M4 12h16M4 18h16',
+  chart: 'M4 20h16M7 16v-5M12 16V6M17 16v-8',
 } as const;
 
 export type IconName = keyof typeof PATHS;

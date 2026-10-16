@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { OrderLifecycleState, Team } from '../domain/types';
+import type { OrderLifecycleState, Player, SavedOrder, Team } from '../domain/types';
 import { createId } from '../utils/id';
 import { totalSlots } from '../domain/games/format';
 import { useAppStore } from '../state/appStore';
@@ -24,6 +24,12 @@ import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
 import type { ParticipantConfig } from '../domain/types';
 import { useN01Environment } from '../state/n01Environment';
 import type { Page } from '../navigation';
+import { latestVersion } from '../domain/orders/lifecycle';
+import { effectivePpr } from '../domain/n01/effectivePpr';
+import { formatPpr } from '../domain/players/strength';
+import { formatRating, onRadioGroupKeyDown, rovingTabIndex } from '../components/ui';
+import { Carousel } from '../components/Carousel';
+import { BarChart, KineticText, RingGauge, RollingNumber, StackedBar, type BarDatum } from '../components/motion';
 
 /** What HOME needs to know about the order currently open in this session. */
 export interface WorkingOrderSummary {
@@ -47,6 +53,7 @@ export function HomePage({
   onResume,
   onNextMatch,
   currentParticipants = null,
+  onOpenOrder,
 }: {
   onNavigate: (page: Page) => void;
   onNewOrder: () => void;
@@ -56,6 +63,8 @@ export function HomePage({
   onNextMatch?: (order: NextMatchOrder) => void;
   /** Attendance being worked on in this session. */
   currentParticipants?: readonly ParticipantConfig[] | null;
+  /** Opens a saved order (the recent-orders carousel). */
+  onOpenOrder?: (order: SavedOrder) => void;
 }): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
@@ -68,6 +77,18 @@ export function HomePage({
   const [syncing, setSyncing] = useState<Team | null>(null);
   const [nextMatchFlow, setNextMatchFlow] = useState<Team | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [showStrength, setShowStrength] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState<SavedOrder | null>(null);
+
+  // Opening a saved order replaces the working copy: unsaved work is confirmed first.
+  const openOrder = (order: SavedOrder): void => {
+    if (!onOpenOrder) return;
+    if (working && !working.saved) {
+      setConfirmOpen(order);
+      return;
+    }
+    onOpenOrder(order);
+  };
 
   // Switching teams detaches the working order (it belongs to the old team), so unsaved
   // work there is confirmed first, exactly like starting a new order.
@@ -150,11 +171,13 @@ export function HomePage({
             <NextMatchCard team={team} onStart={() => setNextMatchFlow(team)} onSync={() => setSyncing(team)} />
           ) : null}
           <section className="hero" aria-labelledby="hero-title">
-            <span className="kicker">LEAGUE ORDER</span>
+            <span className="kicker">
+              <KineticText text="LEAGUE ORDER" variant="track" step={30} />
+            </span>
             <h2 className="hero-title" id="hero-title">
-              試合のオーダーを、
+              <KineticText text="試合のオーダーを、" step={34} />
               <br />
-              速く・公平に・強く。
+              <KineticText text="速く・公平に・強く。" variant="drop" delay={320} step={46} className="hero-accent" />
             </h2>
             <div className="hero-actions">
               <button type="button" className={team?.n01 ? 'btn xl' : 'btn primary xl'} onClick={onNewOrder}>
@@ -180,7 +203,9 @@ export function HomePage({
             <div className="team-card-top">
               <span className="grow">
                 <span className="kicker">ACTIVE TEAM</span>
-                <span className="team-name">{team?.name ?? '未設定'}</span>
+                <span className="team-name">
+                  <KineticText text={team?.name ?? '未設定'} step={30} />
+                </span>
                 {team?.leagueName ? <span className="team-league">{team.leagueName}</span> : null}
               </span>
               <button type="button" className="btn small" onClick={() => setTeamSheet(true)}>
@@ -191,21 +216,34 @@ export function HomePage({
             <div className="scoreboard">
               <div>
                 <span className="k">PLAYERS</span>
-                <span className="v">{store.teamPlayers.length}</span>
+                <RollingNumber className="v" value={store.teamPlayers.length} />
               </div>
               <div>
                 <span className="k">FORMATS</span>
-                <span className="v">{store.teamFormats.length}</span>
+                <RollingNumber className="v" value={store.teamFormats.length} />
               </div>
               <div>
                 <span className="k">ORDERS</span>
-                <span className="v">{store.teamOrders.length}</span>
+                <RollingNumber className="v" value={store.teamOrders.length} />
               </div>
             </div>
           </section>
+
+          {store.teamOrders.length > 0 && onOpenOrder ? (
+            <RecentOrdersCarousel orders={store.teamOrders} onOpen={openOrder} />
+          ) : (
+            <GuideCarousel
+              players={store.teamPlayers.length}
+              formats={store.teamFormats.length}
+              onNavigate={onNavigate}
+              onNewOrder={onNewOrder}
+            />
+          )}
         </div>
 
         <div>
+          <TeamInsight orders={store.teamOrders} players={store.teamPlayers} onShowStrength={() => setShowStrength(true)} />
+
           <div className="quick-grid">
             <button type="button" className="quick-tile" onClick={() => onNavigate('players')}>
               <span className="tile-icon" aria-hidden="true">
@@ -267,6 +305,25 @@ export function HomePage({
       </div>
 
       {showChangelog ? <ChangelogSheet onClose={() => setShowChangelog(false)} /> : null}
+
+      {showStrength ? (
+        <StrengthModal players={store.teamPlayers} teamName={team?.name ?? ''} onClose={() => setShowStrength(false)} />
+      ) : null}
+
+      {confirmOpen && onOpenOrder ? (
+        <ConfirmDialog
+          title="保存済みのオーダーを開く"
+          message={`作業中のオーダーに保存されていない変更があります。「${confirmOpen.title}」を開くと破棄されます。残す場合は結果画面で保存または確定してください。`}
+          confirmLabel="破棄して開く"
+          destructive
+          onCancel={() => setConfirmOpen(null)}
+          onConfirm={() => {
+            const target = confirmOpen;
+            setConfirmOpen(null);
+            onOpenOrder(target);
+          }}
+        />
+      ) : null}
 
       {teamSheet ? (
         <Sheet
@@ -636,5 +693,290 @@ function TeamEditor({
         </div>
       ) : null}
     </Sheet>
+  );
+}
+
+/**
+ * TEAM INSIGHT: how much of the saved work is finalized, as a ring and a proportion bar,
+ * plus the way into the members' strength chart. Read-only — it counts stored records.
+ */
+function TeamInsight({
+  orders,
+  players,
+  onShowStrength,
+}: {
+  orders: readonly SavedOrder[];
+  players: readonly Player[];
+  onShowStrength: () => void;
+}): React.JSX.Element {
+  const finalized = orders.filter((order) => latestVersion(order.versions) !== null).length;
+  const drafts = orders.length - finalized;
+  const rate = orders.length > 0 ? finalized / orders.length : 0;
+  const rated = players.filter((player) => player.rating !== null && Number.isFinite(player.rating)).length;
+  return (
+    <section className="card insight-card" aria-labelledby="insight-title">
+      <div className="card-head">
+        <h2 className="card-title" id="insight-title">
+          <span className="kicker" aria-hidden="true">
+            INSIGHT
+          </span>
+          チームの状況
+        </h2>
+      </div>
+      <div className="insight-body">
+        <RingGauge
+          value={rate}
+          label="確定率"
+          display={orders.length > 0 ? `${Math.round(rate * 100)}%` : '—'}
+          tone="success"
+        />
+        <div className="insight-side">
+          <StackedBar
+            label="オーダーの内訳"
+            segments={[
+              { key: 'final', label: '確定', value: finalized, tone: 'success' },
+              { key: 'draft', label: '下書き', value: drafts, tone: 'draft' },
+            ]}
+          />
+          <p className="tiny muted insight-note">
+            戦力データ入力済み <strong className="num">{rated}</strong> / {players.length} 名 (Rating)
+          </p>
+          <button type="button" className="btn small" onClick={onShowStrength} disabled={players.length === 0}>
+            <Icon name="chart" size={16} />
+            メンバーの戦力分布
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+type StrengthMetric = 'rating' | 'ppr';
+
+/**
+ * Members' strength as a bar chart in a modal. Values are the stored Rating or the PPR
+ * the order generator would use (n01 or manual); a missing value is shown as "—", never 0.
+ */
+function StrengthModal({
+  players,
+  teamName,
+  onClose,
+}: {
+  players: readonly Player[];
+  teamName: string;
+  onClose: () => void;
+}): React.JSX.Element {
+  const ratingOf = (player: Player): number | null =>
+    player.rating !== null && Number.isFinite(player.rating) ? player.rating : null;
+  const pprOf = (player: Player): number | null => effectivePpr(player).value;
+  const hasRating = players.some((player) => ratingOf(player) !== null);
+  const hasPpr = players.some((player) => pprOf(player) !== null);
+  const [metric, setMetric] = useState<StrengthMetric>(hasRating || !hasPpr ? 'rating' : 'ppr');
+
+  const valueOf = metric === 'rating' ? ratingOf : pprOf;
+  const known = players.map(valueOf).filter((value): value is number => value !== null);
+  const max = known.length > 0 ? Math.max(...known) : 0;
+  const average = known.length > 0 ? known.reduce((sum, value) => sum + value, 0) / known.length : null;
+  const data: BarDatum[] = [...players]
+    .sort((a, b) => (valueOf(b) ?? -Infinity) - (valueOf(a) ?? -Infinity))
+    .map((player) => {
+      const value = valueOf(player);
+      return {
+        key: player.id,
+        label: player.name,
+        ratio: value !== null && max > 0 ? value / max : 0,
+        display: metric === 'rating' ? formatRating(value) : formatPpr(value),
+        muted: value === null,
+      };
+    });
+
+  const options: { key: StrengthMetric; label: string }[] = [
+    { key: 'rating', label: 'Rating' },
+    { key: 'ppr', label: 'PPR' },
+  ];
+
+  return (
+    <Sheet title="メンバーの戦力分布" onClose={onClose} variant="modal" className="strength-modal">
+      <p className="tiny muted" style={{ marginTop: 0 }}>
+        {teamName} ・ {players.length} 名。未入力の値は「—」で表示し、0 としては扱いません。
+      </p>
+      <div className="segmented" role="radiogroup" aria-label="表示する指標" onKeyDown={onRadioGroupKeyDown}>
+        {options.map((option, index) => (
+          <button
+            type="button"
+            key={option.key}
+            role="radio"
+            aria-checked={metric === option.key}
+            tabIndex={rovingTabIndex(metric === option.key, index, true)}
+            onClick={() => setMetric(option.key)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="scoreboard strength-summary">
+        <div>
+          <span className="k">入力済み</span>
+          <RollingNumber className="v" value={`${known.length}/${players.length}`} />
+        </div>
+        <div>
+          <span className="k">平均</span>
+          <RollingNumber className="v" value={average === null ? '—' : average.toFixed(1)} />
+        </div>
+        <div>
+          <span className="k">最高</span>
+          <RollingNumber className="v" value={known.length > 0 ? (Number.isInteger(max) ? String(max) : max.toFixed(1)) : '—'} />
+        </div>
+      </div>
+      {/* Keyed by the metric: switching replays the bars growing in. */}
+      <BarChart key={metric} data={data} label={metric === 'rating' ? 'メンバー別 Rating' : 'メンバー別 PPR'} />
+    </Sheet>
+  );
+}
+
+/** The latest saved orders, one per slide; a slide opens its order. */
+function RecentOrdersCarousel({
+  orders,
+  onOpen,
+}: {
+  orders: readonly SavedOrder[];
+  onOpen: (order: SavedOrder) => void;
+}): React.JSX.Element {
+  const recent = orders.slice(0, 6);
+  return (
+    <Carousel
+      label="最近のオーダー"
+      kicker="RECENT"
+      slideLabel={(index) => `${index + 1} / ${recent.length}: ${recent[index].title}`}
+      slides={recent.map((order) => {
+        const latest = latestVersion(order.versions);
+        const players = new Set(order.solution.assignments.flatMap((assignment) => assignment.playerIds).filter(Boolean)).size;
+        return {
+          key: order.id,
+          content: (
+            <button type="button" className="order-slide" onClick={() => onOpen(order)}>
+              <span className="order-slide-top">
+                {latest ? (
+                  <StatusBadge tone="finalized" icon="checkCircle">
+                    v{latest.version} 確定
+                  </StatusBadge>
+                ) : (
+                  <StatusBadge tone="draft" icon="edit">
+                    未確定
+                  </StatusBadge>
+                )}
+                <span className="tiny muted">{new Date(latest?.finalizedAt ?? order.updatedAt).toLocaleDateString('ja-JP')}</span>
+              </span>
+              <span className="order-slide-title">{order.title}</span>
+              <span className="order-slide-vs">{order.match?.opponentName ? `vs ${order.match.opponentName}` : '対戦相手 未設定'}</span>
+              <span className="order-slide-stats">
+                <span>
+                  <RollingNumber className="v" value={order.input.games.length} />
+                  <span className="k">ゲーム</span>
+                </span>
+                <span>
+                  <RollingNumber className="v" value={players} />
+                  <span className="k">出場者</span>
+                </span>
+                <span>
+                  <RollingNumber className="v" value={order.versions.length} />
+                  <span className="k">確定版</span>
+                </span>
+              </span>
+              <span className="order-slide-open">
+                開いて編集
+                <Icon name="chevronRight" size={16} />
+              </span>
+            </button>
+          ),
+        };
+      })}
+    />
+  );
+}
+
+/** First-run guide: the four steps from roster to a shared order, one per slide. */
+function GuideCarousel({
+  players,
+  formats,
+  onNavigate,
+  onNewOrder,
+}: {
+  players: number;
+  formats: number;
+  onNavigate: (page: Page) => void;
+  onNewOrder: () => void;
+}): React.JSX.Element {
+  const steps: { key: string; icon: IconName; title: string; body: string; done: boolean; action: string; onAction: () => void }[] = [
+    {
+      key: 'players',
+      icon: 'users',
+      title: 'メンバーを登録',
+      body: 'Rating・PPR は任意。未入力でも 0 扱いにはなりません。',
+      done: players > 0,
+      action: 'メンバーを見る',
+      onAction: () => onNavigate('players'),
+    },
+    {
+      key: 'formats',
+      icon: 'format',
+      title: 'フォーマットを確認',
+      body: 'リーグのゲーム構成。Singles・Doubles・Trios などの人数と順番です。',
+      done: formats > 0,
+      action: 'フォーマットを見る',
+      onAction: () => onNavigate('formats'),
+    },
+    {
+      key: 'setup',
+      icon: 'sliders',
+      title: '条件を決めて生成',
+      body: '参加者・出場条件・プリセットを選ぶと、最大 3 つの候補を作ります。',
+      done: false,
+      action: 'オーダーを作る',
+      onAction: onNewOrder,
+    },
+    {
+      key: 'share',
+      icon: 'share',
+      title: '確定して共有',
+      body: '確定すると v1・v2… と版が残り、LINE 向けの画像やテキストで共有できます。',
+      done: false,
+      action: 'オーダーを作る',
+      onAction: onNewOrder,
+    },
+  ];
+  return (
+    <Carousel
+      label="はじめかた"
+      kicker="GUIDE"
+      slideLabel={(index) => `ステップ ${index + 1} / ${steps.length}: ${steps[index].title}`}
+      slides={steps.map((step, index) => ({
+        key: step.key,
+        content: (
+          <div className="guide-slide">
+            <span className="guide-no" aria-hidden="true">
+              <RollingNumber value={String(index + 1).padStart(2, '0')} />
+            </span>
+            <span className="guide-icon" aria-hidden="true">
+              <Icon name={step.icon} size={22} />
+            </span>
+            <strong className="guide-title">{step.title}</strong>
+            <p className="guide-body">{step.body}</p>
+            <span className="guide-foot">
+              {step.done ? (
+                <StatusBadge tone="finalized" icon="check">
+                  完了
+                </StatusBadge>
+              ) : (
+                <span />
+              )}
+              <button type="button" className="btn small" onClick={step.onAction}>
+                {step.action}
+              </button>
+            </span>
+          </div>
+        ),
+      }))}
+    />
   );
 }

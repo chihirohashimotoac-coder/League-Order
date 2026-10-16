@@ -42,6 +42,9 @@ export function HistoryPage({
   );
   const [confirmDelete, setConfirmDelete] = useState<SavedOrder | null>(null);
   const [confirmWithdraw, setConfirmWithdraw] = useState<SavedOrder | null>(null);
+  // View only: filtering and sorting never touch the stored orders.
+  const [filter, setFilter] = useState<HistoryFilter>('all');
+  const [sort, setSort] = useState<HistorySort>('newest');
 
   if (store.teamOrders.length === 0) {
     return (
@@ -68,11 +71,37 @@ export function HistoryPage({
       latestVersion(order.versions)?.version ?? null,
     );
 
+  const shown = viewOrders(store.teamOrders, filter, sort);
+  const finalizedCount = store.teamOrders.filter((order) => latestVersion(order.versions) !== null).length;
+
   return (
     <>
+      <div className="history-toolbar">
+        <label className="field compact">
+          <span>表示</span>
+          <select value={filter} onChange={(event) => setFilter(event.target.value as HistoryFilter)}>
+            <option value="all">すべて ({store.teamOrders.length})</option>
+            <option value="finalized">確定済み ({finalizedCount})</option>
+            <option value="draft">未確定 ({store.teamOrders.length - finalizedCount})</option>
+          </select>
+        </label>
+        <label className="field compact">
+          <span>並び順</span>
+          <select value={sort} onChange={(event) => setSort(event.target.value as HistorySort)}>
+            <option value="newest">新しい順</option>
+            <option value="oldest">古い順</option>
+            <option value="title">タイトル順</option>
+          </select>
+        </label>
+      </div>
+      {shown.length === 0 ? (
+        <p className="small-text muted history-empty" role="status">
+          この条件に当てはまるオーダーはありません。
+        </p>
+      ) : null}
       <Card flush>
-        <ul className="list">
-          {store.teamOrders.map((order) => {
+        <ul className="list stagger-list">
+          {shown.map((order) => {
             const latest = latestVersion(order.versions);
             const season = statusOf(order);
             return (
@@ -410,4 +439,19 @@ function SeasonStatusBadge({
       {label}
     </StatusBadge>
   );
+}
+
+type HistoryFilter = 'all' | 'finalized' | 'draft';
+type HistorySort = 'newest' | 'oldest' | 'title';
+
+/** The list as shown: a filtered, sorted copy (the store's array is never reordered). */
+function viewOrders(orders: readonly SavedOrder[], filter: HistoryFilter, sort: HistorySort): SavedOrder[] {
+  const kept = orders.filter((order) => {
+    if (filter === 'all') return true;
+    const finalized = latestVersion(order.versions) !== null;
+    return filter === 'finalized' ? finalized : !finalized;
+  });
+  if (sort === 'oldest') return [...kept].sort((a, b) => a.createdAt - b.createdAt);
+  if (sort === 'title') return [...kept].sort((a, b) => a.title.localeCompare(b.title, 'ja'));
+  return [...kept].sort((a, b) => b.createdAt - a.createdAt);
 }

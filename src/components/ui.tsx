@@ -3,9 +3,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
 import type { DartsDiscipline, OrderLifecycleState } from '../domain/types';
@@ -215,6 +217,149 @@ export function Segmented<T extends string>({
   );
 }
 
+/**
+ * Single-choice cards built on native radio inputs: arrow keys, Tab and the form semantics
+ * come from the browser, the card look from CSS. For two to four options that each need a
+ * sentence of explanation — a pull-down would hide exactly the text that helps decide.
+ */
+export function RadioCards<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  hint,
+  columns = 1,
+}: {
+  label: string;
+  options: readonly { key: T; label: string; hint?: string }[];
+  value: T;
+  onChange: (next: T) => void;
+  hint?: string;
+  columns?: 1 | 2;
+}): React.JSX.Element {
+  const name = useId();
+  return (
+    <fieldset className="radio-cards">
+      <legend>{label}</legend>
+      <div className={columns === 2 ? 'radio-cards-grid two' : 'radio-cards-grid'}>
+        {options.map((option) => (
+          <label key={option.key} className="radio-card">
+            <input
+              type="radio"
+              name={name}
+              value={option.key}
+              checked={value === option.key}
+              onChange={() => onChange(option.key)}
+            />
+            <span className="radio-dot" aria-hidden="true" />
+            <span className="rc-text">
+              <span className="rc-title">{option.label}</span>
+              {option.hint ? <span className="rc-hint">{option.hint}</span> : null}
+            </span>
+          </label>
+        ))}
+      </div>
+      {hint ? <span className="hint">{hint}</span> : null}
+    </fieldset>
+  );
+}
+
+const RADIO_KEYS = new Set(['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End']);
+
+/**
+ * Arrow-key movement for an ARIA `radiogroup` of `role="radio"` buttons (WAI-ARIA APG):
+ * the arrows move focus *and* the selection, Home / End jump to the ends. Pair it with
+ * {@link rovingTabIndex} so Tab enters the group once, on the selected option.
+ */
+export function onRadioGroupKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
+  if (!RADIO_KEYS.has(event.key)) return;
+  const radios = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]:not([disabled])'),
+  );
+  const current = radios.indexOf(document.activeElement as HTMLElement);
+  if (current < 0 || radios.length === 0) return;
+  event.preventDefault();
+  const last = radios.length - 1;
+  const next =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? last
+        : event.key === 'ArrowRight' || event.key === 'ArrowDown'
+          ? (current + 1) % radios.length
+          : (current - 1 + radios.length) % radios.length;
+  radios[next].focus();
+  radios[next].click();
+}
+
+/** Tab stop of one radio in a roving group: the selected one, else the first. */
+export function rovingTabIndex(selected: boolean, index: number, anySelected: boolean): 0 | -1 {
+  return selected || (!anySelected && index === 0) ? 0 : -1;
+}
+
+/**
+ * An accordion section: a native `<details>`, so it opens with Enter / Space, works without
+ * JavaScript and is found by in-page search. The height animation is CSS only (see
+ * `::details-content` in the stylesheet) and simply snaps where unsupported.
+ *
+ * Sections sharing a `group` behave as an exclusive accordion — opening one closes the
+ * others (the native `name` attribute).
+ */
+export function Accordion({
+  title,
+  note,
+  icon,
+  kicker,
+  group,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  note?: ReactNode;
+  icon?: IconName;
+  kicker?: string;
+  group?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}): React.JSX.Element {
+  // `name` is the standard exclusive-accordion attribute; React passes it through as is.
+  const groupProps = group ? ({ name: group } as Record<string, string>) : {};
+  return (
+    <details className="disclosure accordion" open={defaultOpen} {...groupProps}>
+      <summary>
+        {icon ? (
+          <span className="acc-icon" aria-hidden="true">
+            <Icon name={icon} size={18} />
+          </span>
+        ) : null}
+        <span className="grow" style={{ minWidth: 0 }}>
+          {kicker ? (
+            <span className="kicker" aria-hidden="true">
+              {kicker}
+            </span>
+          ) : null}
+          <span className="summary-title">{title}</span>
+          {note ? <span className="summary-note">{note}</span> : null}
+        </span>
+        <Icon name="chevronDown" className="chev" />
+      </summary>
+      <div className="disclosure-body">{children}</div>
+    </details>
+  );
+}
+
+const TABBABLE = 'a[href], button, input, select, textarea, summary, [tabindex]';
+
+/** Keyboard-reachable controls inside `root`, in document order. */
+function tabbableIn(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(TABBABLE)).filter(
+    (element) =>
+      element.tabIndex >= 0 &&
+      !(element as HTMLButtonElement).disabled &&
+      !element.closest('[hidden], [inert], [aria-hidden="true"]'),
+  );
+}
+
 /** The sheets currently open, oldest first (see the Escape handling in {@link Sheet}). */
 const openSheets: symbol[] = [];
 
@@ -232,12 +377,18 @@ export function Sheet({
   children,
   footer,
   className,
+  variant = 'sheet',
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
   className?: string;
+  /**
+   * `sheet` rises from the bottom (forms, lists); `modal` is a centred dialog for short
+   * decisions; `drawer` slides in from the side (the app menu).
+   */
+  variant?: 'sheet' | 'modal' | 'drawer';
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -255,14 +406,45 @@ export function Sheet({
     // closes the one on top only, not the whole stack.
     const self = Symbol('sheet');
     openSheets.push(self);
+    const onTop = (): boolean => openSheets[openSheets.length - 1] === self;
+    // Direction of the last Tab, so focus leaving the sheet wraps to the matching end.
+    let backwards = false;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && openSheets[openSheets.length - 1] === self) closeRef.current();
+      if (event.key === 'Escape' && onTop()) closeRef.current();
+      if (event.key !== 'Tab' || !onTop()) return;
+      backwards = event.shiftKey;
+      // Wrap at the two ends. Past the last control focus would otherwise leave the page
+      // altogether (to the browser's own UI) when the sheet is last in the document.
+      const root = ref.current;
+      const items = root ? tabbableIn(root) : [];
+      const active = document.activeElement;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) return;
+      if (event.shiftKey && (active === first || active === root)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    // The sheet is modal (`aria-modal`): Tab / Shift+Tab never reach the screen behind it,
+    // they wrap around inside the sheet on top.
+    const onFocusIn = (event: FocusEvent): void => {
+      const root = ref.current;
+      if (!root || !onTop() || root.contains(event.target as Node)) return;
+      const items = tabbableIn(root);
+      (backwards ? items[items.length - 1] : items[0])?.focus();
+      if (!root.contains(document.activeElement)) root.focus();
     };
     document.addEventListener('keydown', onKey);
+    document.addEventListener('focusin', onFocusIn);
     ref.current?.focus();
     return () => {
       openSheets.splice(openSheets.indexOf(self), 1);
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', onFocusIn);
       // Hand focus back to the control that opened the sheet, if it is still there.
       if (opener && opener.isConnected) opener.focus({ preventScroll: true });
     };
@@ -270,7 +452,7 @@ export function Sheet({
 
   return (
     <div
-      className="sheet-backdrop"
+      className={variant === 'sheet' ? 'sheet-backdrop' : `sheet-backdrop is-${variant}`}
       role="presentation"
       // Nothing here calls preventDefault: native selection, copy / cut / paste and the
       // context menu inside the sheet behave exactly as they do anywhere else.
@@ -296,7 +478,7 @@ export function Sheet({
       }}
     >
       <div
-        className={className ? `sheet ${className}` : 'sheet'}
+        className={['sheet', variant === 'sheet' ? '' : variant, className ?? ''].filter(Boolean).join(' ')}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -304,7 +486,7 @@ export function Sheet({
         ref={ref}
       >
         <div className="sheet-head">
-          <span className="sheet-grabber" aria-hidden="true" />
+          {variant === 'sheet' ? <span className="sheet-grabber" aria-hidden="true" /> : null}
           <h2>{title}</h2>
           <button type="button" className="btn icon ghost sheet-close" onClick={onClose} aria-label="閉じる">
             <Icon name="close" />
@@ -336,6 +518,7 @@ export function ConfirmDialog({
     <Sheet
       title={title}
       onClose={onCancel}
+      variant="modal"
       footer={
         <>
           <button type="button" className="btn grow" onClick={onCancel}>

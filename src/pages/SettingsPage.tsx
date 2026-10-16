@@ -6,7 +6,8 @@ import { DEFAULT_OPTIMIZER_SETTINGS, DEFAULT_WEIGHTS } from '../domain/orders/pr
 import { parseBackup, serialiseBackup } from '../storage/backup';
 import { downloadText } from '../share';
 import { useAppStore } from '../state/appStore';
-import { Card, ConfirmDialog, Field, Stepper, useToast } from '../components/ui';
+import { Accordion, Card, ConfirmDialog, RadioCards, Stepper, useToast } from '../components/ui';
+import { BarChart } from '../components/motion';
 import { ChangelogSheet } from '../components/ChangelogSheet';
 
 // The opponent term is not a custom weight: it only means something with opponent data,
@@ -25,6 +26,9 @@ const WEIGHT_LABELS: { key: Exclude<keyof ScoreWeights, 'opponentWin'>; label: s
   { key: 'consecutive', label: '連続出場ペナルティ', hint: '高いほど連続出場を避ける' },
   { key: 'season', label: 'シーズン不均衡ペナルティ', hint: '高いほどシーズン累計を均等化' },
 ];
+
+/** Upper end of each custom-weight slider (unchanged range; also the chart's full scale). */
+const WEIGHT_MAX = 2;
 
 /** SETTINGS screen: custom weights, engine budget, JSON import/export (spec §23, §26). */
 export function SettingsPage(): React.JSX.Element {
@@ -83,6 +87,9 @@ export function SettingsPage(): React.JSX.Element {
           type="file"
           accept="application/json,.json"
           className="visually-hidden"
+          // Opened by the 「JSON インポート」 button above; out of the Tab order, but named.
+          aria-label="インポートする JSON ファイル"
+          tabIndex={-1}
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = '';
@@ -91,7 +98,14 @@ export function SettingsPage(): React.JSX.Element {
         />
       </Card>
 
-      <Card title="n01 連携" kicker="N01">
+      {/* One open at a time: the long settings stay out of the way until needed. */}
+      <Accordion
+        group="settings"
+        kicker="N01"
+        icon="refresh"
+        title="n01 連携"
+        note={`自動同期 ${n01.autoSync ? 'オン' : 'オフ'} ・ 推定勝率 ${n01.showPredictions ? '表示' : '非表示'} ・ 過去 ${n01.historyDepth} シーズン`}
+      >
         <label className="check-row">
           <input
             type="checkbox"
@@ -121,12 +135,31 @@ export function SettingsPage(): React.JSX.Element {
         <p className="tiny muted" style={{ marginBottom: 0 }}>
           多いほど相手の傾向を広く見ますが、同期に時間がかかります (既定 {DEFAULT_N01_SETTINGS.historyDepth})。
         </p>
-      </Card>
+      </Accordion>
 
-      <Card title="カスタムウェイト" kicker="WEIGHTS">
+      <Accordion
+        group="settings"
+        kicker="WEIGHTS"
+        icon="sliders"
+        title="カスタムウェイト"
+        note="プリセット「カスタム」で使う評価の重み"
+      >
         <p className="tiny muted" style={{ marginTop: 0 }}>
           プリセット「カスタム」を選んだときに使用します。0 にするとその項目を無視します。
         </p>
+        <div className="weight-chart">
+          <span className="kicker">BALANCE</span>
+          <BarChart
+            label="ウェイトの配分"
+            data={WEIGHT_LABELS.map(({ key, label }) => ({
+              key,
+              label,
+              ratio: settings.customWeights[key] / WEIGHT_MAX,
+              display: settings.customWeights[key].toFixed(2),
+              muted: settings.customWeights[key] === 0,
+            }))}
+          />
+        </div>
         {WEIGHT_LABELS.map(({ key, label, hint }) => (
           <div key={key} style={{ marginBottom: 12 }}>
             <div className="row between">
@@ -136,7 +169,7 @@ export function SettingsPage(): React.JSX.Element {
             <input
               type="range"
               min={0}
-              max={2}
+              max={WEIGHT_MAX}
               step={0.05}
               value={settings.customWeights[key]}
               aria-label={label}
@@ -157,9 +190,15 @@ export function SettingsPage(): React.JSX.Element {
         >
           既定値に戻す
         </button>
-      </Card>
+      </Accordion>
 
-      <Card title="最適化エンジン" kicker="ENGINE">
+      <Accordion
+        group="settings"
+        kicker="ENGINE"
+        icon="spark"
+        title="最適化エンジン"
+        note={`探索 ${settings.optimizer.timeLimitMs} ms ・ Beam ${settings.optimizer.beamWidth}`}
+      >
         <div className="field">
           <span>探索時間の上限 (ミリ秒)</span>
           <div className="row between">
@@ -191,22 +230,18 @@ export function SettingsPage(): React.JSX.Element {
           </div>
         </div>
 
-        <Field label="既定の公平性範囲">
-          <select
-            value={settings.optimizer.fairnessScope}
-            onChange={(event) =>
-              update({
-                optimizer: {
-                  ...settings.optimizer,
-                  fairnessScope: event.target.value as AppSettings['optimizer']['fairnessScope'],
-                },
-              })
-            }
-          >
-            <option value="today">今回のみ</option>
-            <option value="season">シーズン込み</option>
-          </select>
-        </Field>
+        <RadioCards
+          label="既定の公平性範囲"
+          columns={2}
+          value={settings.optimizer.fairnessScope}
+          options={[
+            { key: 'today', label: '今回のみ' },
+            { key: 'season', label: 'シーズン込み' },
+          ]}
+          onChange={(next: AppSettings['optimizer']['fairnessScope']) =>
+            update({ optimizer: { ...settings.optimizer, fairnessScope: next } })
+          }
+        />
 
         <button
           type="button"
@@ -215,7 +250,7 @@ export function SettingsPage(): React.JSX.Element {
         >
           既定値に戻す
         </button>
-      </Card>
+      </Accordion>
 
       <Card title="このアプリについて" kicker="ABOUT">
         <p className="small-text muted" style={{ marginTop: 0 }}>

@@ -70,6 +70,31 @@ function Preview(): React.JSX.Element {
             </>
           ) : null}
         </p>
+        {__PREVIEW_APP_LINK__ ? (
+          <details className="disclosure preview-ui" data-testid="preview-ui-guide">
+            <summary>
+              <span className="grow">
+                <span className="summary-title">v{__APP_VERSION__} の UI 確認ポイント</span>
+                <span className="summary-note">アプリ本体のサンプルチームで確認できます</span>
+              </span>
+            </summary>
+            <div className="disclosure-body">
+              <ul className="small-text preview-ui-list">
+                <li>ハンバーガーメニュー: ヘッダー右の「≡」。全画面・更新履歴・新規オーダー</li>
+                <li>パンくずリスト: ホーム以外の画面上部 (例: ホーム › オーダー設定 › オーダー結果)</li>
+                <li>カルーセル: ホームの「はじめかた」、オーダー保存後は「最近のオーダー」</li>
+                <li>モーダル: ホームの「メンバーの戦力分布」と各確認ダイアログ</li>
+                <li>アコーディオン: 設定の n01 連携・カスタムウェイト・最適化エンジン (同時に 1 つ)</li>
+                <li>ラジオボタン: オーダー設定の「詳細条件」とプリセット (矢印キーで移動)</li>
+                <li>プルダウン: 履歴の「表示」「並び順」</li>
+                <li>モーション: 端末の「視差効果を減らす」をオフにすると再生されます</li>
+              </ul>
+              <a className="btn small" href="./index.html">
+                アプリ本体を開く
+              </a>
+            </div>
+          </details>
+        ) : null}
       </header>
       <nav className="preview-tabs" aria-label="シナリオ">
         {scenarios.map((entry) => (
