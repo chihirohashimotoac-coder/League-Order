@@ -46,6 +46,12 @@ test('hamburger menu: every screen, the current one marked, and it closes on the
   await expect(menu.getByRole('button', { name: /^ホーム/u })).toHaveAttribute('aria-current', 'page');
   await audit(page, 'menu');
 
+  // Modal: keyboard focus wraps inside the menu and never reaches the page behind it.
+  for (const key of ['Shift+Tab', 'Shift+Tab', 'Tab', 'Tab']) {
+    await page.keyboard.press(key);
+    expect(await menu.evaluate((element) => element.contains(document.activeElement)), key).toBe(true);
+  }
+
   await menu.getByRole('button', { name: /^ペア相性/u }).click();
   await expect(menu).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'ペア相性', level: 1 })).toBeVisible();

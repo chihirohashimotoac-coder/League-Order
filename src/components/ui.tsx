@@ -348,6 +348,18 @@ export function Accordion({
   );
 }
 
+const TABBABLE = 'a[href], button, input, select, textarea, summary, [tabindex]';
+
+/** Keyboard-reachable controls inside `root`, in document order. */
+function tabbableIn(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(TABBABLE)).filter(
+    (element) =>
+      element.tabIndex >= 0 &&
+      !(element as HTMLButtonElement).disabled &&
+      !element.closest('[hidden], [inert], [aria-hidden="true"]'),
+  );
+}
+
 /** The sheets currently open, oldest first (see the Escape handling in {@link Sheet}). */
 const openSheets: symbol[] = [];
 
@@ -394,14 +406,45 @@ export function Sheet({
     // closes the one on top only, not the whole stack.
     const self = Symbol('sheet');
     openSheets.push(self);
+    const onTop = (): boolean => openSheets[openSheets.length - 1] === self;
+    // Direction of the last Tab, so focus leaving the sheet wraps to the matching end.
+    let backwards = false;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && openSheets[openSheets.length - 1] === self) closeRef.current();
+      if (event.key === 'Escape' && onTop()) closeRef.current();
+      if (event.key !== 'Tab' || !onTop()) return;
+      backwards = event.shiftKey;
+      // Wrap at the two ends. Past the last control focus would otherwise leave the page
+      // altogether (to the browser's own UI) when the sheet is last in the document.
+      const root = ref.current;
+      const items = root ? tabbableIn(root) : [];
+      const active = document.activeElement;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) return;
+      if (event.shiftKey && (active === first || active === root)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    // The sheet is modal (`aria-modal`): Tab / Shift+Tab never reach the screen behind it,
+    // they wrap around inside the sheet on top.
+    const onFocusIn = (event: FocusEvent): void => {
+      const root = ref.current;
+      if (!root || !onTop() || root.contains(event.target as Node)) return;
+      const items = tabbableIn(root);
+      (backwards ? items[items.length - 1] : items[0])?.focus();
+      if (!root.contains(document.activeElement)) root.focus();
     };
     document.addEventListener('keydown', onKey);
+    document.addEventListener('focusin', onFocusIn);
     ref.current?.focus();
     return () => {
       openSheets.splice(openSheets.indexOf(self), 1);
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', onFocusIn);
       // Hand focus back to the control that opened the sheet, if it is still there.
       if (opener && opener.isConnected) opener.focus({ preventScroll: true });
     };

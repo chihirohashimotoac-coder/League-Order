@@ -79,3 +79,54 @@ describe('Sheet dismissal', () => {
     }
   });
 });
+
+describe('Sheet focus', () => {
+  function renderWithPage() {
+    const view = render(
+      <>
+        <button type="button">背後のボタン</button>
+        <Sheet title="メニュー" onClose={() => undefined} variant="drawer">
+          <button type="button">最初</button>
+          <button type="button">最後</button>
+        </Sheet>
+      </>,
+    );
+    return { behind: screen.getByRole('button', { name: '背後のボタン' }), view };
+  }
+
+  it('wraps Shift+Tab out of the sheet to its last control, never the page behind', () => {
+    const { behind } = renderWithPage();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    behind.focus();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '最後' }));
+  });
+
+  it('wraps Tab out of the sheet to its first control', () => {
+    const { behind } = renderWithPage();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    behind.focus();
+    // The header's close button is the first control of every sheet.
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '閉じる' }));
+  });
+
+  it('Tab on the last control goes to the first, Shift+Tab on the first to the last', () => {
+    renderWithPage();
+    const last = screen.getByRole('button', { name: '最後' });
+    const close = screen.getByRole('button', { name: '閉じる' });
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it('lets focus go anywhere again once the sheet is closed', () => {
+    const { behind, view } = renderWithPage();
+    view.unmount();
+    render(<button type="button">背後のボタン</button>);
+    const again = screen.getByRole('button', { name: '背後のボタン' });
+    again.focus();
+    expect(document.activeElement).toBe(again);
+    expect(behind.isConnected).toBe(false);
+  });
+});
