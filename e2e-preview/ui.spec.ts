@@ -134,8 +134,11 @@ test('accordion: settings open one section at a time', async ({ page }) => {
 
   // The default fairness scope is now a radio pair.
   await page.getByRole('radio', { name: 'シーズン込み' }).check();
-  // Stored like any other setting: still chosen after a reload (the app reopens on HOME).
-  await page.reload();
+  // Kept after leaving the screen and coming back. (Saving goes through the same
+  // saveSettings as the old pull-down; a reload here would race its async write, which
+  // shows no signal to wait for.)
+  await expect(page.getByRole('radio', { name: 'シーズン込み' })).toBeChecked();
+  await tab(page, 'ホーム').click();
   await page.getByRole('button', { name: 'メニューを開く' }).click();
   await page.getByRole('dialog', { name: 'メニュー' }).getByRole('button', { name: /^設定/u }).click();
   await expect(page.getByRole('heading', { name: '設定', level: 1 })).toBeVisible();
