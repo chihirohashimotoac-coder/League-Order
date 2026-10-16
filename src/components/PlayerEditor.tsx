@@ -3,7 +3,7 @@ import type { Player, SkillLevel } from '../domain/types';
 import { GAME_KIND_LABELS, PPR_MAX, SKILL_KINDS } from '../domain/types';
 import { formatPpr, parsePprInput, playerPpr } from '../domain/players/strength';
 import { pprSourceOf } from '../domain/n01/effectivePpr';
-import { Field, Sheet, Stepper } from './ui';
+import { Field, Sheet, Stepper, onRadioGroupKeyDown, rovingTabIndex } from './ui';
 
 /**
  * The form for one player's details, shared by every place a player is entered by hand
@@ -142,13 +142,14 @@ export function PlayerEditor({
                 })`
               : 'n01 に PPR のデータがありません'}
           </p>
-          <div className="segmented" role="radiogroup" aria-label="使用する PPR">
-            {(['n01', 'manual'] as const).map((source) => (
+          <div className="segmented" role="radiogroup" aria-label="使用する PPR" onKeyDown={onRadioGroupKeyDown}>
+            {(['n01', 'manual'] as const).map((source, index) => (
               <button
                 type="button"
                 key={source}
                 role="radio"
                 aria-checked={pprSourceOf(draft) === source}
+                tabIndex={rovingTabIndex(pprSourceOf(draft) === source, index, true)}
                 onClick={() => setDraft({ ...draft, pprSource: source })}
               >
                 {source === 'n01' ? 'n01 の PPR' : '手動の PPR'}

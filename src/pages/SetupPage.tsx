@@ -35,6 +35,9 @@ import {
   formatRating,
   formatStrengthLine,
   useToast,
+  RadioCards,
+  onRadioGroupKeyDown,
+  rovingTabIndex,
 } from '../components/ui';
 import { describeStrengthWeights, resolveStrength } from '../domain/players/strength';
 import { Icon, type IconName } from '../components/icons';
@@ -448,8 +451,8 @@ export function SetupPage({
           </span>
         </div>
       ) : null}
-      <div className="preset-grid" role="radiogroup" aria-label="プリセット">
-        {visiblePresets.map((key) => {
+      <div className="preset-grid" role="radiogroup" aria-label="プリセット" onKeyDown={onRadioGroupKeyDown}>
+        {visiblePresets.map((key, index) => {
           const card = PRESET_CARDS[key];
           const selected = draft.preset === key;
           return (
@@ -458,10 +461,12 @@ export function SetupPage({
               key={key}
               role="radio"
               aria-checked={selected}
+              tabIndex={rovingTabIndex(selected, index, visiblePresets.includes(draft.preset))}
               className="preset"
               onClick={() => applyPreset(key)}
             >
               <span className="p-head">
+                <span className="p-radio" aria-hidden="true" />
                 <Icon name={card.icon} size={18} />
                 {PRESET_LABELS[key]}
                 {selected ? <Icon name="check" size={18} strokeWidth={2.6} className="p-check-mark" /> : null}
@@ -560,65 +565,45 @@ export function SetupPage({
 
       {showPolicy ? (
         <Sheet title="詳細条件" onClose={() => setShowPolicy(false)}>
-          <Field
+          <RadioCards
             label="公平性の評価範囲"
             hint="「シーズン込み」にすると、累計出場が少ない選手が優先されます。"
-          >
-            <select
-              value={draft.settings.fairnessScope}
-              onChange={(event) =>
-                onDraftChange({
-                  ...draft,
-                  settings: {
-                    ...draft.settings,
-                    fairnessScope: event.target.value as OptimizerSettings['fairnessScope'],
-                  },
-                })
-              }
-            >
-              <option value="today">今回のみ</option>
-              <option value="season">シーズン込み</option>
-            </select>
-          </Field>
+            columns={2}
+            value={draft.settings.fairnessScope}
+            options={[
+              { key: 'today', label: '今回のみ', hint: 'この試合の出場回数で評価' },
+              { key: 'season', label: 'シーズン込み', hint: 'シーズン累計も評価に含める' },
+            ]}
+            onChange={(next: OptimizerSettings['fairnessScope']) =>
+              onDraftChange({ ...draft, settings: { ...draft.settings, fairnessScope: next } })
+            }
+          />
 
-          <Field
+          <RadioCards
             label="最大連続出場の扱い"
             hint="絶対条件にすると必ず守ります。少人数チームでは生成できなくなることがあります。"
-          >
-            <select
-              value={draft.settings.consecutiveMode}
-              onChange={(event) =>
-                onDraftChange({
-                  ...draft,
-                  settings: {
-                    ...draft.settings,
-                    consecutiveMode: event.target.value as OptimizerSettings['consecutiveMode'],
-                  },
-                })
-              }
-            >
-              <option value="soft">できるだけ考慮 (避けられない時は超える)</option>
-              <option value="hard">絶対条件 (絶対に超えない)</option>
-            </select>
-          </Field>
+            value={draft.settings.consecutiveMode}
+            options={[
+              { key: 'soft', label: 'できるだけ考慮', hint: '避けられない時は超える' },
+              { key: 'hard', label: '絶対条件', hint: '絶対に超えない' },
+            ]}
+            onChange={(next: OptimizerSettings['consecutiveMode']) =>
+              onDraftChange({ ...draft, settings: { ...draft.settings, consecutiveMode: next } })
+            }
+          />
 
-          <Field label="最小出場回数の扱い" hint="既定は絶対条件です。満たせない場合は理由を表示します。">
-            <select
-              value={draft.settings.minAppearanceMode}
-              onChange={(event) =>
-                onDraftChange({
-                  ...draft,
-                  settings: {
-                    ...draft.settings,
-                    minAppearanceMode: event.target.value as OptimizerSettings['minAppearanceMode'],
-                  },
-                })
-              }
-            >
-              <option value="hard">絶対条件 (必ず満たす)</option>
-              <option value="soft">できるだけ考慮</option>
-            </select>
-          </Field>
+          <RadioCards
+            label="最小出場回数の扱い"
+            hint="既定は絶対条件です。満たせない場合は理由を表示します。"
+            value={draft.settings.minAppearanceMode}
+            options={[
+              { key: 'hard', label: '絶対条件', hint: '必ず満たす' },
+              { key: 'soft', label: 'できるだけ考慮' },
+            ]}
+            onChange={(next: OptimizerSettings['minAppearanceMode']) =>
+              onDraftChange({ ...draft, settings: { ...draft.settings, minAppearanceMode: next } })
+            }
+          />
 
           <div className="field">
             <span>既定の最大連続出場</span>

@@ -133,12 +133,12 @@ describe('今回だけの助っ人 from the next-match flow', () => {
 
     // Not a member of the team, in storage or on screen …
     expect((await storedPlayers()).some((entry) => entry.name === '助っ人 花子')).toBe(false);
-    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'メンバー' }));
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'メンバー' }));
     await screen.findByText('橋本 千尋');
     expect(screen.queryByText('助っ人 花子')).toBeNull();
 
     // … and not offered the next time.
-    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'ホーム' }));
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
     const again = await openAttendance(user);
     expect(again).not.toHaveTextContent('助っ人 花子');
     expect(again).toHaveTextContent('本日参加 7 / 7');
@@ -273,7 +273,7 @@ describe('次回から参加するメンバー from the next-match flow', () => 
     expect(within(screen.getByTestId('strength-basis-panel')).getByText('新人 次郎').closest('.basis-row')).toHaveAttribute('data-origin', 'unknown');
 
     // The next sync asks again.
-    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'ホーム' }));
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
     await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
     const again = await screen.findByRole('dialog', { name: '次戦のオーダーを作る' });
     expect(await within(again).findByTestId('pending-links', {}, { timeout: 10_000 })).toHaveTextContent('新人次郎');
@@ -324,7 +324,7 @@ describe('助っ人 on the ordinary SETUP screen', () => {
     cleanup();
     renderApp();
     await screen.findByRole('heading', { name: 'kalavinka', level: 1 });
-    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '履歴' }));
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: '履歴' }));
     await user.click(await screen.findByRole('button', { name: /助っ人|ORDER|20\d\d|下書き|未確定|バランス|勝利|対戦/ }));
     const preview = await screen.findByRole('dialog');
     // The saved order lists the helper by name too.
@@ -334,7 +334,7 @@ describe('助っ人 on the ordinary SETUP screen', () => {
     expect(fieldedNames().some((name) => name.includes('助っ人 花子'))).toBe(true);
 
     // A new order does not carry them over.
-    await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'ホーム' }));
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
     await user.click(screen.getByRole('button', { name: '新しいオーダーを作る' }));
     const discard = screen.queryByRole('button', { name: '破棄して作成' });
     if (discard) await user.click(discard);
