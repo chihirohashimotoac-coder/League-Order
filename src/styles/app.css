@@ -4660,10 +4660,11 @@ input[type='range'] {
   animation-delay: 90ms;
 }
 
+/* Opacity only: sections hold controls, and a control must never move under the thumb
+   (nor report a fractional size while it slides). Movement is kept for decoration. */
 @keyframes section-in {
   from {
     opacity: 0;
-    transform: translateY(12px);
   }
 }
 
@@ -4675,7 +4676,7 @@ input[type='range'] {
 }
 
 .stagger-list > li {
-  animation: fade-up var(--dur-3) var(--ease-out) backwards;
+  animation: section-in var(--dur-3) var(--ease-out) backwards;
 }
 
 .stagger-list > li:nth-child(2) { animation-delay: 40ms; }
@@ -5089,7 +5090,7 @@ input[type='range'] {
 .disclosure[open] > .disclosure-body,
 .reason-game[open] > :not(summary),
 .analytics-details[open] > :not(summary) {
-  animation: fade-up var(--dur-3) var(--ease-out);
+  animation: section-in var(--dur-3) var(--ease-out);
 }
 
 /* Smooth open *and* close where the browser can animate to `auto` height. */
@@ -5155,7 +5156,7 @@ input[type='range'] {
 }
 
 .preset[aria-checked='true'] {
-  animation: select-pop var(--dur-3) var(--ease-spring);
+  animation: select-ring var(--dur-4) var(--ease-out);
 }
 
 .preset[aria-checked='true'] .p-radio {
@@ -5166,9 +5167,14 @@ input[type='range'] {
   transform: scale(1);
 }
 
-@keyframes select-pop {
+/* A ring spreads from the newly chosen card; the card itself keeps its size. */
+@keyframes select-ring {
   from {
-    transform: scale(0.96);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent);
+  }
+
+  to {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--color-accent) 0%, transparent);
   }
 }
 
@@ -5364,15 +5370,8 @@ select:not([multiple]) {
 .carousel-slide {
   min-width: 0;
   scroll-snap-align: start;
-  animation: slide-in var(--dur-4) var(--ease-out) backwards;
+  animation: section-in var(--dur-4) var(--ease-out) backwards;
   animation-delay: calc(120ms + var(--i, 0) * 80ms);
-}
-
-@keyframes slide-in {
-  from {
-    opacity: 0;
-    transform: translateX(40px);
-  }
 }
 
 .carousel-dots {
