@@ -87,6 +87,9 @@ export function SettingsPage(): React.JSX.Element {
           type="file"
           accept="application/json,.json"
           className="visually-hidden"
+          // Opened by the 「JSON インポート」 button above; out of the Tab order, but named.
+          aria-label="インポートする JSON ファイル"
+          tabIndex={-1}
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = '';
