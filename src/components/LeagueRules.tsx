@@ -104,7 +104,7 @@ export function LeagueRulesEditor({
         <Icon name="scale" />
         <span className="grow" style={{ minWidth: 0 }}>
           <span className="summary-title">リーグ規則 (必須条件)</span>
-          <span className="summary-note">{written > 0 ? `${written} 件の上限を設定中` : '未設定 (任意)'}</span>
+          <span className="summary-note">{written > 0 ? `${written} 件の上限を設定中` : '設定なし (任意)'}</span>
         </span>
         <Icon name="chevronDown" className="chev" />
       </summary>
