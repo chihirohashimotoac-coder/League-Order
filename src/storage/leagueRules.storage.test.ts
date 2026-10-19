@@ -166,5 +166,11 @@ describe('9. JSON export / import', () => {
     if (!restored.ok) return;
     const caps = restored.snapshot.formats[0].leagueRules?.maxPerStructure;
     expect(caps && Number.isNaN(caps.SINGLES)).toBe(true);
+    // Exported again, the invalid value becomes JSON `null` — still invalid, never "no rule".
+    const again = parseBackup(serialiseBackup(restored.snapshot));
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    const kept = again.snapshot.formats[0].leagueRules?.maxPerStructure;
+    expect(kept && Number.isNaN(kept.SINGLES)).toBe(true);
   });
 });

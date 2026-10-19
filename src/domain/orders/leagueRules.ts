@@ -311,8 +311,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function parseLeagueRules(value: unknown): LeagueRules | undefined {
   if (!isRecord(value)) return undefined;
+  // Only a missing key is "no rule". `null` is what JSON makes of a `NaN` kept from an earlier
+  // damaged import, so it stays invalid across export / import instead of turning the rule off.
   const read = (raw: unknown): number | undefined =>
-    raw === undefined || raw === null ? undefined : typeof raw === 'number' ? raw : Number.NaN;
+    raw === undefined ? undefined : typeof raw === 'number' ? raw : Number.NaN;
   const rules: LeagueRules = {};
   if (isRecord(value.maxPerStructure)) {
     const caps: Partial<Record<StructuralKind, number>> = {};
