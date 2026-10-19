@@ -21,6 +21,7 @@ import {
   parseTeamBinding,
 } from '../domain/n01/parse';
 import { DEFAULT_SETTINGS, type Snapshot } from './repository';
+import { parseLeagueRules } from '../domain/orders/leagueRules';
 
 /**
  * JSON export / import (spec §23).
@@ -225,6 +226,8 @@ export function parseBackup(raw: string): ImportResult {
         .map((game) => (game.kinds.length === 0 ? { ...game, kinds: ['CUSTOM' as const] } : game)),
       createdAt: asNumber(row.createdAt, Date.now()),
       source: parseFormatSource(row.source),
+      // League rules: kept as written (a damaged value is kept and flagged, never dropped).
+      leagueRules: parseLeagueRules(row.leagueRules),
     }))
     .filter((format) => format.id !== '');
 

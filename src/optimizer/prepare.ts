@@ -39,6 +39,33 @@ import {
 } from '../domain/prediction/predictOrder';
 import { aptitudeDelta, estimateRole, roleKeyOf, type RoleStrengthEntry } from '../domain/prediction/roleStrength';
 import type { ComboOrder } from './throwOrder';
+import {
+  hasLeagueRules,
+  isDoublesPairGame,
+  isValidCap,
+  leagueStatusOf,
+  perPlayerLimits,
+} from '../domain/orders/leagueRules';
+
+/**
+ * The order's league rules, compiled onto game and player indices (docs/DESIGN.md, リーグ規則).
+ * Which game counts towards which cap comes from `domain/orders/leagueRules.ts` and nowhere
+ * else, so the search counts exactly what the validator checks.
+ */
+export interface PreparedLeagueRules {
+  /** Per-player caps: `games[gameIndex]` is true when an appearance there counts. */
+  limits: { label: string; cap: number; games: boolean[] }[];
+  /** Doubles games the same pair may share (`Infinity` = no rule). */
+  pairCap: number;
+  /** `pairGames[gameIndex]`: a Doubles game counted by the same-pair rule. */
+  pairGames: boolean[];
+  /** Distinct helpers that may be fielded (`Infinity` = no rule). */
+  helperCap: number;
+  /** `isHelper[playerIndex]`: league status HELPER in this order. */
+  isHelper: boolean[];
+  /** `blocked[gameIndex][playerIndex]`: why a cap of 0 rules the player out of the game, or `null`. */
+  blocked: (string | null)[][];
+}
 
 /**
  * Immutable, index-based view of an order input, built once per generation run.
@@ -141,6 +168,47 @@ export interface PreparedContext {
   orderMemo: Map<string, ComboOrder>;
   /** What the opponent term maximises (the match outcome, unless this is an underdog run). */
   objective: SearchObjective;
+  /** The order's league rules, or `null` when it has none (every rule-free path is unchanged). */
+  leagueRules: PreparedLeagueRules | null;
+}
+
+/**
+ * Compiles the rules of an order. A cap that is not a whole number ≥ 0 (a damaged import,
+ * which `precheck` reports before any search) is read as "nothing may be placed", never as
+ * "no limit".
+ */
+function prepareLeagueRules(
+  input: OrderInput,
+  games: readonly GameSlotDef[],
+  configs: readonly ParticipantConfig[],
+): PreparedLeagueRules | null {
+  const rules = input.leagueRules;
+  if (!hasLeagueRules(rules)) return null;
+  const capOf = (value: number | undefined): number =>
+    value === undefined ? Number.POSITIVE_INFINITY : isValidCap(value) ? value : -1;
+  const limits = perPlayerLimits(rules).map((limit) => ({
+    label: limit.label,
+    cap: capOf(limit.cap),
+    games: games.map((game) => limit.matches(game)),
+  }));
+  const helperCap = capOf(rules.maxHelpers);
+  const isHelper = configs.map((config) => leagueStatusOf(config) === 'HELPER');
+  const blocked = games.map((_, gi) =>
+    configs.map((_, pi) => {
+      const zero = limits.find((limit) => limit.games[gi] && limit.cap <= 0);
+      if (zero) return `リーグ規則で ${zero.label} に出場できません (上限 ${Math.max(0, zero.cap)} 回)`;
+      if (isHelper[pi] && helperCap <= 0) return `リーグ規則で助っ人を配置できません (上限 ${Math.max(0, helperCap)} 名)`;
+      return null;
+    }),
+  );
+  return {
+    limits,
+    pairCap: capOf(rules.maxSameDoublesPair),
+    pairGames: games.map((game) => isDoublesPairGame(game)),
+    helperCap,
+    isHelper,
+    blocked,
+  };
 }
 
 /**
@@ -206,12 +274,15 @@ export function prepare(rawInput: OrderInput): PreparedContext {
     for (const gi of group.gameIndices) roleOfGame[gi] = groupIndex;
   });
 
+  // A cap of 0 is the same as "may not play these games": folded into eligibility, so the
+  // candidate sets and the diagnostics see it up front.
+  const leagueRules = prepareLeagueRules(input, games, configs);
   const eligible = buildMatrix(g, n, false);
   const eligibleLists: number[][] = [];
   for (let gi = 0; gi < g; gi += 1) {
     const list: number[] = [];
     for (let pi = 0; pi < n; pi += 1) {
-      const ok = checkEligibility(configs[pi], games[gi]) === null;
+      const ok = checkEligibility(configs[pi], games[gi]) === null && !leagueRules?.blocked[gi][pi];
       eligible[gi][pi] = ok;
       if (ok) list.push(pi);
     }
@@ -284,7 +355,7 @@ export function prepare(rawInput: OrderInput): PreparedContext {
       continue;
     }
     if (!eligible[gi][pi]) {
-      const reason = checkEligibility(configs[pi], game)?.message ?? '出場できません';
+      const reason = checkEligibility(configs[pi], game)?.message ?? leagueRules?.blocked[gi][pi] ?? '出場できません';
       invalidLocks.push({ lock, reason: `${game.name}: ${players[pi].name} は${reason}` });
       continue;
     }
@@ -425,5 +496,6 @@ export function prepare(rawInput: OrderInput): PreparedContext {
     startKnown,
     orderMemo: new Map(),
     objective: input.searchObjective ?? 'match',
+    leagueRules,
   };
 }

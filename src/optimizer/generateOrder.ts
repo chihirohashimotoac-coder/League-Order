@@ -44,6 +44,7 @@ import { buildBoundContext, type BoundContext } from './search/bound';
 import { searchOnce } from './searchOnce';
 import { RERANK_SCORE_TOLERANCE, rerankByMatchOutcome, selectionMatchValue } from './rerank';
 import { applySkewGate } from './skewGate';
+import { describeLeagueRules } from '../domain/orders/leagueRules';
 
 export { RERANK_SCORE_TOLERANCE, selectionMatchValue };
 
@@ -623,6 +624,7 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
 
   if (solutions.length === 0) {
     const suggestions = analyseRelaxations(input);
+    const rules = describeLeagueRules(input.leagueRules);
     return {
       ok: false,
       candidates: [],
@@ -630,7 +632,10 @@ export function generateOrder(input: OrderInput, options: GenerateOptions = {}):
         {
           code: 'SEARCH_EXHAUSTED',
           message:
-            'すべての絶対条件を満たすオーダーが見つかりませんでした。制約を自動的に破ることはしません。',
+            'すべての絶対条件を満たすオーダーが見つかりませんでした。制約を自動的に破ることはしません。' +
+            (rules.length > 0
+              ? ` リーグ規則 (必須条件: ${rules.join(' ・ ')}) も緩めずに探索しています。下の解決候補はリーグ規則を守ったまま成立を確認したものです。`
+              : ''),
           suggestions:
             suggestions.length > 0
               ? suggestions
