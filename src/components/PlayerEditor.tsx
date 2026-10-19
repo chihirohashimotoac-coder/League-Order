@@ -188,6 +188,9 @@ export function PlayerEditor({
           />
         </label>
       </div>
+      <p className="tiny muted field-pair-hint">
+        Rating はソフトダーツのレーティング、PPR は 3投平均 (1 ラウンド 3 投の平均点) でハードダーツ (スティール) で主に使われます。どちらか片方だけでも構いません。
+      </p>
       {ratingError ? (
         <p className="field-error" role="alert">
           {ratingError}

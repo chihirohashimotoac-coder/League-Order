@@ -126,6 +126,20 @@ describe('n01 team creation', () => {
     expect(hashimoto).toHaveTextContent(/PPR \d+(\.\d+)? ・ PPR n01/);
   });
 
+  it('HOME counts n01 PPR as strength data, not only Rating', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    const players = (await new Repository(await (await import('../../storage/db')).openBackend()).loadAll()).players;
+    const withPpr = players.filter((player) => player.n01?.stats?.ppr != null || player.ppr != null).length;
+    expect(withPpr).toBeGreaterThan(0);
+    const coverage = await screen.findByTestId('strength-coverage');
+    // No Rating was typed, yet the members with an n01 PPR are counted — the same values
+    // the order generator uses.
+    expect(coverage).toHaveTextContent(`戦力データあり ${withPpr} / ${players.length} 名 (Rating または PPR)`);
+    expect(coverage).toHaveTextContent(`Rating 0 名 ・ PPR (3投平均) ${withPpr} 名`);
+  });
+
   it('re-syncs with no changes, and reports a network failure without pretending to be current', async () => {
     const user = userEvent.setup();
     renderApp();
@@ -163,6 +177,11 @@ describe('linking an existing team', () => {
     await user.click(await screen.findByRole('button', { name: '編集' }));
     await user.click(await screen.findByRole('button', { name: 'n01と接続' }));
     const wizard = await screen.findByRole('dialog', { name: 'n01と接続' });
+    // Linking is not creating: the wizard says which team it attaches to, and offers no
+    // way to a new manual team.
+    expect(within(wizard).getByTestId('wizard-intro')).toHaveTextContent('既存のチーム「KALAVINKA」に n01 League のチームを接続します');
+    expect(within(wizard).getByTestId('wizard-intro')).toHaveTextContent('新しいチームは作られず');
+    expect(within(wizard).queryByRole('button', { name: /手入力で作成/ })).toBeNull();
     await user.click(within(wizard).getByRole('button', { name: /ATDO/ }));
     await user.click(await within(wizard).findByRole('button', { name: /kalavinka/ }));
     const mapping = await within(wizard).findByLabelText('橋本 千尋');

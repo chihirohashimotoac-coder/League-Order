@@ -5,6 +5,7 @@ import {
   DISCIPLINE_STRENGTH_WEIGHTS,
   describeStrengthWeights,
   effectiveStrengthWeights,
+  explainStrengthWeights,
   formatPpr,
   parsePprInput,
   playerPpr,
@@ -160,5 +161,65 @@ describe('resolveStrength', () => {
     const model = resolveStrength('SOFT', roster, participants);
     expect(model.strength.has('pA')).toBe(false);
     expect(model.strength.get('pB')).toBeCloseTo(1, 10);
+  });
+});
+
+describe('explainStrengthWeights: the note matches the blend actually used', () => {
+  const explain = (discipline: 'SOFT' | 'STEEL' | 'UNSPECIFIED', players: Player[]) =>
+    explainStrengthWeights(resolveStrength(discipline, players, everyone(players)));
+
+  it('Rating only (first manual entry): "Rating 100%" and no "same weight" claim', () => {
+    const players = [
+      player({ id: 'a', name: 'A', rating: 14 }),
+      player({ id: 'b', name: 'B', rating: 9 }),
+      player({ id: 'c', name: 'C' }),
+    ];
+    const text = explain('UNSPECIFIED', players);
+    expect(text.title).toBe('戦力評価 Rating 100%');
+    expect(text.note).toContain('PPR (3投平均) が未入力のため、Rating だけで評価します');
+    expect(text.note).not.toContain('同じ比重');
+    expect(text.note).toContain('未入力のRatingは 0 ではなく参加者の中央値');
+  });
+
+  it('PPR only: "PPR 100%"', () => {
+    const players = [player({ id: 'a', name: 'A', ppr: 70 }), player({ id: 'b', name: 'B', ppr: 50 })];
+    const text = explain('STEEL', players);
+    expect(text.title).toBe('戦力評価 PPR 100%');
+    expect(text.note).toBe('Rating が未入力のため、PPR (3投平均) だけで評価します。');
+  });
+
+  it('both, with the discipline’s own blend', () => {
+    expect(explain('UNSPECIFIED', fixtureRoster())).toEqual({
+      title: '戦力評価 Rating 50% / PPR 50%',
+      note: 'ダーツ種別が未設定のため、Rating と PPR (3投平均) を同じ比重で評価します。',
+    });
+    expect(explain('SOFT', fixtureRoster()).title).toBe('戦力評価 Rating 70% / PPR 30%');
+    expect(explain('SOFT', fixtureRoster()).note).toContain('ソフトダーツの既定の配分');
+    expect(explain('STEEL', fixtureRoster()).title).toBe('戦力評価 PPR 70% / Rating 30%');
+    expect(explain('STEEL', fixtureRoster()).note).toContain('ハードダーツ (スティール) の既定の配分');
+  });
+
+  it('neither entered', () => {
+    const players = [player({ id: 'a', name: 'A' }), player({ id: 'b', name: 'B' })];
+    expect(explain('SOFT', players)).toEqual({
+      title: '戦力評価なし',
+      note: '参加者の Rating・PPR (3投平均) がどちらも未入力のため、適性と公平性で生成します。',
+    });
+  });
+
+  it('everybody equal', () => {
+    const players = [player({ id: 'a', name: 'A', rating: 10, ppr: 60 }), player({ id: 'b', name: 'B', rating: 10, ppr: 60 })];
+    expect(explain('SOFT', players)).toEqual({
+      title: '戦力評価なし',
+      note: 'Rating は全員同じ値、PPR (3投平均) は全員同じ値で差が無いため、適性と公平性で生成します。',
+    });
+    const mixed = [player({ id: 'a', name: 'A', rating: 10 }), player({ id: 'b', name: 'B', rating: 10 })];
+    expect(explain('SOFT', mixed).note).toBe('Rating は全員同じ値、PPR (3投平均) は未入力で差が無いため、適性と公平性で生成します。');
+    // One informative metric, the other flat.
+    const flatPpr = [player({ id: 'a', name: 'A', rating: 12, ppr: 60 }), player({ id: 'b', name: 'B', rating: 8, ppr: 60 })];
+    expect(explain('UNSPECIFIED', flatPpr)).toEqual({
+      title: '戦力評価 Rating 100%',
+      note: 'PPR (3投平均) が全員同じ値のため、Rating だけで評価します。',
+    });
   });
 });

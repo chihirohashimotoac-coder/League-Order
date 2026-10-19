@@ -111,7 +111,7 @@ test.describe('n01 league native sync (Phase 1)', () => {
     const server = await start(page);
     await page.getByRole('button', { name: 'n01から作成' }).click();
     const wizard = page.getByRole('dialog', { name: 'n01から作成' });
-    await wizard.getByText('その他のリーグ').click();
+    // The search for any other n01 League is visible straight away (not hidden behind a toggle).
     await wizard.getByLabel('リーグ名で検索').fill('TDA');
     await wizard.getByRole('button', { name: '検索', exact: true }).click();
     await wizard.getByRole('button', { name: /TDA\s*lg_Ev9v_7379/ }).click();

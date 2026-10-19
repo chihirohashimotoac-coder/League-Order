@@ -8,7 +8,9 @@ import {
   orderFingerprint,
 } from './domain/orders/lifecycle';
 import { seasonCommitStatus } from './domain/orders/seasonLedger';
+import { orderOwnershipIssue } from './domain/orders/ownership';
 import { validateHardConstraints } from './optimizer/constraints/validate';
+import { formatStructureIssues } from './domain/games/format';
 import { createId } from './utils/id';
 import { syncParticipants } from './domain/orders/participants';
 import { guestsOf } from './domain/players/newPlayer';
@@ -68,6 +70,20 @@ export function App(): React.JSX.Element {
   const [diagnosticInput, setDiagnosticInput] = useState<OrderInput | null>(null);
   const [generating, setGenerating] = useState(false);
   const runnerRef = useRef<OrderRunner | null>(null);
+  /**
+   * Generation token. Every request takes the next number; anything that makes a running
+   * request unwanted (another team, a new order, opening a saved order, discarding, leaving
+   * the app) bumps it. An answer whose number is no longer current — success, "no
+   * solution" or failure alike — is dropped without touching the screen, the
+   * notifications or the spinner, so it can never be shown or saved as this team's order.
+   */
+  const generationRef = useRef(0);
+
+  /** Retires the running request (if any): its answer will be ignored. */
+  const invalidateGeneration = useCallback(() => {
+    generationRef.current += 1;
+    setGenerating(false);
+  }, []);
 
   const [draft, setDraft] = useState<SetupDraft | null>(null);
   const [match, setMatch] = useState<MatchInfo>(() => createMatchInfo());
@@ -77,6 +93,8 @@ export function App(): React.JSX.Element {
   /** What to do once the captain agrees to discard unsaved work (null = no dialog). */
   const [confirmDiscard, setConfirmDiscard] = useState<(() => void) | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  /** A format to open in the editor when FORMAT opens (the first-run "自分の構成を作る"). */
+  const [formatToEdit, setFormatToEdit] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
 
   // A new build is never applied automatically — the captain decides when.
@@ -85,6 +103,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     runnerRef.current = createRunner();
     return () => {
+      // Nothing that answers after the app is gone may write anything.
+      generationRef.current += 1;
       runnerRef.current?.dispose();
       runnerRef.current = null;
     };
@@ -102,30 +122,34 @@ export function App(): React.JSX.Element {
     const previous = workingTeam.current;
     workingTeam.current = store.activeTeamId;
     if (previous !== null && previous !== store.activeTeamId) {
+      // A line-up still being computed for the old team must not arrive in this one.
+      invalidateGeneration();
       setSession(null);
       setRecord(null);
       setDiagnostics([]);
       // One team's one-order helpers are nobody's in the other team.
       setDraft((current) => (current && current.guests.length > 0 ? clearGuests(current) : current));
     }
-  }, [store.ready, store.activeTeamId]);
+  }, [store.ready, store.activeTeamId, invalidateGeneration]);
 
   // Every screen opens at its top; keeping the previous screen's scroll offset made HOME
   // open mid-page with the main action scrolled out of view.
   useEffect(() => {
     window.scrollTo(0, 0);
+    if (page !== 'formats') setFormatToEdit(null);
   }, [page]);
 
   // "Delete everything" returns to the first-run state, so nothing from the old data may
   // linger in the working copy.
   useEffect(() => {
     if (!store.ready || hasTeams) return;
+    invalidateGeneration();
     setSession(null);
     setRecord(null);
     setDiagnostics([]);
     setDraft(null);
     setPage('home');
-  }, [store.ready, hasTeams]);
+  }, [store.ready, hasTeams, invalidateGeneration]);
 
   // Keep the setup draft in step with the roster and the saved settings.
   useEffect(() => {
@@ -172,10 +196,22 @@ export function App(): React.JSX.Element {
     async (input: OrderInput, options?: { candidateCount?: number }) => {
       const runner = runnerRef.current;
       if (!runner) return;
+      // A game that contradicts itself (two player-count kinds, a two-player Singles) is
+      // never generated: the format is corrected first (FORMAT screen).
+      const structure = formatStructureIssues(input.games);
+      if (structure.length > 0) {
+        toast.show(`生成できません: ${structure[0].message} フォーマット画面で修正してください。`, 'error');
+        return;
+      }
+      generationRef.current += 1;
+      const token = generationRef.current;
+      // Still wanted: no newer request, no reset since, and still the active team's.
+      const live = (): boolean => token === generationRef.current && input.teamId === workingTeam.current;
       setGenerating(true);
       setDiagnostics([]);
       try {
         const result = await runner.generate(input, options);
+        if (!live()) return;
         if (result.ok) {
           setSession((current) => {
             const base = current && current.present.current ? current : createUndoable(input);
@@ -200,9 +236,11 @@ export function App(): React.JSX.Element {
           toast.show('条件を満たすオーダーがありません。理由を表示します。', 'error');
         }
       } catch (error) {
+        if (!live()) return;
         toast.show(`生成に失敗しました: ${(error as Error).message}`, 'error');
       } finally {
-        setGenerating(false);
+        // A retired request leaves the spinner to the request that replaced it.
+        if (token === generationRef.current) setGenerating(false);
       }
     },
     [toast],
@@ -232,10 +270,11 @@ export function App(): React.JSX.Element {
 
   /** Drops the working copy so the next generation is a brand-new order. */
   const resetWorkingOrder = useCallback(() => {
+    invalidateGeneration();
     setSession(null);
     setRecord(null);
     setDiagnostics([]);
-  }, []);
+  }, [invalidateGeneration]);
 
   /**
    * True when the working copy holds anything not yet in storage: an order never saved,
@@ -324,6 +363,8 @@ export function App(): React.JSX.Element {
 
   const openSavedOrder = useCallback(
     (order: SavedOrder) => {
+      // A generation still running belongs to whatever was open before.
+      invalidateGeneration();
       const restored = undoableReducer(createUndoable(order.input), {
         type: 'generated',
         candidates: [order.solution],
@@ -352,7 +393,7 @@ export function App(): React.JSX.Element {
       setPage('result');
       toast.show('履歴から読み込みました', 'ok');
     },
-    [toast, store.teamFormats, store.teamPlayers, match],
+    [toast, store.teamFormats, store.teamPlayers, match, invalidateGeneration],
   );
 
   const games = useMemo(() => {
@@ -386,16 +427,24 @@ export function App(): React.JSX.Element {
     return seasonCommitStatus(commit, latestVersion(record.versions)?.version ?? null);
   }, [record, store]);
 
-  /** Creates or updates the persisted record for the current working order. */
+  /**
+   * Creates or updates the persisted record for the current working order.
+   *
+   * The record's team is the team the order was generated for (`input.teamId`), and the
+   * write is refused when that is not the active team or not the team of the record being
+   * updated (`orderOwnershipIssue`): nothing is written rather than something repaired.
+   */
   const persist = useCallback(
-    (mutate: (base: SavedOrder) => SavedOrder): SavedOrder | null => {
-      if (!session?.present.current || !store.activeTeamId) return null;
+    (mutate: (base: SavedOrder) => SavedOrder): { ok: true; order: SavedOrder } | { ok: false; message: string | null } => {
+      if (!session?.present.current) return { ok: false, message: null };
+      const issue = orderOwnershipIssue({ activeTeamId: store.activeTeamId, input: session.present.input, record });
+      if (issue) return { ok: false, message: issue.message };
       const now = Date.now();
       const base: SavedOrder =
         record ??
         {
           id: createId('ord'),
-          teamId: store.activeTeamId,
+          teamId: session.present.input.teamId,
           title: `${new Date(now).toLocaleDateString('ja-JP')} ${session.present.current.meta.label}`,
           createdAt: now,
           updatedAt: now,
@@ -415,14 +464,15 @@ export function App(): React.JSX.Element {
       });
       setRecord(next);
       store.saveOrder(next);
-      return next;
+      return { ok: true, order: next };
     },
     [record, session, store, match],
   );
 
   const handleSaveDraft = useCallback(() => {
     const saved = persist((base) => base);
-    toast.show(saved ? '履歴に保存しました' : '保存できませんでした', saved ? 'ok' : 'error');
+    if (saved.ok) toast.show('履歴に保存しました', 'ok');
+    else toast.show(saved.message ?? '保存できませんでした', 'error');
   }, [persist, toast]);
 
   /**
@@ -438,6 +488,13 @@ export function App(): React.JSX.Element {
       toast.show(`確定できません: ${violations[0].message}`, 'error');
       return;
     }
+    // An order made with a self-contradicting format stays viewable, but is not handed to
+    // the team as confirmed.
+    const structure = formatStructureIssues(session.present.input.games);
+    if (structure.length > 0) {
+      toast.show(`確定できません: ${structure[0].message} フォーマットを修正して作り直してください。`, 'error');
+      return;
+    }
     if (lifecycle === 'FINALIZED') {
       toast.show('すでに確定済みです (内容に変更はありません)', 'ok');
       return;
@@ -450,11 +507,11 @@ export function App(): React.JSX.Element {
         createVersion(session.present.input, session.present.current!, match, base.versions, Date.now()),
       ],
     }));
-    if (!saved) {
-      toast.show('確定できませんでした', 'error');
+    if (!saved.ok) {
+      toast.show(saved.message ? `確定できません: ${saved.message}` : '確定できませんでした', 'error');
       return;
     }
-    const version = latestVersion(saved.versions)!;
+    const version = latestVersion(saved.order.versions)!;
     toast.show(`v${version.version} として確定しました`, 'ok');
   }, [session, lifecycle, persist, match, toast]);
 
@@ -462,6 +519,12 @@ export function App(): React.JSX.Element {
     if (!record) return;
     const version = latestVersion(record.versions);
     if (!version) return;
+    // Season totals belong to the order's own team only.
+    const issue = orderOwnershipIssue({ activeTeamId: store.activeTeamId, input: record.input, record });
+    if (issue) {
+      toast.show(`シーズン累計へ反映できません: ${issue.message}`, 'error');
+      return;
+    }
     const result = store.commitSeason(record, version);
     toast.show(result.message, result.ok ? 'ok' : 'error');
     if (result.clamped.length > 0) {
@@ -488,7 +551,20 @@ export function App(): React.JSX.Element {
     );
   }
 
-  if (!hasTeams) return <WelcomePage />;
+  if (!hasTeams) {
+    return (
+      <WelcomePage
+        onCreated={(next) => {
+          if (next.kind === 'editFormat') {
+            setFormatToEdit(next.formatId);
+            setPage('formats');
+          } else {
+            setPage('home');
+          }
+        }}
+      />
+    );
+  }
 
   const latest = latestVersion(record?.versions ?? []);
   const working: WorkingOrderSummary | null = solution
@@ -570,7 +646,7 @@ export function App(): React.JSX.Element {
         ) : null}
         {page === 'players' ? <PlayersPage /> : null}
         {page === 'pairs' ? <PairsPage /> : null}
-        {page === 'formats' ? <FormatsPage /> : null}
+        {page === 'formats' ? <FormatsPage initialEditId={formatToEdit} /> : null}
         {page === 'setup' && draft ? (
           <SetupPage
             draft={draft}

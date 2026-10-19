@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { OrderLifecycleState, Player, SavedOrder, Team } from '../domain/types';
 import { createId } from '../utils/id';
 import { totalSlots } from '../domain/games/format';
@@ -25,7 +25,7 @@ import type { ParticipantConfig } from '../domain/types';
 import { useN01Environment } from '../state/n01Environment';
 import type { Page } from '../navigation';
 import { latestVersion } from '../domain/orders/lifecycle';
-import { effectivePpr } from '../domain/n01/effectivePpr';
+import { applyHistoryStrength } from '../domain/n01/historyStrength';
 import { formatPpr } from '../domain/players/strength';
 import { formatRating, onRadioGroupKeyDown, rovingTabIndex } from '../components/ui';
 import { Carousel } from '../components/Carousel';
@@ -100,6 +100,12 @@ export function HomePage({
 
   const format = store.teamFormats[0];
   const team = store.activeTeam;
+  // The Rating / PPR the order generator would use for each member (SETUP builds the same):
+  // n01 or hand-typed PPR, or the estimate from the last analysis.
+  const intel = team?.n01
+    ? (store.n01CacheFor(team.id).find((record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel') ?? null)
+    : null;
+  const strengthPlayers = useMemo(() => applyHistoryStrength(store.teamPlayers, intel).players, [store.teamPlayers, intel]);
 
   const tertiary: { key: string; icon: IconName; title: string; meta: string; onSelect: () => void }[] = [
     {
@@ -199,6 +205,16 @@ export function HomePage({
             </div>
           </section>
 
+          {store.teamOrders.length === 0 && !working && !team?.demo ? (
+            <NextStepCard
+              hasPlayers={store.teamPlayers.length > 0}
+              formats={store.teamFormats.length}
+              allManaged={store.teamFormats.length > 0 && store.teamFormats.every((entry) => entry.source)}
+              onNavigate={onNavigate}
+              onNewOrder={onNewOrder}
+            />
+          ) : null}
+
           <section className="card team-card" aria-label="アクティブなチーム">
             <div className="team-card-top">
               <span className="grow">
@@ -235,6 +251,7 @@ export function HomePage({
             <GuideCarousel
               players={store.teamPlayers.length}
               formats={store.teamFormats.length}
+              managedFormats={store.teamFormats.filter((entry) => entry.source).length}
               onNavigate={onNavigate}
               onNewOrder={onNewOrder}
             />
@@ -242,7 +259,7 @@ export function HomePage({
         </div>
 
         <div>
-          <TeamInsight orders={store.teamOrders} players={store.teamPlayers} onShowStrength={() => setShowStrength(true)} />
+          <TeamInsight orders={store.teamOrders} players={strengthPlayers} onShowStrength={() => setShowStrength(true)} />
 
           <div className="quick-grid">
             <button type="button" className="quick-tile" onClick={() => onNavigate('players')}>
@@ -251,7 +268,7 @@ export function HomePage({
               </span>
               <span>
                 <span className="title">メンバー</span>
-                <span className="meta">{store.teamPlayers.length} 名 ・ Rating 任意</span>
+                <span className="meta">{store.teamPlayers.length} 名 ・ Rating・PPR 任意</span>
               </span>
             </button>
             <button type="button" className="quick-tile" onClick={() => onNavigate('formats')}>
@@ -307,7 +324,7 @@ export function HomePage({
       {showChangelog ? <ChangelogSheet onClose={() => setShowChangelog(false)} /> : null}
 
       {showStrength ? (
-        <StrengthModal players={store.teamPlayers} teamName={team?.name ?? ''} onClose={() => setShowStrength(false)} />
+        <StrengthModal players={strengthPlayers} teamName={team?.name ?? ''} onClose={() => setShowStrength(false)} />
       ) : null}
 
       {confirmOpen && onOpenOrder ? (
@@ -333,7 +350,7 @@ export function HomePage({
             <>
               <button type="button" className="btn grow" onClick={() => setWizard({ kind: 'create' })}>
                 <Icon name="refresh" size={18} />
-                n01から追加
+                n01から新規作成
               </button>
               <button
                 type="button"
@@ -348,6 +365,9 @@ export function HomePage({
             </>
           }
         >
+          <p className="tiny muted" style={{ marginTop: 0 }}>
+            「チームを追加」は手入力 (ソフト・ハード) で新しいチームを作ります。今あるチームを n01 League と接続するときは、そのチームの「編集」から「n01と接続」を選びます。
+          </p>
           <ul className="list">
             {store.teams.map((entry) => (
               <li key={entry.id}>
@@ -460,6 +480,14 @@ export function HomePage({
             setWizard(null);
             setTeamSheet(false);
           }}
+          onManual={
+            wizard.kind === 'create'
+              ? () => {
+                  setWizard(null);
+                  setEditingTeam({ id: createId('team'), name: '', createdAt: Date.now() });
+                }
+              : undefined
+          }
         />
       ) : null}
 
@@ -712,7 +740,11 @@ function TeamInsight({
   const finalized = orders.filter((order) => latestVersion(order.versions) !== null).length;
   const drafts = orders.length - finalized;
   const rate = orders.length > 0 ? finalized / orders.length : 0;
-  const rated = players.filter((player) => player.rating !== null && Number.isFinite(player.rating)).length;
+  const hasRating = (player: Player): boolean => player.rating !== null && Number.isFinite(player.rating);
+  const hasPpr = (player: Player): boolean => player.ppr !== null && Number.isFinite(player.ppr);
+  const rated = players.filter(hasRating).length;
+  const withPpr = players.filter(hasPpr).length;
+  const withEither = players.filter((player) => hasRating(player) || hasPpr(player)).length;
   return (
     <section className="card insight-card" aria-labelledby="insight-title">
       <div className="card-head">
@@ -738,8 +770,11 @@ function TeamInsight({
               { key: 'draft', label: '下書き', value: drafts, tone: 'draft' },
             ]}
           />
-          <p className="tiny muted insight-note">
-            戦力データ入力済み <strong className="num">{rated}</strong> / {players.length} 名 (Rating)
+          <p className="tiny muted insight-note" data-testid="strength-coverage">
+            戦力データあり <strong className="num">{withEither}</strong> / {players.length} 名 (Rating または PPR)
+            <span className="insight-breakdown">
+              Rating {rated} 名 ・ PPR (3投平均) {withPpr} 名 ・ オーダー生成で使う値で数えています
+            </span>
           </p>
           <button type="button" className="btn small" onClick={onShowStrength} disabled={players.length === 0}>
             <Icon name="chart" size={16} />
@@ -768,7 +803,8 @@ function StrengthModal({
 }): React.JSX.Element {
   const ratingOf = (player: Player): number | null =>
     player.rating !== null && Number.isFinite(player.rating) ? player.rating : null;
-  const pprOf = (player: Player): number | null => effectivePpr(player).value;
+  // Already the value the generator uses (see `applyHistoryStrength` in HomePage).
+  const pprOf = (player: Player): number | null => (player.ppr !== null && Number.isFinite(player.ppr) ? player.ppr : null);
   const hasRating = players.some((player) => ratingOf(player) !== null);
   const hasPpr = players.some((player) => pprOf(player) !== null);
   const [metric, setMetric] = useState<StrengthMetric>(hasRating || !hasPpr ? 'rating' : 'ppr');
@@ -895,25 +931,114 @@ function RecentOrdersCarousel({
   );
 }
 
+/**
+ * What to do next on a team with no order yet: check the format (a starter template is an
+ * example, not the league's rules), then make the first order. n01-managed formats come
+ * from the league itself and need no check.
+ */
+function NextStepCard({
+  hasPlayers,
+  formats,
+  allManaged,
+  onNavigate,
+  onNewOrder,
+}: {
+  hasPlayers: boolean;
+  formats: number;
+  allManaged: boolean;
+  onNavigate: (page: Page) => void;
+  onNewOrder: () => void;
+}): React.JSX.Element {
+  return (
+    <section className="card next-step-card" aria-labelledby="next-step-title" data-testid="next-step">
+      <h2 className="card-title" id="next-step-title">
+        <span className="kicker" aria-hidden="true">
+          NEXT
+        </span>
+        次にやること
+      </h2>
+      <ol className="next-step-list">
+        {!hasPlayers ? (
+          <li>
+            <span className="grow">
+              <strong>メンバーを登録</strong>
+              <span className="tiny muted">Rating・PPR (3投平均) は任意です。</span>
+            </span>
+            <button type="button" className="btn small" onClick={() => onNavigate('players')}>
+              メンバー
+            </button>
+          </li>
+        ) : null}
+        {formats === 0 ? (
+          <li>
+            <span className="grow">
+              <strong>フォーマットを作成</strong>
+              <span className="tiny muted">リーグのゲーム数・人数・順番を登録します。</span>
+            </span>
+            <button type="button" className="btn small" onClick={() => onNavigate('formats')}>
+              フォーマット
+            </button>
+          </li>
+        ) : allManaged ? null : (
+          <li>
+            <span className="grow">
+              <strong>フォーマットの内容を確認</strong>
+              <span className="tiny muted">
+                テンプレートは一般的な例です。リーグのゲーム数・人数・順番、ソフト / ハードの種別と合っているか確かめてください。
+              </span>
+            </span>
+            <button type="button" className="btn small" onClick={() => onNavigate('formats')}>
+              確認する
+            </button>
+          </li>
+        )}
+        <li>
+          <span className="grow">
+            <strong>最初のオーダーを作る</strong>
+            <span className="tiny muted">参加者と条件を選ぶと、最大 3 つの候補を作ります。</span>
+          </span>
+          <button type="button" className="btn small primary" onClick={onNewOrder}>
+            オーダーを作る
+          </button>
+        </li>
+      </ol>
+    </section>
+  );
+}
+
 /** First-run guide: the four steps from roster to a shared order, one per slide. */
 function GuideCarousel({
   players,
   formats,
+  managedFormats,
   onNavigate,
   onNewOrder,
 }: {
   players: number;
   formats: number;
+  /** Formats n01 manages: they come from the league, so they need no checking. */
+  managedFormats: number;
   onNavigate: (page: Page) => void;
   onNewOrder: () => void;
 }): React.JSX.Element {
-  const steps: { key: string; icon: IconName; title: string; body: string; done: boolean; action: string; onAction: () => void }[] = [
+  const steps: {
+    key: string;
+    icon: IconName;
+    title: string;
+    body: string;
+    /** `done`: nothing left to do; `check`: exists but the captain should look; `todo`: missing. */
+    status: 'done' | 'check' | 'todo';
+    statusLabel?: string;
+    action: string;
+    onAction: () => void;
+  }[] = [
     {
       key: 'players',
       icon: 'users',
       title: 'メンバーを登録',
-      body: 'Rating・PPR は任意。未入力でも 0 扱いにはなりません。',
-      done: players > 0,
+      body: 'Rating・PPR (3投平均) は任意。未入力でも 0 扱いにはなりません。',
+      status: players > 0 ? 'done' : 'todo',
+      statusLabel: players > 0 ? `${players} 名登録済み` : undefined,
       action: 'メンバーを見る',
       onAction: () => onNavigate('players'),
     },
@@ -921,8 +1046,9 @@ function GuideCarousel({
       key: 'formats',
       icon: 'format',
       title: 'フォーマットを確認',
-      body: 'リーグのゲーム構成。Singles・Doubles・Trios などの人数と順番です。',
-      done: formats > 0,
+      body: 'リーグのゲーム構成。Singles・Doubles・Trios などの人数と順番、ソフト / ハードの種別です。',
+      status: formats === 0 ? 'todo' : managedFormats === formats ? 'done' : 'check',
+      statusLabel: formats === 0 ? undefined : managedFormats === formats ? 'n01 管理' : `${formats} 件 ・ 内容を確認`,
       action: 'フォーマットを見る',
       onAction: () => onNavigate('formats'),
     },
@@ -931,7 +1057,7 @@ function GuideCarousel({
       icon: 'sliders',
       title: '条件を決めて生成',
       body: '参加者・出場条件・プリセットを選ぶと、最大 3 つの候補を作ります。',
-      done: false,
+      status: 'todo',
       action: 'オーダーを作る',
       onAction: onNewOrder,
     },
@@ -940,7 +1066,7 @@ function GuideCarousel({
       icon: 'share',
       title: '確定して共有',
       body: '確定すると v1・v2… と版が残り、LINE 向けの画像やテキストで共有できます。',
-      done: false,
+      status: 'todo',
       action: 'オーダーを作る',
       onAction: onNewOrder,
     },
@@ -963,9 +1089,13 @@ function GuideCarousel({
             <strong className="guide-title">{step.title}</strong>
             <p className="guide-body">{step.body}</p>
             <span className="guide-foot">
-              {step.done ? (
+              {step.status === 'done' ? (
                 <StatusBadge tone="finalized" icon="check">
-                  完了
+                  {step.statusLabel ?? '完了'}
+                </StatusBadge>
+              ) : step.status === 'check' ? (
+                <StatusBadge tone="draft" icon="alert">
+                  {step.statusLabel ?? '要確認'}
                 </StatusBadge>
               ) : (
                 <span />

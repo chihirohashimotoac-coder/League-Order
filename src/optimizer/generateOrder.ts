@@ -265,7 +265,7 @@ function buildWarnings(
     warnings.push({
       severity: 'warning',
       code: 'CONSECUTIVE_OVER',
-      message: `最大連続出場の上限超過が ${evaluation.consecutiveExcessTotal} 箇所あります (設定は Soft のため配置は有効です)。`,
+      message: `最大連続出場の上限超過が ${evaluation.consecutiveExcessTotal} 箇所あります (設定が「できるだけ考慮」のため配置は有効です)。`,
     });
   }
   const { rating: ratingShare, ppr: pprShare } = ctx.strengthWeights;
