@@ -47,7 +47,11 @@ export function searchOnce(
     width: Math.max(1, ctx.input.settings.beamWidth),
     deadline: started + timeLimitMs * 0.35,
   });
-  if (!beam.feasible || beam.solutions.length === 0) return null;
+  // League rules are counting conditions over the whole order (a pair's games, the helpers
+  // fielded), which a bounded beam can walk into a dead end on while a line-up still exists:
+  // with rules, the branch and bound gets its turn even then. Without rules nothing changes.
+  const beamFailed = !beam.feasible || beam.solutions.length === 0;
+  if (beamFailed && ctx.leagueRules === null) return null;
 
   // Line-ups already returned as other candidates are not eligible again, so each
   // candidate the captain compares is genuinely a different order.
@@ -55,7 +59,7 @@ export function searchOnce(
     excluded.size === 0
       ? beam.solutions
       : beam.solutions.filter((solution) => !excluded.has(selectionSignature(ctx, solution)));
-  if (pool.length === 0 && !searchPastExcluded) return null;
+  if (!beamFailed && pool.length === 0 && !searchPastExcluded) return null;
 
   let bestSelection: Combo[] | null = pool[0] ?? null;
   let bestEvaluation: Evaluation | null = bestSelection ? evaluateSelection(ctx, bestSelection) : null;

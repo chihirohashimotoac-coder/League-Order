@@ -9,7 +9,15 @@ import { buildAllCandidates, type GameCandidates } from './candidates/combinatio
 import { prepare } from './prepare';
 import { buildBoundContext } from './search/bound';
 import { beamSearch } from './search/beam';
+import { dfsSearch } from './search/dfs';
 import { minAppearancesFor } from '../domain/orders/participants';
+import {
+  leagueRuleIssues,
+  leagueStatusOf,
+  needsLeagueStatus,
+  perPlayerLimits,
+} from '../domain/orders/leagueRules';
+import type { PreparedContext } from './prepare';
 
 /**
  * Infeasibility diagnostics (spec §31).
@@ -60,6 +68,11 @@ export function precheck(input: OrderInput): Diagnostic[] {
   // meaningful to add until the format itself is valid.
   if (diagnostics.length > 0) return diagnostics;
 
+  // League rules that cannot be read, or a helper rule with players whose status is not
+  // stated: nothing can be checked, so nothing is generated (and nobody is assumed REGULAR).
+  diagnostics.push(...leagueRuleBlockers(ctx));
+  if (diagnostics.length > 0) return diagnostics;
+
   // Per-game eligibility.
   for (let gi = 0; gi < ctx.gameCount; gi += 1) {
     const game = ctx.games[gi];
@@ -76,6 +89,18 @@ export function precheck(input: OrderInput): Diagnostic[] {
       gameId: game.id,
       message: `${playerName(entry.pi)} の制約を解除する (理由: ${entry.reason?.message})`,
     }));
+    // A league rule cap of 0 rules players out too; the rule is the league's, so it is named
+    // rather than offered as something to relax.
+    const ruleBlocked = ctx.configs
+      .map((config, pi) => ({ pi, reason: checkEligibility(config, game) === null ? ctx.leagueRules?.blocked[gi][pi] : null }))
+      .filter((entry): entry is { pi: number; reason: string } => !!entry.reason);
+    if (ruleBlocked.length > 0) {
+      suggestions.push({
+        kind: 'other',
+        gameId: game.id,
+        message: `リーグ規則 (必須条件) で出場できない選手: ${ruleBlocked.map((entry) => `${playerName(entry.pi)} (${entry.reason})`).join('、')}`,
+      });
+    }
     const notIncluded = input.participants.filter((config) => !config.include);
     for (const config of notIncluded.slice(0, 5)) {
       const player = input.players.find((p) => p.id === config.playerId);
@@ -113,6 +138,8 @@ export function precheck(input: OrderInput): Diagnostic[] {
       ],
     });
   }
+
+  diagnostics.push(...leagueRuleCapacity(ctx));
 
   // Minimum appearances. These are only blockers when the minimum is a hard constraint;
   // in soft mode an unreachable minimum is reported as a warning on the result instead.
@@ -232,6 +259,98 @@ export function precheck(input: OrderInput): Diagnostic[] {
   return diagnostics;
 }
 
+/** Rules that cannot be checked at all: unreadable caps, or unstated statuses under a helper rule. */
+function leagueRuleBlockers(ctx: PreparedContext): Diagnostic[] {
+  const rules = ctx.input.leagueRules;
+  if (!ctx.leagueRules || !rules) return [];
+  const issues = leagueRuleIssues(rules);
+  if (issues.length > 0) {
+    return [
+      {
+        code: 'LEAGUE_RULE_INVALID',
+        message: `リーグ規則の値を読み取れません: ${issues.join(' ')}`,
+        suggestions: [{ kind: 'other', message: 'フォーマット画面のリーグ規則で上限を 0 以上の整数に直してから生成してください。' }],
+      },
+    ];
+  }
+  if (!needsLeagueStatus(rules)) return [];
+  const unstated = ctx.configs
+    .map((config, pi) => ({ config, pi }))
+    .filter((entry) => leagueStatusOf(entry.config) === null);
+  if (unstated.length === 0) return [];
+  return [
+    {
+      code: 'LEAGUE_STATUS_UNSET',
+      message: `助っ人の人数上限 (${rules.maxHelpers} 名) を確認するには、参加者全員の大会資格が必要です。未設定: ${unstated
+        .map((entry) => ctx.players[entry.pi].name)
+        .join('、')}`,
+      playerIds: unstated.map((entry) => entry.config.playerId),
+      suggestions: [
+        {
+          kind: 'other',
+          message: 'オーダー設定の参加者の「条件」で、正規登録か助っ人かを選んでください (未設定のまま正規登録とはみなしません)。',
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * Counting arguments that need no search: a capped category with more slots than the
+ * participants may fill under the cap, and more slots than regulars plus the allowed number
+ * of helpers can cover.
+ */
+function leagueRuleCapacity(ctx: PreparedContext): Diagnostic[] {
+  const rules = ctx.leagueRules;
+  const source = ctx.input.leagueRules;
+  if (!rules || !source) return [];
+  const diagnostics: Diagnostic[] = [];
+  const eligibleGames = (pi: number, matches: (gi: number) => boolean): number =>
+    ctx.eligible.reduce((acc, row, gi) => acc + (row[pi] && matches(gi) ? 1 : 0), 0);
+
+  perPlayerLimits(source).forEach((limit, k) => {
+    const compiled = rules.limits[k];
+    const slots = ctx.games.reduce((acc, game, gi) => acc + (compiled.games[gi] ? game.playerCount : 0), 0);
+    if (slots === 0) return;
+    let capacity = 0;
+    for (let pi = 0; pi < ctx.playerCount; pi += 1) {
+      capacity += Math.min(compiled.cap, ctx.maxAppearances[pi], eligibleGames(pi, (gi) => compiled.games[gi]));
+    }
+    if (capacity >= slots) return;
+    diagnostics.push({
+      code: 'LEAGUE_RULE_CAPACITY',
+      message: `${limit.label} のゲームは ${slots} 枠ありますが、リーグ規則 (1人 ${limit.cap} 回まで) と出場条件の範囲では参加者 ${ctx.playerCount} 名で最大 ${capacity} 枠しか埋められません。`,
+      suggestions: [
+        { kind: 'addParticipant', message: `${limit.label} に出場できる参加者を追加する` },
+        { kind: 'allowPlayerInGame', message: `${limit.label} の出場不可・最大出場回数の設定を見直す` },
+      ],
+    });
+  });
+
+  if (Number.isFinite(rules.helperCap)) {
+    const capacity = (pi: number): number => Math.min(ctx.maxAppearances[pi], eligibleGames(pi, () => true));
+    let regular = 0;
+    const helpers: number[] = [];
+    for (let pi = 0; pi < ctx.playerCount; pi += 1) {
+      if (rules.isHelper[pi]) helpers.push(capacity(pi));
+      else regular += capacity(pi);
+    }
+    helpers.sort((a, b) => b - a);
+    const reachable = regular + helpers.slice(0, Math.max(0, rules.helperCap)).reduce((acc, value) => acc + value, 0);
+    if (reachable < ctx.totalSlots) {
+      diagnostics.push({
+        code: 'LEAGUE_RULE_CAPACITY',
+        message: `総枠 ${ctx.totalSlots} に対し、正規登録の参加者と助っ人 ${rules.helperCap} 名までで埋められるのは最大 ${reachable} 枠です (リーグ規則)。`,
+        suggestions: [
+          { kind: 'addParticipant', message: '正規登録の参加者を追加する' },
+          { kind: 'raiseMaxAppearances', message: '正規登録の参加者の最大出場回数を見直す' },
+        ],
+      });
+    }
+  }
+  return diagnostics;
+}
+
 /** One concrete relaxation to try when the search itself comes up empty. */
 interface Relaxation {
   describe: string;
@@ -264,7 +383,15 @@ function feasible(input: OrderInput, budgetMs: number): boolean {
     width: Math.max(16, ctx.input.settings.beamWidth),
     deadline: performance.now() + budgetMs,
   });
-  return result.feasible && result.solutions.length > 0;
+  if (result.feasible && result.solutions.length > 0) return true;
+  // With league rules the beam can dead-end while a line-up exists (see `searchOnce`).
+  if (ctx.leagueRules === null) return false;
+  return dfsSearch(ctx, bctx, candidates, {
+    deadline: performance.now() + budgetMs,
+    nodeLimit: ctx.input.settings.nodeLimit,
+    incumbent: Number.NEGATIVE_INFINITY,
+    fairnessUrgency: 0,
+  }).foundAny;
 }
 
 /**

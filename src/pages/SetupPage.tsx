@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type {
   FormatId,
   GameKind,
+  LeagueStatus,
   MatchInfo,
   OptimizerSettings,
   OrderInput,
@@ -9,7 +10,9 @@ import type {
   Player,
   PresetKey,
 } from '../domain/types';
-import { GAME_KIND_LABELS, PRESET_KEYS, PRESET_LABELS, formatDiscipline } from '../domain/types';
+import { GAME_KIND_LABELS, LEAGUE_STATUS_LABELS, PRESET_KEYS, PRESET_LABELS, formatDiscipline } from '../domain/types';
+import { leagueRulesSnapshot, leagueStatusOf, needsLeagueStatus } from '../domain/orders/leagueRules';
+import { LeagueRulesSummary } from '../components/LeagueRules';
 import { scopeForPreset, weightsForPreset } from '../domain/orders/presets';
 import { formatStructureIssues, totalSlots } from '../domain/games/format';
 import {
@@ -121,6 +124,8 @@ export function SetupPage({
 
   const included = draft.participants.filter((config) => config.include);
   const discipline = formatDiscipline(format);
+  // A helper cap needs every participant's league status; nobody is assumed REGULAR.
+  const statusRequired = needsLeagueStatus(format?.leagueRules);
   // Opponent data for the next match (n01 teams only). The context is built against the
   // format chosen here and travels inside the order, so the saved order can always be
   // re-evaluated exactly as it was generated.
@@ -133,6 +138,9 @@ export function SetupPage({
   // seasons the last analysis returned — or the manual fallback: the order input snapshots
   // that value and where it came from, so a saved order keeps the PPR it was made with.
   const everyone = useMemo(() => [...store.teamPlayers, ...draft.guests], [store.teamPlayers, draft.guests]);
+  const unstated = statusRequired
+    ? everyone.filter((player) => configById.get(player.id)?.include && leagueStatusOf(configById.get(player.id)) === null)
+    : [];
   const { players: effectivePlayers, basis: strengthBasis } = useMemo(
     () => applyHistoryStrength(everyone, intel),
     [everyone, intel],
@@ -212,6 +220,14 @@ export function SetupPage({
       toast.show('参加者を 1 名以上選択してください', 'error');
       return null;
     }
+    if (unstated.length > 0) {
+      toast.show(
+        `生成できません: 大会資格が未設定の参加者がいます (${unstated.map((player) => player.name).join('、')})。「条件」で正規登録か助っ人かを選んでください。`,
+        'error',
+      );
+      return null;
+    }
+    const leagueRules = leagueRulesSnapshot(format.leagueRules);
     if (structureIssues.length > 0) {
       toast.show(`生成できません: ${structureIssues[0].message} フォーマット画面で修正してください。`, 'error');
       return null;
@@ -229,6 +245,8 @@ export function SetupPage({
       settings: draft.settings,
       // Snapshot: a later edit to the format's discipline must not re-score this order.
       discipline: formatDiscipline(format),
+      // Snapshot too: the order is checked against the rules it was made under.
+      ...(leagueRules ? { leagueRules } : {}),
       ...(opponent ? { opponent } : {}),
       strengthBasis,
       // New orders are made with the throw-order model and keep the evidence they used, so a
@@ -307,6 +325,7 @@ export function SetupPage({
             ))}
           </select>
         </Field>
+        <LeagueRulesSummary rules={format?.leagueRules} />
         {structureIssues.length > 0 ? (
           <div className="notice warn" role="alert" data-testid="setup-format-issue">
             <Icon name="alert" size={18} />
@@ -371,6 +390,33 @@ export function SetupPage({
         players={effectivePlayers}
         includedIds={new Set(included.map((config) => config.playerId))}
       />
+      {unstated.length > 0 ? (
+        <div className="notice warn" role="status" data-testid="league-status-notice">
+          <Icon name="alert" size={18} />
+          <span className="grow small-text">
+            リーグ規則に助っ人の人数上限 ({format?.leagueRules?.maxHelpers} 名) があるため、参加者ごとの大会資格 (正規登録 / 助っ人) が必要です。
+            未設定: {unstated.map((player) => player.name).join('、')}。各選手の「条件」で選んでください。
+          </span>
+          {unstated.some((player) => !player.guest) ? (
+            <button
+              type="button"
+              className="btn small"
+              onClick={() =>
+                onDraftChange({
+                  ...draft,
+                  participants: draft.participants.map((config) =>
+                    unstated.some((player) => player.id === config.playerId && !player.guest)
+                      ? { ...config, leagueStatus: 'REGULAR' }
+                      : config,
+                  ),
+                })
+              }
+            >
+              名簿メンバーを正規登録にする
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <ul className="participants">
         {everyone.map((player) => {
           const config = configById.get(player.id) ?? createParticipantConfig(player.id, false);
@@ -395,6 +441,7 @@ export function SetupPage({
                   <span className="p-name">
                     <strong>{player.name}</strong>
                     {player.guest ? <span className="n01-tag guest-tag" data-testid="guest-tag">助っ人 (今回のみ)</span> : null}
+                    {statusRequired && config.include ? <LeagueStatusTag status={leagueStatusOf(config)} /> : null}
                     <span
                       className={
                         player.rating === null && effectivePpr(player).value === null ? 'rt unknown' : 'rt'
@@ -551,6 +598,7 @@ export function SetupPage({
                 config={config}
                 games={games}
                 defaultMaxConsecutive={draft.settings.defaultMaxConsecutive}
+                statusRequired={statusRequired}
                 onChange={(change) => updateConfig(detailFor.id, change)}
                 onClose={() => setDetailFor(null)}
               />
@@ -661,11 +709,25 @@ function describeRestrictions(
   return notes;
 }
 
+/** The league status of a participant under a helper rule, always in words. */
+function LeagueStatusTag({ status }: { status: LeagueStatus | null }): React.JSX.Element {
+  return status === null ? (
+    <span className="n01-tag status-tag unset" data-testid="league-status-tag">
+      大会資格 未設定
+    </span>
+  ) : (
+    <span className={`n01-tag status-tag ${status === 'HELPER' ? 'helper' : 'regular'}`} data-testid="league-status-tag">
+      大会: {LEAGUE_STATUS_LABELS[status]}
+    </span>
+  );
+}
+
 function ParticipantDetail({
   player,
   config,
   games,
   defaultMaxConsecutive,
+  statusRequired,
   onChange,
   onClose,
 }: {
@@ -673,6 +735,8 @@ function ParticipantDetail({
   config: ParticipantConfig;
   games: readonly { id: string; name: string; order: number }[];
   defaultMaxConsecutive: number;
+  /** The format has a helper rule, so this order needs the player's league status. */
+  statusRequired: boolean;
   onChange: (change: Partial<ParticipantConfig>) => void;
   onClose: () => void;
 }): React.JSX.Element {
@@ -680,9 +744,30 @@ function ParticipantDetail({
   const kinds: GameKind[] = ['SINGLES', 'DOUBLES', 'TRIOS', 'G501', 'CRICKET', 'GALLON', 'TEAM'];
   const min = minAppearancesFor(config);
   const max = maxAppearancesFor(config, games as never);
+  const status = leagueStatusOf(config);
 
   return (
     <Sheet title={`${player.name} の出場条件`} onClose={onClose}>
+      {statusRequired || status !== null ? (
+        <div className="sheet-section" data-testid="league-status-picker">
+          <RadioCards<LeagueStatus | ''>
+            label="大会資格 (リーグ規則・このオーダーのみ)"
+            hint={
+              status === null
+                ? '未設定です。助っ人の人数上限を確認するため、どちらかを選んでください (未設定のまま正規登録とはみなしません)。'
+                : '助っ人の人数上限の確認に使います。「今回だけの助っ人」として追加したかどうかとは別に選べます。大会側の登録確認ではありません。'
+            }
+            columns={2}
+            value={status ?? ''}
+            options={[
+              { key: 'REGULAR', label: LEAGUE_STATUS_LABELS.REGULAR, hint: 'チームの登録選手' },
+              { key: 'HELPER', label: LEAGUE_STATUS_LABELS.HELPER, hint: '人数上限の対象' },
+            ]}
+            onChange={(next) => onChange({ leagueStatus: next === '' ? undefined : next })}
+          />
+        </div>
+      ) : null}
+
       <div className="sheet-section">
         <span className="kicker">絶対条件 ・ 出場できないゲーム</span>
         <div className="chip-row">

@@ -13,6 +13,7 @@ import {
 import { sortedGames } from '../../domain/games/format';
 import { buildAppearanceIndices, consecutiveExcess } from '../../domain/orders/consecutive';
 import { checkEligibility } from './eligibility';
+import { leagueRuleViolations, type LeagueRuleViolationCode } from '../../domain/orders/leagueRules';
 
 /**
  * Independent re-verification of every hard constraint on a finished assignment.
@@ -34,7 +35,8 @@ export type HardViolationCode =
   | 'MIN_APPEARANCES_UNMET'
   | 'LOCK_BROKEN'
   | 'FORBIDDEN_PAIR'
-  | 'CONSECUTIVE_EXCEEDED';
+  | 'CONSECUTIVE_EXCEEDED'
+  | LeagueRuleViolationCode;
 
 export interface HardViolation {
   code: HardViolationCode;
@@ -197,6 +199,17 @@ export function validateHardConstraints(
       }
     }
   }
+
+  // League rules (the order's own snapshot): hard conditions like every check above.
+  violations.push(
+    ...leagueRuleViolations(
+      input.leagueRules,
+      games,
+      assignments,
+      input.participants,
+      (playerId) => playerById.get(playerId)?.name ?? playerId,
+    ),
+  );
 
   return violations;
 }

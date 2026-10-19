@@ -14,6 +14,7 @@ import type {
 } from '../types';
 import { sortedGames } from '../games/format';
 import { asDiscipline } from '../types';
+import { leagueRulesSnapshot } from './leagueRules';
 
 /**
  * Order lifecycle: finalization, versioning and change detection (追加要件 §2–§5, §8, §9).
@@ -140,6 +141,7 @@ export function createVersion(
     gameId: entry.gameId,
     playerIds: [...entry.playerIds],
   }));
+  const leagueRules = leagueRulesSnapshot(input.leagueRules);
 
   return {
     version: nextVersionNumber(versions),
@@ -161,6 +163,8 @@ export function createVersion(
     hasImputedRating: solution.metrics.hasImputedRating,
     // What "strong" meant when this version was generated (soft / steel).
     discipline: asDiscipline(input.discipline),
+    // The league rules the version was checked against: a later format edit never reaches it.
+    ...(leagueRules ? { leagueRules } : {}),
   };
 }
 

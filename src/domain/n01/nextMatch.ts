@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import { formatDiscipline } from '../types';
 import { createParticipantConfig } from '../orders/participants';
+import { leagueRulesSnapshot } from '../orders/leagueRules';
 import { scopeForPreset, weightsForPreset } from '../orders/presets';
 import { applyHistoryStrength, buildRoleStrengthContext } from './historyStrength';
 import { THROW_ORDER_MODEL_VERSION } from '../prediction/throwOrder';
@@ -84,6 +85,7 @@ export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder
   });
   const match = source.intel?.nextMatch;
   const binding = source.team.n01;
+  const leagueRules = leagueRulesSnapshot(source.format.leagueRules);
   return {
     opponentAvailable: opponent !== null,
     match: {
@@ -107,6 +109,7 @@ export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder
         fairnessScope: scopeForPreset(preset, source.settings.optimizer.fairnessScope),
       },
       discipline,
+      ...(leagueRules ? { leagueRules } : {}),
       ...(opponent ? { opponent } : {}),
       strengthBasis: basis,
       // New orders are made with the throw-order model and keep the role evidence they used.

@@ -47,6 +47,8 @@ import {
   formatRating,
 } from '../components/ui';
 import { StrengthBasisPanel } from '../components/StrengthBasisPanel';
+import { LeagueRulesPanel } from '../components/LeagueRules';
+import { leagueRuleViolations } from '../domain/orders/leagueRules';
 import { Icon } from '../components/icons';
 import { OpponentPanel } from '../components/n01/OpponentPanel';
 import { useAppStore } from '../state/appStore';
@@ -133,7 +135,6 @@ export function ResultPage({
     );
   }
 
-  const violatingGames = new Set(state.violations.map((violation) => violation.gameId).filter(Boolean));
 
   const versions = record?.versions ?? [];
   const latest = latestVersion(versions);
@@ -160,7 +161,19 @@ export function ResultPage({
   const offerUnderdog =
     showPredictions && state.underdog !== null && (state.showingUnderdog || (!state.edited && state.selectedCandidate === standardIndex));
   const baselineByGame = new Map(baseline?.assignments.map((entry) => [entry.gameId, entry.playerIds]));
-  const hasViolations = state.violations.length > 0;
+  // The rules are checked live against the line-up on screen as well, so an order opened from
+  // history (no edit yet) that breaks its rules cannot be finalized from here either.
+  const ruleViolations = leagueRuleViolations(
+    state.input.leagueRules,
+    ordered,
+    solution.assignments,
+    state.input.participants,
+    (id) => nameById.get(id) ?? id,
+  );
+  const hasViolations = state.violations.length > 0 || ruleViolations.length > 0;
+  const shownViolations =
+    state.violations.length > 0 ? state.violations : ruleViolations;
+  const violatingGames = new Set(shownViolations.map((violation) => violation.gameId).filter(Boolean));
 
   const shareButton = (
     <button type="button" className="btn small outline" onClick={() => setShareOpen(true)}>
@@ -234,7 +247,7 @@ export function ResultPage({
               <span>
                 <strong>絶対条件に違反しています</strong>
                 <ul>
-                  {state.violations.map((violation, index) => (
+                  {shownViolations.map((violation, index) => (
                     <li key={index} className="small-text">
                       {violation.message}
                     </li>
@@ -286,6 +299,13 @@ export function ResultPage({
         </div>
 
         <div className="result-side">
+          <LeagueRulesPanel
+            rules={state.input.leagueRules}
+            games={ordered}
+            assignments={solution.assignments}
+            participants={state.input.participants}
+            players={players}
+          />
           <SectionHeader kicker="APPEARANCES" title="出場回数" />
           <AppearanceSummary solution={solution} nameById={nameById} />
 

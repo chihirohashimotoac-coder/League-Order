@@ -53,9 +53,18 @@ export interface SearchState {
   sumPair: number;
   sumNovelty: number;
   sumOppWin: number;
+  /**
+   * League rules (empty when the order has none): `ruleCounts[limit][player]` appearances
+   * towards each per-player cap, `pairCounts[a * n + b]` Doubles games of each pair (a < b),
+   * and how many distinct helpers are fielded.
+   */
+  ruleCounts: Int32Array[];
+  pairCounts: Int32Array;
+  helpersUsed: number;
 }
 
 export function createState(ctx: PreparedContext): SearchState {
+  const rules = ctx.leagueRules;
   return {
     counts: new Int32Array(ctx.playerCount),
     lastGame: new Int32Array(ctx.playerCount).fill(-2),
@@ -67,6 +76,9 @@ export function createState(ctx: PreparedContext): SearchState {
     sumPair: 0,
     sumNovelty: 0,
     sumOppWin: 0,
+    ruleCounts: rules ? rules.limits.map(() => new Int32Array(ctx.playerCount)) : [],
+    pairCounts: new Int32Array(rules && Number.isFinite(rules.pairCap) ? ctx.playerCount * ctx.playerCount : 0),
+    helpersUsed: 0,
   };
 }
 
@@ -82,6 +94,9 @@ export function cloneState(state: SearchState): SearchState {
     sumPair: state.sumPair,
     sumNovelty: state.sumNovelty,
     sumOppWin: state.sumOppWin,
+    ruleCounts: state.ruleCounts.map((counts) => new Int32Array(counts)),
+    pairCounts: new Int32Array(state.pairCounts),
+    helpersUsed: state.helpersUsed,
   };
 }
 
@@ -219,7 +234,7 @@ export function upperBound(
 
 /**
  * Hard feasibility of placing `members` in game `gi` given the current state:
- * max appearances, and the consecutive limit when it is configured as hard.
+ * max appearances, the consecutive limit when it is configured as hard, and the league rules.
  */
 export function canPlace(
   ctx: PreparedContext,
@@ -238,7 +253,50 @@ export function canPlace(
       }
     }
   }
+  return ctx.leagueRules === null || leagueRulesAllow(ctx, gi, state, members);
+}
+
+/** The league rules part of {@link canPlace} (the same counting as `domain/orders/leagueRules.ts`). */
+function leagueRulesAllow(ctx: PreparedContext, gi: number, state: SearchState, members: readonly number[]): boolean {
+  const rules = ctx.leagueRules!;
+  for (let k = 0; k < rules.limits.length; k += 1) {
+    const limit = rules.limits[k];
+    if (!limit.games[gi]) continue;
+    for (const pi of members) {
+      if (state.ruleCounts[k][pi] + 1 > limit.cap) return false;
+    }
+  }
+  if (rules.pairGames[gi] && members.length === 2 && state.pairCounts.length > 0) {
+    if (state.pairCounts[pairIndex(ctx, members[0], members[1])] + 1 > rules.pairCap) return false;
+  }
+  if (Number.isFinite(rules.helperCap)) {
+    let added = 0;
+    for (const pi of members) if (rules.isHelper[pi] && state.counts[pi] === 0) added += 1;
+    if (added > 0 && state.helpersUsed + added > rules.helperCap) return false;
+  }
   return true;
+}
+
+/**
+ * Whole-selection league rule check (the local search, the re-ranking and the bias gate move
+ * players around outside the incremental search). Replays the placements game by game with
+ * the same counters the search keeps, so both agree by construction.
+ */
+export function selectionMeetsLeagueRules(
+  ctx: PreparedContext,
+  selection: readonly { members: number[]; strength: number; gameFit: number; pairFit: number; novelty: number; oppValue: number }[],
+): boolean {
+  if (ctx.leagueRules === null) return true;
+  const state = createState(ctx);
+  for (let gi = 0; gi < selection.length; gi += 1) {
+    if (!leagueRulesAllow(ctx, gi, state, selection[gi].members)) return false;
+    applyCombo(ctx, gi, state, selection[gi].members, selection[gi]);
+  }
+  return true;
+}
+
+function pairIndex(ctx: PreparedContext, a: number, b: number): number {
+  return a < b ? a * ctx.playerCount + b : b * ctx.playerCount + a;
 }
 
 export interface PlaceUndo {
@@ -249,6 +307,10 @@ export interface PlaceUndo {
   prevRunLen: number[];
   prevExcess: number;
   prevSums: [number, number, number, number, number];
+  prevHelpers: number;
+  /** League rule counters this placement incremented (limit indices; the pair slot or -1). */
+  ruleLimits: number[];
+  pairSlot: number;
 }
 
 /** Applies a combo to the state, returning the information needed to undo it. */
@@ -266,7 +328,24 @@ export function applyCombo(
     prevRunLen: members.map((pi) => state.runLen[pi]),
     prevExcess: state.consecExcess,
     prevSums: [state.sumStrength, state.sumGameFit, state.sumPair, state.sumNovelty, state.sumOppWin],
+    prevHelpers: state.helpersUsed,
+    ruleLimits: [],
+    pairSlot: -1,
   };
+
+  const rules = ctx.leagueRules;
+  if (rules) {
+    for (let k = 0; k < rules.limits.length; k += 1) {
+      if (!rules.limits[k].games[gi]) continue;
+      undo.ruleLimits.push(k);
+      for (const pi of members) state.ruleCounts[k][pi] += 1;
+    }
+    if (rules.pairGames[gi] && members.length === 2 && state.pairCounts.length > 0) {
+      undo.pairSlot = pairIndex(ctx, members[0], members[1]);
+      state.pairCounts[undo.pairSlot] += 1;
+    }
+    for (const pi of members) if (rules.isHelper[pi] && state.counts[pi] === 0) state.helpersUsed += 1;
+  }
 
   const role = state.roleCounts[ctx.roleOfGame[gi]];
   for (const pi of members) {
@@ -301,6 +380,11 @@ export function undoCombo(state: SearchState, undo: PlaceUndo): void {
   });
   state.consecExcess = undo.prevExcess;
   [state.sumStrength, state.sumGameFit, state.sumPair, state.sumNovelty, state.sumOppWin] = undo.prevSums;
+  for (const k of undo.ruleLimits) {
+    for (const pi of undo.members) state.ruleCounts[k][pi] -= 1;
+  }
+  if (undo.pairSlot >= 0) state.pairCounts[undo.pairSlot] -= 1;
+  state.helpersUsed = undo.prevHelpers;
 }
 
 /**

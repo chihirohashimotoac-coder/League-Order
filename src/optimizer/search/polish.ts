@@ -7,6 +7,7 @@ import {
 import { consecutiveExcess } from '../../domain/orders/consecutive';
 import type { PreparedContext } from '../prepare';
 import { evaluateSelection, type Evaluation } from '../scoring/score';
+import { selectionMeetsLeagueRules } from './bound';
 
 /**
  * Deterministic hill climbing (docs/DESIGN.md §6.3 Stage 3).
@@ -60,7 +61,7 @@ export function hardFeasible(ctx: PreparedContext, selection: readonly Combo[]):
       if (Number.isFinite(limit) && consecutiveExcess(appearances[pi], limit) > 0) return false;
     }
   }
-  return true;
+  return selectionMeetsLeagueRules(ctx, selection);
 }
 
 function withMembers(

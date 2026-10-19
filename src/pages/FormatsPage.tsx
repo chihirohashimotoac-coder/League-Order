@@ -33,6 +33,14 @@ import {
 } from '../components/ui';
 import { Icon } from '../components/icons';
 import { divisionLabel } from '../domain/n01/division';
+import { LeagueRulesEditor } from '../components/LeagueRules';
+import {
+  hasLeagueRules,
+  leagueRulesFromText,
+  leagueRulesSnapshot,
+  leagueRulesToText,
+  type RuleCapText,
+} from '../domain/orders/leagueRules';
 
 /**
  * FORMAT screen (spec §4).
@@ -74,6 +82,8 @@ export function FormatsPage({ initialEditId = null }: { initialEditId?: string |
   // A copy is always a manual format: the n01 source and game metadata stay with the
   // managed original, which keeps being rewritten by every sync.
   const duplicate = (format: LeagueFormat): void => {
+    // Game ids change, but rules are per category (Singles, 01 …), never per game, so they
+    // carry over to a copy unchanged.
     store.saveFormat({
       ...format,
       id: createId('fmt'),
@@ -81,6 +91,7 @@ export function FormatsPage({ initialEditId = null }: { initialEditId?: string |
       games: format.games.map((game) => ({ ...game, id: createId('gm'), n01: undefined })),
       createdAt: Date.now(),
       source: undefined,
+      leagueRules: leagueRulesSnapshot(format.leagueRules),
     });
     toast.show(format.source ? '手動フォーマットとしてコピーしました' : '複製しました', 'ok');
   };
@@ -109,6 +120,12 @@ export function FormatsPage({ initialEditId = null }: { initialEditId?: string |
                       <span className="title">{format.name}</span>
                       <DisciplineBadge discipline={formatDiscipline(format)} />
                       {format.source ? <span className="n01-tag">n01 管理</span> : null}
+                      {hasLeagueRules(format.leagueRules) ? (
+                        <span className="rules-tag" data-testid="format-rules-tag">
+                          <Icon name="scale" size={14} />
+                          リーグ規則
+                        </span>
+                      ) : null}
                       {formatStructureIssues(format.games).length > 0 ? (
                         <span className="issue-tag" data-testid="format-issue-tag">
                           <Icon name="alert" size={14} />
@@ -149,13 +166,19 @@ export function FormatsPage({ initialEditId = null }: { initialEditId?: string |
           format={editing}
           isNew={!store.teamFormats.some((candidate) => candidate.id === editing.id)}
           onClose={() => setEditing(null)}
-          onSave={(format) => {
+          onSave={(format, ruleText) => {
             const issues = validateFormat(format.games);
             if (issues.length > 0) {
               toast.show(issues[0].message, 'error');
               return;
             }
-            store.saveFormat({ ...format, games: renumber(format.games) });
+            const rules = leagueRulesFromText(ruleText);
+            if (!rules.ok) {
+              toast.show(`リーグ規則: ${Object.values(rules.errors)[0]}`, 'error');
+              return;
+            }
+            // Clearing every input removes the rules (`undefined`), never leaves an empty set.
+            store.saveFormat({ ...format, games: renumber(format.games), leagueRules: rules.rules });
             setEditing(null);
             toast.show('保存しました', 'ok');
           }}
@@ -261,10 +284,12 @@ function FormatEditor({
   format: LeagueFormat;
   isNew: boolean;
   onClose: () => void;
-  onSave: (format: LeagueFormat) => void;
+  onSave: (format: LeagueFormat, ruleText: RuleCapText) => void;
   onDelete: () => void;
 }): React.JSX.Element {
   const [draft, setDraft] = useState<LeagueFormat>(format);
+  // The rule inputs as typed: "" (no rule) and "0" (zero games) stay distinct until saved.
+  const [ruleText, setRuleText] = useState<RuleCapText>(() => leagueRulesToText(format.leagueRules));
 
   const setGames = (games: GameSlotDef[]): void => setDraft({ ...draft, games: renumber(games) });
 
@@ -313,7 +338,7 @@ function FormatEditor({
               削除
             </button>
           ) : null}
-          <button type="button" className="btn primary grow" onClick={() => onSave(draft)}>
+          <button type="button" className="btn primary grow" onClick={() => onSave(draft, ruleText)}>
             保存
           </button>
         </>
@@ -424,6 +449,8 @@ function FormatEditor({
         <Icon name="plus" size={18} />
         ゲームを追加
       </button>
+
+      <LeagueRulesEditor games={draft.games} text={ruleText} onChange={setRuleText} />
     </Sheet>
   );
 }

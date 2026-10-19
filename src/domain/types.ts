@@ -244,7 +244,46 @@ export interface LeagueFormat {
    * in the editor ("copy to a manual format" makes an editable one).
    */
   source?: N01FormatSource;
+  /** League rules (manual formats only). Absent = none; formats stored before it have none. */
+  leagueRules?: LeagueRules;
 }
+
+/**
+ * Competition kinds a league rule can cap (競技区分). They describe what is played, never how
+ * many play — that is the structural kind (人数区分), a separate axis.
+ */
+export const RULE_PLAY_KINDS = ['G501', 'CRICKET', 'CUSTOM'] as const;
+
+export type RulePlayKind = (typeof RULE_PLAY_KINDS)[number];
+
+/**
+ * Optional league rules of a manual format (リーグ規則). Every rule is a hard condition, and
+ * only the ones written here exist: an absent key is "no rule", never 0. See
+ * `domain/orders/leagueRules.ts` for how each one is counted.
+ */
+export interface LeagueRules {
+  /** Games one player may play in each player-count category (Singles, Doubles …). */
+  maxPerStructure?: Partial<Record<StructuralKind, number>>;
+  /** Games one player may play in each competition kind (01, Cricket …). */
+  maxPerPlayKind?: Partial<Record<RulePlayKind, number>>;
+  /** Doubles games the same two players may play together (A/B and B/A are one pair). */
+  maxSameDoublesPair?: number;
+  /** Distinct helpers (league status HELPER) fielded in one order. */
+  maxHelpers?: number;
+}
+
+/**
+ * A player's standing under the league rules for one order (大会資格). Kept on the order's
+ * participant row, independent of `Player.guest`, which only says where the player is stored.
+ */
+export const LEAGUE_STATUSES = ['REGULAR', 'HELPER'] as const;
+
+export type LeagueStatus = (typeof LEAGUE_STATUSES)[number];
+
+export const LEAGUE_STATUS_LABELS: Record<LeagueStatus, string> = {
+  REGULAR: '正規登録',
+  HELPER: '助っ人',
+};
 
 export function formatDiscipline(format: Pick<LeagueFormat, 'discipline'> | null | undefined): DartsDiscipline {
   return asDiscipline(format?.discipline);
@@ -320,6 +359,11 @@ export interface ParticipantConfig {
    * `undefined` = use the player's stored rating. `null` = force Unknown.
    */
   ratingOverride?: Rating;
+  /**
+   * League status in this order (大会資格), read only by the helper rule. Absent = not stated:
+   * never taken as REGULAR, and never derived from `Player.guest`.
+   */
+  leagueStatus?: LeagueStatus;
 }
 
 /** A pinned assignment that re-generation must preserve (hard). */
@@ -412,6 +456,11 @@ export interface OrderInput {
    * as `UNSPECIFIED`.
    */
   discipline: DartsDiscipline;
+  /**
+   * Snapshot of the format's league rules at generation time, so a saved order is checked
+   * against the rules it was made under after the format is edited. Absent = no rules.
+   */
+  leagueRules?: LeagueRules;
   /**
    * The opponent the order is made against (Phase 4): our players' predicted strengths
    * and, per game, the distribution of the opponent side. Self-contained, so a saved
@@ -704,7 +753,10 @@ export type DiagnosticCode =
   | 'LOCK_INVALID'
   | 'LOCK_CONFLICT'
   | 'SEARCH_EXHAUSTED'
-  | 'INVALID_GAME';
+  | 'INVALID_GAME'
+  | 'LEAGUE_RULE_INVALID'
+  | 'LEAGUE_STATUS_UNSET'
+  | 'LEAGUE_RULE_CAPACITY';
 
 export interface DiagnosticSuggestion {
   /** Human-readable remedy. */
@@ -848,6 +900,8 @@ export interface OrderVersion {
   hasImputedRating: boolean;
   /** Discipline the version was generated for. Absent on versions made before it existed. */
   discipline?: DartsDiscipline;
+  /** League rules the version was checked against. Absent = none (or made before rules existed). */
+  leagueRules?: LeagueRules;
 }
 
 /**
