@@ -118,7 +118,7 @@ export function LeagueRulesEditor({
           <fieldset className="rule-group">
             <legend>選手ごとの出場上限 ・ 人数区分</legend>
             {structures.map((kind) => (
-              <RuleInput key={kind} row={{ key: `structure:${kind}`, label: ruleKindLabel(kind), unit: '回まで / 1人' }} text={text} onChange={set} />
+              <RuleInput key={kind} row={{ key: `structure:${kind}`, label: ruleKindLabel(kind), unit: '回 / 1人' }} text={text} onChange={set} />
             ))}
           </fieldset>
         ) : null}
@@ -127,7 +127,7 @@ export function LeagueRulesEditor({
           <fieldset className="rule-group">
             <legend>選手ごとの出場上限 ・ 競技区分</legend>
             {plays.map((kind) => (
-              <RuleInput key={kind} row={{ key: `play:${kind}`, label: ruleKindLabel(kind), unit: '回まで / 1人' }} text={text} onChange={set} />
+              <RuleInput key={kind} row={{ key: `play:${kind}`, label: ruleKindLabel(kind), unit: '回 / 1人' }} text={text} onChange={set} />
             ))}
           </fieldset>
         ) : null}
@@ -138,7 +138,7 @@ export function LeagueRulesEditor({
         {doubles ? (
           <fieldset className="rule-group">
             <legend>ダブルスの同一ペア</legend>
-            <RuleInput row={{ key: 'pair', label: '同じ 2 人の組', unit: '回まで' }} text={text} onChange={set} />
+            <RuleInput row={{ key: 'pair', label: '同じ2人の組', unit: '回' }} text={text} onChange={set} />
             <p className="tiny muted rule-note">
               ダブルスのゲームだけを数えます。投順が逆 (A / B と B / A) でも同じペアです。トリオスやチーム戦で同席した 2 人は数えません。
               ペア設定の「禁止」とは別の条件です。
@@ -148,7 +148,7 @@ export function LeagueRulesEditor({
 
         <fieldset className="rule-group">
           <legend>助っ人の人数</legend>
-          <RuleInput row={{ key: 'helpers', label: '助っ人', unit: '名まで' }} text={text} onChange={set} />
+          <RuleInput row={{ key: 'helpers', label: '助っ人', unit: '名' }} text={text} onChange={set} />
           <p className="tiny muted rule-note">
             オーダーに実際に配置した助っ人の人数です。同じ人を複数ゲームに出しても 1 名、参加者にいても出場しなければ 0 名です。
             正規登録か助っ人かは、オーダー設定で選手ごとに選びます (「今回だけの助っ人」として追加したかどうかとは別です)。

@@ -84,7 +84,7 @@ describe('league rules in the app', () => {
 
     await user.clear(within(editor).getByLabelText('Singles'));
     await user.type(within(editor).getByLabelText('Singles'), '1');
-    await user.type(within(editor).getByLabelText('同じ 2 人の組'), '0');
+    await user.type(within(editor).getByLabelText('同じ2人の組'), '0');
     await user.click(screen.getByRole('button', { name: '保存' }));
     expect(await screen.findByTestId('format-rules-tag')).toHaveTextContent('リーグ規則');
     const stored = (await new Repository(await openBackend()).loadAll()).formats.find((f) => f.id === `${TEAM_A}_fmt`);

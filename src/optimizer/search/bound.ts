@@ -313,6 +313,9 @@ export interface PlaceUndo {
   pairSlot: number;
 }
 
+/** Shared by every placement of an order without league rules (nothing to undo there). */
+const NO_RULE_LIMITS: number[] = [];
+
 /** Applies a combo to the state, returning the information needed to undo it. */
 export function applyCombo(
   ctx: PreparedContext,
@@ -329,12 +332,13 @@ export function applyCombo(
     prevExcess: state.consecExcess,
     prevSums: [state.sumStrength, state.sumGameFit, state.sumPair, state.sumNovelty, state.sumOppWin],
     prevHelpers: state.helpersUsed,
-    ruleLimits: [],
+    ruleLimits: NO_RULE_LIMITS,
     pairSlot: -1,
   };
 
   const rules = ctx.leagueRules;
   if (rules) {
+    undo.ruleLimits = [];
     for (let k = 0; k < rules.limits.length; k += 1) {
       if (!rules.limits[k].games[gi]) continue;
       undo.ruleLimits.push(k);

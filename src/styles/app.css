@@ -6145,7 +6145,7 @@ select:not([multiple]) {
 
 .rule-row {
   display: grid;
-  grid-template-columns: minmax(72px, 1fr) minmax(0, 168px);
+  grid-template-columns: minmax(64px, 1fr) auto;
   align-items: center;
   gap: 4px 10px;
   padding: 4px 0;
@@ -6163,13 +6163,16 @@ select:not([multiple]) {
 }
 
 .rule-row .rule-input input {
-  width: 72px;
+  width: 100px;
+  padding-left: 10px;
+  padding-right: 10px;
   flex: none;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
 .rule-row .rule-unit {
+  min-width: 4.2em;
   font-size: 12.5px;
   color: var(--color-text-muted);
   white-space: nowrap;
