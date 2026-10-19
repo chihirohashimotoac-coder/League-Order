@@ -892,6 +892,64 @@ input[type='range'] {
   gap: 8px;
 }
 
+/* A chip in a single-choice group (role="radio"): the same look and check mark as a pressed chip. */
+.chip[role='radio'][aria-checked='true'] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+.chip[role='radio'][aria-checked='true']::before {
+  content: '✓';
+  content: '✓' / '';
+  font-weight: 900;
+  color: var(--color-accent-ink);
+}
+
+.chip .chip-hint {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* FORMAT editor: player-count category and game kinds are two separate groups. */
+.game-structure {
+  display: grid;
+  gap: 8px;
+}
+
+.game-structure .structure-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.game-structure .structure-note {
+  margin: 0;
+}
+
+.game-structure .structure-count {
+  margin-top: 2px;
+}
+
+.game-structure .structure-issue {
+  margin: 0;
+}
+
+.issue-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 6px 0 0;
+  padding: 1px 7px;
+  border: 1px solid var(--color-danger);
+  border-radius: 999px;
+  color: var(--color-danger-text, var(--color-danger));
+  font-size: 12px;
+  font-weight: 800;
+  vertical-align: 1px;
+}
+
 .segmented {
   display: flex;
   gap: 4px;
@@ -3233,6 +3291,9 @@ input[type='range'] {
 
 .onboarding-foot {
   position: fixed;
+  /* Above the radio cards' transparent inputs (z-index 1), which would otherwise take
+     the taps meant for 次へ when a card scrolls under the bar. */
+  z-index: 5;
   left: 0;
   right: 0;
   bottom: 0;
@@ -3249,10 +3310,110 @@ input[type='range'] {
 
 .roster-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 92px var(--tap-target);
+  grid-template-columns: minmax(0, 1fr) 88px 104px var(--tap-target);
+  grid-template-areas: 'name rating ppr remove';
   gap: 8px;
-  align-items: center;
+  align-items: end;
   margin-bottom: 8px;
+}
+
+.roster-entry .re-name {
+  grid-area: name;
+}
+
+.roster-entry .re-rating {
+  grid-area: rating;
+}
+
+.roster-entry .re-ppr {
+  grid-area: ppr;
+}
+
+.roster-entry .re-remove {
+  grid-area: remove;
+}
+
+.roster-entry .re-field {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.roster-entry .re-cap {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--color-text-secondary);
+}
+
+.roster-entry .re-field input {
+  width: 100%;
+}
+
+/* Phones: the name gets the whole first line, Rating and PPR share the second. */
+@media (max-width: 479px) {
+  .roster-entry {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--tap-target);
+    grid-template-areas:
+      'name name remove'
+      'rating ppr .';
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--color-border);
+  }
+}
+
+/* FIRST RUN: the two ways to start, each with one sentence on what it covers. */
+.start-option {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+}
+
+.start-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.start-tag {
+  padding: 1px 8px;
+  border: 1px solid var(--color-accent-text);
+  border-radius: 999px;
+  color: var(--color-accent-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.start-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.template-play {
+  display: inline-block;
+  margin-right: 2px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--color-text-secondary);
+}
+
+.template-preview {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
 }
 
 .template-list {
@@ -5836,4 +5997,77 @@ select:not([multiple]) {
   .hero::after {
     display: none;
   }
+}
+
+/* n01 wizard: what the wizard does (create vs link) and the way out to manual entry. */
+.wizard-intro {
+  margin: 0 0 12px;
+  color: var(--color-text-secondary);
+}
+
+.league-search {
+  margin: 14px 0 6px;
+}
+
+.manual-fallback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.manual-fallback p {
+  flex: 1 1 200px;
+}
+
+/* HOME: the next step on a team without an order yet. */
+.next-step-card .card-title {
+  margin: 0 0 8px;
+}
+
+.next-step-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  counter-reset: next-step;
+}
+
+.next-step-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+  counter-increment: next-step;
+}
+
+.next-step-list li:first-child {
+  border-top: 0;
+}
+
+.next-step-list li::before {
+  content: counter(next-step, decimal-leading-zero);
+  font-weight: 900;
+  font-size: 13px;
+  color: var(--color-accent-text);
+}
+
+.next-step-list .grow {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.insight-breakdown {
+  display: block;
+  margin-top: 2px;
+}
+.score-note {
+  margin: 6px 0 12px;
 }

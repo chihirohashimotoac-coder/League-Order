@@ -191,12 +191,18 @@ export function ResultPage({
           />
 
           {state.candidates.length > 1 ? (
-            <CandidateGrid
-              candidates={state.candidates}
-              selected={state.edited || state.showingUnderdog ? -1 : state.selectedCandidate}
-              onSelect={(index) => dispatch({ type: 'selectCandidate', index })}
-              showPredictions={showPredictions}
-            />
+            <>
+              <CandidateGrid
+                candidates={state.candidates}
+                selected={state.edited || state.showingUnderdog ? -1 : state.selectedCandidate}
+                onSelect={(index) => dispatch({ type: 'selectCandidate', index })}
+                showPredictions={showPredictions}
+              />
+              <p className="tiny muted score-note" data-testid="score-note">
+                SCORE は戦力・適性・公平性などの条件を 0〜100 にまとめた生成時の評価値で、勝率ではありません。
+                {showPredictions ? '勝つ見込みは「推定勝率」を見てください。' : ''}
+              </p>
+            </>
           ) : null}
 
           {showPredictions ? <OpponentPanel solution={solution} candidates={state.candidates} games={ordered} input={state.input} /> : null}
@@ -579,7 +585,7 @@ function CandidateGrid({
             key={`${candidate.meta.label}-${index}`}
             className="candidate-tab"
             aria-pressed={selected === index}
-            aria-label={`候補 ${letter}: ${candidate.meta.label} (総合 ${candidate.score.display}${
+            aria-label={`候補 ${letter}: ${candidate.meta.label} (評価値 ${candidate.score.display}${
               showPredictions && candidate.prediction ? `、推定勝率 ${formatProbability(candidate.prediction.win)}` : ''
             })${
               candidate.meta.alternativeTo ? ` ${candidate.meta.alternativeTo}と同じ最適解のため次点` : ''
@@ -590,7 +596,7 @@ function CandidateGrid({
               <span className="c-letter">{letter}</span>
               <span className="c-label">{candidate.meta.label}</span>
             </span>
-            <span className="c-score">
+            <span className="c-score" title="生成時の評価値 (0〜100)。勝率ではありません。">
               <small>SCORE</small>
               {candidate.score.display}
             </span>
@@ -652,9 +658,13 @@ function StrengthBasis({ solution }: { solution: OrderSolution }): React.JSX.Ele
       <span className="grow">
         <span className="basis-title">{blend ? `戦力評価 ${blend}` : '戦力評価なし'}</span>
         <span className="basis-note">
-          {blend
-            ? 'Rating と PPR をそれぞれ参加者内で 0〜1 に正規化してから合成しています。'
-            : 'Rating・PPR に差が無いため、適性と公平性で生成しています。'}
+          {!blend
+            ? 'Rating・PPR (3投平均) に差が無いため、適性と公平性で生成しています。'
+            : weights.ppr <= 1e-9
+              ? 'PPR (3投平均) が未入力または全員同じ値のため、Rating だけで評価しています。'
+              : weights.rating <= 1e-9
+                ? 'Rating が未入力または全員同じ値のため、PPR (3投平均) だけで評価しています。'
+                : 'Rating と PPR (3投平均) をそれぞれ参加者内で 0〜1 に正規化してから合成しています。'}
         </span>
       </span>
     </div>
@@ -989,6 +999,9 @@ function AnalysisPanel({
           <Metric label="総合評価" value={solution.score.display} />
           <Metric label="標準偏差" value={solution.metrics.appearanceStdDev} />
         </div>
+        <p className="tiny muted" style={{ marginTop: 0 }}>
+          総合評価 (SCORE) は条件の満たし具合を 0〜100 にした値で、勝率ではありません。
+        </p>
         {(
           [
             ['戦力 (Rating / PPR)', solution.score.strength],

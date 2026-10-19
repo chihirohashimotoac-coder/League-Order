@@ -181,6 +181,73 @@ export function describeStrengthWeights(weights: StrengthWeights): string | null
   return parts.map((part) => `${part.label} ${Math.round(part.value * 100)}%`).join(' / ');
 }
 
+/** What a metric told the strength model about today's participants. */
+function metricState(metric: ResolvedMetric): 'informative' | 'unknown' | 'flat' {
+  if (isInformative(metric)) return 'informative';
+  return metric.knownCount === 0 ? 'unknown' : 'flat';
+}
+
+const METRIC_STATE_TEXT = { unknown: '未入力', flat: '全員同じ値' } as const;
+
+/**
+ * The strength line shown before generating, written from the blend the optimizer will
+ * actually use (`effectiveStrengthWeights`) — so it can never say "Rating 100%" and "Rating
+ * and PPR weighed equally" at the same time. The weights themselves are not changed here.
+ */
+export function explainStrengthWeights(
+  model: Pick<StrengthModel, 'discipline' | 'ratings' | 'pprs' | 'weights'>,
+): { title: string; note: string } {
+  const blend = describeStrengthWeights(model.weights);
+  const rating = metricState(model.ratings);
+  const ppr = metricState(model.pprs);
+  const imputedNote = (metrics: { label: string; metric: ResolvedMetric }[]): string =>
+    metrics.some(({ metric }) => metric.imputed.size > 0)
+      ? ` 未入力の${metrics
+          .filter(({ metric }) => metric.imputed.size > 0)
+          .map(({ label }) => label)
+          .join('・')}は 0 ではなく参加者の中央値で評価します。`
+      : '';
+
+  if (!blend) {
+    if (rating === 'unknown' && ppr === 'unknown') {
+      return {
+        title: '戦力評価なし',
+        note: '参加者の Rating・PPR (3投平均) がどちらも未入力のため、適性と公平性で生成します。',
+      };
+    }
+    return {
+      title: '戦力評価なし',
+      note: `Rating は${METRIC_STATE_TEXT[rating as 'unknown' | 'flat']}、PPR (3投平均) は${METRIC_STATE_TEXT[ppr as 'unknown' | 'flat']}で差が無いため、適性と公平性で生成します。`,
+    };
+  }
+  const title = `戦力評価 ${blend}`;
+  if (model.weights.ppr <= 1e-9) {
+    return {
+      title,
+      note: `PPR (3投平均) が${METRIC_STATE_TEXT[ppr as 'unknown' | 'flat']}のため、Rating だけで評価します。${imputedNote([{ label: 'Rating', metric: model.ratings }])}`,
+    };
+  }
+  if (model.weights.rating <= 1e-9) {
+    return {
+      title,
+      note: `Rating が${METRIC_STATE_TEXT[rating as 'unknown' | 'flat']}のため、PPR (3投平均) だけで評価します。${imputedNote([{ label: 'PPR', metric: model.pprs }])}`,
+    };
+  }
+  const basis =
+    model.discipline === 'SOFT'
+      ? 'ソフトダーツの既定の配分です (Rating 重視)。'
+      : model.discipline === 'STEEL'
+        ? 'ハードダーツ (スティール) の既定の配分です (PPR 重視)。'
+        : 'ダーツ種別が未設定のため、Rating と PPR (3投平均) を同じ比重で評価します。';
+  return {
+    title,
+    note: `${basis}${imputedNote([
+      { label: 'Rating', metric: model.ratings },
+      { label: 'PPR', metric: model.pprs },
+    ])}`,
+  };
+}
+
 /** `PPR 68.4`, `PPR 72.45`, or `PPR —` when unknown (never "0"). */
 export function formatPpr(ppr: number | null | undefined): string {
   if (ppr === null || ppr === undefined || !Number.isFinite(ppr)) return 'PPR —';

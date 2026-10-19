@@ -1,27 +1,46 @@
 import { useState } from 'react';
-import type { Player, Team } from '../domain/types';
+import type { DartsDiscipline, Player, Team } from '../domain/types';
+import { DISCIPLINE_STRENGTH_WEIGHTS, describeStrengthWeights, parsePprInput } from '../domain/players/strength';
 import { createId } from '../utils/id';
-import { FORMAT_TEMPLATES, formatFromTemplate } from '../storage/seed';
+import { CUSTOM_FORMAT_START, FORMAT_TEMPLATES, formatFromTemplate, type FormatTemplate } from '../storage/seed';
+import { totalSlots } from '../domain/games/format';
 import { useAppStore } from '../state/appStore';
-import { Field, onRadioGroupKeyDown, rovingTabIndex, useToast } from '../components/ui';
+import { Field, RadioCards, onRadioGroupKeyDown, rovingTabIndex, useToast } from '../components/ui';
 import { Icon } from '../components/icons';
 import { N01TeamWizard } from '../components/n01/N01TeamWizard';
+
+/** Where the app goes once the first team exists. */
+export type FirstRunNext = { kind: 'home' } | { kind: 'editFormat'; formatId: string };
 
 /**
  * FIRST RUN.
  *
  * Shown whenever there is no team at all — a fresh install, or after "delete
- * everything". The captain chooses between their own team (a three-step setup that
- * creates nothing else) and the sample, which is labelled as demo data everywhere.
+ * everything". The captain chooses between entering their own team by hand (soft or
+ * hard darts, any league — no n01 account needed), importing a team from n01 League, and
+ * the sample, which is labelled as demo data everywhere.
+ *
+ * What the captain types into the manual setup lives here, not in the setup steps, so
+ * leaving the setup and coming back (or trying n01 first) loses nothing.
  */
-export function WelcomePage(): React.JSX.Element {
+export function WelcomePage({ onCreated }: { onCreated?: (next: FirstRunNext) => void }): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
   const [mode, setMode] = useState<'welcome' | 'setup'>('welcome');
   const [busy, setBusy] = useState(false);
   const [n01Open, setN01Open] = useState(false);
+  const [setup, setSetup] = useState<OnboardingDraft>(emptyDraft);
 
-  if (mode === 'setup') return <Onboarding onCancel={() => setMode('welcome')} />;
+  if (mode === 'setup') {
+    return (
+      <Onboarding
+        draft={setup}
+        onDraftChange={setSetup}
+        onCancel={() => setMode('welcome')}
+        onCreated={onCreated}
+      />
+    );
+  }
 
   return (
     <main className="welcome">
@@ -41,15 +60,35 @@ export function WelcomePage(): React.JSX.Element {
       </div>
 
       <div className="welcome-actions">
-        <button type="button" className="btn primary xl" onClick={() => setN01Open(true)}>
-          <Icon name="refresh" size={22} />
-          n01から作成
-        </button>
-        <p className="note">n01 のリーグとチームを選ぶだけで、メンバー・PPR・フォーマットを取り込みます。</p>
-        <button type="button" className="btn xl" onClick={() => setMode('setup')}>
-          <Icon name="users" size={22} />
-          自分のチームを作る
-        </button>
+        <section className="start-option" aria-labelledby="start-manual">
+          <h2 id="start-manual" className="start-title">
+            手入力で作成
+            <span className="start-tag">ソフト・ハード</span>
+          </h2>
+          <p className="start-note">
+            n01 に登録していなくても作れます。メンバーと Rating・PPR (3投平均)、ゲーム構成を入力します。店舗リーグや
+            Light League などのオンラインリーグもこちらです。
+          </p>
+          <button type="button" className="btn primary xl" onClick={() => setMode('setup')}>
+            <Icon name="users" size={22} />
+            自分のチームを作る
+          </button>
+        </section>
+
+        <section className="start-option" aria-labelledby="start-n01">
+          <h2 id="start-n01" className="start-title">
+            n01 League から取り込み
+          </h2>
+          <p className="start-note">
+            n01 League (n01darts.com のリーグ) に登録済みのチームから、メンバー・PPR・フォーマットを読み取ります。ATDO・TDO・TDA
+            以外のリーグも名前で検索できます。n01 Online のスケジュールモードは対象外です。
+          </p>
+          <button type="button" className="btn xl" onClick={() => setN01Open(true)}>
+            <Icon name="refresh" size={22} />
+            n01から作成
+          </button>
+        </section>
+
         <button
           type="button"
           className="btn xl"
@@ -68,7 +107,15 @@ export function WelcomePage(): React.JSX.Element {
         <p className="note">サンプルは「DEMO」と表示され、あとからまとめて削除できます。データはこの端末の中だけに保存されます。</p>
       </div>
       {n01Open ? (
-        <N01TeamWizard mode={{ kind: 'create' }} onClose={() => setN01Open(false)} onDone={() => setN01Open(false)} />
+        <N01TeamWizard
+          mode={{ kind: 'create' }}
+          onClose={() => setN01Open(false)}
+          onDone={() => setN01Open(false)}
+          onManual={() => {
+            setN01Open(false);
+            setMode('setup');
+          }}
+        />
       ) : null}
     </main>
   );
@@ -78,33 +125,102 @@ interface RosterEntry {
   key: string;
   name: string;
   rating: string;
+  ppr: string;
+}
+
+interface OnboardingDraft {
+  step: number;
+  teamName: string;
+  leagueName: string;
+  /** `null` until the captain chooses — "あとで設定" is a choice too (`UNSPECIFIED`). */
+  discipline: DartsDiscipline | null;
+  roster: RosterEntry[];
+  templateKey: string;
+  /** Once the captain picks a format themselves, a discipline change no longer re-picks it. */
+  templateChosen: boolean;
+}
+
+function emptyDraft(): OnboardingDraft {
+  return {
+    step: 0,
+    teamName: '',
+    leagueName: '',
+    discipline: null,
+    roster: [{ key: createId('row'), name: '', rating: '', ppr: '' }],
+    templateKey: FORMAT_TEMPLATES[0].key,
+    templateChosen: false,
+  };
 }
 
 const STEPS = ['チーム', 'メンバー', 'フォーマット'] as const;
 
-function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
+const DISCIPLINE_OPTIONS: readonly { key: DartsDiscipline; label: string; hint: string }[] = [
+  {
+    key: 'SOFT',
+    label: 'ソフトダーツ',
+    hint: `Rating 重視で評価します (${describeStrengthWeights(DISCIPLINE_STRENGTH_WEIGHTS.SOFT)})。`,
+  },
+  {
+    key: 'STEEL',
+    label: 'ハードダーツ (スティール)',
+    hint: `PPR (3投平均) 重視で評価します (${describeStrengthWeights(DISCIPLINE_STRENGTH_WEIGHTS.STEEL)})。`,
+  },
+  {
+    key: 'UNSPECIFIED',
+    label: 'あとで設定',
+    hint: '「未設定」のまま作成し、Rating と PPR を同じ比重で評価します。あとから「フォーマット」画面の各フォーマットで変更できます。',
+  },
+];
+
+/** The starter format that fits the chosen darts, until the captain picks one. */
+function defaultTemplateFor(discipline: DartsDiscipline | null): string {
+  return discipline === 'STEEL' ? 'zeroone5' : FORMAT_TEMPLATES[0].key;
+}
+
+const TEMPLATE_CHOICES: readonly FormatTemplate[] = [...FORMAT_TEMPLATES, CUSTOM_FORMAT_START];
+
+function Onboarding({
+  draft,
+  onDraftChange,
+  onCancel,
+  onCreated,
+}: {
+  draft: OnboardingDraft;
+  onDraftChange: (next: OnboardingDraft) => void;
+  onCancel: () => void;
+  onCreated?: (next: FirstRunNext) => void;
+}): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
-  const [step, setStep] = useState(0);
-  const [teamName, setTeamName] = useState('');
-  const [leagueName, setLeagueName] = useState('');
-  const [roster, setRoster] = useState<RosterEntry[]>(() => [{ key: createId('row'), name: '', rating: '' }]);
-  const [templateKey, setTemplateKey] = useState<string>(FORMAT_TEMPLATES[0].key);
   const [busy, setBusy] = useState(false);
+  const { step, roster, templateKey, discipline } = draft;
+  const update = (change: Partial<OnboardingDraft>): void => onDraftChange({ ...draft, ...change });
 
   const named = roster.filter((entry) => entry.name.trim() !== '');
 
   const next = (): void => {
-    if (step === 0 && !teamName.trim()) {
+    if (step === 0 && !draft.teamName.trim()) {
       toast.show('チーム名を入力してください', 'error');
+      return;
+    }
+    if (step === 0 && discipline === null) {
+      toast.show('ダーツ種別を選んでください (「あとで設定」も選べます)', 'error');
       return;
     }
     if (step === 1 && named.length === 0) {
       toast.show('メンバーを 1 名以上入力してください', 'error');
       return;
     }
+    if (step === 1) {
+      const bad = named.find((entry) => !parsePprInput(entry.ppr).ok);
+      if (bad) {
+        const parsed = parsePprInput(bad.ppr);
+        toast.show(`${bad.name.trim()}: ${parsed.ok ? '' : parsed.message}`, 'error');
+        return;
+      }
+    }
     if (step < STEPS.length - 1) {
-      setStep(step + 1);
+      update({ step: step + 1 });
       return;
     }
     finish();
@@ -114,19 +230,20 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
     const now = Date.now();
     const team: Team = {
       id: createId('team'),
-      name: teamName.trim(),
-      leagueName: leagueName.trim() || undefined,
+      name: draft.teamName.trim(),
+      leagueName: draft.leagueName.trim() || undefined,
       createdAt: now,
     };
     const players: Player[] = named.map((entry, index) => {
       const parsed = Number(entry.rating.trim());
+      const ppr = parsePprInput(entry.ppr);
       return {
         id: createId('pl'),
         teamId: team.id,
         name: entry.name.trim(),
         // Empty means Unknown, never 0.
         rating: entry.rating.trim() !== '' && Number.isFinite(parsed) ? parsed : null,
-        ppr: null,
+        ppr: ppr.ok ? ppr.value : null,
         skills: {},
         seasonAppearances: 0,
         seasonAppearancesByKind: {},
@@ -134,16 +251,25 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
         createdAt: now + index,
       };
     });
-    const template = FORMAT_TEMPLATES.find((entry) => entry.key === templateKey) ?? FORMAT_TEMPLATES[0];
+    const template = TEMPLATE_CHOICES.find((entry) => entry.key === templateKey) ?? FORMAT_TEMPLATES[0];
+    const format = formatFromTemplate(template, team.id, now, discipline ?? 'UNSPECIFIED');
     setBusy(true);
     void store
-      .createTeamSetup(team, players, formatFromTemplate(template, team.id, now))
-      .then(() => toast.show(`${team.name} を作成しました`, 'ok'))
+      .createTeamSetup(team, players, format)
+      .then(() => {
+        toast.show(`${team.name} を作成しました`, 'ok');
+        onCreated?.(template.key === CUSTOM_FORMAT_START.key ? { kind: 'editFormat', formatId: format.id } : { kind: 'home' });
+      })
       .catch(() => setBusy(false));
   };
 
   const updateEntry = (key: string, change: Partial<RosterEntry>): void =>
-    setRoster((current) => current.map((entry) => (entry.key === key ? { ...entry, ...change } : entry)));
+    update({ roster: roster.map((entry) => (entry.key === key ? { ...entry, ...change } : entry)) });
+
+  const chooseDiscipline = (value: DartsDiscipline): void =>
+    update({ discipline: value, templateKey: draft.templateChosen ? templateKey : defaultTemplateFor(value) });
+
+  const selected = TEMPLATE_CHOICES.find((entry) => entry.key === templateKey) ?? FORMAT_TEMPLATES[0];
 
   return (
     <main className="onboarding">
@@ -171,8 +297,8 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
           <Field label="チーム名">
             <input
               type="text"
-              value={teamName}
-              onChange={(event) => setTeamName(event.target.value)}
+              value={draft.teamName}
+              onChange={(event) => update({ teamName: event.target.value })}
               placeholder="例: KALAVINKA"
               autoComplete="off"
             />
@@ -180,12 +306,19 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
           <Field label="リーグ名 (任意)">
             <input
               type="text"
-              value={leagueName}
-              onChange={(event) => setLeagueName(event.target.value)}
+              value={draft.leagueName}
+              onChange={(event) => update({ leagueName: event.target.value })}
               placeholder="例: 秋季リーグ Div.2"
               autoComplete="off"
             />
           </Field>
+          <RadioCards
+            label="ダーツ種別"
+            options={DISCIPLINE_OPTIONS}
+            value={discipline ?? ('' as DartsDiscipline)}
+            onChange={chooseDiscipline}
+            hint="戦力評価で Rating と PPR のどちらを重く見るかが変わります。"
+          />
         </>
       ) : null}
 
@@ -193,11 +326,17 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
         <>
           <h1>メンバーを登録</h1>
           <p className="body-text lead">
-            Rating は空欄で構いません (未入力は 0 ではなく「不明」として扱います)。適性などはあとから設定できます。
+            {discipline === 'STEEL'
+              ? 'PPR (3投平均) を入れると戦力評価に使います。Rating は任意です。'
+              : discipline === 'SOFT'
+                ? 'Rating を入れると戦力評価に使います。PPR (3投平均) は任意です。'
+                : 'Rating・PPR (3投平均) はどちらも任意です。'}
+            空欄は 0 ではなく「不明」として扱います。適性などはあとから設定できます。
           </p>
           {roster.map((entry, index) => (
             <div className="roster-entry" key={entry.key}>
               <input
+                className="re-name"
                 type="text"
                 value={entry.name}
                 onChange={(event) => updateEntry(entry.key, { name: event.target.value })}
@@ -205,19 +344,40 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
                 aria-label={`メンバー ${index + 1} の名前`}
                 autoComplete="off"
               />
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                value={entry.rating}
-                onChange={(event) => updateEntry(entry.key, { rating: event.target.value })}
-                placeholder="Rt."
-                aria-label={`メンバー ${index + 1} の Rating`}
-              />
+              <label className="re-rating re-field">
+                <span className="re-cap" aria-hidden="true">
+                  Rating
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  value={entry.rating}
+                  onChange={(event) => updateEntry(entry.key, { rating: event.target.value })}
+                  placeholder="—"
+                  aria-label={`メンバー ${index + 1} の Rating`}
+                />
+              </label>
+              <label className="re-ppr re-field">
+                <span className="re-cap" aria-hidden="true">
+                  PPR (3投平均)
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min={0}
+                  max={180}
+                  value={entry.ppr}
+                  onChange={(event) => updateEntry(entry.key, { ppr: event.target.value })}
+                  placeholder="—"
+                  aria-label={`メンバー ${index + 1} の PPR (3投平均)`}
+                />
+              </label>
               <button
                 type="button"
-                className="btn icon ghost"
-                onClick={() => setRoster((current) => current.filter((row) => row.key !== entry.key))}
+                className="btn icon ghost re-remove"
+                onClick={() => update({ roster: roster.filter((row) => row.key !== entry.key) })}
                 disabled={roster.length <= 1}
                 aria-label={`メンバー ${index + 1} を削除`}
               >
@@ -228,7 +388,7 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
           <button
             type="button"
             className="btn block"
-            onClick={() => setRoster((current) => [...current, { key: createId('row'), name: '', rating: '' }])}
+            onClick={() => update({ roster: [...roster, { key: createId('row'), name: '', rating: '', ppr: '' }] })}
           >
             <Icon name="plus" size={18} />
             メンバーを追加
@@ -241,35 +401,58 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
         <>
           <h1>フォーマットを選択</h1>
           <p className="body-text lead">
-            リーグのゲーム構成です。あとから自由に編集・追加できます。
+            よくある構成の例です。特定のリーグの公式ルールではありません。リーグのゲーム数・人数・順番と見比べて選び、作成後は「フォーマット」画面で自由に編集できます。
           </p>
           <div className="template-list" role="radiogroup" aria-label="フォーマット" onKeyDown={onRadioGroupKeyDown}>
-            {FORMAT_TEMPLATES.map((template, index) => (
-              <button
-                type="button"
-                key={template.key}
-                role="radio"
-                aria-checked={templateKey === template.key}
-                tabIndex={rovingTabIndex(
-                  templateKey === template.key,
-                  index,
-                  FORMAT_TEMPLATES.some((entry) => entry.key === templateKey),
-                )}
-                className="preset"
-                onClick={() => setTemplateKey(template.key)}
-              >
-                <span className="p-head">
-                  <span className="p-radio" aria-hidden="true" />
-                  <Icon name="format" size={18} />
-                  {template.name}
-                  {templateKey === template.key ? (
-                    <Icon name="check" size={18} className="p-check-mark" />
-                  ) : null}
-                </span>
-                <span className="p-desc">{template.description}</span>
-              </button>
-            ))}
+            {TEMPLATE_CHOICES.map((template, index) => {
+              const checked = templateKey === template.key;
+              const custom = template.key === CUSTOM_FORMAT_START.key;
+              return (
+                <button
+                  type="button"
+                  key={template.key}
+                  role="radio"
+                  aria-checked={checked}
+                  tabIndex={rovingTabIndex(checked, index, TEMPLATE_CHOICES.some((entry) => entry.key === templateKey))}
+                  className="preset"
+                  onClick={() => update({ templateKey: template.key, templateChosen: true })}
+                >
+                  <span className="p-head">
+                    <span className="p-radio" aria-hidden="true" />
+                    <Icon name={custom ? 'edit' : 'format'} size={18} />
+                    {custom ? '自分の構成を作る' : template.name}
+                    {checked ? <Icon name="check" size={18} className="p-check-mark" /> : null}
+                  </span>
+                  <span className="p-desc">
+                    {custom ? (
+                      '1 ゲームから始めて、作成後すぐにフォーマット編集を開きます。'
+                    ) : (
+                      <>
+                        <span className="template-play">{template.play === 'zeroone' ? '01 のみ' : '01 + Cricket'}</span>{' '}
+                        {template.description}
+                      </>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
           </div>
+          <section className="template-preview" aria-label="選んだ構成の内容" data-testid="template-preview">
+            <p className="small-text secondary" style={{ margin: '0 0 6px' }}>
+              {selected.key === CUSTOM_FORMAT_START.key
+                ? '最初の 1 ゲーム (作成後に追加・編集します)'
+                : `${selected.games.length} ゲーム ・ 総枠 ${totalSlots(selected.games)}`}
+            </p>
+            <ol className="lineup-preview">
+              {selected.games.map((game, index) => (
+                <li key={`${game.name}-${index}`}>
+                  <span className="no">{String(index + 1).padStart(2, '0')}</span>
+                  <span>{game.name}</span>
+                  <span className="badge">{game.playerCount}名</span>
+                </li>
+              ))}
+            </ol>
+          </section>
         </>
       ) : null}
 
@@ -277,7 +460,7 @@ function Onboarding({ onCancel }: { onCancel: () => void }): React.JSX.Element {
         <button
           type="button"
           className="btn"
-          onClick={() => (step === 0 ? onCancel() : setStep(step - 1))}
+          onClick={() => (step === 0 ? onCancel() : update({ step: step - 1 }))}
         >
           {step === 0 ? 'キャンセル' : '戻る'}
         </button>

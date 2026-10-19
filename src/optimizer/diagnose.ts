@@ -358,7 +358,7 @@ export function analyseRelaxations(input: OrderInput, budgetMs = 400): Diagnosti
   // Relax the consecutive limit when it is hard.
   if (input.settings.consecutiveMode === 'hard') {
     relaxations.push({
-      describe: '連続出場制限を Soft にする',
+      describe: '連続出場制限を「できるだけ考慮」にする',
       suggestion: {
         kind: 'relaxConsecutive',
         message: '最大連続出場の扱いを「絶対条件」から「できるだけ考慮」に変更すると生成できます。',

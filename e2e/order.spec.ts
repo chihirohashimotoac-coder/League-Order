@@ -229,6 +229,7 @@ test.describe('first run (§50-§53)', () => {
     await page.getByRole('button', { name: '自分のチームを作る' }).click();
 
     await page.getByLabel('チーム名').fill('KALAVINKA');
+    await page.getByRole('radio', { name: /ソフトダーツ/ }).check();
     await page.getByRole('button', { name: '次へ' }).click();
 
     const roster: [string, string][] = [

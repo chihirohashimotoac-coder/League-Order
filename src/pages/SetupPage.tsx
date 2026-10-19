@@ -11,7 +11,7 @@ import type {
 } from '../domain/types';
 import { GAME_KIND_LABELS, PRESET_KEYS, PRESET_LABELS, formatDiscipline } from '../domain/types';
 import { scopeForPreset, weightsForPreset } from '../domain/orders/presets';
-import { totalSlots } from '../domain/games/format';
+import { formatStructureIssues, totalSlots } from '../domain/games/format';
 import {
   createParticipantConfig,
   maxAppearancesFor,
@@ -39,7 +39,7 @@ import {
   onRadioGroupKeyDown,
   rovingTabIndex,
 } from '../components/ui';
-import { describeStrengthWeights, resolveStrength } from '../domain/players/strength';
+import { explainStrengthWeights, resolveStrength } from '../domain/players/strength';
 import { Icon, type IconName } from '../components/icons';
 import { effectivePpr, withEffectivePpr } from '../domain/n01/effectivePpr';
 import { applyHistoryStrength, buildRoleStrengthContext } from '../domain/n01/historyStrength';
@@ -112,6 +112,7 @@ export function SetupPage({
   const format = store.teamFormats.find((entry) => entry.id === draft.formatId) ?? store.teamFormats[0];
   const games = format?.games ?? [];
   const slots = totalSlots(games);
+  const structureIssues = useMemo(() => formatStructureIssues(games), [games]);
 
   const configById = useMemo(
     () => new Map(draft.participants.map((config) => [config.playerId, config])),
@@ -153,9 +154,8 @@ export function SetupPage({
     (key) => key !== 'OPPONENT_OPTIMIZED' || hasOpponent || draft.preset === 'OPPONENT_OPTIMIZED',
   );
   // The same resolution the optimizer runs, so the blend shown here is the one used.
-  const strengthBlend = useMemo(
-    () =>
-      describeStrengthWeights(resolveStrength(discipline, effectivePlayers, draft.participants).weights),
+  const strengthText = useMemo(
+    () => explainStrengthWeights(resolveStrength(discipline, effectivePlayers, draft.participants)),
     [discipline, effectivePlayers, draft.participants],
   );
 
@@ -210,6 +210,10 @@ export function SetupPage({
     }
     if (included.length === 0) {
       toast.show('参加者を 1 名以上選択してください', 'error');
+      return null;
+    }
+    if (structureIssues.length > 0) {
+      toast.show(`生成できません: ${structureIssues[0].message} フォーマット画面で修正してください。`, 'error');
       return null;
     }
     return {
@@ -303,19 +307,23 @@ export function SetupPage({
             ))}
           </select>
         </Field>
+        {structureIssues.length > 0 ? (
+          <div className="notice warn" role="alert" data-testid="setup-format-issue">
+            <Icon name="alert" size={18} />
+            <span className="grow small-text">
+              このフォーマットには修正が必要なゲームがあります: {structureIssues[0].message}
+              {structureIssues.length > 1 ? ` ほか ${structureIssues.length - 1} 件。` : ''}
+            </span>
+            <button type="button" className="btn small" onClick={() => onNavigate('formats')}>
+              フォーマットを修正
+            </button>
+          </div>
+        ) : null}
         <div className="strength-basis" data-testid="setup-strength-basis">
           <DisciplineBadge discipline={discipline} />
           <span className="grow">
-            <span className="basis-title">
-              {strengthBlend ? `戦力評価 ${strengthBlend}` : '戦力評価なし'}
-            </span>
-            <span className="basis-note">
-              {strengthBlend
-                ? discipline === 'UNSPECIFIED'
-                  ? 'ダーツ種別が未設定のため Rating と PPR を同じ比重で評価します。'
-                  : '未入力の値は 0 ではなく参加者の中央値で評価します。'
-                : '参加者の Rating・PPR に差が無いため、適性と公平性で生成します。'}
-            </span>
+            <span className="basis-title">{strengthText.title}</span>
+            <span className="basis-note">{strengthText.note}</span>
           </span>
         </div>
         <div className="metrics">

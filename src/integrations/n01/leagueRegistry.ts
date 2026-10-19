@@ -39,11 +39,19 @@ export function parseLeagueReference(input: string): LeagueReference {
   if (isLeagueId(value)) return { ok: true, leagueId: value };
   if (/^[a-z]+:/iu.test(value)) {
     if (!isAllowedN01Url(value)) {
-      return { ok: false, message: 'n01 (https://n01darts.com) の URL だけを受け付けます。' };
+      return {
+        ok: false,
+        message:
+          'n01 League (https://n01darts.com) の URL だけを受け付けます。ほかのサービスのリーグは自動連携の対象外です。',
+      };
     }
     const match = LEAGUE_ID_IN_TEXT.exec(decodeURIComponentSafe(value));
     if (match) return { ok: true, leagueId: match[0] };
-    return { ok: false, message: 'URL にリーグ ID (lg_…) が含まれていません。' };
+    return {
+      ok: false,
+      message:
+        'URL に n01 League のリーグ ID (lg_…) が含まれていません。n01 Online のスケジュールモードなど、n01 League 以外のページは取り込めません。',
+    };
   }
   return { ok: false, message: 'リーグ ID は lg_xxxx_1234 の形式です。' };
 }

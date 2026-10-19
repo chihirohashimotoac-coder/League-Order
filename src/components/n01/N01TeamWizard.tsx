@@ -38,10 +38,16 @@ export function N01TeamWizard({
   mode,
   onClose,
   onDone,
+  onManual,
 }: {
   mode: N01WizardMode;
   onClose: () => void;
   onDone: (team: Team) => void;
+  /**
+   * Leaves for the manual setup (create mode): offered wherever n01 cannot help — a league
+   * that is not on n01 League, no search result, a failed request, an unsupported URL.
+   */
+  onManual?: () => void;
 }): React.JSX.Element {
   const sync = useN01Sync();
   const store = useAppStore();
@@ -214,7 +220,16 @@ export function N01TeamWizard({
         ))}
       </ol>
 
-      {step === 'league' ? <LeagueStep onChoose={chooseLeague} /> : null}
+      {step === 'league' ? (
+        <>
+          <p className="small-text wizard-intro" data-testid="wizard-intro">
+            {linkTeam
+              ? `既存のチーム「${linkTeam.name}」に n01 League のチームを接続します。新しいチームは作られず、Rating・適性・履歴はそのまま残ります。`
+              : 'n01 League のチームから新しいチームを作成します。今あるチームに接続する場合は、ホームの「切替 / 管理」→ チームの「編集」→「n01と接続」から行います。'}
+          </p>
+          <LeagueStep onChoose={chooseLeague} onManual={onManual} />
+        </>
+      ) : null}
 
       {step === 'team' ? (
         <section aria-labelledby="n01-team-title">
@@ -222,7 +237,7 @@ export function N01TeamWizard({
             {league?.title} のチームを選択
           </h3>
           {loading ? <Loading label="チーム一覧を取得しています" /> : null}
-          {error ? <ErrorBox message={error} onRetry={() => setRetry((count) => count + 1)} /> : null}
+          {error ? <ErrorBox message={error} onRetry={() => setRetry((count) => count + 1)} onManual={onManual} /> : null}
           {browse ? (
             <>
               <p className="tiny muted">
@@ -262,7 +277,7 @@ export function N01TeamWizard({
             {mode.kind === 'create' ? '内容を確認' : '選手の対応を確認'}
           </h3>
           {loading ? <SyncProgress steps={PREVIEW_STEPS} state={progress} /> : null}
-          {error ? <ErrorBox message={error} onRetry={() => setRetry((count) => count + 1)} /> : null}
+          {error ? <ErrorBox message={error} onRetry={() => setRetry((count) => count + 1)} onManual={onManual} /> : null}
           {plan && data ? (
             <>
               <TeamPreview plan={plan} data={data} />
@@ -297,19 +312,54 @@ function Loading({ label }: { label: string }): React.JSX.Element {
   );
 }
 
-function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }): React.JSX.Element {
+function ErrorBox({
+  message,
+  onRetry,
+  onManual,
+}: {
+  message: string;
+  onRetry: () => void;
+  onManual?: () => void;
+}): React.JSX.Element {
   return (
-    <div className="notice danger" role="alert">
-      <Icon name="alert" size={18} />
-      <span className="grow small-text">{message}</span>
-      <button type="button" className="btn small" onClick={onRetry}>
-        再試行
+    <>
+      <div className="notice danger" role="alert">
+        <Icon name="alert" size={18} />
+        <span className="grow small-text">{message}</span>
+        <button type="button" className="btn small" onClick={onRetry}>
+          再試行
+        </button>
+      </div>
+      {onManual ? <ManualFallback onManual={onManual} reason="n01 に接続できなくても、" /> : null}
+    </>
+  );
+}
+
+/**
+ * The way out to the manual setup. n01 is optional: nothing in making an order depends on
+ * it, so a league n01 does not have — or n01 being unreachable — never blocks the captain.
+ */
+function ManualFallback({ onManual, reason }: { onManual: () => void; reason: string }): React.JSX.Element {
+  return (
+    <div className="manual-fallback" data-testid="manual-fallback">
+      <p className="tiny muted" style={{ margin: 0 }}>
+        {reason}手入力でチームを作成してオーダーを作れます (ソフト・ハード両対応)。
+      </p>
+      <button type="button" className="btn small" onClick={onManual}>
+        <Icon name="edit" size={16} />
+        手入力で作成する
       </button>
     </div>
   );
 }
 
-function LeagueStep({ onChoose }: { onChoose: (league: N01LeagueSummary) => void }): React.JSX.Element {
+function LeagueStep({
+  onChoose,
+  onManual,
+}: {
+  onChoose: (league: N01LeagueSummary) => void;
+  onManual?: () => void;
+}): React.JSX.Element {
   const sync = useN01Sync();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<N01LeagueSummary[] | null>(null);
@@ -334,6 +384,7 @@ function LeagueStep({ onChoose }: { onChoose: (league: N01LeagueSummary) => void
       <h3 id="n01-league-title" className="wizard-title">
         リーグを選択
       </h3>
+      <p className="kicker" style={{ margin: '0 0 6px' }}>よく使うリーグ</p>
       <div className="league-quick" role="group" aria-label="よく使うリーグ">
         {KNOWN_LEAGUES.map((entry) => (
           <button
@@ -348,51 +399,67 @@ function LeagueStep({ onChoose }: { onChoose: (league: N01LeagueSummary) => void
         ))}
       </div>
 
+      <div className="league-search" data-testid="league-search">
+        <Field
+          label="その他の n01 League を検索"
+          hint="ATDO・TDO・TDA 以外でも、n01 League にあるリーグは名前で探せます。"
+        >
+          <span className="row" style={{ gap: 8 }}>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') search();
+              }}
+              placeholder="例: リーグ名の一部"
+              aria-label="リーグ名で検索"
+            />
+            <button type="button" className="btn small" onClick={search} disabled={searching}>
+              検索
+            </button>
+          </span>
+        </Field>
+        {searchError ? (
+          <>
+            <p className="tiny danger-text" role="alert">{searchError}</p>
+            {onManual ? <ManualFallback onManual={onManual} reason="n01 に接続できなくても、" /> : null}
+          </>
+        ) : null}
+        {results ? (
+          results.length === 0 ? (
+            <div role="status">
+              <p className="tiny muted">「{query.trim()}」に一致する n01 League のリーグは見つかりませんでした。</p>
+              {onManual ? (
+                <ManualFallback onManual={onManual} reason="n01 League にないリーグ (店舗リーグ、Light League などのオンラインリーグ) は、" />
+              ) : null}
+            </div>
+          ) : (
+            <ul className="choice-list">
+              {results.map((entry) => (
+                <li key={entry.leagueId}>
+                  <button type="button" className="list-row" onClick={() => onChoose(entry)}>
+                    <span className="grow">
+                      <span className="title">{entry.title}</span>
+                      <span className="meta">{entry.leagueId}</span>
+                    </span>
+                    <Icon name="chevronRight" size={18} className="chevron" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : null}
+      </div>
+
       <details className="disclosure">
         <summary>
           <Icon name="plus" />
-          <span className="grow">その他のリーグ</span>
+          <span className="grow">リーグ ID / URL で指定</span>
           <Icon name="chevronDown" className="chev" />
         </summary>
         <div className="disclosure-body">
-          <Field label="リーグ名で検索">
-            <span className="row" style={{ gap: 8 }}>
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') search();
-                }}
-                placeholder="例: ATDO"
-              />
-              <button type="button" className="btn small" onClick={search} disabled={searching}>
-                検索
-              </button>
-            </span>
-          </Field>
-          {searchError ? <p className="tiny danger-text" role="alert">{searchError}</p> : null}
-          {results ? (
-            results.length === 0 ? (
-              <p className="tiny muted">見つかりませんでした。</p>
-            ) : (
-              <ul className="choice-list">
-                {results.map((entry) => (
-                  <li key={entry.leagueId}>
-                    <button type="button" className="list-row" onClick={() => onChoose(entry)}>
-                      <span className="grow">
-                        <span className="title">{entry.title}</span>
-                        <span className="meta">{entry.leagueId}</span>
-                      </span>
-                      <Icon name="chevronRight" size={18} className="chevron" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )
-          ) : null}
-
-          <Field label="リーグ ID / n01 の URL" hint="https://n01darts.com の URL、または lg_xxxx_1234 の形式">
+          <Field label="リーグ ID / n01 の URL" hint="https://n01darts.com のリーグページの URL、または lg_xxxx_1234 の形式">
             <span className="row" style={{ gap: 8 }}>
               <input
                 type="text"
@@ -417,10 +484,23 @@ function LeagueStep({ onChoose }: { onChoose: (league: N01LeagueSummary) => void
               </button>
             </span>
           </Field>
-          {referenceError ? <p className="tiny danger-text" role="alert">{referenceError}</p> : null}
+          {referenceError ? (
+            <>
+              <p className="tiny danger-text" role="alert">{referenceError}</p>
+              {onManual ? <ManualFallback onManual={onManual} reason="自動連携できないリーグでも、" /> : null}
+            </>
+          ) : null}
         </div>
       </details>
-      <p className="tiny muted">n01 の公開データを読み取るだけで、n01 へ書き込むことはありません。</p>
+      <p className="tiny muted">
+        対象は n01 League (リーグ ID が lg_… のリーグ) だけです。n01 Online のスケジュールモードや、Light League
+        など他サービスのリーグは自動連携の対象外です。n01 の公開データを読み取るだけで、n01 へ書き込むことはありません。
+      </p>
+      {onManual ? (
+        <button type="button" className="btn small ghost" onClick={onManual} style={{ width: '100%' }}>
+          n01 を使わずに手入力で作成する
+        </button>
+      ) : null}
     </section>
   );
 }
