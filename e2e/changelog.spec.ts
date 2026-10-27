@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { expectNoAxeViolations } from './axe';
 
 /** The update history opens from HOME and from SETTINGS, lists one entry per change, and links nowhere. */
 test.use({ serviceWorkers: 'block' });
@@ -14,7 +14,7 @@ async function openSample(page: Page): Promise<void> {
   await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });
 }
 
-test('the update history opens from the home screen', async ({ page }) => {
+test('the update history opens from the home screen', async ({ page }, info) => {
   await openSample(page);
 
   const row = page.locator('.list-row').filter({ hasText: '更新履歴' });
@@ -31,8 +31,7 @@ test('the update history opens from the home screen', async ({ page }) => {
   await expect(sheet.locator('a')).toHaveCount(0);
   await expect(sheet).not.toContainText('github.com');
 
-  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
-  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await expectNoAxeViolations(page, info);
 
   await page.keyboard.press('Escape');
   await expect(sheet).toHaveCount(0);

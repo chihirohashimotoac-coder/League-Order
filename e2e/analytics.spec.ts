@@ -1,6 +1,6 @@
-import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { serveAnalyticsExtras, type AnalyticsServerControl } from './analyticsServer';
+import { expectNoAxeViolations } from './axe';
 import { pinFixtureClock, serveN01, type N01ServerControl } from './n01Server';
 
 /**
@@ -147,8 +147,7 @@ test.describe('PLAYER ANALYTICS', () => {
     await createKalavinka(page);
     await openAnalytics(page);
     await expect(page.getByTestId('metric-3DA')).toBeVisible();
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
-    expect(results.violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }))).toEqual([]);
+    await expectNoAxeViolations(page, info);
     await noSideScroll(page);
     await page.screenshot({ path: `test-results/analytics-player-${info.project.name}.png`, fullPage: true });
   });
@@ -191,8 +190,7 @@ test.describe('TEAM ANALYTICS', () => {
     await expect(page.getByTestId('official-table')).toBeVisible();
     await page.getByLabel(/比較するチームを追加/).selectOption({ index: 1 });
     await expect(page.getByTestId('team-compare-table')).toBeVisible();
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
-    expect(results.violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }))).toEqual([]);
+    await expectNoAxeViolations(page, info);
     await noSideScroll(page);
     await page.screenshot({ path: `test-results/analytics-team-${info.project.name}.png`, fullPage: true });
   });
