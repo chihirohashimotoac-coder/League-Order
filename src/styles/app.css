@@ -6293,3 +6293,320 @@ select:not([multiple]) {
   border-color: var(--color-warning);
   color: var(--color-warning);
 }
+
+/* ------------------------------------------------------------------ */
+/* MATCH RESULTS / LIVE MATCH (features/matches)                       */
+/* Built from the existing tokens; no new colours or type sizes.        */
+/* ------------------------------------------------------------------ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.matches,
+.live {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.matches-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.matches-bar select {
+  width: 100%;
+}
+
+.matches-meta a {
+  color: var(--color-accent-text);
+}
+
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.match-list,
+.live-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.match-row,
+.live-card-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.match-row[aria-expanded='true'],
+.live-card-row[aria-pressed='true'] {
+  border-color: var(--color-accent);
+}
+
+.match-teams {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  font-weight: 600;
+}
+
+.match-teams > span:last-child {
+  text-align: right;
+}
+
+.match-teams .own,
+.live-card-row .own,
+.standings tr.own th,
+.projected li.own {
+  color: var(--color-accent-text);
+}
+
+.match-score {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15em;
+}
+
+.match-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.tag.state-live {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.tag.state-official {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.tag.state-unrecorded {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.match-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 4px 4px;
+  min-width: 0;
+}
+
+.match-games,
+.standings,
+.compare,
+.players-form,
+.cricket-marks {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.match-games th,
+.match-games td,
+.standings th,
+.standings td,
+.compare th,
+.compare td,
+.players-form th,
+.players-form td {
+  padding: 6px 6px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.match-games th[scope='row'] > span,
+.match-games td > span {
+  display: block;
+}
+
+.match-games td.won .names {
+  font-weight: 700;
+}
+
+.match-games td.won .names::after {
+  content: ' ◯';
+  color: var(--color-success);
+}
+
+.match-games td.legs {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.leg-list {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.intel {
+  border-top: 1px dashed var(--color-border-strong);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.intel-title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 1em;
+}
+
+.intel-block h4 {
+  margin: 0 0 4px;
+  font-size: 0.95em;
+}
+
+.intel-block ul,
+.projected {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.intel-block li.surprise {
+  color: var(--color-warning);
+}
+
+.live-board {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-1);
+  min-width: 0;
+}
+
+.live-card-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.live-card-score {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  font-weight: 600;
+}
+
+.live-card-score > span:nth-child(3) {
+  text-align: right;
+}
+
+.live-card-score > span:last-child {
+  grid-column: 1 / -1;
+  text-align: center;
+}
+
+.live-card-score strong {
+  font-size: 1.4em;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-game-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.live-sides {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.live-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.live-side.throwing {
+  border-color: var(--color-accent);
+}
+
+.live-side.won {
+  border-color: var(--color-success);
+}
+
+.live-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.live-main {
+  font-size: 2.4em;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.cricket-marks th,
+.cricket-marks td {
+  text-align: center;
+  padding: 2px 6px;
+}
+
+.throws {
+  margin: 0;
+  padding-left: 1.6em;
+}
+
+.live-status.retrying,
+.live-status.budget {
+  color: var(--color-warning);
+}
+
+.rule-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.match-games th[scope='row'] > span:first-child {
+  white-space: nowrap;
+}

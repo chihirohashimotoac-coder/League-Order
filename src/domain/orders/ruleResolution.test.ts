@@ -16,7 +16,7 @@ import { generateOrder, evaluateManualOrder } from '../../optimizer/generateOrde
 import { validateHardConstraints } from '../../optimizer/constraints/validate';
 import { orderInput, player } from '../../test/factories';
 import { createBackup, parseBackup, serialiseBackup } from '../../storage/backup';
-import { DEFAULT_SETTINGS } from '../../storage/seed';
+import { DEFAULT_SETTINGS } from '../../storage/repository';
 
 const ATDO = 'lg_l3hI_3397';
 const TDO = 'lg_3qgW_6619';

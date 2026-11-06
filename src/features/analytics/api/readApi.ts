@@ -27,6 +27,10 @@ export const ANALYTICS_OPERATIONS = [
   'team/player/list',
   'match/list',
   'match/get',
+  // MATCH RESULTS / LIVE MATCH (features/matches): read operations only.
+  'league/schedule/get',
+  'match/live',
+  'match/throws',
 ] as const;
 
 export type AnalyticsOperation = (typeof ANALYTICS_OPERATIONS)[number];
