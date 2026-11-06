@@ -570,7 +570,7 @@ export function App(): React.JSX.Element {
           </span>
           <span className="header-titles">
             <span className="kicker">LEAGUE ORDER</span>
-            <h1>{store.settings.watch.leagueTitle}</h1>
+            <h1>{store.settings.watch.title}</h1>
           </span>
           <button type="button" className="btn small" onClick={() => setRegistering(true)}>
             チームを登録

@@ -84,7 +84,6 @@ export function GameView({
       alive = false;
     };
     // Only when the live leg index changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveIndex]);
 
   const all = useMemo(() => {

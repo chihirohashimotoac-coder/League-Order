@@ -248,8 +248,9 @@ function membersOf(value: unknown): GameMember[] {
 
 function gameSide(value: unknown): GameSide | null {
   if (!isRec(value)) return null;
-  const teamId = str(value.tpid);
-  if (!teamId) return null;
+  // Games outside any competition (n01 Online / Live) have no entry id: the player's name stands in.
+  const teamId = str(value.tpid) ?? '';
+  if (!teamId && !str(value.name)) return null;
   const darts = num(value.allDarts);
   return {
     teamId,

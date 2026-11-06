@@ -14,6 +14,8 @@ import type { N01RosterPlayer } from '../../integrations/n01/types';
 import type { PlayerStatsRow } from '../analytics/types';
 import type { RequestGovernor } from './governor';
 import { sharedGovernor } from './governor';
+import type { CompetitionDoc, CompetitionSummary, StandingGroup } from './competition';
+import { parseAllStandings, parseCompetition, parseCompetitionList } from './competition';
 
 /**
  * Read adapter of MATCH RESULTS and LIVE MATCH.
@@ -217,6 +219,55 @@ export class MatchesApi {
   /** Every member of every team of a season (names for the stats rows). */
   roster(tournamentId: string): Promise<N01RosterPlayer[]> {
     return this.read('team/player/list', this.memoised('team/player/list', { tdid: tournamentId }), (raw) => parseRoster(raw, ''));
+  }
+
+  /** Tournaments by title keyword (any status, newest first). */
+  searchCompetitions(keyword: string): Promise<CompetitionSummary[]> {
+    return this.read('tournament/list', this.fresh('tournament/list', { keyword, count: '40', fields: 'tdid,title,status,lgid,t_date' }), parseCompetitionList);
+  }
+
+  /** A competition's document (entries, titles, kind) — any tournament, league event or not. */
+  competition(tdid: string): Promise<CompetitionDoc> {
+    return this.read('tournament/get', this.memoised('tournament/get', { tdid }), (raw) => parseCompetition(raw, tdid));
+  }
+
+  /** Every game of a competition (all kinds), oldest first; `live` = in progress only, never memoised. */
+  async competitionGames(tdid: string, options: { live?: boolean; signal?: AbortSignal } = {}): Promise<{ games: GameRow[]; truncated: boolean }> {
+    const games: GameRow[] = [];
+    for (let page = 0; page < MATCH_ROWS_MAX_PAGES; page += 1) {
+      const params: Record<string, string> = { tdid, sort: 'startTime', order: 'asc', count: String(MATCH_ROWS_PAGE), fields: GAME_FIELDS };
+      if (options.live) {
+        params.live = '1';
+        params.endMatch = '0';
+      }
+      if (page > 0) params.skip = String(page * MATCH_ROWS_PAGE);
+      const request = options.live || page === 0 ? this.fresh('match/list', params, options.signal) : this.memoised('match/list', params);
+      const result = await this.read('match/list', request, parseGameRows);
+      games.push(...result.games);
+      if (result.rows < MATCH_ROWS_PAGE) return { games, truncated: false };
+    }
+    return { games, truncated: true };
+  }
+
+  /** Games in progress anywhere on n01 (competitions and n01 Online / Live), newest started first. */
+  async nowLive(signal?: AbortSignal): Promise<GameRow[]> {
+    // Sorting the whole of n01 by updateTime is refused as too slow (-54); the default order is start time, newest first.
+    const params = { live: '1', endMatch: '0', count: String(MATCH_ROWS_PAGE), fields: GAME_FIELDS };
+    return (await this.read('match/list', this.fresh('match/list', params, signal), parseGameRows)).games;
+  }
+
+  /** One game's row (names, legs) by its id. */
+  async game(mid: string): Promise<GameRow | null> {
+    const archived = await this.read('match/list', this.fresh('match/list', { mid, fields: GAME_FIELDS }), parseGameRows);
+    if (archived.games[0]) return archived.games[0];
+    // A game outside any competition reaches the archive only after it ends (checked 2026-11-06).
+    const live = await this.read('match/list', this.fresh('match/list', { mid, live: '1', fields: GAME_FIELDS }), parseGameRows);
+    return live.games[0] ?? null;
+  }
+
+  /** League divisions and round-robin groups (n01's own table); none for brackets. */
+  allStandings(tdid: string): Promise<StandingGroup[]> {
+    return this.read('tournament/standings', this.memoised('tournament/standings', { tdid }), parseAllStandings);
   }
 
   gameDetail(mid: string): Promise<GameDetail> {

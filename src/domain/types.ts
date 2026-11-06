@@ -997,7 +997,9 @@ export interface AppSettings {
 }
 
 export interface WatchSettings {
-  /** n01 league id (`lgid`). */
-  leagueId: string;
-  leagueTitle: string;
+  /** A league (its seasons) or one tournament / event. */
+  kind: 'league' | 'tournament';
+  /** `lgid` or `tdid`. */
+  id: string;
+  title: string;
 }

@@ -1,37 +1,78 @@
 import { useState } from 'react';
-import { KNOWN_LEAGUES, parseLeagueReference } from '../../../integrations/n01/leagueRegistry';
+import { KNOWN_LEAGUES } from '../../../integrations/n01/leagueRegistry';
 import { describeN01Error } from '../../../integrations/n01/client';
 import { useN01Environment } from '../../../state/n01Environment';
 import type { WatchSettings } from '../../../domain/types';
+import { useMatchesApiFactory } from '../environment';
+import { parseCompetitionReference } from '../competition';
 
 /**
- * Picks the league to watch: the known leagues in one tap, any other n01 League by name, id
- * or page link. Nothing is stored here; `onPick` gets the league.
+ * What to watch: a league (its seasons), a tournament or event, or one match. The known
+ * leagues are one tap; anything else on n01 by name, id or page link. Leagues and tournaments
+ * are searched together.
  */
-export function LeaguePicker({ onPick, current }: { onPick: (league: WatchSettings) => void; current?: string | null }): React.JSX.Element {
+
+interface Hit {
+  target: WatchSettings;
+  note: string;
+}
+
+const STATUS: Record<number, string> = { 10: '準備中', 20: '受付中', 25: '作成中', 30: '開催中', 40: '終了' };
+
+export function LeaguePicker({
+  onPick,
+  onMatch,
+  onNow,
+  current,
+}: {
+  onPick: (target: WatchSettings) => void;
+  /** A pasted match id or link: open that one game. */
+  onMatch?: (mid: string) => void;
+  /** Browse what is being played on n01 right now. */
+  onNow?: () => void;
+  current?: string | null;
+}): React.JSX.Element {
   const environment = useN01Environment();
+  const factory = useMatchesApiFactory();
   const [query, setQuery] = useState('');
-  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'error'; message: string } | { kind: 'hits'; hits: WatchSettings[] }>({ kind: 'idle' });
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'error'; message: string } | { kind: 'hits'; hits: Hit[] }>({ kind: 'idle' });
 
   const search = async (): Promise<void> => {
     const text = query.trim();
     if (!text) return;
-    const reference = parseLeagueReference(text);
-    if (reference.ok) {
-      onPick({ leagueId: reference.leagueId, leagueTitle: KNOWN_LEAGUES.find((league) => league.leagueId === reference.leagueId)?.title ?? reference.leagueId });
+    const reference = parseCompetitionReference(text);
+    if (reference?.kind === 'league') {
+      onPick({ kind: 'league', id: reference.id, title: KNOWN_LEAGUES.find((league) => league.leagueId === reference.id)?.title ?? reference.id });
+      return;
+    }
+    if (reference?.kind === 'tournament') {
+      onPick({ kind: 'tournament', id: reference.id, title: reference.id });
+      return;
+    }
+    if (reference?.kind === 'match' && onMatch) {
+      onMatch(reference.id);
       return;
     }
     if (/^[a-z]+:/iu.test(text)) {
-      setState({ kind: 'error', message: reference.message });
+      setState({ kind: 'error', message: 'リンクからリーグ・大会・試合の ID を読み取れませんでした。' });
       return;
     }
     setState({ kind: 'busy' });
-    try {
-      const hits = await environment.createClient().searchLeagues(text);
-      setState({ kind: 'hits', hits: hits.slice(0, 20).map((hit) => ({ leagueId: hit.leagueId, leagueTitle: hit.title })) });
-    } catch (error) {
-      setState({ kind: 'error', message: describeN01Error(error) });
+    const [leagues, tournaments] = await Promise.allSettled([environment.createClient().searchLeagues(text), factory().searchCompetitions(text)]);
+    if (leagues.status === 'rejected' && tournaments.status === 'rejected') {
+      setState({ kind: 'error', message: describeN01Error(leagues.reason) });
+      return;
     }
+    const hits: Hit[] = [
+      ...(leagues.status === 'fulfilled' ? leagues.value.slice(0, 15).map((hit) => ({ target: { kind: 'league' as const, id: hit.leagueId, title: hit.title || hit.leagueId }, note: 'リーグ' })) : []),
+      ...(tournaments.status === 'fulfilled'
+        ? tournaments.value
+            .filter((hit) => !hit.leagueId)
+            .slice(0, 25)
+            .map((hit) => ({ target: { kind: 'tournament' as const, id: hit.tdid, title: hit.title || hit.tdid }, note: `大会 ・ ${STATUS[hit.status ?? 0] ?? ''}` }))
+        : []),
+    ];
+    setState({ kind: 'hits', hits });
   };
 
   return (
@@ -43,11 +84,16 @@ export function LeaguePicker({ onPick, current }: { onPick: (league: WatchSettin
             type="button"
             className="chip"
             aria-pressed={current === league.leagueId}
-            onClick={() => onPick({ leagueId: league.leagueId, leagueTitle: league.title })}
+            onClick={() => onPick({ kind: 'league', id: league.leagueId, title: league.title })}
           >
             {league.title}
           </button>
         ))}
+        {onNow ? (
+          <button type="button" className="chip" onClick={onNow}>
+            いま n01 で進行中
+          </button>
+        ) : null}
       </div>
       <form
         className="row"
@@ -62,8 +108,8 @@ export function LeaguePicker({ onPick, current }: { onPick: (league: WatchSettin
           className="grow"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="ほかのリーグ: 名前・リーグID・n01 の URL"
-          aria-label="リーグを検索"
+          placeholder="リーグ・大会の名前、ID、n01 の URL"
+          aria-label="リーグ・大会を検索"
           enterKeyHint="search"
         />
         <button type="submit" className="btn" disabled={state.kind === 'busy' || !query.trim()}>
@@ -81,9 +127,9 @@ export function LeaguePicker({ onPick, current }: { onPick: (league: WatchSettin
         ) : (
           <ul className="league-hits">
             {state.hits.map((hit) => (
-              <li key={hit.leagueId}>
-                <button type="button" className="btn ghost small" onClick={() => onPick(hit)}>
-                  {hit.leagueTitle}
+              <li key={`${hit.target.kind}:${hit.target.id}`}>
+                <button type="button" className="btn ghost small" onClick={() => onPick(hit.target)}>
+                  {hit.target.title} <span className="muted small-text">({hit.note})</span>
                 </button>
               </li>
             ))}

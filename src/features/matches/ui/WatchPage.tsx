@@ -13,6 +13,8 @@ import { formatClock, formatRate, usePlayerStats, useRegisteredTeams, useSeasonD
 import { LeaguePicker } from './LeaguePicker';
 import { LiveTab } from './LiveTab';
 import { ResultsTab } from './ResultsTab';
+import { MatchSheet } from './MatchSheet';
+import { NowView, TournamentHub } from './CompetitionViews';
 
 /**
  * 観戦 (WATCH): one page for any n01 league, with or without a team. Four tabs —
@@ -32,21 +34,24 @@ const TABS: [WatchTab, string][] = [
 export default function WatchPage({ initialTab }: { initialTab: WatchTab }): React.JSX.Element {
   const store = useAppStore();
   const factory = useMatchesApiFactory();
-  // The league: the one last watched, else the active team's.
-  const fallback: WatchSettings | null = store.activeTeam?.n01 ? { leagueId: store.activeTeam.n01.leagueId, leagueTitle: store.activeTeam.n01.leagueTitle } : null;
-  const league = store.settings.watch ?? fallback;
+  // What to watch: the last choice, else the active team's league.
+  const fallback: WatchSettings | null = store.activeTeam?.n01 ? { kind: 'league', id: store.activeTeam.n01.leagueId, title: store.activeTeam.n01.leagueTitle } : null;
+  const target = store.settings.watch ?? fallback;
+  const league = target?.kind === 'league' ? target : null;
   const [refresh, setRefresh] = useState(0);
   const api = useMemo(() => factory(), [factory, refresh]);
-  const seasons = useSeasons(league ? api : null, league?.leagueId ?? null);
+  const seasons = useSeasons(league ? api : null, league?.id ?? null);
   const [tournamentId, setTournamentId] = useState<string | null>(null);
   useEffect(() => {
     setTournamentId(null);
-  }, [league?.leagueId]);
+  }, [target?.id]);
   const current = seasons.kind === 'ready' ? (seasons.value.find((entry) => entry.status === 30) ?? seasons.value[0])?.tournamentId ?? null : null;
-  const tdid = tournamentId ?? current;
+  const tdid = league ? (tournamentId ?? current) : null;
   const data = useSeasonData(tdid ? api : null, tdid);
   const [tab, setTab] = useState<WatchTab>(initialTab);
   const [picking, setPicking] = useState(false);
+  const [now, setNow] = useState(false);
+  const [game, setGame] = useState<{ mid: string; title?: string } | null>(null);
   const [team, setTeam] = useState<string | null>(null);
   const season = data.kind === 'ready' ? data.value.season : null;
   const registered = useRegisteredTeams(season);
@@ -54,22 +59,56 @@ export default function WatchPage({ initialTab }: { initialTab: WatchTab }): Rea
   const pick = (next: WatchSettings): void => {
     store.updateSettings({ watch: next });
     setPicking(false);
+    setNow(false);
   };
+  const sheet = game ? <MatchSheet mid={game.mid} title={game.title} factory={factory} onClose={() => setGame(null)} /> : null;
+  const pickerSheet = picking ? (
+    <Sheet title="見るリーグ・大会" onClose={() => setPicking(false)}>
+      <LeaguePicker
+        onPick={pick}
+        current={target?.id}
+        onMatch={(mid) => {
+          setPicking(false);
+          setGame({ mid });
+        }}
+        onNow={() => {
+          setPicking(false);
+          setNow(true);
+        }}
+      />
+    </Sheet>
+  ) : null;
 
-  if (!league) {
+  if (!target || now) {
     return (
-      <Card kicker="WATCH" title="見るリーグを選んでください">
-        <LeaguePicker onPick={pick} />
-      </Card>
+      <div className="watch" data-testid="watch-page">
+        {target ? (
+          <button type="button" className="btn ghost small" onClick={() => setNow(false)}>
+            <Icon name="chevronLeft" size={16} /> {target.title} に戻る
+          </button>
+        ) : null}
+        {now ? (
+          <NowView
+            factory={factory}
+            onCompetition={(id, title) => pick({ kind: 'tournament', id, title })}
+            onGame={(mid, title) => setGame({ mid, title })}
+          />
+        ) : (
+          <Card kicker="WATCH" title="見るリーグ・大会を選んでください">
+            <LeaguePicker onPick={pick} onMatch={(mid) => setGame({ mid })} onNow={() => setNow(true)} />
+          </Card>
+        )}
+        {sheet}
+      </div>
     );
   }
 
-  return (
-    <div className="watch" data-testid="watch-page">
-      <div className="watch-bar">
-        <button type="button" className="btn small" onClick={() => setPicking(true)} aria-label={`リーグを変更 (現在 ${league.leagueTitle})`}>
-          {league.leagueTitle} <Icon name="chevronDown" size={14} />
-        </button>
+  const bar = (
+    <div className="watch-bar">
+      <button type="button" className="btn small" onClick={() => setPicking(true)} aria-label={`見るものを変更 (現在 ${target.title})`}>
+        {target.title} <Icon name="chevronDown" size={14} />
+      </button>
+      {league ? (
         <select aria-label="シーズン" value={tdid ?? ''} onChange={(event) => setTournamentId(event.target.value)} disabled={seasons.kind !== 'ready'}>
           {seasons.kind === 'ready' ? (
             seasons.value.map((entry) => (
@@ -82,17 +121,43 @@ export default function WatchPage({ initialTab }: { initialTab: WatchTab }): Rea
             <option value="">{seasons.kind === 'error' ? '取得エラー' : '読み込み中…'}</option>
           )}
         </select>
-        <button type="button" className="btn small icon" onClick={() => setRefresh((n) => n + 1)} aria-label="最新の情報を取得">
-          <Icon name="refresh" size={16} />
+      ) : (
+        <span className="grow" />
+      )}
+      <button type="button" className="btn small icon" onClick={() => setRefresh((n) => n + 1)} aria-label="最新の情報を取得">
+        <Icon name="refresh" size={16} />
+      </button>
+    </div>
+  );
+  const tabs = (
+    <div className="segmented" role="tablist" aria-label="表示">
+      {TABS.map(([key, label]) => (
+        <button key={key} type="button" role="tab" aria-selected={tab === key} aria-pressed={tab === key} onClick={() => setTab(key)}>
+          {key === 'results' && !league ? '試合' : label}
         </button>
+      ))}
+    </div>
+  );
+
+  if (target.kind === 'tournament') {
+    return (
+      <div className="watch" data-testid="watch-page">
+        {bar}
+        {tabs}
+        <TournamentHub key={`${target.id}:${refresh}`} api={api} tdid={target.id} tab={tab} onGame={(mid, title) => setGame({ mid, title })} />
+        <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
+          いま n01 で進行中の試合を見る
+        </button>
+        {sheet}
+        {pickerSheet}
       </div>
-      <div className="segmented" role="tablist" aria-label="表示">
-        {TABS.map(([key, label]) => (
-          <button key={key} type="button" role="tab" aria-selected={tab === key} aria-pressed={tab === key} onClick={() => setTab(key)}>
-            {label}
-          </button>
-        ))}
-      </div>
+    );
+  }
+
+  return (
+    <div className="watch" data-testid="watch-page">
+      {bar}
+      {tabs}
       {seasons.kind === 'error' ? <Retry message={seasons.message} onRetry={() => setRefresh((n) => n + 1)} /> : null}
       {data.kind === 'loading' && seasons.kind !== 'error' ? (
         <p className="muted small-text" role="status">
@@ -114,11 +179,11 @@ export default function WatchPage({ initialTab }: { initialTab: WatchTab }): Rea
           {team ? <TeamSheet teamId={team} data={data.value} registered={registered} factory={factory} onClose={() => setTeam(null)} /> : null}
         </>
       ) : null}
-      {picking ? (
-        <Sheet title="見るリーグ" onClose={() => setPicking(false)}>
-          <LeaguePicker onPick={pick} current={league.leagueId} />
-        </Sheet>
-      ) : null}
+      <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
+        いま n01 で進行中の試合を見る (大会・個別の試合)
+      </button>
+      {sheet}
+      {pickerSheet}
     </div>
   );
 }

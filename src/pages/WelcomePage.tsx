@@ -68,13 +68,13 @@ export function WelcomePage({ onCreated, onWatchBack }: { onCreated?: (next: Fir
       <div className="welcome-actions">
         <section className="start-option watch-option" aria-labelledby="start-watch">
           <h2 id="start-watch" className="start-title">
-            リーグを見る
+            リーグ・大会を見る
             <span className="start-tag">チーム不要</span>
           </h2>
           <p className="start-note">
-            n01 League の試合をライブで観戦し、日程・結果・順位・選手スタッツを見られます。チームに所属していなくても使えます。
+            n01 のリーグ・トーナメント・個別の試合をライブで観戦し、結果・順位・選手スタッツを見られます。チームに所属していなくても使えます。
           </p>
-          <LeaguePicker onPick={(league) => store.updateSettings({ watch: league })} />
+          <LeaguePicker onPick={(target) => store.updateSettings({ watch: target })} />
         </section>
 
         <h2 className="welcome-divider">チームを登録</h2>
