@@ -47,8 +47,18 @@ describe('security review (Phase 6 §11)', () => {
     // The network is reached through one transport only.
     // (`sync.fetch(…)` is the app's own method, not the network.)
     const networkFetch = /(?:await|return|=|\(|,)\s*fetch\(|(?:globalThis|window|self)\.fetch\b/;
-    expect(offenders(networkFetch).filter((path) => path !== 'integrations/n01/client.ts')).toEqual([]);
-    expect(offenders(networkFetch)).toEqual(['integrations/n01/client.ts']);
+    // `preview/demoN01.ts` is the review preview's stand-in for n01: it answers n01 URLs from
+    // demo data instead of sending them, and exists only in a `PREVIEW_DEMO_N01=1` preview build
+    // (checked below), never in the production bundle.
+    const allowed = ['integrations/n01/client.ts', 'preview/demoN01.ts'];
+    expect(offenders(networkFetch).filter((path) => !allowed.includes(path))).toEqual([]);
+    expect(offenders(networkFetch)).toContain('integrations/n01/client.ts');
+    const main = files.find((file) => file.path === 'main.tsx')!.text;
+    const guarded = main.slice(main.indexOf('if (__PREVIEW_DEMO_N01__) {'));
+    expect(main.indexOf('if (__PREVIEW_DEMO_N01__) {')).toBeGreaterThan(0);
+    expect(guarded.slice(0, guarded.indexOf('\n}\n'))).toContain("import('./preview/demoN01')");
+    expect(main.indexOf("import('./preview/demoN01')")).toBe(main.indexOf('if (__PREVIEW_DEMO_N01__) {') + guarded.indexOf("import('./preview/demoN01')"));
+    expect(readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf-8')).toContain("__PREVIEW_DEMO_N01__: 'false'");
     expect(offenders(/XMLHttpRequest|navigator\.sendBeacon|new WebSocket/)).toEqual([]);
   });
 

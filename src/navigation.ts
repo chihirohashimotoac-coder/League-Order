@@ -11,6 +11,8 @@ export const PAGES = [
   'history',
   'settings',
   'analytics',
+  'matches',
+  'live',
 ] as const;
 
 export type Page = (typeof PAGES)[number];
@@ -29,6 +31,8 @@ export const PAGE_TITLES: Record<Page, string> = {
   history: '履歴',
   settings: '設定',
   analytics: 'データ分析',
+  matches: '日程・結果',
+  live: 'ライブ',
 };
 
 /** Tabs shown in the bottom bar, in order. */
@@ -46,6 +50,8 @@ export const TAB_FOR_PAGE: Partial<Record<Page, Page>> = {
   pairs: 'home',
   settings: 'home',
   analytics: 'home',
+  matches: 'home',
+  live: 'home',
 };
 
 /** Pages reached from another screen rather than from the tab bar. */
@@ -53,6 +59,8 @@ export const BACK_TARGETS: Partial<Record<Page, Page>> = {
   pairs: 'home',
   settings: 'home',
   analytics: 'home',
+  matches: 'home',
+  live: 'home',
   result: 'setup',
 };
 
@@ -69,6 +77,8 @@ export const BREADCRUMB_PARENT: Partial<Record<Page, Page>> = {
   history: 'home',
   settings: 'home',
   analytics: 'home',
+  matches: 'home',
+  live: 'home',
 };
 
 /** Short breadcrumb label; HOME reads ホーム rather than the team name. */
@@ -101,6 +111,14 @@ export const MENU_GROUPS: { title: string; kicker: string; entries: MenuEntry[] 
       { page: 'setup', label: 'オーダー設定', icon: 'target', note: '参加者・条件・プリセット' },
       { page: 'result', label: 'オーダー結果', icon: 'checkCircle', note: '作業中のオーダー' },
       { page: 'history', label: '履歴', icon: 'history', note: '保存・確定したオーダー' },
+    ],
+  },
+  {
+    title: '試合',
+    kicker: 'MATCH',
+    entries: [
+      { page: 'live', label: 'ライブ', icon: 'target', note: '進行中の全カードを観戦' },
+      { page: 'matches', label: '日程・結果', icon: 'trophy', note: '結果・順位・スタッツ' },
     ],
   },
   {

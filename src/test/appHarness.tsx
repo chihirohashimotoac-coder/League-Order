@@ -4,7 +4,7 @@ import { AppStoreProvider } from '../state/appStore';
 import { ToastProvider } from '../components/ui';
 import { openBackend, resetBackendCache } from '../storage/db';
 import { DEFAULT_SETTINGS, Repository, type Snapshot } from '../storage/repository';
-import type { LeagueFormat, Player, SavedOrder, Team } from '../domain/types';
+import type { LeagueFormat, Player, RuleAnswerSet, SavedOrder, Team } from '../domain/types';
 
 /**
  * The real app shell over a seeded IndexedDB: two manual teams (A active) with four
@@ -44,7 +44,9 @@ export function formatFor(teamId: string): LeagueFormat {
   };
 }
 
-export async function seed(extra: { formats?: LeagueFormat[]; orders?: SavedOrder[] } = {}): Promise<void> {
+export async function seed(
+  extra: { formats?: LeagueFormat[]; orders?: SavedOrder[]; ruleAnswers?: Record<string, RuleAnswerSet> } = {},
+): Promise<void> {
   const teams: Team[] = [
     { id: TEAM_A, name: 'チームA', createdAt: 1 },
     { id: TEAM_B, name: 'チームB', createdAt: 2 },
@@ -56,7 +58,17 @@ export async function seed(extra: { formats?: LeagueFormat[]; orders?: SavedOrde
     pairs: [],
     orders: extra.orders ?? [],
     seasonCommits: [],
-    settings: { ...DEFAULT_SETTINGS, activeTeamId: TEAM_A },
+    // The harness formats play Singles twice. Their appearance cap is stated up front (2 = as
+    // many as there are Singles games, i.e. no restriction), so the suites that are not about
+    // the question are never stopped by it; `extra.ruleAnswers` replaces it.
+    settings: {
+      ...DEFAULT_SETTINGS,
+      activeTeamId: TEAM_A,
+      ruleAnswers: extra.ruleAnswers ?? {
+        [`format:${TEAM_A}_fmt`]: { caps: { SINGLES: 2 }, updatedAt: 0 },
+        [`format:${TEAM_B}_fmt`]: { caps: { SINGLES: 2 }, updatedAt: 0 },
+      },
+    },
   };
   await new Repository(await openBackend()).replaceAll(snapshot);
   resetBackendCache();

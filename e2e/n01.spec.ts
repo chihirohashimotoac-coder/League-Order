@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01, type N01ServerControl } from './n01Server';
+import { clickGenerate } from './ruleQuestions';
+import { waitForRest } from './axe';
 
 /**
  * n01 integration in a real browser, against the fixture n01 server.
@@ -11,6 +13,8 @@ import { pinFixtureClock, serveN01, type N01ServerControl } from './n01Server';
 test.use({ serviceWorkers: 'block' });
 
 async function audit(page: Page, label: string): Promise<void> {
+  // Measured at rest: an entrance fade blends colours and reports contrast the screen does not have.
+  await waitForRest(page);
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
   const summary = results.violations.map((violation) => ({
     id: violation.id,
@@ -78,7 +82,7 @@ test.describe('n01 league native sync (Phase 1)', () => {
     await createKalavinka(page);
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     await expect(page.locator('.order-game')).toHaveCount(7);
     await expect(page.getByTestId('result-strength-basis')).toContainText('STEEL');
@@ -158,7 +162,7 @@ test.describe('n01 league native sync (Phase 1)', () => {
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
     await expect(page.getByTestId('setup-opponent')).toContainText('次戦: vs スピンコブラ');
     await page.getByRole('radio', { name: /対戦相手最適化/ }).click();
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     await expect(page.locator('.candidate-tab .c-label')).toHaveText(['対戦相手最適化', '勝利優先', 'バランス', '公平性優先']);
     const panel = page.getByTestId('opponent-panel');
@@ -175,7 +179,7 @@ test.describe('throw order in the result (docs/THROW_ORDER_MODEL.md §7)', () =>
     await createKalavinka(page);
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
     await page.getByRole('radio', { name: /対戦相手最適化/ }).click();
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 
     const doubles = page.locator('.order-game').filter({ hasText: 'Doubles 501' }).first();

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { clickGenerate } from './ruleQuestions';
 
 /**
  * vNext regressions in a real browser: text selection inside sheets, Rating + PPR,
@@ -43,7 +44,7 @@ async function generate(page: Page): Promise<void> {
   await tab(page, 'ホーム').click();
   await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 }
 
@@ -248,7 +249,7 @@ test.describe('strength basis', () => {
     await expect(setupBasis).toContainText('STEEL');
     await expect(setupBasis).toContainText('戦力評価 PPR 70% / Rating 30%');
 
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     const resultBasis = page.getByTestId('result-strength-basis');
     await expect(resultBasis).toContainText('STEEL');

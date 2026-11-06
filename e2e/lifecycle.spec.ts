@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { clickGenerate } from './ruleQuestions';
 
 /**
  * Order lifecycle, versioning and season-commit safety (追加要件 §16).
@@ -23,7 +24,7 @@ function tab(page: Page, name: string) {
 async function generate(page: Page): Promise<void> {
   await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 }
 
@@ -459,7 +460,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await page.getByRole('button', { name: '戻る' }).click();
     await expect(page.getByTestId('editing-banner')).toContainText('ORDER v1 を編集中');
     await page.getByLabel('遠藤 を参加者に含める').uncheck();
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
 
     await expect(stateBanner(page)).toContainText('再確定が必要');
     await finalize(page);
@@ -476,7 +477,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await openApp(page);
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
     await page.getByLabel('遠藤 を参加者に含める').uncheck();
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     await finalize(page);
 
@@ -502,7 +503,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await page.getByRole('button', { name: '戻る' }).click();
     await page.getByRole('button', { name: '新規オーダーにする' }).click();
     await expect(page.getByTestId('editing-banner')).toHaveCount(0);
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(stateBanner(page)).toContainText('未確定');
     await expect(page.getByRole('button', { name: 'オーダーを確定 v1' })).toBeVisible();
   });
@@ -532,7 +533,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await tab(page, 'オーダー').click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
     await expect(page.getByTestId('editing-banner')).toHaveCount(0);
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(stateBanner(page)).toContainText('未確定');
     await finalize(page);
     await expect(stateBanner(page)).toContainText('v1');
@@ -558,7 +559,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await page.getByRole('button', { name: '解除' }).click();
     await page.getByLabel('青木 を参加者に含める').check();
     await page.getByLabel('馬場 を参加者に含める').check();
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByText('オーダーを生成できませんでした')).toBeVisible();
 
     // v1 is still what is shown, unchanged, and saving it keeps v1's own conditions.

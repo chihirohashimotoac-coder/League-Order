@@ -48,6 +48,8 @@ import type { NextMatchOrder } from './domain/n01/nextMatch';
 // Loaded only when the analytics screen is opened: it adds nothing to start-up and makes no
 // network request until then.
 const AnalyticsEntry = lazy(() => import('./features/analytics/ui/AnalyticsEntry'));
+// MATCH RESULTS / LIVE MATCH: loaded only when opened, like analytics.
+const MatchesEntry = lazy(() => import('./features/matches/ui/MatchesEntry'));
 
 /**
  * Application shell.
@@ -111,6 +113,8 @@ export function App(): React.JSX.Element {
   }, []);
 
   const hasTeams = store.teams.length > 0;
+  // Viewer without a team who chose 「チームを登録」.
+  const [registering, setRegistering] = useState(false);
 
   // The working order belongs to the team it was made for. Switching (or deleting) the
   // active team detaches it: otherwise SETUP re-syncs to the new team's roster while
@@ -256,8 +260,7 @@ export function App(): React.JSX.Element {
    */
   const handleGenerate = useCallback(
     (input: OrderInput) => {
-      store.saveSettings({
-        ...store.settings,
+      store.updateSettings({
         lastPreset: input.preset,
         optimizer: input.settings,
       });
@@ -345,6 +348,12 @@ export function App(): React.JSX.Element {
           preset: order.input.preset,
           settings: order.input.settings,
         });
+        // Caps the league does not state are asked on SETUP before anything is generated.
+        if (order.pendingRules.length > 0) {
+          setPage('setup');
+          toast.show('出場回数の規則が未確認です。確認してから生成してください。');
+          return;
+        }
         handleGenerate(order.input);
       };
       if (unsaved) {
@@ -551,9 +560,35 @@ export function App(): React.JSX.Element {
     );
   }
 
+  // No team, but a league chosen to watch: the match screens, with the way to register a team.
+  if (!hasTeams && store.settings.watch && !registering) {
+    return (
+      <div className="app viewer-shell">
+        <header className="app-header">
+          <span className="brand-mark" aria-hidden="true">
+            <Icon name="target" size={20} />
+          </span>
+          <span className="header-titles">
+            <span className="kicker">LEAGUE ORDER</span>
+            <h1>{store.settings.watch.title}</h1>
+          </span>
+          <button type="button" className="btn small" onClick={() => setRegistering(true)}>
+            チームを登録
+          </button>
+        </header>
+        <main className="app-main wide">
+          <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
+            <MatchesEntry page={page === 'matches' ? 'matches' : 'live'} onNavigate={setPage} />
+          </Suspense>
+        </main>
+      </div>
+    );
+  }
+
   if (!hasTeams) {
     return (
       <WelcomePage
+        onWatchBack={store.settings.watch ? () => setRegistering(false) : undefined}
         onCreated={(next) => {
           if (next.kind === 'editFormat') {
             setFormatToEdit(next.formatId);
@@ -573,7 +608,7 @@ export function App(): React.JSX.Element {
 
   const hasActionBar =
     page === 'setup' || page === 'result' || page === 'players' || page === 'formats';
-  const wide = page === 'home' || page === 'result' || page === 'analytics';
+  const wide = page === 'home' || page === 'result' || page === 'analytics' || page === 'matches';
   const backTarget = BACK_TARGETS[page];
   const activeTab = TAB_FOR_PAGE[page] ?? page;
   const teamName = store.activeTeam?.name ?? 'チーム未設定';
@@ -707,6 +742,11 @@ export function App(): React.JSX.Element {
         {page === 'analytics' ? (
           <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
             <AnalyticsEntry onNavigate={setPage} />
+          </Suspense>
+        ) : null}
+        {page === 'matches' || page === 'live' ? (
+          <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
+            <MatchesEntry page={page} onNavigate={setPage} />
           </Suspense>
         ) : null}
         </div>

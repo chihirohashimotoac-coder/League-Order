@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { serveAnalyticsExtras, type AnalyticsServerControl } from './analyticsServer';
 import { expectNoAxeViolations } from './axe';
 import { pinFixtureClock, serveN01, type N01ServerControl } from './n01Server';
+import { clickGenerate } from './ruleQuestions';
 
 /**
  * PLAYER ANALYTICS in a real browser against the fixture n01 (mobile and desktop).
@@ -138,7 +139,7 @@ test.describe('PLAYER ANALYTICS', () => {
     await page.getByRole('button', { name: '戻る' }).click();
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 60_000 });
   });
 

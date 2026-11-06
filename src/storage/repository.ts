@@ -1,3 +1,5 @@
+import { parseRuleAnswers } from '../domain/orders/ruleResolution';
+import { parseWatch } from '../features/matches/watchSettings';
 import { DEFAULT_N01_SETTINGS } from '../domain/types';
 import type {
   AppSettings,
@@ -80,6 +82,8 @@ export class Repository {
           lastPreset: stored.lastPreset ?? 'BALANCED',
           customWeights: mergeDefined(DEFAULT_WEIGHTS, stored.customWeights),
           n01: mergeDefined(DEFAULT_N01_SETTINGS, stored.n01),
+          ...(stored.ruleAnswers ? { ruleAnswers: parseRuleAnswers(stored.ruleAnswers) } : {}),
+          ...(parseWatch(stored.watch) ? { watch: parseWatch(stored.watch)! } : {}),
         }
       : DEFAULT_SETTINGS;
 

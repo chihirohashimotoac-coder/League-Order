@@ -11,7 +11,8 @@ import type {
 } from '../types';
 import { formatDiscipline } from '../types';
 import { createParticipantConfig } from '../orders/participants';
-import { leagueRulesSnapshot } from '../orders/leagueRules';
+import { resolveOrderRules } from '../orders/ruleResolution';
+import type { AskableKind } from '../orders/ruleResolution';
 import { scopeForPreset, weightsForPreset } from '../orders/presets';
 import { applyHistoryStrength, buildRoleStrengthContext } from './historyStrength';
 import { THROW_ORDER_MODEL_VERSION } from '../prediction/throwOrder';
@@ -69,6 +70,11 @@ export interface NextMatchOrder {
   match: MatchInfo;
   /** False when there is no usable opponent data (the order is made as 勝利優先). */
   opponentAvailable: boolean;
+  /**
+   * Player-count kinds whose appearance cap is not known yet (no league rule, no format rule,
+   * no earlier answer). The order must not be generated until the captain answers them.
+   */
+  pendingRules: AskableKind[];
 }
 
 export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder {
@@ -85,9 +91,11 @@ export function buildNextMatchOrder(source: NextMatchOrderInput): NextMatchOrder
   });
   const match = source.intel?.nextMatch;
   const binding = source.team.n01;
-  const leagueRules = leagueRulesSnapshot(source.format.leagueRules);
+  const resolution = resolveOrderRules(source.format, source.settings.ruleAnswers);
+  const leagueRules = resolution.rules;
   return {
     opponentAvailable: opponent !== null,
+    pendingRules: resolution.pending,
     match: {
       leagueName: source.team.leagueName?.trim() || binding?.leagueTitle || '',
       teamName: source.team.name,
