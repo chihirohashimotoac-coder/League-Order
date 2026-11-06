@@ -13,8 +13,10 @@ import type { GameOutlook } from '../probability';
 import { teamProfile } from '../insights';
 import { checkReproduction, projectMany } from '../standings';
 import type { SeasonData } from './useMatchContext';
-import { formatClock, formatRate, useTodayBoard } from './useMatchContext';
+import { formatClock, useTodayBoard } from './useMatchContext';
 import { GameView } from './GameView';
+import { LiveSheet } from './LiveSheet';
+import { usePlayerStats } from './useMatchContext';
 import type { MatchesApiFactory } from '../environment';
 
 /**
@@ -289,9 +291,18 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
     return spans.length ? spans.reduce((a, b) => a + b, 0) / spans.length : null;
   })();
 
-  const cricket = live?.matchType === 'cricket';
-  const leg = live?.leg ?? null;
-  const at = (side: 0 | 1): 0 | 1 => (liveFlip ? ((1 - side) as 0 | 1) : side);
+  // Each singles player's season average (n01's own figure), matched within the team by exact name.
+  const stats = usePlayerStats(api, data.season.tournamentId, !card.finished);
+  const seasonAverage: [number | null, number | null] | undefined =
+    live && stats.kind === 'ready'
+      ? ([0, 1] as const).map((side) => {
+          const members = live.sides[side].members;
+          if (members.length !== 1) return null;
+          const hits = stats.value.filter((row) => row.teamId === live.sides[side].teamId && row.name === members[0]);
+          const line = hits.length === 1 ? hits[0].line : null;
+          return line && line.score !== null && line.darts ? (line.score / line.darts) * 3 : null;
+        }) as [number | null, number | null]
+      : undefined;
 
   return (
     <section className="focus-card" aria-label={`${names[0]} 対 ${names[1]}`} data-testid="focus-card">
@@ -332,36 +343,9 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
         <span className="muted"> (今季の種別勝率から計算{seasonGames < 20 ? '・データ少なめ' : ''})</span>
       </p>
 
-      {live && !live.gameEnded && leg ? (
-        <div className="scoreboard" data-testid="live-board">
-          <div className="scoreboard-head small-text">
-            <strong>{live.title.split(' ').slice(-1)[0]}</strong> {cricket ? 'Cricket' : `${live.startScore ?? ''}`} ・ Leg {(live.currentLeg ?? 0) + 1}
-            {live.limitLeg ? ` (${live.limitLeg} 先取)` : ''}
-          </div>
-          <div className="live-sides">
-            {([0, 1] as const).map((side) => {
-              const n = at(side);
-              const throwing = !leg.ended && leg.thrower === n;
-              return (
-                <div key={side} className={`live-side${throwing ? ' throwing' : ''}`}>
-                  <span className="live-name">{live.sides[n].members.join(' / ') || live.sides[n].name}</span>
-                  <span className="live-main">{cricket ? (leg.points?.[n] ?? '—') : (leg.left?.[n] ?? '—')}</span>
-                  <span className="muted small-text">
-                    Leg {live.legs[n]} ・ {cricket ? 'MPR' : '平均'} {formatRate(live.sides[n].rate)}
-                  </span>
-                  {throwing ? (
-                    <span className="tag state-live" data-testid="next-thrower">
-                      次: {leg.member ?? live.sides[n].members[0] ?? live.sides[n].name}
-                    </span>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
+      {live && !live.gameEnded ? <LiveSheet api={api} live={live} seasonAverage={seasonAverage} /> : null}
 
-      {selectedGame ? (
+      {selectedGame && !(live && !live.gameEnded && live.mid === selectedGame.mid) ? (
         <details className="game-block" open>
           <summary>
             {slotLabel(data.season, selectedGame.schid)} ・ {selectedGame.finished ? '終了' : '進行中'} ・ {names[0]} {sideRate(selectedGame, flipOf(selectedGame) ? 1 : 0)?.toFixed(2) ?? '—'} / {names[1]}{' '}

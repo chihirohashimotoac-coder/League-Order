@@ -5,8 +5,8 @@ import type { GameRow, LiveState } from '../parse';
 import { LivePoller } from '../livePoller';
 import type { LiveStatus } from '../livePoller';
 import type { MatchesApiFactory } from '../environment';
-import { formatRate } from './useMatchContext';
 import { GameView } from './GameView';
+import { LiveSheet } from './LiveSheet';
 
 /**
  * Any one n01 game in a sheet — a tournament match, an n01 Online / Live game, a game opened
@@ -51,7 +51,6 @@ export function MatchSheet({ mid, factory, onClose, title }: { mid: string; fact
 
   const names: [string, string] = row ? [row.sides[0].members.map((m) => m.name).join(' / ') || row.sides[0].name, row.sides[1].members.map((m) => m.name).join(' / ') || row.sides[1].name] : ['—', '—'];
   const cricket = row?.matchType === 'cricket';
-  const leg = live?.leg ?? null;
   return (
     <Sheet title={title || row?.title || '試合'} onClose={onClose}>
       <div className="match-sheet" data-testid="match-sheet">
@@ -70,29 +69,11 @@ export function MatchSheet({ mid, factory, onClose, title }: { mid: string; fact
               </strong>
               <span>{names[1]}</span>
             </header>
-            {live && !live.gameEnded && leg ? (
-              <div className="live-sides" data-testid="live-board">
-                {([0, 1] as const).map((side) => (
-                  <div key={side} className={`live-side${!leg.ended && leg.thrower === side ? ' throwing' : ''}`}>
-                    <span className="live-name">{live.sides[side].members.join(' / ') || live.sides[side].name}</span>
-                    <span className="live-main">{cricket ? (leg.points?.[side] ?? '—') : (leg.left?.[side] ?? '—')}</span>
-                    <span className="muted small-text">
-                      {cricket ? 'MPR' : '平均'} {formatRate(live.sides[side].rate)}
-                    </span>
-                    {!leg.ended && leg.thrower === side ? <span className="tag state-live">次に投げる</span> : null}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <GameView
-              api={api}
-              mid={mid}
-              cricket={cricket}
-              finished={row.finished && !(live && !live.gameEnded)}
-              names={names}
-              flip={false}
-              liveLeg={live && !live.gameEnded ? live.leg : null}
-            />
+            {live && !live.gameEnded ? (
+              <LiveSheet api={api} live={live} />
+            ) : (
+              <GameView api={api} mid={mid} cricket={cricket} finished={row.finished} names={names} flip={false} />
+            )}
             {inProgress ? (
               <p className={`small-text live-status ${status.kind}`} role="status">
                 {status.kind === 'polling' ? '自動更新中' : status.kind === 'paused-hidden' ? '非表示のため一時停止中' : status.kind === 'retrying' ? `取得エラー: ${status.message}` : status.kind === 'finished' ? '終了しました' : '接続中…'}

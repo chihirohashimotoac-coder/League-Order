@@ -251,3 +251,34 @@ describe('the board of the day', () => {
     expect(parseWatch({ kind: 'league', id: 'javascript:alert(1)' })).toBeUndefined();
   });
 });
+
+describe('checkout routes and the leg estimate (League Order additions to the live sheet)', () => {
+  it('routes the standard finishes and none for bogeys or above 170', async () => {
+    const { checkoutRoute } = await import('./checkout');
+    expect(checkoutRoute(170)).toEqual(['T20', 'T20', 'BULL']);
+    expect(checkoutRoute(141)).toEqual(['T20', 'T19', 'D12']);
+    expect(checkoutRoute(100)).toEqual(['T20', 'D20']);
+    expect(checkoutRoute(60)).toEqual(['S20', 'D20']);
+    expect(checkoutRoute(40)).toEqual(['D20']);
+    expect(checkoutRoute(50)).toEqual(['BULL']);
+    for (const bogey of [169, 168, 166, 165, 163, 162, 159, 171, 1]) expect(checkoutRoute(bogey)).toBeNull();
+    // Every route really adds up and ends on a double.
+    const value = (label: string): number => (label === 'BULL' ? 50 : label === 'S25' ? 25 : Number(label.slice(1)) * { S: 1, D: 2, T: 3 }[label[0] as 'S' | 'D' | 'T']);
+    for (let left = 2; left <= 170; left += 1) {
+      const route = checkoutRoute(left);
+      if (!route) continue;
+      expect(route.reduce((sum, label) => sum + value(label), 0)).toBe(left);
+      expect(route[route.length - 1] === 'BULL' || route[route.length - 1].startsWith('D')).toBe(true);
+    }
+  });
+
+  it('the leg estimate favours fewer points left, a better average and throwing next', async () => {
+    const { legChance, freshLegChance, shrunkAverage } = await import('./checkout');
+    expect(legChance([40, 300], [45, 45], 0)).toBeGreaterThan(0.9);
+    expect(legChance([300, 300], [45, 45], 0)).toBeGreaterThan(legChance([300, 300], [45, 45], 1));
+    expect(freshLegChance([45, 45])).toBeCloseTo(0.5, 5);
+    expect(freshLegChance([60, 40])).toBeGreaterThan(0.6);
+    // A few darts barely move the average from 45.
+    expect(shrunkAverage(90, 6)).toBeCloseTo(49.5, 5);
+  });
+});

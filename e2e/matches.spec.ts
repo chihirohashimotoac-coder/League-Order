@@ -154,8 +154,14 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await expect(focus.getByTestId('estimate')).toContainText('予測');
     await expect(focus.getByTestId('next-thrower')).toContainText('C1');
     await expect(focus.getByTestId('upcoming')).toContainText('シングルス1 A1 vs C1');
-    // The game in progress: comparison and score sheet below the scoreboard.
-    await expect(focus.getByTestId('game-view')).toBeVisible();
+    // The game in progress as a scoreboard: Scored / To Go, the points left, the game's figures,
+    // then League Order's own figures (leg / game chance).
+    const board = focus.getByTestId('live-board');
+    await expect(board.getByTestId('score-sheet')).toContainText('To Go');
+    await expect(board.getByTestId('score-sheet')).toContainText('321');
+    await expect(board).toContainText('3 Darts');
+    await expect(board.getByTestId('league-order-plus')).toBeVisible();
+    await expect(board.getByTestId('leg-chance')).toContainText('%');
     await expect(focus.getByTestId('live-status')).toContainText('終了しました', { timeout: 15_000 });
     await expect(focus.locator('.focus-head')).toContainText('3 - 2');
     const lives = log.filter((entry) => entry.startsWith('match/live'));
