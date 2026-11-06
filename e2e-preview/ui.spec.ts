@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { clickGenerate } from '../e2e/ruleQuestions';
 
 /**
  * v1.4 navigation and controls on the preview's app page (its sample team, no service worker):
@@ -67,7 +68,7 @@ test('hamburger menu: every screen, the current one marked, and it closes on the
 test('breadcrumbs: the trail to the current screen, and each step leads back', async ({ page }) => {
   await expect(page.getByRole('navigation', { name: 'パンくずリスト' })).toHaveCount(0);
   await page.getByRole('button', { name: '新しいオーダーを作る' }).first().click();
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果', level: 1 })).toBeVisible();
 
   const crumbs = page.getByRole('navigation', { name: 'パンくずリスト' });
@@ -171,7 +172,7 @@ test('radio buttons: presets move with the arrow keys; conditions are radio card
 
 test('pull-downs: history filter and order (view only)', async ({ page }) => {
   await page.getByRole('button', { name: '新しいオーダーを作る' }).first().click();
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果', level: 1 })).toBeVisible();
   await page.locator('.action-bar .btn.primary').click();
   await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });

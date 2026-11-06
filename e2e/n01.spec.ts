@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01, type N01ServerControl } from './n01Server';
 import { clickGenerate } from './ruleQuestions';
+import { waitForRest } from './axe';
 
 /**
  * n01 integration in a real browser, against the fixture n01 server.
@@ -12,6 +13,8 @@ import { clickGenerate } from './ruleQuestions';
 test.use({ serviceWorkers: 'block' });
 
 async function audit(page: Page, label: string): Promise<void> {
+  // Measured at rest: an entrance fade blends colours and reports contrast the screen does not have.
+  await waitForRest(page);
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
   const summary = results.violations.map((violation) => ({
     id: violation.id,
