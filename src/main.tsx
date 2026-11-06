@@ -9,6 +9,13 @@ import './styles/app.css';
 const container = document.getElementById('root');
 if (!container) throw new Error('#root not found');
 
+// Review preview only: answer n01 from demo data (the preview cannot reach n01). The flag is
+// `false` in the production build, so this import is not even bundled there.
+if (__PREVIEW_DEMO_N01__) {
+  const [{ installDemoN01 }, { N01_API_BASE_URL }] = await Promise.all([import('./preview/demoN01'), import('./integrations/n01/endpoints')]);
+  installDemoN01(N01_API_BASE_URL);
+}
+
 createRoot(container).render(
   <StrictMode>
     <ToastProvider>
