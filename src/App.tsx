@@ -256,8 +256,7 @@ export function App(): React.JSX.Element {
    */
   const handleGenerate = useCallback(
     (input: OrderInput) => {
-      store.saveSettings({
-        ...store.settings,
+      store.updateSettings({
         lastPreset: input.preset,
         optimizer: input.settings,
       });
@@ -345,6 +344,12 @@ export function App(): React.JSX.Element {
           preset: order.input.preset,
           settings: order.input.settings,
         });
+        // Caps the league does not state are asked on SETUP before anything is generated.
+        if (order.pendingRules.length > 0) {
+          setPage('setup');
+          toast.show('出場回数の規則が未確認です。確認してから生成してください。');
+          return;
+        }
         handleGenerate(order.input);
       };
       if (unsaved) {

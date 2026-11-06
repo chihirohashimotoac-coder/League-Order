@@ -2,6 +2,7 @@ import type {
   GameAssignment,
   GameId,
   GameSlotDef,
+  LeagueRuleOrigin,
   LeagueRules,
   LeagueStatus,
   ParticipantConfig,
@@ -9,7 +10,8 @@ import type {
   RulePlayKind,
   StructuralKind,
 } from '../types';
-import { GAME_KIND_LABELS, LEAGUE_STATUSES, RULE_PLAY_KINDS, STRUCTURAL_KINDS } from '../types';
+import { GAME_KIND_LABELS, LEAGUE_RULE_ORIGINS, LEAGUE_STATUSES, RULE_PLAY_KINDS, STRUCTURAL_KINDS } from '../types';
+import { catalogEntryById } from './ruleCatalog';
 import { structuralKindsOf } from '../games/format';
 import { pairKey } from '../games/pairKey';
 
@@ -240,7 +242,7 @@ export function leagueRuleViolations(
       violations.push({
         code: limit.axis === 'structure' ? 'LEAGUE_STRUCTURE_LIMIT' : 'LEAGUE_PLAY_KIND_LIMIT',
         playerId,
-        message: `リーグ規則: ${nameOf(playerId)} は ${limit.label} の出場上限 ${limit.cap} 回を超えて ${count} 回配置されています。`,
+        message: limitMessage(rules, limit, nameOf(playerId), count),
       });
     }
   }
@@ -276,6 +278,32 @@ export function leagueRuleViolations(
   return violations;
 }
 
+/** Where a cap comes from; a cap with no recorded origin was typed in the format editor. */
+export function ruleOriginOf(rules: LeagueRules | null | undefined, key: string): LeagueRuleOrigin {
+  return rules?.origins?.[key] ?? 'format';
+}
+
+const STRUCTURE_JA: Partial<Record<StructuralKind, string>> = {
+  SINGLES: 'シングルス',
+  DOUBLES: 'ダブルス',
+  TRIOS: 'トリオス',
+  GALLON: 'ガロン',
+  TEAM: 'チーム戦',
+};
+
+function limitMessage(rules: LeagueRules, limit: PerPlayerLimit, name: string, count: number): string {
+  const origin = ruleOriginOf(rules, limit.key);
+  const entry = catalogEntryById(rules.catalogId);
+  const label = (limit.axis === 'structure' && STRUCTURE_JA[limit.kind as StructuralKind]) || limit.label;
+  if (limit.cap === 1 && (origin === 'official' || origin === 'requirement') && entry) {
+    return `${name} は既に${label}に出場しています。${entry.title}では同じ対戦で${label}に 2 回出場できません (${count} 回配置)。`;
+  }
+  if (origin === 'answer') {
+    return `出場条件: ${name} は${label}の出場上限 ${limit.cap} 回 (あなたが指定した条件) を超えて ${count} 回配置されています。`;
+  }
+  return `リーグ規則: ${name} は ${limit.label} の出場上限 ${limit.cap} 回を超えて ${count} 回配置されています。`;
+}
+
 /** One line per written rule, for the screens (`Singles 1人 2 回まで` …). */
 export function describeLeagueRules(rules: LeagueRules | null | undefined): string[] {
   if (!hasLeagueRules(rules)) return [];
@@ -292,6 +320,8 @@ export function cloneLeagueRules(rules: LeagueRules): LeagueRules {
     ...(rules.maxPerPlayKind ? { maxPerPlayKind: { ...rules.maxPerPlayKind } } : {}),
     ...(rules.maxSameDoublesPair !== undefined ? { maxSameDoublesPair: rules.maxSameDoublesPair } : {}),
     ...(rules.maxHelpers !== undefined ? { maxHelpers: rules.maxHelpers } : {}),
+    ...(rules.origins ? { origins: { ...rules.origins } } : {}),
+    ...(rules.catalogId !== undefined ? { catalogId: rules.catalogId } : {}),
   };
 }
 
@@ -336,6 +366,14 @@ export function parseLeagueRules(value: unknown): LeagueRules | undefined {
   if (pair !== undefined) rules.maxSameDoublesPair = pair;
   const helpers = read(value.maxHelpers);
   if (helpers !== undefined) rules.maxHelpers = helpers;
+  if (isRecord(value.origins)) {
+    const origins: Partial<Record<string, LeagueRuleOrigin>> = {};
+    for (const [key, origin] of Object.entries(value.origins)) {
+      if (typeof origin === 'string' && (LEAGUE_RULE_ORIGINS as readonly string[]).includes(origin)) origins[key] = origin as LeagueRuleOrigin;
+    }
+    if (Object.keys(origins).length > 0) rules.origins = origins;
+  }
+  if (typeof value.catalogId === 'string' && value.catalogId !== '') rules.catalogId = value.catalogId;
   return hasLeagueRules(rules) ? rules : undefined;
 }
 

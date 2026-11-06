@@ -22,6 +22,7 @@ import {
 } from '../domain/n01/parse';
 import { DEFAULT_SETTINGS, type Snapshot } from './repository';
 import { parseLeagueRules } from '../domain/orders/leagueRules';
+import { parseRuleAnswers } from '../domain/orders/ruleResolution';
 
 /**
  * JSON export / import (spec §23).
@@ -308,6 +309,7 @@ export function parseBackup(raw: string): ImportResult {
         : undefined,
     ),
     n01: parseN01Settings(settingsRow.n01),
+    ...(isRecord(settingsRow.ruleAnswers) ? { ruleAnswers: parseRuleAnswers(settingsRow.ruleAnswers) } : {}),
   };
 
   if (teams.length === 0) errors.push('チームが 1 件も含まれていません。');
