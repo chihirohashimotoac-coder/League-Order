@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { answerUnrestricted, clickGenerate } from './ruleQuestions';
 
 /**
  * Final acceptance coverage: the operational guarantees a captain depends on at a venue.
@@ -29,7 +30,7 @@ async function generate(page: Page): Promise<void> {
   await goTab(page, 'ホーム');
   await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 }
 
@@ -274,6 +275,9 @@ test.describe('double actions do not write twice (追加要件 §23)', () => {
   test('double-tapping generate leaves one usable order', async ({ page }) => {
     await openFresh(page);
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    // State the sample format's appearance caps first, so the double tap lands on generate itself.
+    await page.getByTestId('rule-conditions-pending').getByRole('button', { name: '確認する' }).click();
+    await answerUnrestricted(page);
     const generateButton = page.getByRole('button', { name: 'オーダーを生成' });
     await generateButton.click({ clickCount: 2, delay: 0 });
 
@@ -453,7 +457,7 @@ test.describe('realistic league flow (追加要件 §19-§21)', () => {
     ).toContainText('Trios');
 
     // 8. Generate.
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     // The hard exclusion held: 遠藤 is not in the Trios game.
     const trios = page.locator('.order-game').filter({ hasText: 'Trios' });
@@ -531,7 +535,7 @@ test.describe('realistic league flow (追加要件 §19-§21)', () => {
     await expect(page.getByTestId('editing-banner')).toContainText('ORDER v1 を編集中');
     await expect(page.getByLabel('土井 を参加者に含める')).toBeChecked();
     await page.getByLabel('土井 を参加者に含める').uncheck();
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 
     // 23-24. Re-generating the reopened order revises it (§64): it is UPDATED against

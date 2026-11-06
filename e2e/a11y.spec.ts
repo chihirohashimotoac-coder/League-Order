@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { clickGenerate } from './ruleQuestions';
 
 /**
  * Automated accessibility audit (axe-core, WCAG 2.0 / 2.1 A + AA rules) of every main
@@ -55,7 +56,7 @@ test('every main screen passes the WCAG AA audit', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await audit(page, 'SETUP');
 
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
   for (const [index, name] of ['RESULT Balanced', 'RESULT Win First', 'RESULT Fairness First'].entries()) {
     await page.locator('.candidate-tab').nth(index).click();
