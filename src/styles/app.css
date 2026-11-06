@@ -7017,3 +7017,15 @@ ul.plain {
 .viewer-shell .app-header .btn {
   margin-left: auto;
 }
+
+.league-picker form {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.league-picker input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
