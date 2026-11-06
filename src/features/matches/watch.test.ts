@@ -253,23 +253,33 @@ describe('the board of the day', () => {
 });
 
 describe('checkout routes and the leg estimate (League Order additions to the live sheet)', () => {
-  it('routes the standard finishes and none for bogeys or above 170', async () => {
-    const { checkoutRoute } = await import('./checkout');
+  it('uses 01 Arrangement Support’s standard routes, unchanged, and none for bogeys or above 170', async () => {
+    const { checkoutRoute, standardRoute } = await import('./checkout');
+    const { STANDARD_ROUTES, STANDARD_ROUTES_TWO_DARTS } = await import('./standardRoutes.generated');
     expect(checkoutRoute(170)).toEqual(['T20', 'T20', 'BULL']);
     expect(checkoutRoute(141)).toEqual(['T20', 'T19', 'D12']);
-    expect(checkoutRoute(100)).toEqual(['T20', 'D20']);
+    expect(checkoutRoute(121)).toEqual(['T20', 'S11', 'BULL']);
     expect(checkoutRoute(60)).toEqual(['S20', 'D20']);
     expect(checkoutRoute(40)).toEqual(['D20']);
-    expect(checkoutRoute(50)).toEqual(['BULL']);
+    expect(standardRoute(41)?.source).toBe('excel-first-candidate');
+    expect(standardRoute(39)?.source).toBe('derived-rule-v1');
     for (const bogey of [169, 168, 166, 165, 163, 162, 159, 171, 1]) expect(checkoutRoute(bogey)).toBeNull();
-    // Every route really adds up and ends on a double.
-    const value = (label: string): number => (label === 'BULL' ? 50 : label === 'S25' ? 25 : Number(label.slice(1)) * { S: 1, D: 2, T: 3 }[label[0] as 'S' | 'D' | 'T']);
-    for (let left = 2; left <= 170; left += 1) {
-      const route = checkoutRoute(left);
-      if (!route) continue;
-      expect(route.reduce((sum, label) => sum + value(label), 0)).toBe(left);
+    // Re-checked here, independently of the source: every route adds up, ends on a double
+    // (or the bull), never busts, and uses at most the darts in hand.
+    const value = (id: string): number => (id === 'BULL' ? 50 : id === 'SB' ? 25 : Number(id.slice(1)) * { S: 1, D: 2, T: 3 }[id[0] as 'S' | 'D' | 'T']);
+    const check = (left: number, route: readonly string[], darts: number): void => {
+      expect(route.length).toBeLessThanOrEqual(darts);
+      let rest = left;
+      for (const id of route.slice(0, -1)) {
+        rest -= value(id);
+        expect(rest).toBeGreaterThan(1);
+      }
+      expect(rest).toBe(value(route[route.length - 1]));
       expect(route[route.length - 1] === 'BULL' || route[route.length - 1].startsWith('D')).toBe(true);
-    }
+    };
+    expect(Object.keys(STANDARD_ROUTES)).toHaveLength(162);
+    for (const [left, entry] of Object.entries(STANDARD_ROUTES)) check(Number(left), entry.route, 3);
+    for (const [left, entry] of Object.entries(STANDARD_ROUTES_TWO_DARTS)) check(Number(left), entry.route, 2);
   });
 
   it('the leg estimate favours fewer points left, a better average and throwing next', async () => {

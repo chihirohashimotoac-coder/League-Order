@@ -1,62 +1,27 @@
+import type { StandardRoute } from './standardRoutes.generated';
+import { STANDARD_ROUTES, STANDARD_ROUTES_TWO_DARTS } from './standardRoutes.generated';
+
 /**
  * Checkout routes (アガリ候補) and a simple leg / game estimate for spectators.
  *
- * Routes: the fewest darts that finish on a double (or the bull), preferring the trebles and
- * doubles players usually aim at. Bogey numbers (169, 168, 166, 165, 163, 162, 159) and
- * anything above 170 have no 3-dart route. A reference, not advice to the player.
+ * Routes are the standard routes (基準ルート) of 01 Arrangement Support, imported unchanged
+ * (`standardRoutes.generated.ts`, see `scripts/import-standard-routes.ts`): the Excel first
+ * candidates for 41–170, the approved rules for 2–40 and for two darts left at 51–70. Bogey
+ * numbers (169, 168, 166, 165, 163, 162, 159) and anything above 170 have none. Shown as a
+ * reference for spectators, never as advice to the player.
  */
 
-interface Dart {
-  label: string;
-  value: number;
-  double: boolean;
-  /** Lower is preferred. */
-  rank: number;
+/** The standard route for `left` with `dartsInHand` darts (3 at the start of a visit), or `null`. */
+export function standardRoute(left: number, dartsInHand = 3): StandardRoute | null {
+  if (dartsInHand === 2 && STANDARD_ROUTES_TWO_DARTS[left]) return STANDARD_ROUTES_TWO_DARTS[left];
+  const route = STANDARD_ROUTES[left] ?? null;
+  return route && route.route.length <= dartsInHand ? route : null;
 }
 
-const DOUBLE_ORDER = [20, 16, 18, 10, 12, 8, 4, 14, 6, 2, 19, 17, 15, 13, 11, 9, 7, 5, 3, 1];
-
-/** Setup darts: T20, T19, S20, T18, T17, S19 first; the finishing double weighs most. */
-const SETUP_RANK: Record<string, number> = { T20: 0, T19: 1, S20: 2, T18: 3, T17: 4, S19: 5, T16: 6, S18: 7, S17: 8, S16: 9 };
-
-function darts(): Dart[] {
-  const all: Dart[] = [];
-  for (let n = 20; n >= 1; n -= 1) all.push({ label: `T${n}`, value: n * 3, double: false, rank: SETUP_RANK[`T${n}`] ?? 10 + (20 - n) });
-  for (let n = 20; n >= 1; n -= 1) all.push({ label: `S${n}`, value: n, double: false, rank: SETUP_RANK[`S${n}`] ?? 30 + (20 - n) });
-  all.push({ label: 'S25', value: 25, double: false, rank: 60 });
-  for (const n of DOUBLE_ORDER) all.push({ label: `D${n}`, value: n * 2, double: true, rank: 10 + DOUBLE_ORDER.indexOf(n) * 3 });
-  all.push({ label: 'BULL', value: 50, double: true, rank: 45 });
-  return all;
-}
-
-let table: Map<number, string[]> | null = null;
-
-function build(): Map<number, string[]> {
-  const all = darts();
-  const finishers = all.filter((dart) => dart.double);
-  const best = new Map<number, { route: string[]; cost: number }>();
-  const offer = (total: number, route: Dart[]): void => {
-    if (total < 2 || total > 170) return;
-    // Setup darts count double (aiming), a double used to set up is a last resort.
-    const setup = route.slice(0, -1).reduce((sum, dart) => sum + (dart.double ? dart.rank + 40 : dart.rank) * 2, 0);
-    const cost = route.length * 1000 + setup + route[route.length - 1].rank;
-    const current = best.get(total);
-    if (!current || cost < current.cost) best.set(total, { route: route.map((dart) => dart.label), cost });
-  };
-  for (const end of finishers) {
-    offer(end.value, [end]);
-    for (const a of all) {
-      offer(a.value + end.value, [a, end]);
-      for (const b of all) offer(a.value + b.value + end.value, [a, b, end]);
-    }
-  }
-  return new Map([...best.entries()].map(([total, entry]) => [total, entry.route]));
-}
-
-/** The route for `left` points, or `null` when none finishes it in three darts. */
-export function checkoutRoute(left: number): string[] | null {
-  table ??= build();
-  return table.get(left) ?? null;
+/** Display labels of the standard route (`SB` is the single bull), or `null` when none. */
+export function checkoutRoute(left: number, dartsInHand = 3): string[] | null {
+  const route = standardRoute(left, dartsInHand);
+  return route ? route.route.map((id) => (id === 'SB' ? 'S-BULL' : id)) : null;
 }
 
 // ---------------------------------------------------------------------------

@@ -147,7 +147,8 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
         <h3 className="section-mini">League Order の分析</h3>
         {route && thrower !== null ? (
           <p className="ns-route" data-testid="checkout-route">
-            アガリ候補 ({names[thrower]} 残り {left![thrower]}): <strong>{route.join(' ')}</strong>
+            基準ルート ({names[thrower]} 残り {left![thrower]}): <strong>{route.join(' ')}</strong>
+            <span className="muted small-text"> ・ 01 Arrangement Support の基準ルート</span>
           </p>
         ) : !cricket && left && thrower !== null && left[thrower] <= 170 && left[thrower] > 1 ? (
           <p className="ns-route muted">残り {left[thrower]} は 3 本で上がれない数字です (セットアップ)。</p>
