@@ -20,3 +20,4 @@ blob-report/
 backtest-report/
 smoke-results/
 dist-artifact
+dist-live
