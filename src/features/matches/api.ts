@@ -6,8 +6,14 @@ import { createAnalyticsFetchTransport } from '../analytics/api/readApi';
 import type { AnalyticsOperation, AnalyticsTransport } from '../analytics/api/readApi';
 import { parseStandings } from '../analytics/api/parse';
 import type { OfficialStandingGroup } from '../analytics/types';
-import type { Fixture, GameDetail, GameRow, LiveResponse, SeasonDocument } from './parse';
-import { MatchSchemaError, parseFixtures, parseGameDetail, parseGameRows, parseLive, parseSeasonDocument } from './parse';
+import type { CardOrder, Fixture, GameDetail, GameRow, LiveResponse, SeasonDocument, ThrowsResponse } from './parse';
+import { MatchSchemaError, parseFixtures, parseGameDetail, parseGameRows, parseLive, parseOrders, parseSeasonDocument, parseThrows } from './parse';
+import { parsePlayerStats } from '../analytics/api/parse';
+import { parseRoster } from '../../integrations/n01/validation';
+import type { N01RosterPlayer } from '../../integrations/n01/types';
+import type { PlayerStatsRow } from '../analytics/types';
+import type { RequestGovernor } from './governor';
+import { sharedGovernor } from './governor';
 
 /**
  * Read adapter of MATCH RESULTS and LIVE MATCH.
@@ -39,7 +45,12 @@ export interface MatchesApiOptions {
   baseUrl?: string;
   maxRequests?: number;
   timeoutMs?: number;
+  /** The request budget shared by every match screen (defaults to the app's one). */
+  governor?: RequestGovernor;
 }
+
+/** Fields of a game row the match screens read (`fields` selects exactly these). */
+const GAME_FIELDS = 'mid,tdid,tmid,schid,scid,match_type,title,startTime,endMatch,endSchedule,updateTime,statsData';
 
 export class MatchesApi {
   private readonly memo = new Map<string, Promise<unknown>>();
@@ -47,6 +58,7 @@ export class MatchesApi {
   private readonly transport: AnalyticsTransport;
   private readonly maxRequests: number;
   private readonly timeoutMs: number;
+  private readonly governor: RequestGovernor;
   requestCount = 0;
 
   constructor(options: MatchesApiOptions = {}) {
@@ -55,6 +67,7 @@ export class MatchesApi {
     this.transport = options.transport ?? createAnalyticsFetchTransport({ baseUrl });
     this.maxRequests = options.maxRequests ?? MATCHES_DEFAULT_MAX_REQUESTS;
     this.timeoutMs = options.timeoutMs ?? MATCHES_TIMEOUT_MS;
+    this.governor = options.governor ?? sharedGovernor;
   }
 
   private key(operation: AnalyticsOperation, params: Record<string, string>): string {
@@ -65,6 +78,7 @@ export class MatchesApi {
     if (signal?.aborted) throw new N01Error('aborted', N01_ERROR_MESSAGES.aborted, operation);
     if (this.requestCount >= this.maxRequests) throw new MatchBudgetError(this.maxRequests);
     this.requestCount += 1;
+    await this.governor.acquire(signal);
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -76,6 +90,8 @@ export class MatchesApi {
     try {
       return await this.transport.request(operation, params, controller.signal);
     } catch (error) {
+      // n01 says "too many requests": every match screen waits, not only this one.
+      if (error instanceof N01Error && error.kind === 'http' && error.status === 429) this.governor.pause(60);
       if (error instanceof N01Error) throw error;
       if (timedOut) throw new N01Error('timeout', N01_ERROR_MESSAGES.timeout, operation);
       if (signal?.aborted) throw new N01Error('aborted', N01_ERROR_MESSAGES.aborted, operation);
@@ -149,7 +165,7 @@ export class MatchesApi {
         sort: 'startTime',
         order: 'asc',
         count: String(MATCH_ROWS_PAGE),
-        fields: 'mid,tdid,tmid,schid,scid,match_type,title,startTime,endMatch,endSchedule,updateTime,statsData',
+        fields: GAME_FIELDS,
       };
       if (options.live) params.live = '1';
       if (page > 0) params.skip = String(page * MATCH_ROWS_PAGE);
@@ -160,6 +176,47 @@ export class MatchesApi {
       if (result.rows < MATCH_ROWS_PAGE) return { games, unreadable, truncated: false };
     }
     return { games, unreadable, truncated: true };
+  }
+
+  /**
+   * The league games started since `fromEpochSec` (one league night), finished and in progress:
+   * the archive holds games in progress too, with the same `updateTime` as the live list
+   * (checked 2026-11-06), so one request draws the whole board. Never memoised.
+   */
+  async todayGames(tournamentId: string, fromEpochSec: number, signal?: AbortSignal): Promise<GameRow[]> {
+    const params: Record<string, string> = {
+      tdid: tournamentId,
+      tmid__regex: '_lg_',
+      startTime__gte: String(Math.floor(fromEpochSec)),
+      sort: 'startTime',
+      order: 'asc',
+      count: String(MATCH_ROWS_PAGE),
+      fields: GAME_FIELDS,
+    };
+    return (await this.read('match/list', this.fresh('match/list', params, signal), parseGameRows)).games;
+  }
+
+  /** Every leg of a game, throw by throw; with `since`, only the legs changed after it. Finished games are memoised. */
+  throws(mid: string, since: number | null, options: { finished?: boolean; signal?: AbortSignal } = {}): Promise<ThrowsResponse> {
+    const params: Record<string, string> = { mid };
+    if (since !== null) params.since = String(since);
+    const request = options.finished && since === null ? this.memoised('match/throws', params) : this.fresh('match/throws', params, options.signal);
+    return this.read('match/throws', request, parseThrows);
+  }
+
+  /** The orders of one card (who plays which game), as submitted so far. */
+  cardOrders(tournamentId: string, tmid: string): Promise<CardOrder[]> {
+    return this.read('team/order/list', this.fresh('team/order/list', { tdid: tournamentId, tmid }), parseOrders);
+  }
+
+  /** n01's own season figures per player (`player_stats_list`). */
+  playerStats(tournamentId: string): Promise<PlayerStatsRow[]> {
+    return this.read('tournament/stats', this.memoised('tournament/stats', { tdid: tournamentId, kind: 'player_stats_list' }), parsePlayerStats);
+  }
+
+  /** Every member of every team of a season (names for the stats rows). */
+  roster(tournamentId: string): Promise<N01RosterPlayer[]> {
+    return this.read('team/player/list', this.memoised('team/player/list', { tdid: tournamentId }), (raw) => parseRoster(raw, ''));
   }
 
   gameDetail(mid: string): Promise<GameDetail> {

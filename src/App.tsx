@@ -113,6 +113,8 @@ export function App(): React.JSX.Element {
   }, []);
 
   const hasTeams = store.teams.length > 0;
+  // Viewer without a team who chose 「チームを登録」.
+  const [registering, setRegistering] = useState(false);
 
   // The working order belongs to the team it was made for. Switching (or deleting) the
   // active team detaches it: otherwise SETUP re-syncs to the new team's roster while
@@ -558,9 +560,35 @@ export function App(): React.JSX.Element {
     );
   }
 
+  // No team, but a league chosen to watch: the match screens, with the way to register a team.
+  if (!hasTeams && store.settings.watch && !registering) {
+    return (
+      <div className="app viewer-shell">
+        <header className="app-header">
+          <span className="brand-mark" aria-hidden="true">
+            <Icon name="target" size={20} />
+          </span>
+          <span className="header-titles">
+            <span className="kicker">LEAGUE ORDER</span>
+            <h1>{store.settings.watch.leagueTitle}</h1>
+          </span>
+          <button type="button" className="btn small" onClick={() => setRegistering(true)}>
+            チームを登録
+          </button>
+        </header>
+        <main className="app-main wide">
+          <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
+            <MatchesEntry page={page === 'matches' ? 'matches' : 'live'} onNavigate={setPage} />
+          </Suspense>
+        </main>
+      </div>
+    );
+  }
+
   if (!hasTeams) {
     return (
       <WelcomePage
+        onWatchBack={store.settings.watch ? () => setRegistering(false) : undefined}
         onCreated={(next) => {
           if (next.kind === 'editFormat') {
             setFormatToEdit(next.formatId);

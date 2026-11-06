@@ -992,4 +992,12 @@ export interface AppSettings {
   n01?: N01Settings;
   /** Answers to the appearance-count questions, by scope. Absent = none given yet. */
   ruleAnswers?: Record<string, RuleAnswerSet>;
+  /** The league last watched (リーグを見る), so the match screens open on it. */
+  watch?: WatchSettings;
+}
+
+export interface WatchSettings {
+  /** n01 league id (`lgid`). */
+  leagueId: string;
+  leagueTitle: string;
 }

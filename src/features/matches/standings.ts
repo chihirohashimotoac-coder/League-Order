@@ -92,3 +92,28 @@ export function projectStandings(rule: PointRule, group: OfficialStandingGroup, 
       return { ...row, projectedPosition: better + 1, tied };
     });
 }
+
+/** The division if every listed card ended as given (card side order). Only after `checkReproduction` passed. */
+export function projectMany(rule: PointRule, group: OfficialStandingGroup, results: readonly { card: MatchCard; score: [number, number] }[]): ProjectedRow[] {
+  const add = new Map<string, number>();
+  for (const { card, score } of results) {
+    for (const side of [0, 1] as const) {
+      const id = card.teams[side].id;
+      add.set(id, (add.get(id) ?? 0) + (cardPoints(rule, score[side], score[1 - side]) ?? 0));
+    }
+  }
+  const rows = group.rows.map((row) => ({
+    teamId: row.teamId,
+    name: row.name,
+    officialPoints: row.points,
+    projectedPoints: row.points + (add.get(row.teamId) ?? 0),
+    officialRank: row.rank,
+  }));
+  return rows
+    .sort((a, b) => b.projectedPoints - a.projectedPoints)
+    .map((row, _, all) => ({
+      ...row,
+      projectedPosition: all.filter((other) => other.projectedPoints > row.projectedPoints).length + 1,
+      tied: all.filter((other) => other.projectedPoints === row.projectedPoints).length > 1,
+    }));
+}

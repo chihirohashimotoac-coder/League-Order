@@ -1,3 +1,4 @@
+import { LeaguePicker } from '../features/matches/ui/LeaguePicker';
 import { useState } from 'react';
 import type { DartsDiscipline, Player, Team } from '../domain/types';
 import { DISCIPLINE_STRENGTH_WEIGHTS, describeStrengthWeights, parsePprInput } from '../domain/players/strength';
@@ -23,7 +24,7 @@ export type FirstRunNext = { kind: 'home' } | { kind: 'editFormat'; formatId: st
  * What the captain types into the manual setup lives here, not in the setup steps, so
  * leaving the setup and coming back (or trying n01 first) loses nothing.
  */
-export function WelcomePage({ onCreated }: { onCreated?: (next: FirstRunNext) => void }): React.JSX.Element {
+export function WelcomePage({ onCreated, onWatchBack }: { onCreated?: (next: FirstRunNext) => void; onWatchBack?: () => void }): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
   const [mode, setMode] = useState<'welcome' | 'setup'>('welcome');
@@ -57,9 +58,29 @@ export function WelcomePage({ onCreated }: { onCreated?: (next: FirstRunNext) =>
           へようこそ
         </h1>
         <p className="welcome-lead">試合のオーダーを、速く・公平に・強く。メンバーと条件を入れるだけで候補を作ります。</p>
+        {onWatchBack ? (
+          <button type="button" className="btn small" onClick={onWatchBack}>
+            観戦に戻る
+          </button>
+        ) : null}
       </div>
 
       <div className="welcome-actions">
+        <section className="start-option watch-option" aria-labelledby="start-watch">
+          <h2 id="start-watch" className="start-title">
+            リーグを見る
+            <span className="start-tag">チーム不要</span>
+          </h2>
+          <p className="start-note">
+            n01 League の試合をライブで観戦し、日程・結果・順位・選手スタッツを見られます。チームに所属していなくても使えます。
+          </p>
+          <LeaguePicker onPick={(league) => store.updateSettings({ watch: league })} />
+        </section>
+
+        <h2 className="welcome-divider">チームを登録</h2>
+        <p className="start-note">
+          自分の所属チームでも、応援しているチームでも登録できます。複数のチームを登録でき、登録したチームの試合・ライブにはホームからすぐ移動できます (オーダー作成も使えます)。
+        </p>
         <section className="start-option" aria-labelledby="start-manual">
           <h2 id="start-manual" className="start-title">
             手入力で作成

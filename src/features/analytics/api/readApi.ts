@@ -31,6 +31,7 @@ export const ANALYTICS_OPERATIONS = [
   'league/schedule/get',
   'match/live',
   'match/throws',
+  'team/order/list',
 ] as const;
 
 export type AnalyticsOperation = (typeof ANALYTICS_OPERATIONS)[number];

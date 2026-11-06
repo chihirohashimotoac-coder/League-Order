@@ -576,3 +576,84 @@ export function parseLive(raw: unknown): LiveResponse {
     leg: parseLiveLeg(body.leg, cricket),
   };
 }
+
+// ---------------------------------------------------------------------------
+// match/throws — every leg of a game, throw by throw (since = only legs changed after it)
+// ---------------------------------------------------------------------------
+
+export interface ThrowLeg extends LiveLeg {
+  /** Decided by the bull: its darts and points are not counted in averages. */
+  bull: boolean;
+  /** Darts thrown per side in the leg, as n01 counts them. */
+  dartsTotal: [number, number] | null;
+}
+
+export interface ThrowsResponse {
+  changed: boolean;
+  mid: string | null;
+  updateTime: number | null;
+  matchType: '01' | 'cricket';
+  gameEnded: boolean;
+  legs: ThrowLeg[];
+}
+
+export function parseThrowLeg(value: unknown, cricket: boolean): ThrowLeg | null {
+  const leg = parseLiveLeg(value, cricket);
+  if (!leg || !isRec(value)) return null;
+  return { ...leg, bull: num(value.middle_for_diddle) === 1, dartsTotal: pair(value.darts) };
+}
+
+export function parseThrows(raw: unknown): ThrowsResponse {
+  const body = ok('match/throws', raw);
+  const cricket = str(body.match_type)?.toLowerCase() === 'cricket';
+  if (num(body.changed) === 0) {
+    return { changed: false, mid: str(body.mid), updateTime: num(body.updateTime), matchType: cricket ? 'cricket' : '01', gameEnded: num(body.end_match) === 1, legs: [] };
+  }
+  const legs = Array.isArray(body.leg_data) ? body.leg_data.map((leg) => parseThrowLeg(leg, cricket)).filter((leg): leg is ThrowLeg => leg !== null) : [];
+  return { changed: true, mid: str(body.mid), updateTime: num(body.updateTime), matchType: cricket ? 'cricket' : '01', gameEnded: num(body.end_match) === 1, legs };
+}
+
+/** Merges a `since` reply into the legs held: a returned leg replaces the one held, whole. */
+export function mergeLegs(held: readonly ThrowLeg[], fresh: readonly ThrowLeg[]): ThrowLeg[] {
+  const byIndex = new Map(held.map((leg) => [leg.index, leg]));
+  for (const leg of fresh) byIndex.set(leg.index, leg);
+  return [...byIndex.values()].sort((a, b) => a.index - b.index);
+}
+
+// ---------------------------------------------------------------------------
+// team/order/list — who plays which game of a card
+// ---------------------------------------------------------------------------
+
+export interface CardOrder {
+  teamId: string;
+  schid: string;
+  fixed: boolean;
+  members: string[];
+}
+
+export function parseOrders(raw: unknown): CardOrder[] {
+  const body = ok('team/order/list', raw);
+  const list = Array.isArray(body.list) ? body.list : Array.isArray(body.order_list) ? body.order_list : [];
+  const orders: CardOrder[] = [];
+  for (const row of list) {
+    if (!isRec(row)) continue;
+    const teamId = str(row.tpid);
+    const schid = str(row.schid);
+    if (!teamId || !schid) continue;
+    const members = Array.isArray(row.order)
+      ? row.order.map((entry) => (isRec(entry) ? str(entry.oname) ?? '' : '')).filter((name) => name !== '')
+      : [];
+    orders.push({ teamId, schid, fixed: num(row.fix) === 1, members });
+  }
+  return orders;
+}
+
+/** A fixture title's date (`第1戦 10月1日 木曜日`, `2026-09-10`), as `M/D`, or `null`. */
+export function fixtureDate(title: string): { month: number; day: number } | null {
+  const iso = /(\d{4})-(\d{1,2})-(\d{1,2})/u.exec(title);
+  if (iso) return { month: Number(iso[2]), day: Number(iso[3]) };
+  const ja = /(\d{1,2})月(\d{1,2})日/u.exec(title);
+  if (ja) return { month: Number(ja[1]), day: Number(ja[2]) };
+  const slash = /(?:^|\s)(\d{1,2})\/(\d{1,2})(?:\s|$)/u.exec(title);
+  return slash ? { month: Number(slash[1]), day: Number(slash[2]) } : null;
+}
