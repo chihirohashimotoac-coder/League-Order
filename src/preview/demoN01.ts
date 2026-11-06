@@ -377,9 +377,25 @@ function fixtureThrows(mid: string): unknown {
   return { result: 0, changed: 1, mid, match_type: detail.match.match_type, end_match: 1, updateTime: START, leg_data };
 }
 
+function todayRows(): Record<string, unknown>[] {
+  return LIVE ? [...DONE_WINNERS.map((_, slot) => doneRow(slot)), liveRow(Date.now())!] : [];
+}
+
 function respond(operation: string, params: Record<string, string>): unknown | undefined {
+  // Everything in progress on n01 / one game by id: the demo card's games.
+  if (operation === 'match/list' && !params.tdid && params.live === '1' && !params.mid) return { result: 0, list: todayRows().filter((row) => row.endMatch === 0) };
+  if (operation === 'match/list' && params.mid && !params.tdid) {
+    const row = todayRows().find((entry) => entry.mid === params.mid);
+    return { result: 0, list: row ? [row] : [] };
+  }
+  if (operation === 'tournament/list') return { result: 0, list: [] };
+  if (operation === 'match/list' && params.tdid && !params.tmid__regex) {
+    const skip = Number(params.skip ?? 0);
+    const rows = params.live === '1' ? todayRows().filter((row) => row.endMatch === 0 && row.tdid === params.tdid) : [...seasonRows(params.tdid), ...todayRows().filter((row) => row.tdid === params.tdid)];
+    return { result: 0, list: rows.slice(skip, skip + Number(params.count ?? 100)) };
+  }
   if (operation === 'match/list' && params.tmid__regex === '_lg_' && params.tdid) {
-    const today = LIVE && LIVE.tdid === params.tdid ? [...DONE_WINNERS.map((_, slot) => doneRow(slot)), liveRow(Date.now())!] : [];
+    const today = LIVE && LIVE.tdid === params.tdid ? todayRows() : [];
     if (params.startTime__gte) return { result: 0, list: today };
     if (params.live === '1') return { result: 0, list: today.filter((row) => row.endMatch === 0) };
     const skip = Number(params.skip ?? 0);

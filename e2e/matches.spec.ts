@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01 } from './n01Server';
 import { N01_API_BASE_URL } from '../src/integrations/n01/endpoints';
-import { TDID, c001Rows, fixtures, gameRow, list, liveBody, side, tournamentDoc } from '../src/features/matches/testFixtures';
+import { TDID, c001Rows as rawC001Rows, fixtures, gameRow, list, liveBody, side, tournamentDoc } from '../src/features/matches/testFixtures';
 
 /**
  * The 2026-11 update in a real browser: the appearance-count questions, ATDO's caps applied
@@ -73,143 +73,155 @@ test.describe('appearance-count questions (出場回数の確認)', () => {
   });
 });
 
-/** Canned n01 for MATCH RESULTS / LIVE MATCH under ATDO's league id. */
-async function serveMatches(page: Page, live?: () => unknown): Promise<string[]> {
+/** n01 writes one tmid per card. */
+const c001Rows = (): unknown[] => rawC001Rows().map((row) => ({ ...(row as object), tmid: `${TDID}_lg_0_c001_AAAA_BBBB` }));
+const officialC001 = { '0_c001': { AAAA: { BBBB: { r: 3, a: 55.5 } }, BBBB: { AAAA: { r: 2, a: 50.1 } } } };
+/** Today: c003 under way — the team game won by Arrows, Doubles 1 in progress. */
+const today = (): unknown[] => [
+  gameRow('c003', 'AAAA', 'CCCC', 'tm01', [side('AAAA', [['a1', 'A1'], ['a2', 'A2'], ['a3', 'A3'], ['a4', 'A4']], 1, 1001, 54), side('CCCC', [['c1', 'C1'], ['c2', 'C2'], ['c3', 'C3'], ['c4', 'C4']], 0, 880, 54)], { start: 1_800_000_000, mid: 'c003_tm01' }),
+  gameRow('c003', 'AAAA', 'CCCC', 'db01', [side('AAAA', [['a1', 'A1'], ['a2', 'A2']], 1, 400, 30), side('CCCC', [['c1', 'C1'], ['c2', 'C2']], 0, 300, 30)], { start: 1_800_000_900, finished: false, mid: 'c003_db01' }),
+];
+const throwsBody = (mid: string): unknown => ({
+  result: 0,
+  changed: 1,
+  mid,
+  match_type: '01',
+  end_match: 1,
+  updateTime: 1_800_000_500_000,
+  leg_data: [
+    { leg: 0, first: 0, end: 1, winner: 0, darts: [15, 15], throws: [{ p: 0, r: 1, score: 180, left: 321 }, { p: 1, r: 1, score: 60, left: 441 }, { p: 0, r: 2, score: 140, left: 181 }, { p: 1, r: 2, score: 100, left: 341 }, { p: 0, r: 3, score: 100, left: 81 }, { p: 1, r: 3, score: 45, left: 296 }, { p: 0, r: 4, score: 41, left: 40 }, { p: 1, r: 4, score: 85, left: 211 }, { p: 0, r: 5, score: 40, left: 0, darts: 3, finish: 1 }] },
+  ],
+});
+
+async function serveN01Canned(page: Page, live?: () => unknown): Promise<string[]> {
   const log: string[] = [];
   await page.route(`${N01_API_BASE_URL}/**`, async (route) => {
     const url = new URL(route.request().url());
     const operation = url.pathname.replace(/^.*\/api\/v1\//u, '');
-    log.push(`${operation}?${url.searchParams.toString()}`);
-    const live1 = url.searchParams.get('live') === '1';
-    const officialC001 = { '0_c001': { AAAA: { BBBB: { r: 3, a: 55.5 } }, BBBB: { AAAA: { r: 2, a: 50.1 } } } };
-    const body =
-      operation === 'league/tournament/list'
-        ? { result: 0, league: { lgid: 'lg_l3hI_3397', title: 'ATDO' }, list: [{ tdid: TDID, title: 'Test League 1st', status: 30, t_date: 1_800_000_000, createTime: 1_790_000_000 }] }
-        : operation === 'tournament/get'
-          ? tournamentDoc(officialC001)
-          : operation === 'league/schedule/get'
-            ? fixtures()
-            : operation === 'tournament/standings'
-              ? {
-                  result: 0,
-                  tdid: TDID,
-                  groups: [
-                    {
-                      kind: 'lg',
-                      index: 0,
-                      title: 'A Division',
-                      players: [
-                        { tpid: 'AAAA', name: 'Arrows', rank: 1, p: 1, w: 1, d: 0, l: 0, pts: 5 },
-                        { tpid: 'BBBB', name: 'Bulls', rank: 2, p: 1, w: 0, d: 0, l: 1, pts: 2 },
-                        { tpid: 'CCCC', name: 'Corks', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 },
-                        { tpid: 'DDDD', name: 'Doubles', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 },
-                      ],
-                    },
-                  ],
-                }
-              : operation === 'match/list'
-                ? list(
-                    live1
-                      ? [gameRow('c003', 'AAAA', 'CCCC', 'sg01', [side('AAAA', [['a1', 'A1']], 1, 300, 15), side('CCCC', [['c1', 'C1']], 0, 250, 15)], { finished: false })]
-                      : [...c001Rows(), gameRow('c003', 'AAAA', 'CCCC', 'tm01', [side('AAAA', [['a1', 'A1']], 1, 1001, 60), side('CCCC', [['c1', 'C1']], 0, 900, 60)])],
-                  )
-                : operation === 'match/get'
-                  ? {
-                      result: 0,
-                      match: {
-                        mid: url.searchParams.get('mid'),
-                        match_type: '01',
-                        startScore: 501,
-                        endMatch: 1,
-                        legData: [{ first: 0, endFlag: 1, winner: 0, playerData: [[{ score: 0, left: 501 }, { score: 140, left: 361 }, { score: 100, left: 261 }, { score: 100, left: 161 }, { score: -3, left: 0 }], [{ score: 0, left: 501 }, { score: 60, left: 441 }, { score: 60, left: 381 }, { score: 60, left: 321 }]] }],
-                      },
-                    }
-                  : operation === 'match/live' && live
-                    ? live()
-                    : null;
+    const q = url.searchParams;
+    log.push(`${operation}?${q.toString()}`);
+    let body: unknown = null;
+    if (operation === 'league/tournament/list') body = { result: 0, league: { lgid: 'lg_l3hI_3397', title: 'ATDO' }, list: [{ tdid: TDID, title: 'Test League 1st', status: 30, t_date: 1_800_000_000, createTime: 1_790_000_000 }] };
+    else if (operation === 'tournament/get' && q.get('tdid') === TDID) body = tournamentDoc(officialC001);
+    else if (operation === 'tournament/get' && q.get('tdid') === 't_Tour_0001')
+      body = { result: 0, url: 'https://n01darts.com/n01/tournament/comp.php?id=t_Tour_0001', tournament: { tdid: 't_Tour_0001', title: 'Autumn Open', status: 30, entry_list: [{ tpid: 'p1', name: 'Ann' }, { tpid: 'p2', name: 'Bo' }, { tpid: 'p3', name: 'Cy' }], rr_title: ['Group A'] } };
+    else if (operation === 'league/schedule/get') body = fixtures();
+    else if (operation === 'tournament/standings' && q.get('tdid') === TDID)
+      body = { result: 0, tdid: TDID, groups: [{ kind: 'lg', index: 0, title: 'A Division', players: [{ tpid: 'AAAA', name: 'Arrows', rank: 1, p: 1, w: 1, d: 0, l: 0, pts: 5 }, { tpid: 'BBBB', name: 'Bulls', rank: 2, p: 1, w: 0, d: 0, l: 1, pts: 2 }, { tpid: 'CCCC', name: 'Corks', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 }, { tpid: 'DDDD', name: 'Doubles', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 }] }] };
+    else if (operation === 'tournament/standings') body = { result: 0, groups: [{ kind: 'rr', index: 0, title: 'Group A', players: [{ tpid: 'p1', name: 'Ann', rank: 1, p: 1, w: 1, d: 0, l: 0, diff: 2 }] }] };
+    else if (operation === 'match/list' && q.get('tdid') === 't_Tour_0001')
+      body = list([
+        { mid: 'tour_1', tdid: 't_Tour_0001', tmid: 't_Tour_0001_rr_0_p1_p2', schid: '', match_type: '01', title: 'Autumn Open Group A', startTime: 1_800_000_000, endMatch: 1, statsData: [{ name: 'Ann', tpid: 'p1', winLegs: 3, allScore: 1503, allDarts: 60 }, { name: 'Bo', tpid: 'p2', winLegs: 1, allScore: 1200, allDarts: 60 }] },
+        { mid: 'tour_2', tdid: 't_Tour_0001', tmid: 't_Tour_0001_rr_0_p2_p3', schid: '', match_type: '01', title: 'Autumn Open Group A', startTime: 1_800_000_500, endMatch: 0, statsData: [{ name: 'Bo', tpid: 'p2', winLegs: 1, allScore: 300, allDarts: 15 }, { name: 'Cy', tpid: 'p3', winLegs: 0, allScore: 250, allDarts: 15 }] },
+      ]);
+    else if (operation === 'match/list' && q.get('startTime__gte')) body = list(today());
+    else if (operation === 'match/list' && q.get('mid')) body = list([{ mid: q.get('mid'), tdid: 't_Tour_0001', tmid: 't_Tour_0001_rr_0_p1_p2', match_type: '01', title: 'Autumn Open Group A', endMatch: 1, statsData: [{ name: 'Ann', tpid: 'p1', winLegs: 1 }, { name: 'Bo', tpid: 'p2', winLegs: 0 }] }]);
+    else if (operation === 'match/list') body = list([...c001Rows(), ...today()]);
+    else if (operation === 'match/throws') body = throwsBody(q.get('mid') ?? '');
+    else if (operation === 'match/live' && live) body = live();
+    else if (operation === 'team/order/list')
+      body = { result: 0, list: [{ tpid: 'AAAA', schid: 'sg01', fix: 1, order: [{ oid: 'a1', oname: 'A1' }] }, { tpid: 'CCCC', schid: 'sg01', fix: 1, order: [{ oid: 'c1', oname: 'C1' }] }] };
+    else if (operation === 'tournament/stats') body = { result: 0, stats: { a1: { tpid: 'AAAA', score: 3006, darts: 120, leg: 10, winLeg: 7, ton80: 2, highOut: 120, best: 15 }, b1: { tpid: 'BBBB', score: 2400, darts: 120, leg: 10, winLeg: 3, ton80: 0 } } };
+    else if (operation === 'team/player/list') body = { result: 0, list: [{ tpid: 'AAAA', oid: 'a1', oname: 'A1' }, { tpid: 'BBBB', oid: 'b1', oname: 'B1' }] };
     if (body === null) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: -1, error: 'not found' }) });
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body), headers: { 'access-control-allow-origin': '*' } });
   });
   return log;
 }
 
-test.describe('MATCH RESULTS', () => {
-  test('cards, a card in detail with its legs, official standings and player form', async ({ page }) => {
-    const log = await serveMatches(page);
-    await openSample(page);
-    await page.locator('.list-row').filter({ hasText: '試合結果' }).click();
-    await page.getByRole('button', { name: 'ATDO' }).click();
-    const cards = page.getByTestId('match-card');
-    await expect(cards).toHaveCount(4);
-    // Played (newest first), then not yet played. c003 has a finished game and no card result.
-    await expect(cards.nth(0)).toContainText('Arrows');
-    await expect(cards.nth(0)).toContainText('3 - 2');
-    await expect(cards.nth(0)).toContainText('結果確定 (n01)');
-    await expect(cards.nth(1)).toContainText('結果未入力');
-    await expect(cards.nth(1)).toContainText('ゲーム数は League Order の集計');
-    await expect(cards.nth(2)).toContainText('未開催');
-    await expect(cards.nth(3)).toContainText('未開催');
-    await cards.nth(0).click();
-    const detail = page.getByTestId('match-detail');
-    await expect(detail).toContainText('公式結果 3 - 2');
-    await expect(detail).toContainText('シングルス1');
-    await expect(detail).toContainText('MPR');
-    await detail.getByRole('button', { name: 'Leg' }).first().click();
-    await expect(detail.locator('.leg-list')).toContainText('Leg 1');
-    // Own team unknown for the sample team: no analysis is attributed to anyone.
-    await expect(detail.getByTestId('intel-prediction')).toHaveCount(0);
-    await noSidewaysScroll(page);
+async function watchWithoutTeam(page: Page): Promise<void> {
+  await page.goto('/');
+  // 「リーグ・大会を見る」: no team needed.
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  await expect(page.getByTestId('watch-page')).toBeVisible();
+}
 
-    await page.getByRole('tab', { name: '順位' }).click();
-    await expect(page.locator('.standings')).toContainText('Arrows');
-    await expect(page.getByText('勝ち点の計算規則を確認済み')).toBeVisible();
-    await page.getByRole('tab', { name: '選手' }).click();
-    await expect(page.getByTestId('player-forms')).toContainText('A1');
-    await noSidewaysScroll(page);
-    // Read operations only, and each season part read once.
-    expect(log.every((entry) => /^(league\/tournament\/list|tournament\/(get|standings)|league\/schedule\/get|match\/(list|get))\?/u.test(entry))).toBe(true);
-    expect(log.filter((entry) => entry.startsWith('tournament/get')).length).toBe(1);
-  });
-
-  test('a failed read says so and offers a retry, never an empty season', async ({ page }) => {
-    await page.route(`${N01_API_BASE_URL}/**`, (route) => route.abort('internetdisconnected'));
-    await openSample(page);
-    await page.locator('.list-row').filter({ hasText: '試合結果' }).click();
-    await page.getByRole('button', { name: 'ATDO' }).click();
-    await expect(page.getByRole('alert')).toContainText('取得エラー');
-    await expect(page.getByRole('button', { name: '再試行' }).first()).toBeVisible();
-    await expect(page.getByTestId('match-card')).toHaveCount(0);
-  });
-});
-
-test.describe('LIVE MATCH', () => {
-  test('follows the card with since, shows left / next thrower / throws, and stops when it ends', async ({ page }) => {
+test.describe('watching without a team (リーグ・大会を見る)', () => {
+  test('live: today’s cards, the card’s flow, scoreboard, estimate, upcoming lineup; it stops when the card ends', async ({ page }) => {
     let n = 0;
-    const log = await serveMatches(page, () => {
+    const log = await serveN01Canned(page, () => {
       n += 1;
-      if (n === 1) return liveBody();
-      if (n < 4) return { result: 0, changed: 0, mid: 'c003_sg01', updateTime: 1_800_000_010_000 };
-      return liveBody({ updateTime: 1_800_000_020_000, end_match: 1, end_schedule: 1, sets: [3, 2], leg: { ...(liveBody().leg as object), end: 1, winner: 0, left: [0, 401], thrower: null } });
+      const body = liveBody({ mid: 'c003_db01', schid: 'db01', title: 'Test League A Division ダブルス1', sets: [1, 0] });
+      if (n < 3) return body;
+      return { ...body, updateTime: 1_800_000_020_000, end_match: 1, end_schedule: 1, sets: [3, 2] };
     });
-    await openSample(page);
-    await page.locator('.list-row').filter({ hasText: 'ライブ観戦' }).click();
-    await page.getByRole('button', { name: 'ATDO' }).click();
-    await page.getByTestId('live-card').first().click();
-    const board = page.getByTestId('live-board');
-    await expect(board).toContainText('2 - 1');
-    await expect(board).toContainText('321');
-    await expect(board.getByTestId('next-thrower')).toContainText('C1');
-    await board.getByRole('button', { name: 'スロー履歴 (このLeg)' }).click();
-    await expect(board.locator('.throws')).toContainText('R2 A1: 80 → 残り 321');
-    await expect(page.getByTestId('live-status')).toContainText('終了しました', { timeout: 15_000 });
-    await expect(board).toContainText('3 - 2');
+    await watchWithoutTeam(page);
+    await expect(page.getByTestId('board-tile')).toHaveCount(1);
+    await expect(page.getByTestId('board-tile')).toContainText('Arrows');
+    await expect(page.getByTestId('board-tile')).toContainText('1-0');
+    const focus = page.getByTestId('focus-card');
+    await expect(focus.locator('.flow .dot')).toHaveCount(5);
+    await expect(focus.getByTestId('estimate')).toContainText('予測');
+    await expect(focus.getByTestId('next-thrower')).toContainText('C1');
+    await expect(focus.getByTestId('upcoming')).toContainText('シングルス1 A1 vs C1');
+    // The game in progress: comparison and score sheet below the scoreboard.
+    await expect(focus.getByTestId('game-view')).toBeVisible();
+    await expect(focus.getByTestId('live-status')).toContainText('終了しました', { timeout: 15_000 });
+    await expect(focus.locator('.focus-head')).toContainText('3 - 2');
     const lives = log.filter((entry) => entry.startsWith('match/live'));
-    expect(lives[0]).not.toContain('since=');
-    expect(lives.slice(1).every((entry) => entry.includes('since=1800000010000'))).toBe(true);
-    // Stopped: no request after the end.
+    expect(lives.slice(1).every((entry) => entry.includes('since='))).toBe(true);
     const count = lives.length;
     await page.waitForTimeout(3500);
     expect(log.filter((entry) => entry.startsWith('match/live')).length).toBe(count);
     await noSidewaysScroll(page);
+  });
+
+  test('results → match center → a game’s Details and score sheet; standings with the round robin; stats', async ({ page }) => {
+    const log = await serveN01Canned(page);
+    await watchWithoutTeam(page);
+    await page.getByRole('tab', { name: '日程・結果' }).click();
+    const cards = page.getByTestId('match-card');
+    await expect(cards).toHaveCount(4);
+    await expect(page.getByTestId('results-tab')).toContainText('第1戦');
+    await cards.filter({ hasText: '結果確定' }).first().click();
+    const detail = page.getByTestId('match-detail');
+    await expect(detail).toContainText('公式結果 (n01)');
+    await detail.locator('.game-row').nth(3).click();
+    const view = detail.getByTestId('game-view');
+    await expect(view).toContainText('180');
+    await expect(view).toContainText('High Out');
+    await expect(view.getByTestId('score-sheet')).toContainText('40 (3本)');
+    await expect(detail.getByTestId('intel-opponent')).toContainText('対戦 (公式)');
+    await noSidewaysScroll(page);
+    await detail.getByRole('button', { name: /一覧に戻る/ }).click();
+
+    await page.getByRole('tab', { name: '順位' }).click();
+    await expect(page.getByTestId('standings-tab')).toContainText('Arrows');
+    await page.getByText('星取表 (獲得ゲーム数)').first().click();
+    await expect(page.getByTestId('round-robin')).toContainText('3-2');
+    await page.getByRole('tab', { name: 'スタッツ' }).click();
+    await expect(page.getByTestId('stats-tab').locator('tbody tr').first()).toContainText('A1');
+    await expect(page.getByTestId('stats-tab').locator('tbody tr').first()).toContainText('75.15');
+    await noSidewaysScroll(page);
+    // Read operations only.
+    expect(log.every((entry) => /^(league\/tournament\/list|tournament\/(get|standings|stats)|league\/schedule\/get|match\/(list|get|live|throws)|team\/(order|player)\/list)\?/u.test(entry))).toBe(true);
+  });
+
+  test('a tournament by id: matches by stage, a game in a sheet, round-robin standings', async ({ page }) => {
+    await serveN01Canned(page);
+    await watchWithoutTeam(page);
+    await page.getByRole('button', { name: /見るものを変更/ }).click();
+    await page.getByLabel('リーグ・大会を検索').fill('https://n01darts.com/n01/tournament/comp.php?id=t_Tour_0001');
+    await page.getByRole('button', { name: '検索' }).click();
+    const hub = page.getByTestId('tournament-hub');
+    await expect(hub).toContainText('Autumn Open');
+    await expect(hub.getByTestId('competition-match')).toHaveCount(1);
+    await page.getByRole('tab', { name: '試合' }).click();
+    await expect(hub).toContainText('ラウンドロビン Group A');
+    await expect(hub.getByTestId('competition-match')).toHaveCount(2);
+    await hub.getByTestId('competition-match').filter({ hasText: '終了' }).click();
+    await expect(page.getByTestId('match-sheet').getByTestId('score-sheet')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.getByRole('tab', { name: '順位' }).click();
+    await expect(hub).toContainText('Ann');
+    await noSidewaysScroll(page);
+  });
+
+  test('a failed read says so and offers a retry, never an empty season', async ({ page }) => {
+    await page.route(`${N01_API_BASE_URL}/**`, (route) => route.abort('internetdisconnected'));
+    await watchWithoutTeam(page);
+    await expect(page.getByRole('alert').first()).toContainText('取得エラー');
+    await expect(page.getByRole('button', { name: '再試行' }).first()).toBeVisible();
+    await expect(page.getByTestId('match-card')).toHaveCount(0);
   });
 });
