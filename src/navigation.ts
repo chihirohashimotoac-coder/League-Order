@@ -31,8 +31,8 @@ export const PAGE_TITLES: Record<Page, string> = {
   history: '履歴',
   settings: '設定',
   analytics: 'データ分析',
-  matches: '試合結果',
-  live: 'ライブ観戦',
+  matches: '日程・結果',
+  live: 'ライブ',
 };
 
 /** Tabs shown in the bottom bar, in order. */
@@ -117,8 +117,8 @@ export const MENU_GROUPS: { title: string; kicker: string; entries: MenuEntry[] 
     title: '試合',
     kicker: 'MATCH',
     entries: [
-      { page: 'matches', label: '試合結果', icon: 'trophy', note: 'n01 の結果・順位・分析' },
-      { page: 'live', label: 'ライブ観戦', icon: 'target', note: '進行中の試合' },
+      { page: 'live', label: 'ライブ', icon: 'target', note: '進行中の全カードを観戦' },
+      { page: 'matches', label: '日程・結果', icon: 'trophy', note: '結果・順位・スタッツ' },
     ],
   },
   {

@@ -115,20 +115,6 @@ export function HomePage({
       meta: `${store.teamPairs.length} 件設定済み`,
       onSelect: () => onNavigate('pairs'),
     },
-    {
-      key: 'matches',
-      icon: 'trophy',
-      title: '試合結果',
-      meta: team?.n01 ? 'n01 の結果・順位・予測との比較' : 'n01 のリーグを選んで表示',
-      onSelect: () => onNavigate('matches'),
-    },
-    {
-      key: 'live',
-      icon: 'target',
-      title: 'ライブ観戦',
-      meta: '進行中の試合をリアルタイムに近い形で',
-      onSelect: () => onNavigate('live'),
-    },
     ...(team?.n01
       ? [
           {
@@ -276,6 +262,24 @@ export function HomePage({
           <TeamInsight orders={store.teamOrders} players={strengthPlayers} onShowStrength={() => setShowStrength(true)} />
 
           <div className="quick-grid">
+            <button type="button" className="quick-tile" onClick={() => onNavigate('live')} data-testid="home-live">
+              <span className="tile-icon" aria-hidden="true">
+                <Icon name="target" />
+              </span>
+              <span>
+                <span className="title">ライブ</span>
+                <span className="meta">{team?.n01 ? `${team.n01.leagueTitle} の試合を観戦` : 'n01 リーグの試合を観戦'}</span>
+              </span>
+            </button>
+            <button type="button" className="quick-tile" onClick={() => onNavigate('matches')} data-testid="home-results">
+              <span className="tile-icon" aria-hidden="true">
+                <Icon name="trophy" />
+              </span>
+              <span>
+                <span className="title">日程・結果</span>
+                <span className="meta">結果・順位・スタッツ</span>
+              </span>
+            </button>
             <button type="button" className="quick-tile" onClick={() => onNavigate('players')}>
               <span className="tile-icon" aria-hidden="true">
                 <Icon name="users" />

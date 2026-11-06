@@ -182,13 +182,16 @@ interface LiveCard {
   tdid: string;
   tmid: string;
   sides: [{ tpid: string; name: string }, { tpid: string; name: string }];
+  slots: { schid: string; label: string; numPart: number }[];
 }
 
 function liveCard(): LiveCard | null {
   const schedule = find('league/schedule/get', { tdid: 't_ABvC_5234' }) as { schedule?: { p: string[]; lsid: string }[][] } | undefined;
-  const doc = find('tournament/get', { tdid: 't_ABvC_5234' }) as DocLike | undefined;
+  const doc = find('tournament/get', { tdid: 't_ABvC_5234' }) as (DocLike & { tournament: { lg_setting?: { schedule?: { schid: string; subTitle?: string; num_part: number }[] } } }) | undefined;
   if (!schedule?.schedule || !doc) return null;
   const names = new Map((doc.tournament.entry_list ?? []).map((entry) => [entry.tpid, entry.name]));
+  const slots = (doc.tournament.lg_setting?.schedule ?? []).map((slot, index) => ({ schid: slot.schid, label: slot.subTitle ?? `Game ${index + 1}`, numPart: slot.num_part }));
+  if (slots.length < 5) return null;
   for (const [division, cards] of schedule.schedule.entries()) {
     for (const card of cards) {
       if (!card.p[0] || !card.p[1] || card.p[1] === 'empty' || doc.tournament.lg_result?.[`${division}_${card.lsid}`]) continue;
@@ -199,6 +202,7 @@ function liveCard(): LiveCard | null {
           { tpid: card.p[0], name: names.get(card.p[0]) ?? card.p[0] },
           { tpid: card.p[1], name: names.get(card.p[1]) ?? card.p[1] },
         ],
+        slots,
       };
     }
   }
@@ -208,20 +212,86 @@ function liveCard(): LiveCard | null {
 const LIVE = liveCard();
 const VISITS = [60, 45, 100, 81, 26, 140, 41, 57, 85, 60, 100, 45, 60, 21, 40, 32, 60, 100, 36, 16];
 const STEP_MS = 4000;
+/** The demo card: four games already played (winners A, B, A, A), the fifth live. */
+const DONE_WINNERS: (0 | 1)[] = [0, 1, 0, 0];
+const LIVE_SLOT = 4;
+const member = (side: number, slot: number, k: number): string => `デモ${side === 0 ? 'A' : 'B'}${slot + 1}-${k + 1}`;
+const members = (side: number, slot: number): { oid: string; oname: string; name: string }[] =>
+  Array.from({ length: LIVE?.slots[slot]?.numPart ?? 1 }, (_, k) => ({ oid: `d${side}${slot}${k}`, oname: member(side, slot, k), name: member(side, slot, k) }));
 
-/** The game state `steps` visits into the simulated leg (it starts over after the finish). */
+/** Visits of a plausible leg: the winner checks out, the loser stops short. */
+function legVisits(winner: 0 | 1, avg: [number, number]): Record<string, unknown>[] {
+  const left: [number, number] = [501, 501];
+  const throws: Record<string, unknown>[] = [];
+  for (let r = 1; r <= 15; r += 1) {
+    for (const side of [0, 1] as const) {
+      const score = Math.min(avg[side] + ((r * 7 + side * 13) % 21) - 10, left[side]);
+      if (side === winner && left[side] - score <= 0) {
+        throws.push({ p: side, r, score: left[side], left: 0, darts: 2, finish: 1 });
+        return throws;
+      }
+      if (side !== winner && left[side] - score <= 30) {
+        throws.push({ p: side, r, score: 0, left: left[side], darts: 3 });
+        continue;
+      }
+      left[side] -= score;
+      throws.push({ p: side, r, score, left: left[side], darts: 3 });
+    }
+  }
+  return throws;
+}
+
+function doneLegs(slot: number): Record<string, unknown>[] {
+  const winner = DONE_WINNERS[slot];
+  const order: (0 | 1)[] = winner === 0 ? [0, 1, 0] : [1, 0, 1];
+  return order.map((w, leg) => {
+    const throws = legVisits(w, [62 + slot * 2, 58 + slot]);
+    const darts = [0, 1].map((side) => throws.filter((t) => t.p === side).reduce((sum, t) => sum + Number(t.darts), 0));
+    return { leg, first: leg % 2, end: 1, winner: w, time: START - (LIVE_SLOT - slot) * 900_000, start: [501, 501], darts, throws };
+  });
+}
+
+function doneRow(slot: number): Record<string, unknown> {
+  const legs = doneLegs(slot);
+  const side = (index: number): Record<string, unknown> => {
+    const throws = legs.flatMap((leg) => (leg.throws as Record<string, unknown>[]).filter((t) => t.p === index));
+    return {
+      name: LIVE!.sides[index].name,
+      tpid: LIVE!.sides[index].tpid,
+      order: members(index, slot),
+      winLegs: legs.filter((leg) => leg.winner === index).length,
+      allScore: throws.reduce((sum, t) => sum + Number(t.score), 0),
+      allDarts: throws.reduce((sum, t) => sum + Number(t.darts), 0),
+    };
+  };
+  return {
+    mid: `${LIVE!.tmid}_demo${slot}`,
+    tdid: LIVE!.tdid,
+    tmid: LIVE!.tmid,
+    schid: LIVE!.slots[slot].schid,
+    match_type: '01',
+    title: `デモ ${LIVE!.slots[slot].label}`,
+    startTime: Math.floor(START / 1000) - (LIVE_SLOT - slot) * 900,
+    updateTime: START - (LIVE_SLOT - slot - 1) * 900_000,
+    endMatch: 1,
+    statsData: [side(0), side(1)],
+  };
+}
+
+/** The live game, `steps` visits in (it starts over after the finish). */
 function liveState(now: number): Record<string, unknown> | null {
   if (!LIVE) return null;
   const steps = Math.floor((now - START) / STEP_MS) % (VISITS.length + 4);
   const left: [number, number] = [501, 501];
   const throws: Record<string, unknown>[] = [];
   let finished: 0 | 1 | null = null;
+  const names = [member(0, LIVE_SLOT, 0), member(1, LIVE_SLOT, 0)];
   for (let i = 0; i < Math.min(steps, VISITS.length); i += 1) {
     const side = (i % 2) as 0 | 1;
     const score = Math.min(VISITS[i], left[side]);
     const finish = left[side] - score === 0;
     left[side] -= score;
-    throws.push({ p: side, r: Math.floor(i / 2) + 1, score, left: left[side], darts: 3, ...(finish ? { finish: 1 } : {}), member: { oid: `m${side}`, name: side === 0 ? 'デモ選手A' : 'デモ選手B' } });
+    throws.push({ p: side, r: Math.floor(i / 2) + 1, score, left: left[side], darts: 3, ...(finish ? { finish: 1 } : {}) });
     if (finish) {
       finished = side;
       break;
@@ -229,28 +299,26 @@ function liveState(now: number): Record<string, unknown> | null {
   }
   const updateTime = START + Math.min(steps, throws.length) * STEP_MS;
   const thrower = throws.length % 2;
+  const won = [DONE_WINNERS.filter((w) => w === 0).length, DONE_WINNERS.filter((w) => w === 1).length];
   return {
     result: 0,
     changed: 1,
-    mid: `${LIVE.tmid}_demo`,
+    mid: `${LIVE.tmid}_demo${LIVE_SLOT}`,
     tdid: LIVE.tdid,
     tmid: LIVE.tmid,
-    schid: 'demo',
-    title: 'デモ ライブ シングルス1',
+    schid: LIVE.slots[LIVE_SLOT].schid,
+    title: `デモ ${LIVE.slots[LIVE_SLOT].label}`,
     match_type: '01',
     updateTime,
     end_match: 0,
     end_schedule: 0,
-    format: { limit_leg: 2, limit_set: 7, schedule: 1, start_score: 501 },
+    format: { limit_leg: 2, limit_set: LIVE.slots.length, schedule: 1, start_score: 501 },
     show_sets: 1,
-    sets: [3, 2],
+    sets: won,
     legs: finished === null ? [0, 0] : finished === 0 ? [1, 0] : [0, 1],
     current_leg: 0,
     leg_count: 1,
-    players: [
-      { name: LIVE.sides[0].name, tpid: LIVE.sides[0].tpid, order: [{ oid: 'm0', name: 'デモ選手A' }] },
-      { name: LIVE.sides[1].name, tpid: LIVE.sides[1].tpid, order: [{ oid: 'm1', name: 'デモ選手B' }] },
-    ],
+    players: [0, 1].map((side) => ({ name: LIVE!.sides[side].name, tpid: LIVE!.sides[side].tpid, order: [{ oid: `d${side}${LIVE_SLOT}0`, name: names[side] }] })),
     stats: [0, 1].map((side) => {
       const mine = throws.filter((entry) => entry.p === side) as { score: number }[];
       const score = mine.reduce((sum, entry) => sum + entry.score, 0);
@@ -266,7 +334,6 @@ function liveState(now: number): Record<string, unknown> | null {
       left,
       thrower: finished === null ? thrower : null,
       round: Math.floor(throws.length / 2) + 1,
-      ...(finished === null ? { member: { oid: `m${thrower}`, name: thrower === 0 ? 'デモ選手A' : 'デモ選手B' } } : {}),
       throws,
     },
   };
@@ -279,27 +346,65 @@ function liveRow(now: number): Record<string, unknown> | null {
     mid: state.mid,
     tdid: LIVE.tdid,
     tmid: LIVE.tmid,
-    schid: 'demo',
+    schid: LIVE.slots[LIVE_SLOT].schid,
     match_type: '01',
-    title: 'デモ ライブ シングルス1',
+    title: state.title,
     startTime: Math.floor(START / 1000),
     updateTime: state.updateTime,
     endMatch: 0,
-    statsData: LIVE.sides.map((side, index) => ({ name: side.name, tpid: side.tpid, order: [{ oid: `m${index}`, oname: index === 0 ? 'デモ選手A' : 'デモ選手B' }], winLegs: 0, allScore: 0, allDarts: 0 })),
+    statsData: [0, 1].map((side) => ({ name: LIVE!.sides[side].name, tpid: LIVE!.sides[side].tpid, order: members(side, LIVE_SLOT), winLegs: 0, allScore: 0, allDarts: 0 })),
   };
+}
+
+/** `match/throws` for a fixture game, from its per-round record. */
+function fixtureThrows(mid: string): unknown {
+  const detail = gameDetail(mid) as { match: { match_type: string; legData: { first: number; winner: number; playerData: { score: number; left: number }[][] }[] } } | undefined;
+  if (!detail) return undefined;
+  const leg_data = detail.match.legData.map((leg, index) => {
+    const throws: Record<string, unknown>[] = [];
+    const rounds = Math.max(leg.playerData[0].length, leg.playerData[1].length);
+    for (let r = 1; r < rounds; r += 1) {
+      for (const side of [leg.first, 1 - leg.first]) {
+        const visit = leg.playerData[side][r];
+        if (!visit) continue;
+        const before = leg.playerData[side][r - 1].left;
+        if (visit.score < 0) throws.push({ p: side, r, score: before, left: 0, darts: -visit.score, finish: 1 });
+        else throws.push({ p: side, r, score: visit.score, left: visit.left, darts: 3 });
+      }
+    }
+    return { leg: index, first: leg.first, end: 1, winner: leg.winner, start: [501, 501], throws };
+  });
+  return { result: 0, changed: 1, mid, match_type: detail.match.match_type, end_match: 1, updateTime: START, leg_data };
 }
 
 function respond(operation: string, params: Record<string, string>): unknown | undefined {
   if (operation === 'match/list' && params.tmid__regex === '_lg_' && params.tdid) {
-    if (params.live === '1') {
-      const row = LIVE && LIVE.tdid === params.tdid ? liveRow(Date.now()) : null;
-      return { result: 0, list: row ? [row] : [] };
-    }
+    const today = LIVE && LIVE.tdid === params.tdid ? [...DONE_WINNERS.map((_, slot) => doneRow(slot)), liveRow(Date.now())!] : [];
+    if (params.startTime__gte) return { result: 0, list: today };
+    if (params.live === '1') return { result: 0, list: today.filter((row) => row.endMatch === 0) };
     const skip = Number(params.skip ?? 0);
-    return { result: 0, list: seasonRows(params.tdid).slice(skip, skip + Number(params.count ?? 100)) };
+    return { result: 0, list: [...seasonRows(params.tdid), ...today].slice(skip, skip + Number(params.count ?? 100)) };
   }
   if (operation === 'tournament/standings') return standings(params.tdid);
   if (operation === 'match/get') return gameDetail(params.mid);
+  if (operation === 'match/throws') {
+    if (LIVE && params.mid.startsWith(`${LIVE.tmid}_demo`)) {
+      const slot = Number(params.mid.slice(`${LIVE.tmid}_demo`.length));
+      if (slot === LIVE_SLOT) {
+        const state = liveState(Date.now())!;
+        return { result: 0, changed: 1, mid: params.mid, match_type: '01', end_match: 0, updateTime: state.updateTime, leg_data: [state.leg] };
+      }
+      return { result: 0, changed: 1, mid: params.mid, match_type: '01', end_match: 1, updateTime: START, leg_data: doneLegs(slot) };
+    }
+    return fixtureThrows(params.mid);
+  }
+  if (operation === 'team/order/list') {
+    if (!LIVE || params.tmid !== LIVE.tmid) return { result: 0, list: [] };
+    return {
+      result: 0,
+      list: LIVE.slots.flatMap((slot, index) => [0, 1].map((side) => ({ tmid: LIVE!.tmid, tpid: LIVE!.sides[side].tpid, schid: slot.schid, fix: 1, order: members(side, index) }))),
+    };
+  }
   if (operation === 'match/live') {
     const state = liveState(Date.now());
     if (!state) return undefined;

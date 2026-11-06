@@ -2,8 +2,7 @@ import { Component } from 'react';
 import type { ReactNode } from 'react';
 import { EmptyState } from '../../../components/ui';
 import type { Page } from '../../../navigation';
-import MatchesPage from './MatchesPage';
-import LivePage from './LivePage';
+import WatchPage from './WatchPage';
 
 /**
  * The only thing the app shell imports from the match screens (lazily). A render error stops
@@ -26,6 +25,10 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   }
 }
 
-export default function MatchesEntry({ page, onNavigate }: { page: 'matches' | 'live'; onNavigate: (page: Page) => void }): React.JSX.Element {
-  return <Boundary>{page === 'live' ? <LivePage onNavigate={onNavigate} /> : <MatchesPage onNavigate={onNavigate} />}</Boundary>;
+export default function MatchesEntry({ page }: { page: 'matches' | 'live'; onNavigate?: (page: Page) => void }): React.JSX.Element {
+  return (
+    <Boundary>
+      <WatchPage initialTab={page === 'live' ? 'live' : 'results'} />
+    </Boundary>
+  );
 }
