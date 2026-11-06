@@ -11,6 +11,8 @@ import { allFixtureDatasets, fixtureResponse } from '../test/n01/transport';
  * The preview labels itself as demo data on every screen it is used.
  */
 
+declare const __PREVIEW_COMMIT__: string;
+
 const datasets = allFixtureDatasets();
 const START = Date.now();
 
@@ -336,7 +338,7 @@ export function installDemoN01(base: string): void {
   };
   const banner = document.createElement('div');
   banner.setAttribute('role', 'note');
-  banner.textContent = 'レビュー用プレビュー: n01 には接続せず、架空の模擬データを表示しています (ライブは自動で進む模擬試合)。';
+  banner.textContent = `レビュー用プレビュー (commit ${__PREVIEW_COMMIT__}): n01 には接続せず、架空の模擬データを表示しています (ライブは自動で進む模擬試合)。`;
   banner.style.cssText = 'position:sticky;top:0;z-index:50;padding:6px 16px;font-size:12px;background:#172026;color:#fff;text-align:center';
   document.body.prepend(banner);
 }
