@@ -6,6 +6,7 @@ import { gameStats } from '../gameStats';
 import { checkoutRoute, freshLegChance, legChance, shrunkAverage } from '../checkout';
 import { raceChance } from '../probability';
 import { ZeroOneGrid } from './ScoreGrid';
+import { FinishChances, RaceChart } from './LegCharts';
 
 /**
  * The live game the way a darts scoreboard shows it — the layout spectators know from n01's
@@ -162,6 +163,8 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
         ) : !cricket && left && thrower !== null && left[thrower] <= 170 && left[thrower] > 1 ? (
           <p className="ns-route muted">残り {left[thrower]} は 3 本で上がれない数字です (セットアップ)。</p>
         ) : null}
+        {!cricket && leg ? <RaceChart leg={leg} startScore={live.startScore} names={names} /> : null}
+        {!cricket ? <FinishChances legs={all} names={names} /> : null}
         {legP !== null ? (
           <div className="ns-chance" data-testid="leg-chance">
             <span>このLeg</span>

@@ -7412,3 +7412,131 @@ ul.plain {
 .ns-table td.mark {
   box-shadow: inset 0 0 0 3px var(--color-warning-fill);
 }
+
+/* ---------------------------------------------------------------------------
+   Points-left race and finishing chances (League Order's own figures)
+   --------------------------------------------------------------------------- */
+
+.race {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.race svg {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  display: block;
+}
+
+.race .grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.race .tick {
+  fill: var(--color-text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.race .line polyline {
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+
+.race .c0 polyline {
+  stroke: var(--color-accent);
+}
+
+.race .c0 circle {
+  fill: var(--color-accent);
+}
+
+.race .c1 polyline {
+  stroke: var(--color-updated);
+}
+
+.race .c1 circle {
+  fill: var(--color-updated);
+}
+
+.race figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.race-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.race-key i {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.race-key i.c0 {
+  background: var(--color-accent);
+}
+
+.race-key i.c1 {
+  background: var(--color-updated);
+}
+
+.finish-chances {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 7em) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.fc-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.fc-rate {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.fc-pips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.fc-pip {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.7em;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.fc-pip.hit {
+  background: var(--color-success);
+  border-color: var(--color-success);
+  color: var(--color-accent-ink);
+}

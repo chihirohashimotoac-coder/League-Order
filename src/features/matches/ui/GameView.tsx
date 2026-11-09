@@ -6,6 +6,7 @@ import { mergeLegs } from '../parse';
 import { gameStats } from '../gameStats';
 import type { SideStats } from '../gameStats';
 import { CricketGrid, ZeroOneGrid } from './ScoreGrid';
+import { FinishChances, RaceChart } from './LegCharts';
 
 /**
  * One game, the way n01's match Details and score sheet show it — and side by side.
@@ -148,6 +149,7 @@ export function GameView({
         </table>
       </div>
       <p className="muted small-text">n01 の記録から League Order が計算 (ブル決着の Leg は平均・ダーツ数に含めません)。</p>
+      {!cricket ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
       {all.length > 0 ? (
         <div className="chip-row" role="tablist" aria-label="Leg">
           {all.map((entry) => {
@@ -194,6 +196,7 @@ function ScoreSheet({
   const label = `Leg ${leg.index + 1} のスコアシート`;
   return (
     <div className="ns-grid-wrap">
+      {!cricket ? <RaceChart leg={leg} startScore={null} order={order} names={names} /> : null}
       {cricket ? <CricketGrid leg={leg} order={order} names={names} label={label} mark={mark} /> : <ZeroOneGrid leg={leg} order={order} names={names} label={label} mark={mark} />}
       {cricket && leg.marks && leg.numbers ? (
         <p className="small-text muted">

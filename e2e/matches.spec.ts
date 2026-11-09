@@ -159,6 +159,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     const board = focus.getByTestId('live-board');
     await expect(board.getByTestId('score-sheet')).toContainText('To Go');
     await expect(board.getByTestId('score-sheet')).toContainText('321');
+    await expect(board.getByTestId('race-chart')).toContainText('点先行');
     await expect(board).toContainText('3 Darts');
     await expect(board.getByTestId('league-order-plus')).toBeVisible();
     await expect(board.getByTestId('leg-chance')).toContainText('%');
@@ -187,6 +188,9 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await expect(view).toContainText('180');
     await expect(view).toContainText('High Out');
     await expect(view.getByTestId('score-sheet')).toContainText('x3');
+    // League Order's own figures: the points-left race of the leg, the visits started on a finish.
+    await expect(view.getByTestId('race-chart')).toContainText('15 本で上がり');
+    await expect(view.getByTestId('finish-chances')).toContainText('1/2');
     // 見どころ: read from every finished game's throws; a line opens that leg with the visit marked.
     const highlights = detail.getByTestId('highlights');
     await expect(highlights).toContainText('180');
