@@ -233,6 +233,11 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await expect(detail.getByTestId('card-trail')).toContainText('このカードを除く');
     await highlights.locator('.hl-row').filter({ hasText: '180' }).first().click();
     await expect(detail.getByTestId('game-view').locator('tr.marked td.mark')).toHaveText('180');
+    // 起用傾向: who each team put in which game, from the games played.
+    await detail.locator('.focus-head').getByRole('button').first().click();
+    await expect(page.getByTestId('slot-usage')).toContainText('起用傾向');
+    await expect(page.getByTestId('slot-usage')).toContainText('A1');
+    await page.getByRole('button', { name: '閉じる' }).click();
     await expect(detail.getByTestId('intel-opponent')).toContainText('対戦 (公式)');
     await noSidewaysScroll(page);
     await detail.getByRole('button', { name: /一覧に戻る/ }).click();

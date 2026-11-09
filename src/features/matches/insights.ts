@@ -281,3 +281,48 @@ export function percent(record: KindRecord | undefined): string {
   const value = `${Math.round((record.wins / record.games) * 100)}%`;
   return record.games < MIN_SAMPLE ? `${value} (参考 ${record.games}試合)` : `${value} (${record.games}試合)`;
 }
+
+// ---------------------------------------------------------------------------
+// Who a team puts in which game (起用傾向)
+// ---------------------------------------------------------------------------
+
+export interface SlotUsage {
+  /** The season's games the team has played, in schedule order. */
+  slots: { schid: string; label: string }[];
+  /** Cards (matches) the team has played this season. */
+  cards: number;
+  /** Per player: how many cards they played each slot in (same order as `slots`). */
+  rows: { oid: string; name: string; counts: number[]; total: number }[];
+}
+
+/**
+ * From the finished games n01 lists (who actually played, not the submitted orders): for each
+ * player of the team, the number of cards in which they played each game of the schedule.
+ * Players are told apart by their season member id.
+ */
+export function slotUsage(season: SeasonDocument, games: readonly GameRow[], teamId: string): SlotUsage {
+  const index = new Map(season.slots.map((slot, i) => [slot.schid, i]));
+  const cards = new Set<string>();
+  const players = new Map<string, { oid: string; name: string; counts: number[] }>();
+  for (const game of games) {
+    if (!game.finished || !game.schid || !index.has(game.schid)) continue;
+    const side = sideOf(game, teamId);
+    if (side === null) continue;
+    cards.add(game.tmid ?? game.scid ?? game.mid);
+    for (const member of game.sides[side].members) {
+      if (!member.oid) continue;
+      const row = players.get(member.oid) ?? { oid: member.oid, name: member.name, counts: Array(season.slots.length).fill(0) };
+      row.counts[index.get(game.schid)!] += 1;
+      players.set(member.oid, row);
+    }
+  }
+  const used = season.slots.map((_, i) => [...players.values()].some((row) => row.counts[i] > 0));
+  const slots = season.slots.filter((_, i) => used[i]).map((slot) => ({ schid: slot.schid, label: slot.label }));
+  const rows = [...players.values()]
+    .map((row) => {
+      const counts = row.counts.filter((_, i) => used[i]);
+      return { oid: row.oid, name: row.name, counts, total: counts.reduce((a, b) => a + b, 0) };
+    })
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'ja'));
+  return { slots, cards: cards.size, rows };
+}

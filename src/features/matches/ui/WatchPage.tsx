@@ -6,7 +6,7 @@ import type { WatchSettings } from '../../../domain/types';
 import type { Page } from '../../../navigation';
 import type { MatchesApi } from '../api';
 import { checkReproduction, roundMovement } from '../standings';
-import { percent, playerForms, teamProfile } from '../insights';
+import { percent, playerForms, slotUsage, teamProfile } from '../insights';
 import { useMatchesApiFactory } from '../environment';
 import type { MatchesApiFactory } from '../environment';
 import type { PlayerLine, SeasonData } from './useMatchContext';
@@ -17,6 +17,7 @@ import { ResultsTab } from './ResultsTab';
 import { MatchSheet } from './MatchSheet';
 import { NowView, TournamentHub } from './CompetitionViews';
 import { PlayerCard } from './PlayerCard';
+import { shortSlot } from './CardTrail';
 
 /**
  * 観戦 (WATCH): one page for any n01 league, with or without a team. Four tabs —
@@ -569,7 +570,57 @@ function TeamSheet({
           </table>
         </div>
         <p className="muted small-text">League Order の集計 (5 試合未満は参考値)。選手は今季のメンバー ID で区別し、名前だけで統合しません。</p>
+        <UsageTable teamId={teamId} data={data} onPlayer={onPlayer} />
       </div>
     </Sheet>
+  );
+}
+
+function UsageTable({ teamId, data, onPlayer }: { teamId: string; data: SeasonData; onPlayer: (player: PlayerRef) => void }): React.JSX.Element | null {
+  const usage = useMemo(() => slotUsage(data.season, data.games, teamId), [data, teamId]);
+  if (usage.cards === 0 || usage.rows.length === 0) return null;
+  return (
+    <section className="usage" aria-label="起用傾向" data-testid="slot-usage">
+      <h3 className="section-mini">起用傾向 (今季 {usage.cards} 試合)</h3>
+      <div className="table-scroll">
+        <table className="usage-table small-text">
+          <caption className="sr-only">選手ごとに、各ゲームに出場した試合 (対戦カード) の数</caption>
+          <thead>
+            <tr>
+              <th scope="col">選手</th>
+              {usage.slots.map((slot) => (
+                <th key={slot.schid} scope="col" title={slot.label}>
+                  {shortSlot(slot.label)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {usage.rows.map((row) => (
+              <tr key={row.oid}>
+                <th scope="row">
+                  <button type="button" className="linklike" onClick={() => onPlayer({ oid: row.oid, name: row.name, teamId })}>
+                    {row.name}
+                  </button>
+                </th>
+                {row.counts.map((count, i) => {
+                  const share = count / usage.cards;
+                  return (
+                    <td
+                      key={usage.slots[i].schid}
+                      className={share >= 0.6 ? 'strong' : undefined}
+                      style={count ? { background: `color-mix(in srgb, var(--color-accent) ${Math.round(share * 55)}%, var(--color-surface-1))` } : undefined}
+                    >
+                      {count || <span className="muted">·</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted small-text">n01 の試合記録 (実際に出場した選手) から League Order が集計。提出オーダーではありません。色が濃いほど、その枠に出る回数が多い選手です。</p>
+    </section>
   );
 }
