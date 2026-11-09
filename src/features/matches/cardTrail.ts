@@ -1,7 +1,7 @@
 import type { MatchCard } from './cards';
 import { slotStructure } from './cards';
 import { teamProfile } from './insights';
-import type { GameRow, SeasonDocument } from './parse';
+import type { GameRow, SeasonDocument, SeasonSlot } from './parse';
 import type { CardOutlook, GameOutlook } from './probability';
 import { cardOutlook, log5, shrunk } from './probability';
 
@@ -20,11 +20,18 @@ export interface SlotChances {
   seasonGames: number;
 }
 
-export function slotChances(season: SeasonDocument, cards: readonly MatchCard[], games: readonly GameRow[], teams: [string, string], exclude: ReadonlySet<string>): SlotChances {
+export function slotChances(
+  season: SeasonDocument,
+  cards: readonly MatchCard[],
+  games: readonly GameRow[],
+  teams: [string, string],
+  exclude: ReadonlySet<string>,
+  slots: readonly SeasonSlot[],
+): SlotChances {
   const pool = games.filter((game) => !exclude.has(game.mid));
   const a = teamProfile(season, cards, pool, teams[0]);
   const b = teamProfile(season, cards, pool, teams[1]);
-  const chance = new Map(season.slots.map((slot) => [slot.schid, log5(shrunk(a.byStructure[slotStructure(slot)]), shrunk(b.byStructure[slotStructure(slot)]))]));
+  const chance = new Map(slots.map((slot) => [slot.schid, log5(shrunk(a.byStructure[slotStructure(slot)]), shrunk(b.byStructure[slotStructure(slot)]))]));
   const count = (profile: typeof a): number => Object.values(profile.byStructure).reduce((sum, record) => sum + record.games, 0);
   return { chance, seasonGames: count(a) + count(b) };
 }

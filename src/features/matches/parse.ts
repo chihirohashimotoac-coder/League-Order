@@ -78,7 +78,13 @@ export interface SeasonDocument {
   teamGames: boolean;
   teams: Map<string, string>;
   divisions: SeasonDivision[];
+  /** The base schedule (`lg_setting.schedule`). Use `slotsFor` for a division's games. */
   slots: SeasonSlot[];
+  /**
+   * Divisions with their own schedule (`lg_setting.game_setting[]`, keyed by `round` = the
+   * division's index in `lg_table`; ATDO's A division plays a different set of games).
+   */
+  divisionSlots: Map<number, SeasonSlot[]>;
   /** `"<div>_<lsid>"` → tpid → result. */
   results: Map<string, Map<string, CardResultSide>>;
   pointRule: PointRule;
@@ -105,6 +111,27 @@ function slotsOf(schedule: unknown): SeasonSlot[] {
     });
   });
   return slots;
+}
+
+/** The games a division plays: its own schedule when it has one, else the base schedule. */
+export function slotsFor(season: Pick<SeasonDocument, 'slots' | 'divisionSlots'>, division: number | null): SeasonSlot[] {
+  return (division !== null ? season.divisionSlots?.get(division) : undefined) ?? season.slots;
+}
+
+/** Every slot of the season, base schedule first. */
+export function allSlots(season: Pick<SeasonDocument, 'slots' | 'divisionSlots'>): SeasonSlot[] {
+  return [...season.slots, ...[...(season.divisionSlots?.values() ?? [])].flat()];
+}
+
+/** The slot a game id names, in the division's own schedule first. */
+export function slotOf(season: Pick<SeasonDocument, 'slots' | 'divisionSlots'>, schid: string | null, division: number | null = null): SeasonSlot | null {
+  if (!schid) return null;
+  return slotsFor(season, division).find((slot) => slot.schid === schid) ?? allSlots(season).find((slot) => slot.schid === schid) ?? null;
+}
+
+/** The division a team plays in this season, or `null`. */
+export function teamDivision(season: Pick<SeasonDocument, 'divisions'>, teamId: string): number | null {
+  return season.divisions?.find((division) => division.teamIds.includes(teamId))?.index ?? null;
 }
 
 export function parseSeasonDocument(raw: unknown, tournamentId: string): SeasonDocument {
@@ -141,6 +168,15 @@ export function parseSeasonDocument(raw: unknown, tournamentId: string): SeasonD
     }
   }
   const slots = slotsOf(setting.schedule);
+  const divisionSlots = new Map<number, SeasonSlot[]>();
+  if (Array.isArray(setting.game_setting)) {
+    for (const override of setting.game_setting) {
+      if (!isRec(override)) continue;
+      const division = num(override.round);
+      const own = slotsOf(override.schedule);
+      if (division !== null && own.length > 0) divisionSlots.set(division, own);
+    }
+  }
   const manualPoints = Array.isArray(t.lg_pts) ? t.lg_pts.length > 0 : isRec(t.lg_pts) ? Object.keys(t.lg_pts).length > 0 : false;
   return {
     tournamentId: str(t.tdid) ?? tournamentId,
@@ -152,6 +188,7 @@ export function parseSeasonDocument(raw: unknown, tournamentId: string): SeasonD
     teams,
     divisions,
     slots,
+    divisionSlots,
     results,
     pointRule: {
       win: num(setting.point_w),

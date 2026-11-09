@@ -1,5 +1,5 @@
 import type { Fixture, GameRow, SeasonDocument, SeasonSlot } from './parse';
-import { parseLeagueTmid } from './parse';
+import { parseLeagueTmid, slotsFor } from './parse';
 
 /**
  * Match cards (対戦カード) of one season: a fixture, n01's official card result, and the games
@@ -97,7 +97,7 @@ export function buildCards(season: SeasonDocument, fixtures: readonly Fixture[],
       if (row.schid) bySlot.set(row.schid, row);
     }
     const counted: [number, number] = [0, 0];
-    const cardGames: CardGame[] = season.slots.map((slot) => {
+    const cardGames: CardGame[] = slotsFor(season, fixture.divisionIndex).map((slot) => {
       const game = bySlot.get(slot.schid) ?? null;
       if (!game) return { slot, state: 'notPlayed', game: null, winner: null, legs: [null, null], rate: [null, null], members: [[], []], flip: false };
       // Card order may differ from the row's side order.

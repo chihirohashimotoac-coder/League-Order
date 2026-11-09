@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/icons';
 import type { MatchesApi } from '../api';
 import type { CardOrder, GameRow, LiveState, SeasonDocument } from '../parse';
-import { parseLeagueTmid } from '../parse';
+import { parseLeagueTmid, slotOf, slotsFor } from '../parse';
 import { gameWinner, sideRate } from '../cards';
 import type { LiveStatus } from '../livePoller';
 import { LivePoller, medianMs } from '../livePoller';
@@ -66,12 +66,12 @@ export function boardCards(season: SeasonDocument, games: readonly GameRow[]): B
       if (winner !== null) card.won[game.sides[winner].teamId === card.teams[0].id ? 0 : 1] += 1;
       if (!game.finished) card.current = game;
     }
-    card.finished = card.current === null && (card.games.some((game) => game.cardFinished) || card.games.length >= season.slots.length);
+    card.finished = card.current === null && (card.games.some((game) => game.cardFinished) || card.games.length >= slotsFor(season, card.divisionIndex).length);
   }
   return [...byTmid.values()];
 }
 
-const slotLabel = (season: SeasonDocument, schid: string | null): string => season.slots.find((slot) => slot.schid === schid)?.label ?? 'ゲーム';
+const slotLabel = (season: SeasonDocument, schid: string | null): string => slotOf(season, schid)?.label ?? 'ゲーム';
 
 export function LiveTab({ data, registered, api, factory }: { data: SeasonData; registered: string[]; api: MatchesApi; factory: MatchesApiFactory }): React.JSX.Element {
   const board = useTodayBoard(api, data.season.tournamentId, true);
@@ -281,6 +281,7 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
     };
   }, [api, card.tmid, card.finished, data.season.tournamentId]);
 
+  const schedule = slotsFor(data.season, card.divisionIndex);
   const flipOf = (game: GameRow): boolean => game.sides[0].teamId === card.teams[1].id;
   const bySchid = new Map(card.games.map((game) => [game.schid, game]));
   const currentSchid = live && !live.gameEnded ? live.schid : card.current?.schid ?? null;
@@ -293,7 +294,7 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
 
   // Estimate: season win rates per kind (without this card's games), the game in progress by its
   // legs; and the same estimate after each game so far (カード勝率の推移).
-  const { chance, seasonGames } = slotChances(data.season, data.cards, data.games, [card.teams[0].id, card.teams[1].id], new Set(card.games.map((game) => game.mid)));
+  const { chance, seasonGames } = slotChances(data.season, data.cards, data.games, [card.teams[0].id, card.teams[1].id], new Set(card.games.map((game) => game.mid)), schedule);
   const results = card.games.flatMap((game) => {
     const winner = game.finished ? gameWinner(game) : null;
     return winner === null || !game.schid ? [] : [{ schid: game.schid, winner: (flipOf(game) ? 1 - winner : winner) as 0 | 1, endedAt: game.updateTime }];
@@ -302,7 +303,7 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
     live && live.schid && !live.gameEnded && live.limitLeg
       ? { schid: live.schid, legs: (liveFlip ? [live.legs[1], live.legs[0]] : [live.legs[0], live.legs[1]]) as [number, number], need: live.limitLeg }
       : null;
-  const trail = outlookTrail(data.season.slots, chance, results, liveGame);
+  const trail = outlookTrail(schedule, chance, results, liveGame);
   const outlook = trail[trail.length - 1].outlook;
 
   // Standings if every card of this division today ended as it stands.
@@ -328,7 +329,7 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
       : null;
 
   const orderOf = (teamId: string, schid: string): CardOrder | undefined => orders?.find((order) => order.teamId === teamId && order.schid === schid);
-  const upcoming = data.season.slots.filter((slot) => !bySchid.has(slot.schid));
+  const upcoming = schedule.filter((slot) => !bySchid.has(slot.schid));
   const minutesPerGame = (() => {
     const done = card.games.filter((game) => game.finished && game.startTime && game.updateTime);
     if (done.length === 0) return null;
@@ -359,7 +360,7 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
         <span className={registered.includes(card.teams[1].id) ? 'own' : ''}>{names[1]}</span>
       </header>
       <ol className="flow" aria-label="ゲームの流れ">
-        {data.season.slots.map((slot) => {
+        {schedule.map((slot) => {
           const game = bySchid.get(slot.schid);
           const winner = game ? gameWinner(game) : null;
           const cardWinner = game && winner !== null ? (flipOf(game) ? 1 - winner : winner) : null;

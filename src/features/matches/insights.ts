@@ -2,6 +2,7 @@ import type { SavedOrder } from '../../domain/types';
 import type { CardGame, MatchCard } from './cards';
 import { slotStructure } from './cards';
 import type { GameRow, SeasonDocument } from './parse';
+import { slotsFor, teamDivision } from './parse';
 
 /**
  * MATCH INTELLIGENCE: what League Order adds on top of n01's numbers.
@@ -126,7 +127,7 @@ function rate(game: GameRow, side: 0 | 1): number | null {
 }
 
 export function playerForms(season: SeasonDocument, games: readonly GameRow[], teamId: string): PlayerForm[] {
-  const slotBySchid = new Map(season.slots.map((slot) => [slot.schid, slot]));
+  const slotBySchid = new Map(slotsFor(season, teamDivision(season, teamId)).map((slot) => [slot.schid, slot]));
   const forms = new Map<string, PlayerForm & { s01: number[]; sc: number[] }>();
   const sorted = [...games].filter((game) => game.finished).sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0));
   for (const game of sorted) {
@@ -207,7 +208,7 @@ export function teamProfile(season: SeasonDocument, cards: readonly MatchCard[],
     else if (diff < 0) record.l += 1;
     else record.d += 1;
   }
-  const slotBySchid = new Map(season.slots.map((slot) => [slot.schid, slot]));
+  const slotBySchid = new Map(slotsFor(season, teamDivision(season, teamId)).map((slot) => [slot.schid, slot]));
   const byStructure: Record<string, KindRecord> = {};
   const singles: number[] = [];
   for (const game of games) {
@@ -301,7 +302,8 @@ export interface SlotUsage {
  * Players are told apart by their season member id.
  */
 export function slotUsage(season: SeasonDocument, games: readonly GameRow[], teamId: string): SlotUsage {
-  const index = new Map(season.slots.map((slot, i) => [slot.schid, i]));
+  const schedule = slotsFor(season, teamDivision(season, teamId));
+  const index = new Map(schedule.map((slot, i) => [slot.schid, i]));
   const cards = new Set<string>();
   const players = new Map<string, { oid: string; name: string; counts: number[] }>();
   for (const game of games) {
@@ -311,13 +313,13 @@ export function slotUsage(season: SeasonDocument, games: readonly GameRow[], tea
     cards.add(game.tmid ?? game.scid ?? game.mid);
     for (const member of game.sides[side].members) {
       if (!member.oid) continue;
-      const row = players.get(member.oid) ?? { oid: member.oid, name: member.name, counts: Array(season.slots.length).fill(0) };
+      const row = players.get(member.oid) ?? { oid: member.oid, name: member.name, counts: Array(schedule.length).fill(0) };
       row.counts[index.get(game.schid)!] += 1;
       players.set(member.oid, row);
     }
   }
-  const used = season.slots.map((_, i) => [...players.values()].some((row) => row.counts[i] > 0));
-  const slots = season.slots.filter((_, i) => used[i]).map((slot) => ({ schid: slot.schid, label: slot.label }));
+  const used = schedule.map((_, i) => [...players.values()].some((row) => row.counts[i] > 0));
+  const slots = schedule.filter((_, i) => used[i]).map((slot) => ({ schid: slot.schid, label: slot.label }));
   const rows = [...players.values()]
     .map((row) => {
       const counts = row.counts.filter((_, i) => used[i]);

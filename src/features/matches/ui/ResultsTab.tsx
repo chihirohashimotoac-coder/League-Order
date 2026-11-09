@@ -4,7 +4,7 @@ import { useAppStore } from '../../../state/appStore';
 import type { MatchesApi } from '../api';
 import type { MatchCard } from '../cards';
 import { CARD_STATE_LABELS, cardScore, slotKindLabel } from '../cards';
-import { fixtureDate } from '../parse';
+import { fixtureDate, slotsFor } from '../parse';
 import { checkReproduction, projectStandings } from '../standings';
 import { headToHead, linkOrder, percent, teamProfile } from '../insights';
 import type { SeasonData } from './useMatchContext';
@@ -246,7 +246,7 @@ function Insights({ card, data, registered }: { card: MatchCard; data: SeasonDat
   const h2h = headToHead([data.season], { tournamentId: card.tournamentId, ourId: card.teams[0].id, theirId: card.teams[1].id, ourName: card.teams[0].name, theirName: card.teams[1].name });
   const group = data.standings?.find((entry) => entry.divisionIndex === card.divisionIndex);
   const check = group ? checkReproduction(data.season.pointRule, group, data.cards.filter((entry) => entry.divisionIndex === card.divisionIndex)) : null;
-  const games = data.season.slots.length;
+  const games = slotsFor(data.season, card.divisionIndex).length;
   const [first, setFirst] = useState(Math.ceil(games / 2));
   return (
     <section className="intel" aria-label="League Order の分析">
@@ -354,9 +354,10 @@ function Insights({ card, data, registered }: { card: MatchCard; data: SeasonDat
 function MatchTrail({ card, data }: { card: MatchCard; data: SeasonData }): React.JSX.Element | null {
   const steps = useMemo(() => {
     const exclude = new Set(card.games.flatMap((entry) => (entry.game ? [entry.game.mid] : [])));
-    const { chance } = slotChances(data.season, data.cards, data.games, [card.teams[0].id, card.teams[1].id], exclude);
+    const schedule = slotsFor(data.season, card.divisionIndex);
+    const { chance } = slotChances(data.season, data.cards, data.games, [card.teams[0].id, card.teams[1].id], exclude, schedule);
     const results = card.games.flatMap((entry) => (entry.winner !== null && entry.game?.finished ? [{ schid: entry.slot.schid, winner: entry.winner, endedAt: entry.game.updateTime }] : []));
-    return outlookTrail(data.season.slots, chance, results);
+    return outlookTrail(schedule, chance, results);
   }, [card, data]);
   const labels = new Map(card.games.map((entry) => [entry.slot.schid, entry.slot.label]));
   return (
