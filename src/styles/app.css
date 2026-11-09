@@ -7790,3 +7790,8 @@ ul.plain {
 .usage-table td.strong {
   font-weight: 700;
 }
+
+/* Column heads of the standings stay on one line (the table scrolls inside its own box). */
+.standings thead th {
+  white-space: nowrap;
+}
