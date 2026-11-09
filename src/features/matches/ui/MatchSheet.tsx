@@ -70,7 +70,7 @@ export function MatchSheet({ mid, factory, onClose, title }: { mid: string; fact
               <span>{names[1]}</span>
             </header>
             {live && !live.gameEnded ? (
-              <LiveSheet api={api} live={live} />
+              <LiveSheet key={live.mid} api={api} live={live} />
             ) : (
               <GameView api={api} mid={mid} cricket={cricket} finished={row.finished} names={names} flip={false} />
             )}

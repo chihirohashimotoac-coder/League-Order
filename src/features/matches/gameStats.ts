@@ -8,7 +8,10 @@ import type { LiveThrow, ThrowLeg } from './parse';
  * - 100+ / 140+ / 180 are visits of 100–139, 140–179 and 180 (n01's bands; 170+ is not shown).
  * - Best Leg is the fewest darts in a leg the side won; High Out the highest checkout.
  * - Second Legs are the legs the side threw second in; Break Legs the ones of them it won.
- * - First 9 is the average of the first three visits of each leg (3-dart scale).
+ * - First 9 = Σ points of the first three visits of each leg × 3 ÷ Σ darts of those visits. A
+ *   leg finished inside its first three visits counts with the darts actually thrown (301 as
+ *   120, 120, 61 with two darts = 301 × 3 ÷ 8 = 112.875, not 301 ÷ 3). This is the rule of the
+ *   analytics reconstruction, whose f9Score / f9Darts match n01's official season totals.
  * - Cricket: MPR = marks / darts × 3, and how many visits scored 1 … 9 marks.
  *
  * Unknown stays `null` (never 0). Checkout percentage is not given: darts at a double are not
@@ -39,9 +42,9 @@ function empty(): SideStats {
 
 export function gameStats(legs: readonly ThrowLeg[], cricket: boolean): [SideStats, SideStats] {
   const sides: [SideStats, SideStats] = [empty(), empty()];
-  const f9: [{ points: number; visits: number }, { points: number; visits: number }] = [
-    { points: 0, visits: 0 },
-    { points: 0, visits: 0 },
+  const f9: [{ points: number; darts: number }, { points: number; darts: number }] = [
+    { points: 0, darts: 0 },
+    { points: 0, darts: 0 },
   ];
   for (const leg of legs) {
     for (const side of [0, 1] as const) {
@@ -62,7 +65,7 @@ export function gameStats(legs: readonly ThrowLeg[], cricket: boolean): [SideSta
           points += entry.score;
           if (index < 3) {
             f9[side].points += entry.score;
-            f9[side].visits += 1;
+            f9[side].darts += entry.darts;
           }
           if (entry.score === 180) stats.ton80 += 1;
           else if (entry.score >= 140) stats.ton40 += 1;
@@ -84,7 +87,7 @@ export function gameStats(legs: readonly ThrowLeg[], cricket: boolean): [SideSta
   for (const side of [0, 1] as const) {
     const stats = sides[side];
     stats.rate = stats.darts > 0 ? (stats.points / stats.darts) * 3 : null;
-    if (!cricket) stats.first9 = f9[side].visits > 0 ? (f9[side].points / f9[side].visits) : null;
+    if (!cricket) stats.first9 = f9[side].darts > 0 ? (f9[side].points / f9[side].darts) * 3 : null;
   }
   return sides;
 }

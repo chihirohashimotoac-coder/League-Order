@@ -67,12 +67,15 @@ describe('game stats from the throws (n01 Details equivalents)', () => {
     expect(b).toMatchObject({ legsWon: 1, ton: 1, ton40: 1, ton80: 0, highOut: null, secondLegs: 2, breaks: 1 });
   });
 
-  it('leaves the bull-decided leg out of averages and darts, and First 9 is the first three visits', () => {
+  it('leaves the bull-decided leg out of averages and darts, and First 9 is the first three visits by their darts', () => {
     expect(a.darts).toBe(8 + 12);
     expect(a.points).toBe(501 + 501);
     expect(a.rate).toBeCloseTo((1002 / 20) * 3, 5);
-    // First 9: leg 1 (180,180,141) + leg 2 (100,140,121) over 6 visits.
-    expect(a.first9).toBeCloseTo((180 + 180 + 141 + 100 + 140 + 121) / 6, 5);
+    // First 9: leg 1 (180,180,141 — the checkout took 2 darts: 8 darts) + leg 2 (100,140,121: 9
+    // darts) = 862 points over 17 darts, ×3 = 152.12. Until v1.4.0 this divided by 6 visits as if
+    // they were 18 darts (143.67), understating a leg finished early; the analytics reconstruction,
+    // checked against n01's official f9Score / f9Darts, counts the darts thrown (audit F10).
+    expect(a.first9).toBeCloseTo(((180 + 180 + 141 + 100 + 140 + 121) / 17) * 3, 5);
   });
 
   it('uses n01’s own darts count of a finished leg when given', () => {

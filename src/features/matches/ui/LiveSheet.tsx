@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { MatchesApi } from '../api';
-import type { LiveState, LiveThrow, ThrowLeg } from '../parse';
-import { mergeLegs } from '../parse';
+import type { LiveState, LiveThrow } from '../parse';
+import { withLiveLeg } from '../parse';
 import { gameStats } from '../gameStats';
-import { checkoutRoute, freshLegChance, legChance, shrunkAverage } from '../checkout';
+import { checkoutRoute, freshLegChance, legChance, liveEstimateScope, shrunkAverage } from '../checkout';
+import { useGameLegs } from './useGameLegs';
 import { raceChance } from '../probability';
 import { ZeroOneGrid } from './ScoreGrid';
 import { FinishChances, RaceChart } from './LegCharts';
@@ -13,52 +14,28 @@ import { FinishChances, RaceChart } from './LegCharts';
  * viewer: legs in the header, the score sheet of the leg (Scored / To Go per visit, darts in
  * the middle), the points left large at the bottom, the game's figures below.
  *
- * Then what only League Order adds, all labelled 予測 / 参考: the thrower's checkout route,
- * the chance of taking this leg and the game, recent form against the game average, the legs
- * so far, and (league cards) the season average.
+ * Then what only League Order adds, in two visibly separate blocks:
+ * - 実績 (what happened): the thrower's standard route, the race chart, finishing chances, recent
+ *   form against the game average, the legs so far, (league cards) n01's season average;
+ * - 参考予測 (a model, not calibrated): the chance of taking this leg and the game, shown only
+ *   where the model applies (`liveEstimateScope`) — otherwise no number at all.
+ *
+ * The game's legs come from `useGameLegs`, bound to this game's `mid`: figures computed from
+ * the legs wait until they are read, and a failed read says so (with a retry) instead of
+ * showing another game's legs or a partial game as the whole.
  */
 
 const fmt = (value: number | null, digits = 2): string => (value === null ? '—' : value.toFixed(digits));
 
 export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live: LiveState; seasonAverage?: [number | null, number | null] }): React.JSX.Element {
-  const [legs, setLegs] = useState<ThrowLeg[]>([]);
-  const [since, setSince] = useState<number | null>(null);
   const cricket = live.matchType === 'cricket';
   const leg = live.leg;
   const legIndex = leg?.index ?? null;
+  const history = useGameLegs(api, live.mid, { finished: false, liveLegIndex: legIndex });
+  const complete = history.status === 'ready';
 
-  // Every leg of the game once, then the legs changed since whenever the live leg moves on.
-  useEffect(() => {
-    let alive = true;
-    api
-      .throws(live.mid, null)
-      .then((reply) => {
-        if (!alive) return;
-        setLegs(reply.legs);
-        setSince(reply.updateTime);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [api, live.mid]);
-  useEffect(() => {
-    if (since === null || legIndex === null) return;
-    let alive = true;
-    api
-      .throws(live.mid, since)
-      .then((reply) => {
-        if (!alive || !reply.changed) return;
-        setLegs((held) => mergeLegs(held, reply.legs));
-        if (reply.updateTime) setSince(reply.updateTime);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [legIndex]);
-
-  const all = useMemo(() => (leg ? mergeLegs(legs, [{ ...leg, bull: false, dartsTotal: null }]) : legs), [legs, leg]);
+  // The live leg laid over the legs read for this game, keeping its own bull flag and darts.
+  const all = useMemo(() => withLiveLeg(history.legs, leg), [history.legs, leg]);
   const stats = useMemo(() => gameStats(all, cricket), [all, cricket]);
   const names: [string, string] = [live.sides[0].members.join(' / ') || live.sides[0].name, live.sides[1].members.join(' / ') || live.sides[1].name];
   const thrower = leg && !leg.ended ? leg.thrower : null;
@@ -66,16 +43,18 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
   // --- League Order's own figures ---------------------------------------------------------
   const average: [number, number] = [shrunkAverage(stats[0].rate, stats[0].darts), shrunkAverage(stats[1].rate, stats[1].darts)];
   const left = leg?.left ?? null;
-  const legP = !cricket && left && thrower !== null ? legChance(left, average, thrower) : null;
   const need = live.limitLeg;
+  const scope = liveEstimateScope({ cricket, left, thrower, startScore: live.startScore, limitLeg: need, drawMode: live.drawMode, complete });
+  const legP = scope.leg && left && thrower !== null ? legChance(left, average, thrower) : null;
   const gameP =
-    legP !== null && need
+    legP !== null && scope.game && need && live.startScore
       ? (() => {
-          const q = freshLegChance(average);
+          const q = freshLegChance(average, live.startScore);
           return legP * raceChance(q, need, live.legs[0] + 1, live.legs[1]) + (1 - legP) * raceChance(q, need, live.legs[0], live.legs[1] + 1);
         })()
       : null;
   const recent = (side: 0 | 1): number | null => {
+    if (!complete) return null;
     const mine = (leg?.throws ?? []).filter((entry): entry is Extract<LiveThrow, { kind: '01' }> => entry.side === side && entry.kind === '01');
     const visits = [...all.flatMap((entry) => (entry.index === leg?.index ? [] : entry.throws)), ...mine].filter((entry): entry is Extract<LiveThrow, { kind: '01' }> => entry.side === side && entry.kind === '01').slice(-3);
     return visits.length === 3 ? visits.reduce((sum, entry) => sum + entry.score, 0) / 3 : null;
@@ -126,6 +105,8 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
         ))}
       </div>
 
+      {!complete || history.stale ? <LegsStatusLine status={history.status} stale={history.stale} error={history.error} onRetry={history.retry} /> : null}
+      {complete ? (
       <table className="ns-stats" aria-label="このゲームのスタッツ">
         <tbody>
           {(cricket
@@ -152,9 +133,10 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
           ))}
         </tbody>
       </table>
+      ) : null}
 
       <div className="ns-plus" data-testid="league-order-plus">
-        <h3 className="section-mini">League Order の分析</h3>
+        <h3 className="section-mini">League Order の分析 (記録から)</h3>
         {route && thrower !== null ? (
           <p className="ns-route" data-testid="checkout-route">
             基準ルート ({names[thrower]} 残り {left![thrower]}): <strong>{route.join(' ')}</strong>
@@ -164,30 +146,7 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
           <p className="ns-route muted">残り {left[thrower]} は 3 本で上がれない数字です (セットアップ)。</p>
         ) : null}
         {!cricket && leg ? <RaceChart leg={leg} startScore={live.startScore} names={names} /> : null}
-        {!cricket ? <FinishChances legs={all} names={names} /> : null}
-        {legP !== null ? (
-          <div className="ns-chance" data-testid="leg-chance">
-            <span>このLeg</span>
-            <span className="bar" aria-hidden="true">
-              <i style={{ width: `${Math.round(legP * 100)}%` }} />
-            </span>
-            <span>
-              {Math.round(legP * 100)}% - {100 - Math.round(legP * 100)}%
-            </span>
-          </div>
-        ) : null}
-        {gameP !== null ? (
-          <div className="ns-chance">
-            <span>このゲーム</span>
-            <span className="bar" aria-hidden="true">
-              <i style={{ width: `${Math.round(gameP * 100)}%` }} />
-            </span>
-            <span>
-              {Math.round(gameP * 100)}% - {100 - Math.round(gameP * 100)}%
-            </span>
-          </div>
-        ) : null}
-        {legP !== null ? <p className="muted small-text">予測: 残り点・このゲームの平均・次に投げる側から計算した参考値です。</p> : null}
+        {!cricket && complete ? <FinishChances legs={all} names={names} /> : null}
         {!cricket ? (
           <table className="ns-form small-text">
             <tbody>
@@ -206,7 +165,7 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
             </tbody>
           </table>
         ) : null}
-        {all.filter((entry) => entry.ended).length > 0 ? (
+        {complete && all.filter((entry) => entry.ended).length > 0 ? (
           <ol className="ns-legs small-text" aria-label="Legの経過">
             {all
               .filter((entry) => entry.ended)
@@ -225,8 +184,64 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
               })}
           </ol>
         ) : null}
+        {!cricket ? (
+          <div className="ns-estimate" data-testid="live-estimate">
+            <h3 className="section-mini">
+              参考予測 <span className="tag">未検証</span>
+            </h3>
+            {legP !== null ? (
+              <div className="ns-chance" data-testid="leg-chance">
+                <span>このLeg</span>
+                <span className="bar" aria-hidden="true">
+                  <i style={{ width: `${Math.round(legP * 100)}%` }} />
+                </span>
+                <span>
+                  {Math.round(legP * 100)}% - {100 - Math.round(legP * 100)}%
+                </span>
+              </div>
+            ) : null}
+            {gameP !== null ? (
+              <div className="ns-chance" data-testid="game-chance">
+                <span>{live.showSets ? 'このセット' : 'このゲーム'}</span>
+                <span className="bar" aria-hidden="true">
+                  <i style={{ width: `${Math.round(gameP * 100)}%` }} />
+                </span>
+                <span>
+                  {Math.round(gameP * 100)}% - {100 - Math.round(gameP * 100)}%
+                </span>
+              </div>
+            ) : null}
+            <p className="muted small-text">
+              {legP !== null
+                ? `残り点・このゲームの平均・次に投げる側から計算した参考値で、実際の試合での精度は検証していません。${gameP === null && 'reason' in scope ? `${live.showSets ? 'セット' : 'ゲーム'}の予測なし: ${scope.reason}。` : ''}`
+                : `予測なし: ${'reason' in scope ? scope.reason : '—'}。`}
+            </p>
+          </div>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function LegsStatusLine({ status, stale, error, onRetry }: { status: 'loading' | 'ready' | 'error'; stale: boolean; error: string | null; onRetry: () => void }): React.JSX.Element {
+  return (
+    <p className={`small-text legs-status ${status}`} role={status === 'error' ? 'alert' : 'status'} data-testid="legs-status">
+      {status === 'loading'
+        ? 'このゲームの記録を取得中… (平均などは記録がそろってから表示します)'
+        : status === 'error'
+          ? `このゲームの記録を取得できませんでした${error ? ` (${error})` : ''}。平均などは表示していません。`
+          : stale
+            ? '終わった Leg の記録を再取得しています。'
+            : ''}
+      {status === 'error' ? (
+        <>
+          {' '}
+          <button type="button" className="btn small" onClick={onRetry}>
+            再取得
+          </button>
+        </>
+      ) : null}
+    </p>
   );
 }
 

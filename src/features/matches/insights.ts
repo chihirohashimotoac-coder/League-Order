@@ -102,7 +102,12 @@ export interface PlayerForm {
   oid: string;
   name: string;
   byStructure: Record<string, KindRecord>;
-  /** Singles only — the only games whose average is the player's own. */
+  /**
+   * Singles only — the only games whose average is the player's own. `season` and `recent`
+   * (the last {@link RECENT} games) are pooled: Σ points × 3 ÷ Σ darts over those games, the
+   * same 3DA as n01's season figure — never the plain mean of the game averages. `trend` is the
+   * game-by-game average, for the sparkline only.
+   */
   singles01: { season: number | null; recent: number | null; games: number; trend: number[] };
   singlesCricket: { season: number | null; recent: number | null; games: number };
   notes: string[];
@@ -110,8 +115,23 @@ export interface PlayerForm {
 
 const RECENT = 3;
 
-function mean(values: readonly number[]): number | null {
-  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+/** Points (01) or marks (Cricket) and darts of one side of one game. */
+export interface RatePair {
+  num: number;
+  darts: number;
+}
+
+/** Σ num × 3 ÷ Σ darts; `null` with no darts (never 0). */
+export function pooledRate(pairs: readonly RatePair[]): number | null {
+  const darts = pairs.reduce((sum, pair) => sum + pair.darts, 0);
+  return darts > 0 ? (pairs.reduce((sum, pair) => sum + pair.num, 0) / darts) * 3 : null;
+}
+
+function ratePair(game: GameRow, side: 0 | 1): RatePair | null {
+  const row = game.sides[side];
+  if (row.darts === null || row.darts <= 0) return null;
+  const value = game.matchType === 'cricket' ? row.marks : row.score;
+  return value === null ? null : { num: value, darts: row.darts };
 }
 
 /** Card side index of a team in one game row, or `null`. */
@@ -119,16 +139,9 @@ function sideOf(game: GameRow, teamId: string): 0 | 1 | null {
   return game.sides[0].teamId === teamId ? 0 : game.sides[1].teamId === teamId ? 1 : null;
 }
 
-function rate(game: GameRow, side: 0 | 1): number | null {
-  const row = game.sides[side];
-  if (row.darts === null || row.darts <= 0) return null;
-  if (game.matchType === 'cricket') return row.marks === null ? null : (row.marks / row.darts) * 3;
-  return row.score === null ? null : (row.score / row.darts) * 3;
-}
-
 export function playerForms(season: SeasonDocument, games: readonly GameRow[], teamId: string): PlayerForm[] {
   const slotBySchid = new Map(slotsFor(season, teamDivision(season, teamId)).map((slot) => [slot.schid, slot]));
-  const forms = new Map<string, PlayerForm & { s01: number[]; sc: number[] }>();
+  const forms = new Map<string, PlayerForm & { s01: RatePair[]; sc: RatePair[] }>();
   const sorted = [...games].filter((game) => game.finished).sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0));
   for (const game of sorted) {
     const side = sideOf(game, teamId);
@@ -150,21 +163,21 @@ export function playerForms(season: SeasonDocument, games: readonly GameRow[], t
           notes: [],
           s01: [],
           sc: [],
-        } as PlayerForm & { s01: number[]; sc: number[] });
+        } as PlayerForm & { s01: RatePair[]; sc: RatePair[] });
       const record = form.byStructure[structure] ?? { games: 0, wins: 0 };
       record.games += 1;
       if (won) record.wins += 1;
       form.byStructure[structure] = record;
       if (game.sides[side].members.length === 1) {
-        const value = rate(game, side);
-        if (value !== null) (game.matchType === 'cricket' ? form.sc : form.s01).push(value);
+        const pair = ratePair(game, side);
+        if (pair !== null) (game.matchType === 'cricket' ? form.sc : form.s01).push(pair);
       }
       forms.set(member.oid, form);
     }
   }
   return [...forms.values()].map(({ s01, sc, ...form }) => {
-    form.singles01 = { season: mean(s01), recent: s01.length > RECENT ? mean(s01.slice(-RECENT)) : null, games: s01.length, trend: s01.slice(-8) };
-    form.singlesCricket = { season: mean(sc), recent: sc.length > RECENT ? mean(sc.slice(-RECENT)) : null, games: sc.length };
+    form.singles01 = { season: pooledRate(s01), recent: s01.length > RECENT ? pooledRate(s01.slice(-RECENT)) : null, games: s01.length, trend: s01.slice(-8).map((pair) => (pair.num / pair.darts) * 3) };
+    form.singlesCricket = { season: pooledRate(sc), recent: sc.length > RECENT ? pooledRate(sc.slice(-RECENT)) : null, games: sc.length };
     const kinds = Object.entries(form.byStructure).filter(([, record]) => record.games >= MIN_SAMPLE);
     if (kinds.length >= 2) {
       const ranked = kinds.map(([kind, record]) => ({ kind, rate: record.wins / record.games })).sort((a, b) => b.rate - a.rate);
@@ -210,7 +223,7 @@ export function teamProfile(season: SeasonDocument, cards: readonly MatchCard[],
   }
   const slotBySchid = new Map(slotsFor(season, teamDivision(season, teamId)).map((slot) => [slot.schid, slot]));
   const byStructure: Record<string, KindRecord> = {};
-  const singles: number[] = [];
+  const singles: RatePair[] = [];
   for (const game of games) {
     if (!game.finished) continue;
     const side = sideOf(game, teamId);
@@ -224,11 +237,11 @@ export function teamProfile(season: SeasonDocument, cards: readonly MatchCard[],
     if (a > b) entry.wins += 1;
     byStructure[structure] = entry;
     if (game.matchType === '01' && game.sides[side].members.length === 1) {
-      const value = rate(game, side);
-      if (value !== null) singles.push(value);
+      const pair = ratePair(game, side);
+      if (pair !== null) singles.push(pair);
     }
   }
-  return { teamId, name: season.teams.get(teamId) ?? teamId, cards: record, byStructure, singles01: mean(singles), singles01Games: singles.length };
+  return { teamId, name: season.teams.get(teamId) ?? teamId, cards: record, byStructure, singles01: pooledRate(singles), singles01Games: singles.length };
 }
 
 export interface HeadToHeadRow {
