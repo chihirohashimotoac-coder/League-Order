@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01 } from './n01Server';
 import { N01_API_BASE_URL } from '../src/integrations/n01/endpoints';
-import { TDID, c001Rows as rawC001Rows, fixtures, gameRow, list, liveBody, side, tournamentDoc } from '../src/features/matches/testFixtures';
+import { LGID, TDID, c001Rows as rawC001Rows, fixtures, gameRow, list, liveBody, side, tournamentDoc } from '../src/features/matches/testFixtures';
 
 /**
  * The 2026-11 update in a real browser: the appearance-count questions, ATDO's caps applied
@@ -135,6 +135,40 @@ async function watchWithoutTeam(page: Page): Promise<void> {
   await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
   await expect(page.getByTestId('watch-page')).toBeVisible();
 }
+
+test.describe('player card (選手カード)', () => {
+  test('a registered team’s player: season figures from the throws, and the next order one tap away', async ({ page }) => {
+    // A team made from n01 (ATDO) ...
+    await pinFixtureClock(page);
+    await serveN01(page);
+    await page.goto('/');
+    await page.getByRole('button', { name: 'n01から作成' }).click();
+    const wizard = page.getByRole('dialog', { name: 'n01から作成' });
+    await wizard.getByRole('button', { name: 'ATDO', exact: true }).click();
+    await wizard.getByRole('button', { name: /kalavinka/ }).click();
+    await wizard.getByRole('button', { name: 'このチームを作成' }).click();
+    await expect(page.getByRole('heading', { name: 'kalavinka', level: 1 })).toBeVisible();
+    // ... found by its exact name in a season of the same league (Arrows renamed kalavinka).
+    await page.unroute(`${N01_API_BASE_URL}/**`);
+    await serveN01Canned(page);
+    await page.route(
+      (url) => url.pathname.endsWith('/tournament/get') && url.searchParams.get('tdid') === TDID,
+      (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(tournamentDoc(officialC001)).replaceAll('"Arrows"', '"kalavinka"').replaceAll(LGID, 'lg_l3hI_3397') }),
+    );
+    await page.getByTestId('home-results').click();
+    await page.getByRole('tab', { name: 'スタッツ' }).click();
+    await page.getByTestId('stats-tab').getByRole('button', { name: 'A1', exact: true }).click();
+    const card = page.getByTestId('player-card');
+    await expect(card).toContainText('Singles 01 平均');
+    await expect(card).toContainText('上がり圏');
+    await expect(card).not.toContainText('集計中');
+    await expect(card).toContainText('180');
+    await noSidewaysScroll(page);
+    await card.getByRole('button', { name: 'kalavinka の次戦オーダーを作る' }).click();
+    await expect(page.getByTestId('rule-conditions-league')).toBeVisible();
+  });
+});
 
 test.describe('watching without a team (リーグ・大会を見る)', () => {
   test('live: today’s cards, the card’s flow, scoreboard, estimate, upcoming lineup; it stops when the card ends', async ({ page }) => {

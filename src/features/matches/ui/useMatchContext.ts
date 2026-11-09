@@ -143,11 +143,17 @@ export function formatRate(value: number | null): string {
  * it. The active team comes first.
  */
 export function useRegisteredTeams(season: SeasonDocument | null): string[] {
+  const map = useRegisteredTeamMap(season);
+  return useMemo(() => [...map.keys()], [map]);
+}
+
+/** Registered teams of this season: n01 team id → League Order team id (active team first). */
+export function useRegisteredTeamMap(season: SeasonDocument | null): Map<string, string> {
   const store = useAppStore();
   return useMemo(() => {
-    if (!season) return [];
+    const map = new Map<string, string>();
+    if (!season) return map;
     const teams = [...store.teams].sort((a, b) => Number(b.id === store.activeTeamId) - Number(a.id === store.activeTeamId));
-    const ids: string[] = [];
     for (const team of teams) {
       const binding = team.n01;
       if (!binding || binding.leagueId !== season.leagueId) continue;
@@ -159,9 +165,9 @@ export function useRegisteredTeams(season: SeasonDocument | null): string[] {
         ownTeamName: binding.lastTeamName,
         ownDivision: binding.lastDivisionIndex,
       });
-      if (id && !ids.includes(id)) ids.push(id);
+      if (id && !map.has(id)) map.set(id, team.id);
     }
-    return ids;
+    return map;
   }, [season, store.teams, store.activeTeamId]);
 }
 

@@ -7540,3 +7540,76 @@ ul.plain {
   border-color: var(--color-success);
   color: var(--color-accent-ink);
 }
+
+/* ---------------------------------------------------------------------------
+   選手カード (player card)
+   --------------------------------------------------------------------------- */
+
+.player-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pc-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.pc-big {
+  font-size: 2.2em;
+  font-weight: 800;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-spark .area {
+  fill: var(--color-accent-tint);
+}
+
+.pc-spark .stroke {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.pc-spark .end {
+  fill: var(--color-accent);
+}
+
+.pc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5em, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.pc-grid > div {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-paper);
+}
+
+.pc-grid > div.wide {
+  grid-column: 1 / -1;
+}
+
+.pc-grid dt {
+  font-size: 0.75em;
+  color: var(--color-text-muted);
+}
+
+.pc-grid dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}

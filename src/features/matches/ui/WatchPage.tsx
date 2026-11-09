@@ -3,18 +3,20 @@ import { Card, Sheet } from '../../../components/ui';
 import { Icon } from '../../../components/icons';
 import { useAppStore } from '../../../state/appStore';
 import type { WatchSettings } from '../../../domain/types';
+import type { Page } from '../../../navigation';
 import type { MatchesApi } from '../api';
 import { checkReproduction } from '../standings';
 import { percent, playerForms, teamProfile } from '../insights';
 import { useMatchesApiFactory } from '../environment';
 import type { MatchesApiFactory } from '../environment';
 import type { PlayerLine, SeasonData } from './useMatchContext';
-import { formatClock, formatRate, usePlayerStats, useRegisteredTeams, useSeasonData, useSeasons } from './useMatchContext';
+import { formatClock, formatRate, usePlayerStats, useRegisteredTeamMap, useSeasonData, useSeasons } from './useMatchContext';
 import { LeaguePicker } from './LeaguePicker';
 import { LiveTab } from './LiveTab';
 import { ResultsTab } from './ResultsTab';
 import { MatchSheet } from './MatchSheet';
 import { NowView, TournamentHub } from './CompetitionViews';
+import { PlayerCard } from './PlayerCard';
 
 /**
  * 観戦 (WATCH): one page for any n01 league, with or without a team. Four tabs —
@@ -24,6 +26,12 @@ import { NowView, TournamentHub } from './CompetitionViews';
 
 export type WatchTab = 'live' | 'results' | 'standings' | 'stats';
 
+interface PlayerRef {
+  oid: string;
+  name: string;
+  teamId: string | null;
+}
+
 const TABS: [WatchTab, string][] = [
   ['live', 'ライブ'],
   ['results', '日程・結果'],
@@ -31,7 +39,7 @@ const TABS: [WatchTab, string][] = [
   ['stats', 'スタッツ'],
 ];
 
-export default function WatchPage({ initialTab }: { initialTab: WatchTab }): React.JSX.Element {
+export default function WatchPage({ initialTab, onNavigate }: { initialTab: WatchTab; onNavigate?: (page: Page) => void }): React.JSX.Element {
   const store = useAppStore();
   const factory = useMatchesApiFactory();
   // What to watch: the last choice, else the active team's league.
@@ -54,7 +62,13 @@ export default function WatchPage({ initialTab }: { initialTab: WatchTab }): Rea
   const [game, setGame] = useState<{ mid: string; title?: string } | null>(null);
   const [team, setTeam] = useState<string | null>(null);
   const season = data.kind === 'ready' ? data.value.season : null;
-  const registered = useRegisteredTeams(season);
+  const teamMap = useRegisteredTeamMap(season);
+  const registered = useMemo(() => [...teamMap.keys()], [teamMap]);
+  const [player, setPlayer] = useState<PlayerRef | null>(null);
+  const openPlayer = (next: PlayerRef): void => {
+    setTeam(null);
+    setPlayer(next);
+  };
 
   const pick = (next: WatchSettings): void => {
     store.updateSettings({ watch: next });
@@ -175,8 +189,30 @@ export default function WatchPage({ initialTab }: { initialTab: WatchTab }): Rea
           {tab === 'live' ? <LiveTab data={data.value} registered={registered} api={api} factory={factory} /> : null}
           {tab === 'results' ? <ResultsTab data={data.value} registered={registered} api={api} onTeam={setTeam} /> : null}
           {tab === 'standings' ? <StandingsTab data={data.value} registered={registered} onTeam={setTeam} /> : null}
-          {tab === 'stats' ? <StatsTab data={data.value} registered={registered} api={api} onTeam={setTeam} /> : null}
-          {team ? <TeamSheet teamId={team} data={data.value} registered={registered} factory={factory} onClose={() => setTeam(null)} /> : null}
+          {tab === 'stats' ? <StatsTab data={data.value} registered={registered} api={api} onTeam={setTeam} onPlayer={openPlayer} /> : null}
+          {team ? <TeamSheet teamId={team} data={data.value} registered={registered} factory={factory} onClose={() => setTeam(null)} onPlayer={openPlayer} /> : null}
+          {player ? (
+            <PlayerCard
+              key={player.oid}
+              oid={player.oid}
+              name={player.name}
+              teamId={player.teamId}
+              data={data.value}
+              api={api}
+              orderTeamName={player.teamId && teamMap.has(player.teamId) && onNavigate ? (data.value.season.teams.get(player.teamId) ?? null) : null}
+              onOrder={() => {
+                const own = player.teamId ? teamMap.get(player.teamId) : undefined;
+                if (!own || !onNavigate) return;
+                if (store.activeTeamId !== own) store.setActiveTeam(own);
+                onNavigate('setup');
+              }}
+              onTeam={(id) => {
+                setPlayer(null);
+                setTeam(id);
+              }}
+              onClose={() => setPlayer(null)}
+            />
+          ) : null}
         </>
       ) : null}
       <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
@@ -328,7 +364,19 @@ function value(line: PlayerLine['line'], key: SortKey): number | null {
   }
 }
 
-function StatsTab({ data, registered, api, onTeam }: { data: SeasonData; registered: string[]; api: MatchesApi; onTeam: (teamId: string) => void }): React.JSX.Element {
+function StatsTab({
+  data,
+  registered,
+  api,
+  onTeam,
+  onPlayer,
+}: {
+  data: SeasonData;
+  registered: string[];
+  api: MatchesApi;
+  onTeam: (teamId: string) => void;
+  onPlayer: (player: PlayerRef) => void;
+}): React.JSX.Element {
   const stats = usePlayerStats(api, data.season.tournamentId, true);
   const [sort, setSort] = useState<SortKey>('avg');
   const [division, setDivision] = useState<number | 'all'>('all');
@@ -382,7 +430,9 @@ function StatsTab({ data, registered, api, onTeam }: { data: SeasonData; registe
               <tr key={row.oid} className={row.teamId && registered.includes(row.teamId) ? 'own' : ''}>
                 <td>{index + 1}</td>
                 <th scope="row">
-                  {row.name}
+                  <button type="button" className="linklike" onClick={() => onPlayer({ oid: row.oid, name: row.name, teamId: row.teamId })}>
+                    {row.name}
+                  </button>
                   {row.teamId ? (
                     <button type="button" className="linklike muted" onClick={() => onTeam(row.teamId!)}>
                       {data.season.teams.get(row.teamId) ?? ''}
@@ -410,7 +460,20 @@ function StatsTab({ data, registered, api, onTeam }: { data: SeasonData; registe
 
 const STRUCTURE_LABEL: Record<string, string> = { SINGLES: 'Singles', DOUBLES: 'Doubles', TRIOS: 'Trios', GALLON: 'Gallon', TEAM: 'Team', UNKNOWN: '不明' };
 
-function TeamSheet({ teamId, data, registered, onClose }: { teamId: string; data: SeasonData; registered: string[]; factory: MatchesApiFactory; onClose: () => void }): React.JSX.Element {
+function TeamSheet({
+  teamId,
+  data,
+  registered,
+  onClose,
+  onPlayer,
+}: {
+  teamId: string;
+  data: SeasonData;
+  registered: string[];
+  factory: MatchesApiFactory;
+  onClose: () => void;
+  onPlayer: (player: PlayerRef) => void;
+}): React.JSX.Element {
   const profile = teamProfile(data.season, data.cards, data.games, teamId);
   const forms = playerForms(data.season, data.games, teamId);
   const cards = data.cards.filter((card) => card.teams.some((t) => t.id === teamId));
@@ -449,7 +512,11 @@ function TeamSheet({ teamId, data, registered, onClose }: { teamId: string; data
             <tbody>
               {forms.map((form) => (
                 <tr key={form.oid}>
-                  <th scope="row">{form.name}</th>
+                  <th scope="row">
+                    <button type="button" className="linklike" onClick={() => onPlayer({ oid: form.oid, name: form.name, teamId })}>
+                      {form.name}
+                    </button>
+                  </th>
                   <td>
                     {formatRate(form.singles01.season)} / {formatRate(form.singles01.recent)} <span className="muted">({form.singles01.games})</span>
                   </td>

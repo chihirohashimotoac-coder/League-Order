@@ -25,10 +25,10 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   }
 }
 
-export default function MatchesEntry({ page }: { page: 'matches' | 'live'; onNavigate?: (page: Page) => void }): React.JSX.Element {
+export default function MatchesEntry({ page, onNavigate }: { page: 'matches' | 'live'; onNavigate?: (page: Page) => void }): React.JSX.Element {
   return (
     <Boundary>
-      <WatchPage initialTab={page === 'live' ? 'live' : 'results'} />
+      <WatchPage initialTab={page === 'live' ? 'live' : 'results'} onNavigate={onNavigate} />
     </Boundary>
   );
 }
