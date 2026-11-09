@@ -85,6 +85,8 @@ export interface SeasonData {
   standingsError: string | null;
   unreadableGames: number;
   truncated: boolean;
+  /** A page boundary of the game list fell on equal start times (`GameList.unsure`). */
+  unsureGames?: boolean;
 }
 
 export function useSeasonData(api: MatchesApi | null, tournamentId: string | null): Load<SeasonData> {
@@ -111,6 +113,7 @@ export function useSeasonData(api: MatchesApi | null, tournamentId: string | nul
         standingsError,
         unreadableGames: games.unreadable,
         truncated: games.truncated,
+        unsureGames: games.unsure,
       };
     })()
       .then((value) => live && setState({ kind: 'ready', value, fetchedAt: Date.now() }))
@@ -184,6 +187,8 @@ export interface BoardState {
   truncated: boolean;
   /** Rows n01 sent that could not be read. */
   unreadable: number;
+  /** A page boundary fell on equal start times: a game may be missing (`GameList.unsure`). */
+  unsure?: boolean;
 }
 
 /** 5 s while a game is in progress, 15 s when the last three polls brought nothing new, 60 s with nothing live. */
@@ -214,7 +219,7 @@ export function useTodayBoard(api: MatchesApi | null, tournamentId: string | nul
         lastMax = Math.max(lastMax, max);
         const live = games.some((game) => !game.finished);
         delay = !live ? 60_000 : quiet >= 3 ? 15_000 : 5000;
-        setState({ games, error: null, fetchedAt: Date.now(), truncated: list.truncated, unreadable: list.unreadable });
+        setState({ games, error: null, fetchedAt: Date.now(), truncated: list.truncated, unreadable: list.unreadable, unsure: list.unsure });
       } catch (error) {
         if (!alive) return;
         delay = 20_000;

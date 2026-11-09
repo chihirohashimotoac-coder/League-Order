@@ -10,6 +10,7 @@ import type { PeriodLoad } from '../service/periodService';
 import type { AnalyticsServices } from './usePeriodLoad';
 import { AnalyticsApi } from '../api/readApi';
 import { DETAIL_MAX_REQUESTS } from '../service/detailService';
+import { describeN01Error } from '../../../integrations/n01/client';
 
 /**
  * Game rows and leg reconstructions for the open period, fetched only when a view needs them
@@ -83,6 +84,30 @@ export interface DetailState {
 }
 
 /**
+ * The per-game figures shown: rebuilt from the **latest** result of each player, so a player's
+ * figures are exactly what their last reconstruction accepted. Running a player again replaces
+ * all of that player's figures — a season that no longer matches n01 (a corrected or deleted
+ * leg) loses its old figures instead of keeping them under a description that says otherwise —
+ * and nobody else's change. Each result only holds its own player's ids, so nothing collides.
+ */
+export function contributionsOf(results: ReadonlyMap<string, PlayerDetailResult>): PlayerContributions {
+  const contributions: PlayerContributions = new Map();
+  for (const result of results.values()) {
+    for (const [gameId, players] of result.contributions) {
+      const target = contributions.get(gameId) ?? new Map();
+      for (const [oid, value] of players) target.set(oid, value);
+      contributions.set(gameId, target);
+    }
+  }
+  return contributions;
+}
+
+/** A reconstruction that ended in an error: no figures, and the reason (never the old figures). */
+function failedResult(personKey: string, reason: string): PlayerDetailResult {
+  return { personKey, checks: [], contributions: new Map(), bestLegs: new Map(), bestLegHeld: { all: false, starts: [], reasons: [] }, notAttempted: [], stale: [], failures: [reason], requestsSent: 0 };
+}
+
+/**
  * Leg reconstruction per selected player; verified figures accumulate for the open period.
  * Running it again for a player (「再度復元する」), or after the page's refresh, reads that
  * player's games again instead of reusing the cached reconstructions (`forceRefresh`).
@@ -118,16 +143,15 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
           );
           if (c.signal.aborted) return;
           setState((s) => {
-            const contributions: PlayerContributions = new Map([...s.contributions].map(([k, v]) => [k, new Map(v)]));
-            for (const [gameId, players] of result.contributions) {
-              const target = contributions.get(gameId) ?? new Map();
-              for (const [oid, value] of players) target.set(oid, value);
-              contributions.set(gameId, target);
-            }
-            return { running: null, results: new Map([...s.results, [personKey, result]]), contributions };
+            const results = new Map([...s.results, [personKey, result]]);
+            return { running: null, results, contributions: contributionsOf(results) };
           });
-        } catch {
-          if (!c.signal.aborted) setState((s) => ({ ...s, running: null }));
+        } catch (reason) {
+          if (c.signal.aborted) return;
+          setState((s) => {
+            const results = new Map([...s.results, [personKey, failedResult(personKey, `復元できませんでした（${describeN01Error(reason)}）。この選手の個人成績は表示していません。`)]]);
+            return { running: null, results, contributions: contributionsOf(results) };
+          });
         }
       })();
     },

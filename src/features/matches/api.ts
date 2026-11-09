@@ -44,6 +44,20 @@ export const MATCH_ROWS_PAGE = 100;
 export const MATCH_ROWS_MAX_PAGES = 10;
 /** Pages of today's board read at most (newest first): 500 games in 18 hours. */
 export const TODAY_MAX_PAGES = 5;
+
+/**
+ * How many games each paged list reads at most, and in which order — what a capped list shows
+ * (`truncated`). Derived from the page constants so the screens never repeat the numbers.
+ */
+export const LIST_LIMITS = {
+  /** A competition's games, oldest first (`competitionGames`): the newest are the ones left out. */
+  competition: { games: MATCH_ROWS_PAGE * MATCH_ROWS_MAX_PAGES, order: 'oldest' },
+  /** A league season's games, oldest first (`seasonGames`). */
+  season: { games: MATCH_ROWS_PAGE * MATCH_ROWS_MAX_PAGES, order: 'oldest' },
+  /** Today's league games, newest first (`todayGames`): the earliest of the night are left out. */
+  today: { games: MATCH_ROWS_PAGE * TODAY_MAX_PAGES, order: 'newest' },
+} as const;
+export type ListKind = keyof typeof LIST_LIMITS;
 /** Polling reads one API instance may send per minute (one screen: board 12 + orders + since reads). */
 export const MATCHES_POLL_PER_MINUTE = 60;
 /** A full, all-finished page of a competition list is re-read after this long (corrections). */
@@ -84,6 +98,24 @@ export interface GameList {
   truncated: boolean;
   /** Rows n01 sent that could not be read (left out, never filled in). */
   unreadable: number;
+  /**
+   * Two pages met on games with the same start time. n01 documents no order among equal start
+   * times (nor a snapshot of the list), so a game may have fallen between the two page reads:
+   * the list is not known to be whole. A later read usually settles it.
+   */
+  unsure: boolean;
+}
+
+/**
+ * True when a page continues the previous one on the same start time (order not guaranteed).
+ * Rows of the new page already read (a game started meanwhile pushed them down a page in a
+ * newest-first list) are not the boundary: the first row not read yet is.
+ */
+function tiedAtBoundary(previous: readonly GameRow[], next: readonly GameRow[]): boolean {
+  const seen = new Set(previous.map((game) => game.mid));
+  const last = previous[previous.length - 1]?.startTime ?? null;
+  const first = next.find((game) => !seen.has(game.mid))?.startTime ?? null;
+  return last !== null && first !== null && last === first;
 }
 
 /** Fields of a game row the match screens read (`fields` selects exactly these). */
@@ -92,6 +124,8 @@ const GAME_FIELDS = 'mid,tdid,tmid,schid,scid,match_type,title,startTime,endMatc
 export class MatchesApi {
   private readonly memo = new Map<string, Promise<unknown>>();
   private readonly inflight = new Map<string, Promise<unknown>>();
+  /** The signal each in-flight read was sent with: a read already being aborted is never handed on. */
+  private readonly inflightSignal = new WeakMap<Promise<unknown>, AbortSignal | undefined>();
   private readonly transport: AnalyticsTransport;
   private readonly maxRequests: number;
   private readonly timeoutMs: number;
@@ -175,9 +209,14 @@ export class MatchesApi {
   private fresh(operation: AnalyticsOperation, params: Record<string, string>, signal?: AbortSignal): Promise<unknown> {
     const key = this.key(operation, params);
     const running = this.inflight.get(key);
-    if (running) return running;
-    const pending = this.send(operation, params, signal, 'poll').finally(() => this.inflight.delete(key));
+    // Shared with a caller that asks for the same thing — unless that caller has given it up: a
+    // read whose signal is aborted would reject for the new caller too (a retry counted as failed).
+    if (running && !this.inflightSignal.get(running)?.aborted) return running;
+    const pending: Promise<unknown> = this.send(operation, params, signal, 'poll').finally(() => {
+      if (this.inflight.get(key) === pending) this.inflight.delete(key);
+    });
     this.inflight.set(key, pending);
+    this.inflightSignal.set(pending, signal);
     return pending;
   }
 
@@ -214,9 +253,11 @@ export class MatchesApi {
    * until one comes back short; a page none of whose rows can be read stops the list and is
    * reported, never filled in.
    */
-  async seasonGames(tournamentId: string, options: { live?: boolean } = {}): Promise<{ games: GameRow[]; unreadable: number; truncated: boolean }> {
+  async seasonGames(tournamentId: string, options: { live?: boolean } = {}): Promise<GameList> {
     const games: GameRow[] = [];
     let unreadable = 0;
+    let unsure = false;
+    let previous: GameRow[] = [];
     for (let page = 0; page < MATCH_ROWS_MAX_PAGES; page += 1) {
       const params: Record<string, string> = {
         tdid: tournamentId,
@@ -230,11 +271,13 @@ export class MatchesApi {
       if (page > 0) params.skip = String(page * MATCH_ROWS_PAGE);
       const request = options.live ? this.fresh('match/list', params) : this.memoised('match/list', params);
       const result = await this.read('match/list', request, parseGameRows);
+      if (page > 0 && tiedAtBoundary(previous, result.games)) unsure = true;
+      previous = result.games;
       games.push(...result.games);
       unreadable += result.unreadable;
-      if (result.rows < MATCH_ROWS_PAGE) return { games, unreadable, truncated: false };
+      if (result.rows < MATCH_ROWS_PAGE) return { games, unreadable, truncated: false, unsure };
     }
-    return { games, unreadable, truncated: true };
+    return { games, unreadable, truncated: true, unsure };
   }
 
   /**
@@ -251,6 +294,8 @@ export class MatchesApi {
     const byMid = new Map<string, GameRow>();
     let unreadable = 0;
     let truncated = true;
+    let unsure = false;
+    let previous: GameRow[] = [];
     for (let page = 0; page < TODAY_MAX_PAGES; page += 1) {
       const params: Record<string, string> = {
         tdid: tournamentId,
@@ -263,6 +308,8 @@ export class MatchesApi {
       };
       if (page > 0) params.skip = String(page * MATCH_ROWS_PAGE);
       const result = await this.read('match/list', this.fresh('match/list', params, signal), parseGameRows);
+      if (page > 0 && tiedAtBoundary(previous, result.games)) unsure = true;
+      previous = result.games;
       unreadable += result.unreadable;
       for (const game of result.games) if (!byMid.has(game.mid)) byMid.set(game.mid, game);
       if (result.rows < MATCH_ROWS_PAGE) {
@@ -271,7 +318,7 @@ export class MatchesApi {
       }
     }
     const games = [...byMid.values()].sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0));
-    return { games, truncated, unreadable };
+    return { games, truncated, unreadable, unsure };
   }
 
   /** Every leg of a game, throw by throw; with `since`, only the legs changed after it. Finished games are memoised. */
@@ -333,6 +380,8 @@ export class MatchesApi {
   async competitionGames(tdid: string, options: { live?: boolean; signal?: AbortSignal } = {}): Promise<GameList> {
     const byMid = new Map<string, GameRow>();
     let unreadable = 0;
+    let unsure = false;
+    let previous: GameRow[] = [];
     for (let page = 0; page < MATCH_ROWS_MAX_PAGES; page += 1) {
       const params: Record<string, string> = { tdid, sort: 'startTime', order: 'asc', count: String(MATCH_ROWS_PAGE), fields: GAME_FIELDS };
       if (options.live) {
@@ -350,11 +399,13 @@ export class MatchesApi {
         result = await this.read('match/list', this.fresh('match/list', params, options.signal), parseGameRows);
         if (!options.live) this.pages.set(key, { at: this.now(), page: result });
       }
+      if (page > 0 && tiedAtBoundary(previous, result.games)) unsure = true;
+      previous = result.games;
       unreadable += result.unreadable;
       for (const game of result.games) byMid.set(game.mid, game);
-      if (result.rows < MATCH_ROWS_PAGE) return { games: [...byMid.values()], truncated: false, unreadable };
+      if (result.rows < MATCH_ROWS_PAGE) return { games: [...byMid.values()], truncated: false, unreadable, unsure };
     }
-    return { games: [...byMid.values()], truncated: true, unreadable };
+    return { games: [...byMid.values()], truncated: true, unreadable, unsure };
   }
 
   /** Games in progress anywhere on n01 (competitions and n01 Online / Live), newest started first. */

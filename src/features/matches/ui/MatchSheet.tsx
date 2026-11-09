@@ -52,7 +52,7 @@ export function MatchSheet({ mid, factory, onClose, title }: { mid: string; fact
   const names: [string, string] = row ? [row.sides[0].members.map((m) => m.name).join(' / ') || row.sides[0].name, row.sides[1].members.map((m) => m.name).join(' / ') || row.sides[1].name] : ['—', '—'];
   const cricket = row?.matchType === 'cricket';
   return (
-    <Sheet title={title || row?.title || '試合'} onClose={onClose}>
+    <Sheet title={title || row?.title || '試合'} onClose={onClose} className="sheet-wide">
       <div className="match-sheet" data-testid="match-sheet">
         {error ? (
           <p className="small-text" role="alert">

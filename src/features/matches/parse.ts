@@ -656,6 +656,11 @@ export interface ThrowsResponse {
   updateTime: number | null;
   matchType: '01' | 'cricket';
   gameEnded: boolean;
+  /**
+   * The leg the game was at when n01 answered (`current_leg`, 0-based), `null` when absent:
+   * every leg before it had ended by then. Says how far the reply vouches for the game.
+   */
+  currentLeg: number | null;
   legs: ThrowLeg[];
 }
 
@@ -667,10 +672,10 @@ export function parseThrows(raw: unknown): ThrowsResponse {
   const body = ok('match/throws', raw);
   const cricket = str(body.match_type)?.toLowerCase() === 'cricket';
   if (num(body.changed) === 0) {
-    return { changed: false, mid: str(body.mid), updateTime: num(body.updateTime), matchType: cricket ? 'cricket' : '01', gameEnded: num(body.end_match) === 1, legs: [] };
+    return { changed: false, mid: str(body.mid), updateTime: num(body.updateTime), matchType: cricket ? 'cricket' : '01', gameEnded: num(body.end_match) === 1, currentLeg: num(body.current_leg), legs: [] };
   }
   const legs = Array.isArray(body.leg_data) ? body.leg_data.map((leg) => parseThrowLeg(leg, cricket)).filter((leg): leg is ThrowLeg => leg !== null) : [];
-  return { changed: true, mid: str(body.mid), updateTime: num(body.updateTime), matchType: cricket ? 'cricket' : '01', gameEnded: num(body.end_match) === 1, legs };
+  return { changed: true, mid: str(body.mid), updateTime: num(body.updateTime), matchType: cricket ? 'cricket' : '01', gameEnded: num(body.end_match) === 1, currentLeg: num(body.current_leg), legs };
 }
 
 /**

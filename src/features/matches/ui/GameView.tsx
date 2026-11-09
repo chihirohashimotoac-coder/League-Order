@@ -7,6 +7,7 @@ import { gameStats } from '../gameStats';
 import type { SideStats } from '../gameStats';
 import { CricketGrid, ZeroOneGrid } from './ScoreGrid';
 import { FinishChances, RaceChart } from './LegCharts';
+import { LegsStatusLine } from './LegsStatusLine';
 
 /**
  * One game, the way n01's match Details and score sheet show it — and side by side.
@@ -93,57 +94,67 @@ export function GameView({
 
   return (
     <div className="game-view" data-testid="game-view">
-      <div className="table-scroll">
-        <table className="compare small-text" aria-label="ゲームの詳細">
-          <thead>
-            <tr>
-              <th scope="col">{names[0]}</th>
-              <th scope="col" />
-              <th scope="col">{names[1]}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(([label, left, right]) => (
-              <tr key={label}>
-                <td className="num">{left}</td>
-                <th scope="row" className="center">
-                  {label}
-                </th>
-                <td className="num">{right}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="muted small-text">
-        n01 の記録から League Order が計算 (ブル決着の Leg は平均・ダーツ数に含めません。First 9 は各 Leg の最初の 3 ラウンドの得点 ÷ 実際の本数 × 3)。
-        {history.stale ? ' 終わった Leg の記録を再取得しています。' : ''}
-      </p>
-      {!cricket ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
-      {all.length > 0 ? (
-        <div className="chip-row" role="tablist" aria-label="Leg">
-          {all.map((entry) => {
-            const winner = entry.winner === 0 || entry.winner === 1 ? (flip ? 1 - entry.winner : entry.winner) : null;
-            return (
-              <button
-                key={entry.index}
-                type="button"
-                role="tab"
-                className="chip"
-                aria-selected={entry.index === shown}
-                aria-pressed={entry.index === shown}
-                onClick={() => setChosen(entry.index)}
-              >
-                L{entry.index + 1} {winner === null ? '…' : winner === 0 ? '◀' : '▶'}
-                {entry.bull ? ' (ブル)' : ''}
-              </button>
-            );
-          })}
+      <div className="gv-body">
+        <div className="gv-figures">
+          {!history.complete ? <LegsStatusLine history={history} /> : null}
+          {history.complete ? (
+            <div className="table-scroll">
+              <table className="compare small-text" aria-label="ゲームの詳細">
+                <thead>
+                  <tr>
+                    <th scope="col">{names[0]}</th>
+                    <th scope="col" />
+                    <th scope="col">{names[1]}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(([label, left, right]) => (
+                    <tr key={label}>
+                      <td className="num">{left}</td>
+                      <th scope="row" className="center">
+                        {label}
+                      </th>
+                      <td className="num">{right}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {history.complete ? (
+            <p className="muted small-text">
+              n01 の記録から League Order が計算 (ブル決着の Leg は平均・ダーツ数に含めません。First 9 は各 Leg の最初の 3 ラウンドの得点 ÷ 実際の本数 × 3)。
+            </p>
+          ) : null}
+          {!cricket && history.complete ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
         </div>
-      ) : (
-        <p className="muted small-text">まだ投げた記録がありません。</p>
-      )}
-      {leg ? <ScoreSheet leg={leg} cricket={cricket} names={names} at={at} mark={focus && focus.leg === leg.index ? { side: focus.n01Side, round: focus.round } : null} /> : null}
+        <div className="gv-legs">
+          {all.length > 0 ? (
+            <div className="chip-row" role="tablist" aria-label="Leg">
+              {all.map((entry) => {
+                const winner = entry.winner === 0 || entry.winner === 1 ? (flip ? 1 - entry.winner : entry.winner) : null;
+                return (
+                  <button
+                    key={entry.index}
+                    type="button"
+                    role="tab"
+                    className="chip"
+                    aria-selected={entry.index === shown}
+                    aria-pressed={entry.index === shown}
+                    onClick={() => setChosen(entry.index)}
+                  >
+                    L{entry.index + 1} {winner === null ? '…' : winner === 0 ? '◀' : '▶'}
+                    {entry.bull ? ' (ブル)' : ''}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="muted small-text">まだ投げた記録がありません。</p>
+          )}
+          {leg ? <ScoreSheet leg={leg} cricket={cricket} names={names} at={at} mark={focus && focus.leg === leg.index ? { side: focus.n01Side, round: focus.round } : null} /> : null}
+        </div>
+      </div>
     </div>
   );
 }

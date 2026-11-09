@@ -17,6 +17,7 @@ import { CardTrail } from './CardTrail';
 import { LiveSheet } from './LiveSheet';
 import { usePlayerStats } from './useMatchContext';
 import type { MatchesApiFactory } from '../environment';
+import { ListCoverage, listIncomplete } from './ListCoverage';
 
 /**
  * LIVE (ライブ). The first screen answers, without scrolling: which cards are on and their score,
@@ -108,7 +109,8 @@ export function LiveTab({ data, registered, api, factory }: { data: SeasonData; 
   if (sorted.length === 0) {
     return (
       <div className="live-empty" data-testid="live-empty">
-        <p className="small-text">いま進行中・本日終了した試合はありません。</p>
+        <p className="small-text">{listIncomplete(board) ? '取得できた本日の試合はありません (一覧の一部は未取得)。' : 'いま進行中・本日終了した試合はありません。'}</p>
+        <ListCoverage state={board} kind="today" />
         <NextRound data={data} registered={registered} />
       </div>
     );
@@ -121,6 +123,7 @@ export function LiveTab({ data, registered, api, factory }: { data: SeasonData; 
         {formatClock(board.fetchedAt)}
         {board.error ? ` ・ 取得エラー (前回の値を表示中)` : ''}
       </p>
+      <ListCoverage state={board} kind="today" />
       {spots.length ? (
         <section className="followed-now" aria-label="注目選手" data-testid="followed-now">
           <h3 className="section-mini">

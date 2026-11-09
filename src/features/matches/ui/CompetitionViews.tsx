@@ -8,6 +8,8 @@ import type { MatchesApiFactory } from '../environment';
 import type { PlayerLine, StatsSource } from './useMatchContext';
 import { formatClock, formatRate, useFollowed, usePlayerStats } from './useMatchContext';
 import { RankingFooter, RankingSearch, rankThenSearch, useShownCount } from './rankingList';
+import { ListCoverage, listIncomplete } from './ListCoverage';
+import type { ListCoverageState } from './ListCoverage';
 
 /** Refresh of a competition's games: while a game is on, and while it is running but between games. */
 export const HUB_LIVE_MS = 10_000;
@@ -77,7 +79,7 @@ export function TournamentHub({
 }): React.JSX.Element {
   const [doc, setDoc] = useState<CompetitionDoc | null>(null);
   const [rows, setRows] = useState<GameRow[] | null>(null);
-  const [truncated, setTruncated] = useState(false);
+  const [coverage, setCoverage] = useState<ListCoverageState>({ truncated: false, unreadable: 0 });
   const [standings, setStandings] = useState<StandingGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
@@ -103,7 +105,7 @@ export function TournamentHub({
           if (!alive) return;
           setDoc(competition);
           setRows(games.games);
-          setTruncated(games.truncated);
+          setCoverage({ truncated: games.truncated, unreadable: games.unreadable, unsure: games.unsure });
           setFetchedAt(Date.now());
           setError(null);
           const live = games.games.some((game) => !game.finished);
@@ -168,12 +170,13 @@ export function TournamentHub({
           </>
         ) : null}
         {error ? ' ・ 更新エラー (前回の値を表示中)' : ''}
-        {truncated ? ' ・ 試合が多いため先頭 1,000 件まで' : ''}
       </p>
+      <ListCoverage state={coverage} kind="competition" />
       {tab === 'live' ? (
         liveMatches.length === 0 ? (
-          <p className="small-text">
-            いま進行中の試合はありません。{doc.status === FINISHED ? 'この大会は終了しています。' : '始まると自動で表示します。'}「試合」タブで結果を見られます。
+          <p className="small-text" data-testid="competition-live-empty">
+            {listIncomplete(coverage) ? '取得できた試合の中に進行中のものはありません (一覧の一部は未取得)。' : 'いま進行中の試合はありません。'}
+            {doc.status === FINISHED ? 'この大会は終了しています。' : '始まると自動で表示します。'}「試合」タブで結果を見られます。
           </p>
         ) : (
           <ul className="match-list">
