@@ -21,6 +21,13 @@ import type { LiveLeg, LiveThrow } from '../parse';
  */
 const tone = (score: number): string => (score === 180 ? ' ton t180' : score >= 140 ? ' ton t140' : score >= 100 ? ' ton t100' : '');
 
+export interface Mark {
+  side: 0 | 1;
+  round: number;
+}
+
+const marked = (mark: Mark | null, side: 0 | 1, round: number): string => (mark && mark.side === side && mark.round === round ? ' mark' : '');
+
 type Visit = Extract<LiveThrow, { kind: '01' }>;
 type CricketVisit = Extract<LiveThrow, { kind: 'cricket' }>;
 
@@ -33,6 +40,7 @@ export function ZeroOneGrid({
   minRows = 0,
   spare = 0,
   label,
+  mark = null,
 }: {
   leg: Pick<LiveLeg, 'throws' | 'start' | 'first'>;
   startScore?: number | null;
@@ -45,6 +53,8 @@ export function ZeroOneGrid({
   /** Empty rows kept after the last visit (live). */
   spare?: number;
   label?: string;
+  /** A visit to point at (n01 side and round), e.g. from a highlight. */
+  mark?: Mark | null;
 }): React.JSX.Element {
   const rounds = new Map<number, [Visit | null, Visit | null]>();
   for (const entry of leg.throws) {
@@ -63,7 +73,7 @@ export function ZeroOneGrid({
     const entry = rounds.get(round)?.[side] ?? null;
     if (entry?.finish) {
       return [
-        <td key="s" className="sc out" aria-label={`${entry.score} で上がり (${entry.darts}本目)`}>
+        <td key="s" className={`sc out${marked(mark, side, round)}`} aria-label={`${entry.score} で上がり (${entry.darts}本目)`}>
           x{entry.darts}
         </td>,
         <td key="g" className="tg" />,
@@ -71,7 +81,7 @@ export function ZeroOneGrid({
     }
     const waiting = !entry && nextRound === round && thrower === side;
     return [
-      <td key="s" className={`sc${waiting ? ' waiting' : ''}${entry ? tone(entry.score) : ''}`}>
+      <td key="s" className={`sc${waiting ? ' waiting' : ''}${entry ? tone(entry.score) : ''}${marked(mark, side, round)}`}>
         {entry ? entry.score : waiting ? <span className="ns-dot" aria-label="投擲中" /> : ''}
       </td>,
       <td key="g" className="tg">
@@ -121,7 +131,7 @@ export function ZeroOneGrid({
           <td className="tg">{start[order[1]]}</td>
         </tr>
         {Array.from({ length: shown }, (_, i) => i + 1).map((round) => (
-          <tr key={round}>
+          <tr key={round} className={mark?.round === round ? 'marked' : undefined}>
             {cells(order[0], round)}
             <td className="mid">{round * 3}</td>
             {cells(order[1], round)}
@@ -138,11 +148,13 @@ export function CricketGrid({
   order = [0, 1],
   names,
   label,
+  mark = null,
 }: {
   leg: Pick<LiveLeg, 'throws' | 'first'>;
   order?: [0 | 1, 0 | 1];
   names?: [string, string];
   label?: string;
+  mark?: Mark | null;
 }): React.JSX.Element {
   const rounds = new Map<number, [CricketVisit | null, CricketVisit | null]>();
   for (const entry of leg.throws) {
@@ -158,10 +170,10 @@ export function CricketGrid({
   const cells = (side: 0 | 1, round: number): React.JSX.Element[] => {
     const entry = rounds.get(round)?.[side] ?? null;
     return [
-      <td key="h" className="hits">
+      <td key="h" className={`hits${marked(mark, side, round)}`}>
         {entry ? hits(entry) : ''}
       </td>,
-      <td key="m" className={`sc${entry && entry.marks >= 5 ? ' t140' : ''}`}>
+      <td key="m" className={`sc${entry && entry.marks >= 5 ? ' t140' : ''}${marked(mark, side, round)}`}>
         {entry ? `${entry.marks}M${entry.points ? ` +${entry.points}` : ''}` : ''}
       </td>,
     ];
@@ -199,7 +211,7 @@ export function CricketGrid({
       </thead>
       <tbody>
         {Array.from({ length: last }, (_, i) => i + 1).map((round) => (
-          <tr key={round}>
+          <tr key={round} className={mark?.round === round ? 'marked' : undefined}>
             {cells(order[0], round)}
             <td className="mid">{round * 3}</td>
             {cells(order[1], round)}

@@ -10,6 +10,8 @@ import { headToHead, linkOrder, percent, teamProfile } from '../insights';
 import type { SeasonData } from './useMatchContext';
 import { formatClock, formatRate } from './useMatchContext';
 import { GameView } from './GameView';
+import { Highlights } from './Highlights';
+import type { HighlightFocus } from './Highlights';
 
 /**
  * 日程・結果. Every card of the season, grouped by round (節) with its date, newest played round
@@ -136,7 +138,21 @@ function MatchCenter({
   onTeam: (teamId: string) => void;
 }): React.JSX.Element {
   const [game, setGame] = useState<string | null>(null);
+  const [focus, setFocus] = useState<HighlightFocus | null>(null);
   const names: [string, string] = [card.teams[0].name, card.teams[1].name];
+  const openHighlight = (next: HighlightFocus): void => {
+    setGame(next.schid);
+    setFocus(next);
+    // The sheet renders once the game's (memoised) throws are read: wait for the marked row.
+    const behavior: ScrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    const reveal = (tries: number): void => {
+      const row = document.querySelector(`#game-${CSS.escape(next.schid)} tr.marked`);
+      if (row) row.scrollIntoView({ block: 'center', behavior });
+      else if (tries < 60) requestAnimationFrame(() => reveal(tries + 1));
+      else document.getElementById(`game-${next.schid}`)?.scrollIntoView({ block: 'start', behavior });
+    };
+    requestAnimationFrame(() => reveal(0));
+  };
   const score = cardScore(card);
   return (
     <div className="match-center" data-testid="match-detail">
@@ -164,15 +180,19 @@ function MatchCenter({
           </>
         ) : null}
       </p>
+      <Highlights card={card} api={api} onOpen={openHighlight} />
       <ul className="game-list">
         {card.games.map((entry) => (
-          <li key={entry.slot.schid}>
+          <li key={entry.slot.schid} id={`game-${entry.slot.schid}`}>
             <button
               type="button"
               className="game-row"
               aria-expanded={game === entry.slot.schid}
               disabled={!entry.game}
-              onClick={() => setGame(game === entry.slot.schid ? null : entry.slot.schid)}
+              onClick={() => {
+                setFocus(null);
+                setGame(game === entry.slot.schid ? null : entry.slot.schid);
+              }}
             >
               <span className="game-name">
                 {entry.slot.label}
@@ -189,7 +209,16 @@ function MatchCenter({
               </span>
             </button>
             {game === entry.slot.schid && entry.game ? (
-              <GameView api={api} mid={entry.game.mid} cricket={entry.slot.matchType === 'cricket'} finished={entry.game.finished} names={names} flip={entry.flip} />
+              <GameView
+                key={focus?.schid === entry.slot.schid ? `${focus.leg}:${focus.n01Side}:${focus.round}` : 'game'}
+                api={api}
+                mid={entry.game.mid}
+                cricket={entry.slot.matchType === 'cricket'}
+                finished={entry.game.finished}
+                names={names}
+                flip={entry.flip}
+                focus={focus?.schid === entry.slot.schid ? focus : null}
+              />
             ) : null}
           </li>
         ))}

@@ -30,6 +30,7 @@ export function GameView({
   names,
   flip,
   liveLeg,
+  focus = null,
 }: {
   api: MatchesApi;
   mid: string;
@@ -41,11 +42,13 @@ export function GameView({
   flip: boolean;
   /** The current leg from the live poller (games in progress). */
   liveLeg?: LiveLeg | null;
+  /** Open this leg with this visit marked (a highlight). */
+  focus?: { leg: number; n01Side: 0 | 1; round: number } | null;
 }): React.JSX.Element {
   const [legs, setLegs] = useState<ThrowLeg[]>([]);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
-  const [chosen, setChosen] = useState<number | null>(null);
+  const [chosen, setChosen] = useState<number | null>(focus?.leg ?? null);
   const [since, setSince] = useState<number | null>(null);
   const liveIndex = liveLeg?.index ?? null;
 
@@ -168,18 +171,30 @@ export function GameView({
       ) : (
         <p className="muted small-text">まだ投げた記録がありません。</p>
       )}
-      {leg ? <ScoreSheet leg={leg} cricket={cricket} names={names} at={at} /> : null}
+      {leg ? <ScoreSheet leg={leg} cricket={cricket} names={names} at={at} mark={focus && focus.leg === leg.index ? { side: focus.n01Side, round: focus.round } : null} /> : null}
     </div>
   );
 }
 
-function ScoreSheet({ leg, cricket, names, at }: { leg: ThrowLeg; cricket: boolean; names: [string, string]; at: (side: 0 | 1) => 0 | 1 }): React.JSX.Element {
+function ScoreSheet({
+  leg,
+  cricket,
+  names,
+  at,
+  mark,
+}: {
+  leg: ThrowLeg;
+  cricket: boolean;
+  names: [string, string];
+  at: (side: 0 | 1) => 0 | 1;
+  mark: { side: 0 | 1; round: number } | null;
+}): React.JSX.Element {
   // Column order is the card's: the n01 side shown on the left is `at(0)`.
   const order: [0 | 1, 0 | 1] = [at(0), at(1)];
   const label = `Leg ${leg.index + 1} のスコアシート`;
   return (
     <div className="ns-grid-wrap">
-      {cricket ? <CricketGrid leg={leg} order={order} names={names} label={label} /> : <ZeroOneGrid leg={leg} order={order} names={names} label={label} />}
+      {cricket ? <CricketGrid leg={leg} order={order} names={names} label={label} mark={mark} /> : <ZeroOneGrid leg={leg} order={order} names={names} label={label} mark={mark} />}
       {cricket && leg.marks && leg.numbers ? (
         <p className="small-text muted">
           {leg.numbers.map((number, index) => `${number === 25 ? 'BULL' : number}: ${leg.marks![order[0]][index]}-${leg.marks![order[1]][index]}`).join(' ・ ')}

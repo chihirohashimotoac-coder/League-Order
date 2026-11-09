@@ -187,6 +187,12 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await expect(view).toContainText('180');
     await expect(view).toContainText('High Out');
     await expect(view.getByTestId('score-sheet')).toContainText('x3');
+    // 見どころ: read from every finished game's throws; a line opens that leg with the visit marked.
+    const highlights = detail.getByTestId('highlights');
+    await expect(highlights).toContainText('180');
+    await expect(highlights).toContainText('最短');
+    await highlights.locator('.hl-row').filter({ hasText: '180' }).first().click();
+    await expect(detail.getByTestId('game-view').locator('tr.marked td.mark')).toHaveText('180');
     await expect(detail.getByTestId('intel-opponent')).toContainText('対戦 (公式)');
     await noSidewaysScroll(page);
     await detail.getByRole('button', { name: /一覧に戻る/ }).click();

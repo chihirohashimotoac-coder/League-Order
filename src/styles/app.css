@@ -7322,3 +7322,93 @@ ul.plain {
   margin: 0;
   padding-left: 1.2em;
 }
+
+/* ---------------------------------------------------------------------------
+   見どころ (highlights) and a visit pointed at in the score sheet
+   --------------------------------------------------------------------------- */
+
+.highlights {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-1);
+}
+
+.hl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hl-list li + li {
+  border-top: 1px solid var(--color-border);
+}
+
+.hl-row {
+  display: grid;
+  grid-template-columns: 4.8em minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hl-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.hl-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hl-kind {
+  font-size: 0.75em;
+  font-weight: 700;
+  text-align: center;
+  border-radius: 4px;
+  padding: 1px 0;
+  border: 1px solid var(--color-border-strong);
+}
+
+.hl-kind.k-comeback {
+  background: var(--color-text);
+  border-color: var(--color-text);
+  color: var(--color-paper);
+}
+
+.hl-kind.k-highOut {
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.hl-kind.k-ton80 {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.hl-go {
+  color: var(--color-accent-text);
+  white-space: nowrap;
+}
+
+.ns-table tr.marked td.mid {
+  background: var(--color-warning-fill);
+}
+
+.ns-table td.mark {
+  box-shadow: inset 0 0 0 3px var(--color-warning-fill);
+}
