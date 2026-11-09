@@ -110,7 +110,7 @@ test.describe('PLAYER ANALYTICS', () => {
     await page.screenshot({ path: `test-results/analytics-doubles-${info.project.name}.png`, fullPage: true });
     // Switching back and forth does not refetch the game rows already loaded.
     const listed = extras.log.filter((e) => e.startsWith('match/list')).length;
-    await page.getByRole('button', { name: 'その他', exact: true }).click();
+    await page.getByTestId('scope-bar').getByRole('button', { name: 'その他', exact: true }).click();
     await expect(page.getByRole('button', { name: 'チーム戦' })).toBeVisible();
     await page.getByRole('button', { name: '01全体', exact: true }).click();
     expect(extras.log.filter((e) => e.startsWith('match/list')).length).toBe(listed);
