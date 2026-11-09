@@ -32,6 +32,8 @@ export interface GameLegs {
 
 /** Waits before the automatic re-reads of a failed first read (then only by hand). */
 export const LEGS_RETRY_MS = [5_000, 15_000, 30_000] as const;
+/** Waits before the automatic re-reads of a failed `since` read (then it stays `stale`). */
+export const SYNC_RETRY_MS = [5_000, 10_000, 20_000, 40_000, 60_000] as const;
 
 interface Held {
   mid: string;
@@ -47,6 +49,11 @@ export function useGameLegs(api: MatchesApi, mid: string, options: { finished: b
   const [attempt, setAttempt] = useState(0);
   const [syncAttempt, setSyncAttempt] = useState(0);
   const since = useRef<{ mid: string; value: number | null }>({ mid, value: null });
+  // The live leg the held legs are up to date with: a `since` read only when it moves on.
+  const synced = useRef<{ mid: string; leg: number | null }>({ mid, leg: null });
+  const syncFailures = useRef(0);
+  const liveLeg = useRef(liveLegIndex);
+  liveLeg.current = liveLegIndex;
 
   // The whole game, once per mid (and again on a retry).
   useEffect(() => {
@@ -61,6 +68,8 @@ export function useGameLegs(api: MatchesApi, mid: string, options: { finished: b
         if (!alive) return;
         if (reply.mid && reply.mid !== mid) throw new Error('別のゲームの記録が返されました。');
         since.current = { mid, value: reply.updateTime };
+        synced.current = { mid, leg: liveLeg.current };
+        syncFailures.current = 0;
         setHeld({ mid, legs: reply.legs, status: 'ready', error: null, stale: false });
       })
       .catch((reason) => {
@@ -82,6 +91,7 @@ export function useGameLegs(api: MatchesApi, mid: string, options: { finished: b
   // A live leg moved on: the legs changed since the last read.
   useEffect(() => {
     if (finished || !ready || liveLegIndex === null || since.current.mid !== mid || since.current.value === null) return;
+    if (synced.current.mid === mid && synced.current.leg === liveLegIndex) return;
     let alive = true;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -90,12 +100,16 @@ export function useGameLegs(api: MatchesApi, mid: string, options: { finished: b
       .then((reply) => {
         if (!alive || (reply.mid && reply.mid !== mid)) return;
         if (reply.updateTime) since.current = { mid, value: reply.updateTime };
+        synced.current = { mid, leg: liveLegIndex };
+        syncFailures.current = 0;
         setHeld((current) => (current.mid !== mid ? current : { ...current, legs: reply.changed ? mergeLegs(current.legs, reply.legs) : current.legs, stale: false }));
       })
       .catch(() => {
         if (!alive) return;
         setHeld((current) => (current.mid !== mid ? current : { ...current, stale: true }));
-        timer = setTimeout(() => setSyncAttempt((n) => n + 1), LEGS_RETRY_MS[0]);
+        const wait = SYNC_RETRY_MS[syncFailures.current];
+        syncFailures.current += 1;
+        if (wait !== undefined) timer = setTimeout(() => setSyncAttempt((n) => n + 1), wait);
       });
     return () => {
       alive = false;

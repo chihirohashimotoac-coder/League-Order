@@ -96,7 +96,10 @@ export function TournamentHub({
       let delay = HUB_LIVE_MS;
       if (document.visibilityState !== 'hidden') {
         try {
-          const [competition, games] = await Promise.all([api.competition(tdid), api.competitionGames(tdid, { signal: controller.signal })]);
+          const [first, games] = await Promise.all([api.competition(tdid), api.competitionGames(tdid, { signal: controller.signal })]);
+          if (!alive) return;
+          // Nothing in progress: read the status again (the event may have finished since the page opened).
+          const competition = games.games.some((game) => !game.finished) ? first : await api.competitionNow(tdid, controller.signal).catch(() => first);
           if (!alive) return;
           setDoc(competition);
           setRows(games.games);
@@ -298,7 +301,7 @@ function PlayerRanking({ state, entries, teamGames }: { state: ReturnType<typeof
           </table>
         </div>
       ) : null}
-      <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} />
+      <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} noun={teamGames ? '選手' : 'エントリー'} />
       <p className="muted small-text">
         n01 公式の集計 ({teamGames ? '選手単位 player_stats_list' : 'エントリー単位 stats_list'})。順位は 01 平均の順です。
       </p>

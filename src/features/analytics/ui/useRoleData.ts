@@ -90,6 +90,7 @@ export interface DetailState {
 export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | null, games: GamesLoad | null, reloadToken = 0): DetailState & { run: (personKey: string) => void } {
   const [state, setState] = useState<DetailState>({ running: null, results: new Map(), contributions: new Map() });
   const controller = useRef<AbortController | null>(null);
+  const lastReload = useRef(new Map<string, number>());
 
   useEffect(() => {
     controller.current?.abort();
@@ -103,7 +104,10 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
       controller.current?.abort();
       const c = new AbortController();
       controller.current = c;
-      const again = reloadToken > 0 || state.results.has(personKey);
+      // Fresh reads when this player is reconstructed again, or for the first time after the
+      // page's refresh — not on every later run of the period.
+      const again = state.results.has(personKey) || (reloadToken > 0 && lastReload.current.get(personKey) !== reloadToken);
+      lastReload.current.set(personKey, reloadToken);
       setState((s) => ({ ...s, running: personKey }));
       void (async () => {
         try {

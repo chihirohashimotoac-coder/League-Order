@@ -447,7 +447,7 @@ export function StatsTab({
   const empty = stats.value.length === 0;
   return (
     <div className="stats-tab" data-testid="stats-tab">
-      <RankingSearch value={query} onChange={setQuery} label="選手名で検索" />
+      <RankingSearch value={query} onChange={setQuery} label={stats.unit === 'entry' ? '名前で検索' : '選手名で検索'} />
       <div className="chip-row" role="radiogroup" aria-label="並べ替え">
         {SORTS.map(([key, label]) => (
           <button key={key} type="button" className="chip" role="radio" aria-checked={sort === key} onClick={() => setSort(key)}>
@@ -486,14 +486,23 @@ export function StatsTab({
                 <tr key={row.oid} className={row.teamId && registered.includes(row.teamId) ? 'own' : ''}>
                   <td>{rank}</td>
                   <th scope="row">
-                    <button type="button" className="linklike" onClick={() => onPlayer({ oid: row.oid, name: row.name, teamId: row.teamId })}>
-                      {row.name}
-                    </button>
-                    {row.teamId ? (
-                      <button type="button" className="linklike muted" onClick={() => onTeam(row.teamId!)}>
-                        {data.season.teams.get(row.teamId) ?? ''}
+                    {stats.unit === 'entry' ? (
+                      // An individual season: the row is an entry — its sheet is the entry's results.
+                      <button type="button" className="linklike" onClick={() => onTeam(row.oid)}>
+                        {row.name}
                       </button>
-                    ) : null}
+                    ) : (
+                      <>
+                        <button type="button" className="linklike" onClick={() => onPlayer({ oid: row.oid, name: row.name, teamId: row.teamId })}>
+                          {row.name}
+                        </button>
+                        {row.teamId ? (
+                          <button type="button" className="linklike muted" onClick={() => onTeam(row.teamId!)}>
+                            {data.season.teams.get(row.teamId) ?? ''}
+                          </button>
+                        ) : null}
+                      </>
+                    )}
                   </th>
                   <td className="num">{sort === 'legRate' || sort === 'break' ? `${v!.toFixed(1)}%` : sort === 'avg' || sort === 'f9' ? v!.toFixed(2) : v}</td>
                   <td className="num">{formatRate(value(row.line, 'avg'))}</td>
@@ -506,7 +515,7 @@ export function StatsTab({
           </table>
         </div>
       ) : null}
-      {!empty ? <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} /> : null}
+      {!empty ? <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} noun={stats.unit === 'entry' ? 'エントリー' : '選手'} /> : null}
       <p className="muted small-text">n01 公式のシーズン集計 (tournament/stats)。Break は後攻 Leg の取得率。</p>
     </div>
   );

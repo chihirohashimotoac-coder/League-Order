@@ -62,27 +62,31 @@ export function RankingFooter({
   total,
   query,
   onMore,
+  noun = '選手',
 }: {
   shown: number;
   matched: number;
   total: number;
   query: string;
   onMore: (next: number) => void;
+  /** What a row is: 選手 (team members) or エントリー (an individual event's entries). */
+  noun?: '選手' | 'エントリー';
 }): React.JSX.Element {
   const searching = query.trim() !== '';
+  const unit = noun === '選手' ? '人' : '件';
   return (
     <div className="ranking-footer small-text" data-testid="ranking-footer">
-      <p className="muted" role="status">
+      <p className="muted" aria-live="polite">
         {searching
           ? matched === 0
-            ? `「${query.trim()}」に一致する選手はいません (対象 ${total} 人)`
-            : `「${query.trim()}」に一致 ${matched} 人 (対象 ${total} 人)`
-          : `${Math.min(shown, matched)} / ${matched} 人を表示`}
+            ? `「${query.trim()}」に一致する${noun}はいません (対象 ${total} ${unit})`
+            : `「${query.trim()}」に一致 ${matched} ${unit} (対象 ${total} ${unit})`
+          : `${Math.min(shown, matched)} / ${matched} ${unit}を表示`}
       </p>
       {shown < matched ? (
         <div className="row wrap" style={{ gap: 8 }}>
           <button type="button" className="btn small" onClick={() => onMore(shown + RANK_PAGE)}>
-            さらに {Math.min(RANK_PAGE, matched - shown)} 人
+            さらに {Math.min(RANK_PAGE, matched - shown)} {unit}
           </button>
           <button type="button" className="btn small ghost" onClick={() => onMore(matched)}>
             すべて表示

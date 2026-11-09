@@ -31,6 +31,8 @@ import type { GamesContext } from './gamesLoader';
 export const detailKey = (tournamentId: string): string => `detail:${tournamentId}`;
 /** `match/get` requests one reconstruction may send (≈ 2–3 seasons of one player). */
 export const DETAIL_MAX_REQUESTS = 60;
+/** A cached game is re-read for a disagreement with n01 only when read at least this long ago. */
+export const MISMATCH_REREAD_MS = 10 * 60 * 1000;
 
 export interface PlayerDetailResult {
   personKey: string;
@@ -146,7 +148,10 @@ export async function reconstructPerson(
     if (!stopped) {
       const cachedOnly = mine.filter((g) => stored.has(g.gameId) && !readAgain.has(g.gameId));
       const first = composition === 'unknown' ? null : checkPlayerSeason(season.tournamentId, me.oid, me.line, classified, rebuilt, composition === 'pure01');
-      const suspect = first?.state === 'mismatch' ? cachedOnly : cachedOnly.filter((g) => !stored.get(g.gameId)!.r.ok);
+      // Only games read at least MISMATCH_REREAD_MS ago: a season that disagrees for another
+      // reason (a limit of the reconstruction) must not re-read everything on every run.
+      const old = (g: ClassifiedGame): boolean => now - stored.get(g.gameId)!.at >= MISMATCH_REREAD_MS;
+      const suspect = first?.state === 'mismatch' ? cachedOnly.filter(old) : cachedOnly.filter((g) => !stored.get(g.gameId)!.r.ok && old(g));
       if (suspect.length > 0) {
         await fetchGames(suspect);
         rebuilt = toRebuilt(stored);

@@ -316,6 +316,11 @@ export class MatchesApi {
     return this.read('tournament/get', this.memoised('tournament/get', { tdid }), (raw) => parseCompetition(raw, tdid));
   }
 
+  /** The competition document read again (a polling read): its status may have moved on. */
+  competitionNow(tdid: string, signal?: AbortSignal): Promise<CompetitionDoc> {
+    return this.read('tournament/get', this.fresh('tournament/get', { tdid }, signal), (raw) => parseCompetition(raw, tdid));
+  }
+
   /**
    * Every game of a competition (all kinds), oldest first; `live` = in progress only, never
    * memoised.

@@ -748,7 +748,7 @@ export function App(): React.JSX.Element {
         ) : null}
         {page === 'matches' || page === 'live' || page === 'watch' ? (
           <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
-            <MatchesEntry page={page} onNavigate={setPage} />
+            <MatchesEntry key={page} page={page} onNavigate={setPage} />
           </Suspense>
         ) : null}
         </div>

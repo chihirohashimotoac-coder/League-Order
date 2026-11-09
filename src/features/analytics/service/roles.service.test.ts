@@ -305,7 +305,8 @@ describe('leg reconstruction freshness (audit F06)', () => {
     const first = await run(timed(old, clock, cache));
     expect(first.checks[0].verified.score).toBe(false); // the pre-correction record cannot be rebuilt
 
-    // Same day (cache fresh), n01 now serves the corrected game.
+    // Later the same day (cache still fresh), n01 now serves the corrected game.
+    clock.now += 11 * 60 * 1000;
     const fixed = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById);
     const second = await run(timed(fixed, clock, cache));
     expect(gets(fixed, 0)).toContain('VU6AjbQE_1724326953016');

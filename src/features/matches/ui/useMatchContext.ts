@@ -302,7 +302,8 @@ export function usePlayerStats(api: MatchesApi | null, tournamentId: string | nu
         })
       : api.entryStats(tournamentId).then((rows) => ({
           unit: 'entry' as const,
-          rows: rows.map((row) => ({ oid: row.teamId, name: entries?.get(row.teamId) ?? '(名前なし)', teamId: null, divisionIndex: row.divisionIndex, line: row.line })),
+          // The entry is its own "team": division filters and the registered-entry highlight work by it.
+          rows: rows.map((row) => ({ oid: row.teamId, name: entries?.get(row.teamId) ?? '(名前なし)', teamId: row.teamId, divisionIndex: row.divisionIndex, line: row.line })),
         }));
     load
       .then((result) => alive && setState({ kind: 'ready', fetchedAt: Date.now(), value: result.rows, unit: result.unit }))

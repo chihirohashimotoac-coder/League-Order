@@ -112,6 +112,19 @@ describe('F05: the next game never shows the previous game’s legs', () => {
     expect(view.container.textContent).not.toContain('L2:');
   });
 
+  it('opening a game reads it once (no extra since read until its leg moves on)', async () => {
+    const { api, calls } = apiOf(() => ({ ...oldLegs }));
+    const view = render(<LiveSheet api={api} live={liveOf('gameA', 2)} />);
+    await flush();
+    await flush();
+    expect(calls.filter((call) => call.operation === 'match/throws')).toHaveLength(1);
+    view.rerender(<LiveSheet api={api} live={liveOf('gameA', 3)} />);
+    await flush();
+    const reads = calls.filter((call) => call.operation === 'match/throws');
+    expect(reads).toHaveLength(2);
+    expect(reads[1].params.since).toBe('10');
+  });
+
   it('a late reply for the previous game is dropped', async () => {
     let releaseA: (value: unknown) => void = () => undefined;
     const { api } = apiOf((_operation, params) => {
@@ -159,6 +172,29 @@ describe('F03: a running competition with nothing on keeps checking', () => {
     await flush();
     expect(screen.getAllByTestId('competition-match')).toHaveLength(1);
     expect(calls.filter((call) => call.operation === 'match/list').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('a competition that finishes while open stops being polled', async () => {
+    vi.useFakeTimers();
+    let status = 30;
+    const { api, calls } = apiOf((operation) => {
+      if (operation === 'tournament/get') return competitionDoc(status, 0, [['AAAA', 'Alice']]);
+      if (operation === 'tournament/standings') return { result: -51 };
+      return list([]);
+    });
+    render(<TournamentHub api={api} tdid={TDID} tab="live" onGame={() => undefined} />);
+    await flush();
+    status = 40;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(HUB_IDLE_MS * 1.25);
+    });
+    await flush();
+    const settled = calls.length;
+    expect(screen.getByText(/この大会は終了しています/)).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+    });
+    expect(calls.length).toBe(settled);
   });
 
   it('a finished competition with nothing in progress is not polled again', async () => {
@@ -238,8 +274,8 @@ describe('F12: every player of a ranking can be reached', () => {
     await open();
     const rows = () => screen.getByTestId('player-ranking').querySelectorAll('tbody tr');
     expect(rows()).toHaveLength(60);
-    expect(screen.getByTestId('ranking-footer').textContent).toContain('60 / 75 人を表示');
-    fireEvent.click(screen.getByRole('button', { name: 'さらに 15 人' }));
+    expect(screen.getByTestId('ranking-footer').textContent).toContain('60 / 75 件を表示');
+    fireEvent.click(screen.getByRole('button', { name: 'さらに 15 件' }));
     expect(rows()).toHaveLength(75);
     expect(rows()[74].textContent).toContain('75');
     expect(rows()[74].textContent).toContain('Player 075');
@@ -252,7 +288,7 @@ describe('F12: every player of a ranking can be reached', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].querySelector('td')?.textContent).toBe('70');
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'nobody' } });
-    expect(screen.getByTestId('ranking-footer').textContent).toContain('一致する選手はいません');
+    expect(screen.getByTestId('ranking-footer').textContent).toContain('一致するエントリーはいません');
   });
 
   it('league スタッツ: search works with the division filter, the minimum legs and every sort', () => {
