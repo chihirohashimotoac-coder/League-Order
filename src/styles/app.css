@@ -7863,3 +7863,131 @@ ul.plain {
   border-left: 3px solid var(--color-warning);
   color: var(--color-warning);
 }
+
+/* ------------------------------------------------------------------ */
+/* Live score sheet: following the newest visit (re-audit U02)          */
+/* Only the sheet's own box scrolls; its column heads stay in view.     */
+/* ------------------------------------------------------------------ */
+.ns-body,
+.ns-board,
+.ns-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ns-follow {
+  position: relative;
+}
+
+.ns-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.ns-scroll:focus-visible {
+  outline-offset: -3px;
+}
+
+.ns-latest {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  box-shadow: 0 2px 8px rgb(23 32 38 / 22%);
+}
+
+/* ------------------------------------------------------------------ */
+/* Watching on a large screen (re-audit U01)                            */
+/* The same elements, placed side by side when there is room: no second */
+/* copy, no extra request. Phones keep the single column above.         */
+/* ------------------------------------------------------------------ */
+.n01-sheet,
+.game-view {
+  container-type: inline-size;
+}
+
+.gv-body,
+.gv-figures,
+.gv-legs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Score sheet and points left on the left; what happened and the estimate on the right. */
+@container (min-width: 820px) {
+  .ns-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .ns-board {
+    border-right: 1px solid var(--color-border);
+  }
+
+  .ns-scroll {
+    max-height: min(58vh, 560px);
+  }
+
+  .ns-side .ns-plus {
+    border-top: 0;
+  }
+
+  .ns-side > .legs-status,
+  .ns-side > .ns-stats {
+    margin: 8px 12px 0;
+    width: auto;
+  }
+
+  .gv-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px 20px;
+    align-items: start;
+  }
+}
+
+/* The match sheet (a game opened on its own) uses the width of a large screen; every other sheet keeps 760 px. */
+@media (min-width: 1200px) {
+  .sheet.sheet-wide {
+    max-width: min(1320px, calc(100vw - 64px));
+  }
+}
+
+/* Today's board: with two or more cards on a very wide screen, the cards become a column on the
+   left and the chosen card fills the rest (the live sheet then splits in two by itself). */
+@media (min-width: 1500px) {
+  .app-main.wide:has(.live-hub > .board > li + li) {
+    max-width: 1560px;
+  }
+
+  .live-hub:has(> .board > li + li) {
+    display: grid;
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+    gap: 12px 16px;
+    align-items: start;
+  }
+
+  .live-hub:has(> .board > li + li) > * {
+    grid-column: 1 / -1;
+  }
+
+  .live-hub:has(> .board > li + li) > .board {
+    grid-column: 1;
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    overflow-x: visible;
+    position: sticky;
+    top: calc(66px + var(--safe-top));
+    max-height: calc(100dvh - 160px);
+    overflow-y: auto;
+  }
+
+  .live-hub:has(> .board > li + li) > .focus-card {
+    grid-column: 2;
+  }
+}

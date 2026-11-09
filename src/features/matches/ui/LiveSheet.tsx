@@ -9,6 +9,7 @@ import { LegsStatusLine } from './LegsStatusLine';
 import { raceChance } from '../probability';
 import { ZeroOneGrid } from './ScoreGrid';
 import { FinishChances, RaceChart } from './LegCharts';
+import { useFollowLatest } from './useFollowLatest';
 
 /**
  * The live game the way a darts scoreboard shows it — the layout spectators know from n01's
@@ -42,6 +43,8 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
   const stats = useMemo(() => gameStats(all, cricket), [all, cricket]);
   const names: [string, string] = [live.sides[0].members.join(' / ') || live.sides[0].name, live.sides[1].members.join(' / ') || live.sides[1].name];
   const thrower = leg && !leg.ended ? leg.thrower : null;
+  // The score sheet's own box follows the newest visit while the viewer is at it (01 only).
+  const follow = useFollowLatest<HTMLDivElement>({ enabled: !cricket && leg !== null, game: live.mid, update: leg });
 
   // --- League Order's own figures ---------------------------------------------------------
   const average: [number, number] = [shrunkAverage(stats[0].rate, stats[0].darts), shrunkAverage(stats[1].rate, stats[1].darts)];
@@ -89,138 +92,169 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
         </div>
       </header>
 
-      {leg ? (
-        cricket ? (
-          <CricketBoard leg={leg} />
-        ) : (
-          <div className="ns-scroll">
-            <ZeroOneGrid leg={leg} startScore={live.startScore} thrower={thrower} minRows={4} spare={leg.ended ? 0 : 1} />
+      <div className="ns-body">
+        <div className="ns-board">
+          {leg ? (
+            cricket ? (
+              <CricketBoard leg={leg} />
+            ) : (
+              <div className="ns-follow">
+                <div
+                  className="ns-scroll"
+                  ref={follow.ref}
+                  tabIndex={0}
+                  role="region"
+                  aria-label={follow.following ? 'スコア表 (最新の得点を表示中)' : 'スコア表 (過去のラウンドを表示中)'}
+                  data-testid="live-scroll"
+                  data-following={follow.following ? 'true' : 'false'}
+                >
+                  <ZeroOneGrid leg={leg} startScore={live.startScore} thrower={thrower} minRows={4} spare={leg.ended ? 0 : 1} />
+                </div>
+                {!follow.following ? (
+                  <button
+                    type="button"
+                    className="btn small ns-latest"
+                    data-testid="follow-latest"
+                    onClick={(event) => {
+                      const hadFocus = document.activeElement === event.currentTarget;
+                      follow.resume();
+                      // The button goes away: keep a keyboard user in the sheet, not at the page top.
+                      if (hadFocus) follow.ref.current?.focus({ preventScroll: true });
+                    }}
+                  >
+                    最新へ
+                  </button>
+                ) : null}
+              </div>
+            )
+          ) : null}
+
+          <div className="ns-left" aria-label={cricket ? '点数' : '残り点数'}>
+            {([0, 1] as const).map((side) => (
+              <div key={side} className={`ns-big${thrower === side ? ' on' : ''}`} data-testid={thrower === side ? 'next-thrower' : undefined}>
+                {cricket ? (leg?.points?.[side] ?? 0) : (leg?.left?.[side] ?? live.startScore ?? '—')}
+                {thrower === side && leg?.member ? <span className="ns-member">{leg.member}</span> : null}
+              </div>
+            ))}
           </div>
-        )
-      ) : null}
+        </div>
 
-      <div className="ns-left" aria-label={cricket ? '点数' : '残り点数'}>
-        {([0, 1] as const).map((side) => (
-          <div key={side} className={`ns-big${thrower === side ? ' on' : ''}`} data-testid={thrower === side ? 'next-thrower' : undefined}>
-            {cricket ? (leg?.points?.[side] ?? 0) : (leg?.left?.[side] ?? live.startScore ?? '—')}
-            {thrower === side && leg?.member ? <span className="ns-member">{leg.member}</span> : null}
-          </div>
-        ))}
-      </div>
+        <div className="ns-side">
+          {!complete ? <LegsStatusLine history={history} /> : null}
+          {complete ? (
+            <table className="ns-stats" aria-label="このゲームのスタッツ">
+              <tbody>
+                {(cricket
+                  ? [
+                      ['MPR', fmt(stats[0].rate), fmt(stats[1].rate)],
+                      ...[9, 8, 7, 6, 5].map((marks) => [`${marks} Mark`, String(stats[0].markVisits[marks]), String(stats[1].markVisits[marks])]),
+                      ['Best Leg', stats[0].bestLeg ?? '—', stats[1].bestLeg ?? '—'],
+                    ]
+                  : [
+                      ['3 Darts', fmt(stats[0].rate), fmt(stats[1].rate)],
+                      ['First 9', fmt(stats[0].first9), fmt(stats[1].first9)],
+                      ['100+', String(stats[0].ton), String(stats[1].ton)],
+                      ['140+', String(stats[0].ton40), String(stats[1].ton40)],
+                      ["180's", String(stats[0].ton80), String(stats[1].ton80)],
+                      ['High Finish', stats[0].highOut ?? '—', stats[1].highOut ?? '—'],
+                      ['Best Leg', stats[0].bestLeg ?? '—', stats[1].bestLeg ?? '—'],
+                    ]
+                ).map(([label, a, b]) => (
+                  <tr key={String(label)}>
+                    <td>{a}</td>
+                    <th scope="row">{label}</th>
+                    <td>{b}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
 
-      {!complete ? <LegsStatusLine history={history} /> : null}
-      {complete ? (
-      <table className="ns-stats" aria-label="このゲームのスタッツ">
-        <tbody>
-          {(cricket
-            ? [
-                ['MPR', fmt(stats[0].rate), fmt(stats[1].rate)],
-                ...[9, 8, 7, 6, 5].map((marks) => [`${marks} Mark`, String(stats[0].markVisits[marks]), String(stats[1].markVisits[marks])]),
-                ['Best Leg', stats[0].bestLeg ?? '—', stats[1].bestLeg ?? '—'],
-              ]
-            : [
-                ['3 Darts', fmt(stats[0].rate), fmt(stats[1].rate)],
-                ['First 9', fmt(stats[0].first9), fmt(stats[1].first9)],
-                ['100+', String(stats[0].ton), String(stats[1].ton)],
-                ['140+', String(stats[0].ton40), String(stats[1].ton40)],
-                ["180's", String(stats[0].ton80), String(stats[1].ton80)],
-                ['High Finish', stats[0].highOut ?? '—', stats[1].highOut ?? '—'],
-                ['Best Leg', stats[0].bestLeg ?? '—', stats[1].bestLeg ?? '—'],
-              ]
-          ).map(([label, a, b]) => (
-            <tr key={String(label)}>
-              <td>{a}</td>
-              <th scope="row">{label}</th>
-              <td>{b}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      ) : null}
-
-      <div className="ns-plus" data-testid="league-order-plus">
-        <h3 className="section-mini">League Order の分析 (記録から)</h3>
-        {route && thrower !== null ? (
-          <p className="ns-route" data-testid="checkout-route">
-            基準ルート ({names[thrower]} 残り {left![thrower]}): <strong>{route.join(' ')}</strong>
-            <span className="muted small-text"> ・ 01 Arrangement Support の基準ルート</span>
-          </p>
-        ) : !cricket && left && thrower !== null && left[thrower] <= 170 && left[thrower] > 1 ? (
-          <p className="ns-route muted">残り {left[thrower]} は 3 本で上がれない数字です (セットアップ)。</p>
-        ) : null}
-        {!cricket && leg ? <RaceChart leg={leg} startScore={live.startScore} names={names} /> : null}
-        {!cricket && complete ? <FinishChances legs={all} names={names} /> : null}
-        {!cricket ? (
-          <table className="ns-form small-text">
-            <tbody>
-              <tr>
-                <td>{trend(recent(0), stats[0].rate)}</td>
-                <th scope="row">直近3ラウンド平均</th>
-                <td>{trend(recent(1), stats[1].rate)}</td>
-              </tr>
-              {seasonAverage && (seasonAverage[0] !== null || seasonAverage[1] !== null) ? (
-                <tr>
-                  <td>{fmt(seasonAverage[0])}</td>
-                  <th scope="row">今季平均 (n01 公式)</th>
-                  <td>{fmt(seasonAverage[1])}</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        ) : null}
-        {complete && all.filter((entry) => entry.ended).length > 0 ? (
-          <ol className="ns-legs small-text" aria-label="Legの経過">
-            {all
-              .filter((entry) => entry.ended)
-              .map((entry) => {
-                const winner = entry.winner === 0 || entry.winner === 1 ? entry.winner : null;
-                const finish = [...entry.throws].reverse().find((t) => t.kind === '01' && t.finish) as Extract<LiveThrow, { kind: '01' }> | undefined;
-                const darts = winner === null ? null : entry.dartsTotal?.[winner] ?? entry.throws.filter((t) => t.side === winner).reduce((sum, t) => sum + (t.kind === '01' ? t.darts : 3), 0);
-                return (
-                  <li key={entry.index}>
-                    L{entry.index + 1}: {winner === null ? '—' : names[winner]}
-                    {darts ? ` ${darts}本` : ''}
-                    {finish ? ` ・ ${finish.score} アウト` : ''}
-                    {entry.bull ? ' ・ ブル決着' : ''}
-                  </li>
-                );
-              })}
-          </ol>
-        ) : null}
-        {!cricket ? (
-          <div className="ns-estimate" data-testid="live-estimate">
-            <h3 className="section-mini">
-              参考予測 <span className="tag">参考</span>
-            </h3>
-            {legP !== null ? (
-              <div className="ns-chance" data-testid="leg-chance">
-                <span>このLeg</span>
-                <span className="bar" aria-hidden="true">
-                  <i style={{ width: `${Math.round(legP * 100)}%` }} />
-                </span>
-                <span>
-                  {Math.round(legP * 100)}% - {100 - Math.round(legP * 100)}%
-                </span>
+          <div className="ns-plus" data-testid="league-order-plus">
+            <h3 className="section-mini">League Order の分析 (記録から)</h3>
+            {route && thrower !== null ? (
+              <p className="ns-route" data-testid="checkout-route">
+                基準ルート ({names[thrower]} 残り {left![thrower]}): <strong>{route.join(' ')}</strong>
+                <span className="muted small-text"> ・ 01 Arrangement Support の基準ルート</span>
+              </p>
+            ) : !cricket && left && thrower !== null && left[thrower] <= 170 && left[thrower] > 1 ? (
+              <p className="ns-route muted">残り {left[thrower]} は 3 本で上がれない数字です (セットアップ)。</p>
+            ) : null}
+            {!cricket && leg ? <RaceChart leg={leg} startScore={live.startScore} names={names} /> : null}
+            {!cricket && complete ? <FinishChances legs={all} names={names} /> : null}
+            {!cricket ? (
+              <table className="ns-form small-text">
+                <tbody>
+                  <tr>
+                    <td>{trend(recent(0), stats[0].rate)}</td>
+                    <th scope="row">直近3ラウンド平均</th>
+                    <td>{trend(recent(1), stats[1].rate)}</td>
+                  </tr>
+                  {seasonAverage && (seasonAverage[0] !== null || seasonAverage[1] !== null) ? (
+                    <tr>
+                      <td>{fmt(seasonAverage[0])}</td>
+                      <th scope="row">今季平均 (n01 公式)</th>
+                      <td>{fmt(seasonAverage[1])}</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            ) : null}
+            {complete && all.filter((entry) => entry.ended).length > 0 ? (
+              <ol className="ns-legs small-text" aria-label="Legの経過">
+                {all
+                  .filter((entry) => entry.ended)
+                  .map((entry) => {
+                    const winner = entry.winner === 0 || entry.winner === 1 ? entry.winner : null;
+                    const finish = [...entry.throws].reverse().find((t) => t.kind === '01' && t.finish) as Extract<LiveThrow, { kind: '01' }> | undefined;
+                    const darts = winner === null ? null : entry.dartsTotal?.[winner] ?? entry.throws.filter((t) => t.side === winner).reduce((sum, t) => sum + (t.kind === '01' ? t.darts : 3), 0);
+                    return (
+                      <li key={entry.index}>
+                        L{entry.index + 1}: {winner === null ? '—' : names[winner]}
+                        {darts ? ` ${darts}本` : ''}
+                        {finish ? ` ・ ${finish.score} アウト` : ''}
+                        {entry.bull ? ' ・ ブル決着' : ''}
+                      </li>
+                    );
+                  })}
+              </ol>
+            ) : null}
+            {!cricket ? (
+              <div className="ns-estimate" data-testid="live-estimate">
+                <h3 className="section-mini">
+                  参考予測 <span className="tag">参考</span>
+                </h3>
+                {legP !== null ? (
+                  <div className="ns-chance" data-testid="leg-chance">
+                    <span>このLeg</span>
+                    <span className="bar" aria-hidden="true">
+                      <i style={{ width: `${Math.round(legP * 100)}%` }} />
+                    </span>
+                    <span>
+                      {Math.round(legP * 100)}% - {100 - Math.round(legP * 100)}%
+                    </span>
+                  </div>
+                ) : null}
+                {gameP !== null ? (
+                  <div className="ns-chance" data-testid="game-chance">
+                    <span>{live.showSets ? 'このセット' : 'このゲーム'}</span>
+                    <span className="bar" aria-hidden="true">
+                      <i style={{ width: `${Math.round(gameP * 100)}%` }} />
+                    </span>
+                    <span>
+                      {Math.round(gameP * 100)}% - {100 - Math.round(gameP * 100)}%
+                    </span>
+                  </div>
+                ) : null}
+                <p className="muted small-text">
+                  {legP !== null
+                    ? `残り点・このゲームの平均・次に投げる側から計算した参考値です (Leg は過去の試合で簡易検証、${live.showSets ? 'セット' : 'ゲーム'}は未検証)。${gameP === null && 'reason' in scope ? `${live.showSets ? 'セット' : 'ゲーム'}の予測なし: ${scope.reason}。` : ''}`
+                    : `予測なし: ${'reason' in scope ? scope.reason : '—'}。`}
+                </p>
               </div>
             ) : null}
-            {gameP !== null ? (
-              <div className="ns-chance" data-testid="game-chance">
-                <span>{live.showSets ? 'このセット' : 'このゲーム'}</span>
-                <span className="bar" aria-hidden="true">
-                  <i style={{ width: `${Math.round(gameP * 100)}%` }} />
-                </span>
-                <span>
-                  {Math.round(gameP * 100)}% - {100 - Math.round(gameP * 100)}%
-                </span>
-              </div>
-            ) : null}
-            <p className="muted small-text">
-              {legP !== null
-                ? `残り点・このゲームの平均・次に投げる側から計算した参考値です (Leg は過去の試合で簡易検証、${live.showSets ? 'セット' : 'ゲーム'}は未検証)。${gameP === null && 'reason' in scope ? `${live.showSets ? 'セット' : 'ゲーム'}の予測なし: ${scope.reason}。` : ''}`
-                : `予測なし: ${'reason' in scope ? scope.reason : '—'}。`}
-            </p>
           </div>
-        ) : null}
+        </div>
       </div>
     </section>
   );
