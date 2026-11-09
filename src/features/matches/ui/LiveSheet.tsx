@@ -17,7 +17,7 @@ import { FinishChances, RaceChart } from './LegCharts';
  * Then what only League Order adds, in two visibly separate blocks:
  * - 実績 (what happened): the thrower's standard route, the race chart, finishing chances, recent
  *   form against the game average, the legs so far, (league cards) n01's season average;
- * - 参考予測 (a model, not calibrated): the chance of taking this leg and the game, shown only
+ * - 参考予測 (a model; the leg chance recalibrated on past games, the game chance unchecked): the chance of taking this leg and the game, shown only
  *   where the model applies (`liveEstimateScope`) — otherwise no number at all.
  *
  * The game's legs come from `useGameLegs`, bound to this game's `mid`: figures computed from
@@ -187,7 +187,7 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
         {!cricket ? (
           <div className="ns-estimate" data-testid="live-estimate">
             <h3 className="section-mini">
-              参考予測 <span className="tag">未検証</span>
+              参考予測 <span className="tag">参考</span>
             </h3>
             {legP !== null ? (
               <div className="ns-chance" data-testid="leg-chance">
@@ -213,7 +213,7 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
             ) : null}
             <p className="muted small-text">
               {legP !== null
-                ? `残り点・このゲームの平均・次に投げる側から計算した参考値で、実際の試合での精度は検証していません。${gameP === null && 'reason' in scope ? `${live.showSets ? 'セット' : 'ゲーム'}の予測なし: ${scope.reason}。` : ''}`
+                ? `残り点・このゲームの平均・次に投げる側から計算した参考値です (Leg は過去の試合で簡易検証、${live.showSets ? 'セット' : 'ゲーム'}は未検証)。${gameP === null && 'reason' in scope ? `${live.showSets ? 'セット' : 'ゲーム'}の予測なし: ${scope.reason}。` : ''}`
                 : `予測なし: ${'reason' in scope ? scope.reason : '—'}。`}
             </p>
           </div>

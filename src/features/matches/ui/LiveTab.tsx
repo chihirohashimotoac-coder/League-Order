@@ -386,7 +386,7 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
         })}
       </ol>
       <p className="small-text estimate" data-testid="estimate">
-        予測: {names[0]} 勝ち {Math.round(outlook.win * 100)}%{outlook.draw > 0.005 ? ` ・ 引分 ${Math.round(outlook.draw * 100)}%` : ''} ・ {names[1]} 勝ち {Math.round(outlook.loss * 100)}%
+        参考予測: {names[0]} 勝ち {Math.round(outlook.win * 100)}%{outlook.draw > 0.005 ? ` ・ 引分 ${Math.round(outlook.draw * 100)}%` : ''} ・ {names[1]} 勝ち {Math.round(outlook.loss * 100)}%
         <span className="muted"> (今季の種別勝率から計算、このカードを除く{seasonGames < 20 ? '・データ少なめ' : ''})</span>
       </p>
       <CardTrail steps={trail} names={names} labelOf={(schid) => slotLabel(data.season, schid)} basis="今季の種別ごとの勝率 (このカードを除く) から計算した参考値です。" />

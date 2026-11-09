@@ -286,11 +286,15 @@ describe('checkout routes and the leg estimate (League Order additions to the li
   });
 
   it('the leg estimate favours fewer points left, a better average and throwing next', async () => {
-    const { legChance, freshLegChance, shrunkAverage } = await import('./checkout');
-    expect(legChance([40, 300], [45, 45], 0)).toBeGreaterThan(0.9);
+    const { legChance, rawLegChance, freshLegChance, shrunkAverage } = await import('./checkout');
+    // The raw model is near-certain on 40 vs 300; since v1.5.0 the shown chance is recalibrated
+    // on real games (LEG_CALIBRATION, docs/LIVE_ESTIMATE.md) and stays clearly but less sure.
+    expect(rawLegChance([40, 300], [45, 45], 0)).toBeGreaterThan(0.9);
+    expect(legChance([40, 300], [45, 45], 0)).toBeGreaterThan(0.85);
+    expect(legChance([40, 300], [45, 45], 0)).toBeLessThan(rawLegChance([40, 300], [45, 45], 0));
     expect(legChance([300, 300], [45, 45], 0)).toBeGreaterThan(legChance([300, 300], [45, 45], 1));
     expect(freshLegChance([45, 45])).toBeCloseTo(0.5, 5);
-    expect(freshLegChance([60, 40])).toBeGreaterThan(0.6);
+    expect(freshLegChance([60, 40])).toBeGreaterThan(0.55);
     // A few darts barely move the average from 45.
     expect(shrunkAverage(90, 6)).toBeCloseTo(49.5, 5);
   });
