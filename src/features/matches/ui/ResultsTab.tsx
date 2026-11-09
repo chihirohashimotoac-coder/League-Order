@@ -11,6 +11,8 @@ import type { SeasonData } from './useMatchContext';
 import { formatClock, formatRate } from './useMatchContext';
 import { GameView } from './GameView';
 import { Highlights } from './Highlights';
+import { CardTrail } from './CardTrail';
+import { outlookTrail, slotChances } from '../cardTrail';
 import type { HighlightFocus } from './Highlights';
 
 /**
@@ -181,6 +183,7 @@ function MatchCenter({
         ) : null}
       </p>
       <Highlights card={card} api={api} onOpen={openHighlight} />
+      <MatchTrail card={card} data={data} />
       <ul className="game-list">
         {card.games.map((entry) => (
           <li key={entry.slot.schid} id={`game-${entry.slot.schid}`}>
@@ -345,5 +348,23 @@ function Insights({ card, data, registered }: { card: MatchCard; data: SeasonDat
         </div>
       ) : null}
     </section>
+  );
+}
+
+function MatchTrail({ card, data }: { card: MatchCard; data: SeasonData }): React.JSX.Element | null {
+  const steps = useMemo(() => {
+    const exclude = new Set(card.games.flatMap((entry) => (entry.game ? [entry.game.mid] : [])));
+    const { chance } = slotChances(data.season, data.cards, data.games, [card.teams[0].id, card.teams[1].id], exclude);
+    const results = card.games.flatMap((entry) => (entry.winner !== null && entry.game?.finished ? [{ schid: entry.slot.schid, winner: entry.winner, endedAt: entry.game.updateTime }] : []));
+    return outlookTrail(data.season.slots, chance, results);
+  }, [card, data]);
+  const labels = new Map(card.games.map((entry) => [entry.slot.schid, entry.slot.label]));
+  return (
+    <CardTrail
+      steps={steps}
+      names={[card.teams[0].name, card.teams[1].name]}
+      labelOf={(schid) => labels.get(schid) ?? schid}
+      basis="今季の種別ごとの勝率 (このカードを除く) から計算した参考値で、結果の説明ではありません。"
+    />
   );
 }

@@ -186,6 +186,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     const focus = page.getByTestId('focus-card');
     await expect(focus.locator('.flow .dot')).toHaveCount(5);
     await expect(focus.getByTestId('estimate')).toContainText('予測');
+    await expect(focus.getByTestId('card-trail')).toContainText('Arrows の勝率 (予測) の推移');
     await expect(focus.getByTestId('next-thrower')).toContainText('C1');
     await expect(focus.getByTestId('upcoming')).toContainText('シングルス1 A1 vs C1');
     // The game in progress as a scoreboard: Scored / To Go, the points left, the game's figures,
@@ -229,6 +230,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     const highlights = detail.getByTestId('highlights');
     await expect(highlights).toContainText('180');
     await expect(highlights).toContainText('最短');
+    await expect(detail.getByTestId('card-trail')).toContainText('このカードを除く');
     await highlights.locator('.hl-row').filter({ hasText: '180' }).first().click();
     await expect(detail.getByTestId('game-view').locator('tr.marked td.mark')).toHaveText('180');
     await expect(detail.getByTestId('intel-opponent')).toContainText('対戦 (公式)');

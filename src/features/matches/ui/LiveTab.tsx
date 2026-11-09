@@ -3,18 +3,17 @@ import { Icon } from '../../../components/icons';
 import type { MatchesApi } from '../api';
 import type { CardOrder, GameRow, LiveState, SeasonDocument } from '../parse';
 import { parseLeagueTmid } from '../parse';
-import { gameWinner, sideRate, slotStructure } from '../cards';
+import { gameWinner, sideRate } from '../cards';
 import type { LiveStatus } from '../livePoller';
 import { LivePoller, medianMs } from '../livePoller';
 import type { LiveEvent } from '../gameStats';
 import { throwEvents } from '../gameStats';
-import { cardOutlook, log5, shrunk } from '../probability';
-import type { GameOutlook } from '../probability';
-import { teamProfile } from '../insights';
+import { outlookTrail, slotChances } from '../cardTrail';
 import { checkReproduction, projectMany } from '../standings';
 import type { SeasonData } from './useMatchContext';
 import { formatClock, useTodayBoard } from './useMatchContext';
 import { GameView } from './GameView';
+import { CardTrail } from './CardTrail';
 import { LiveSheet } from './LiveSheet';
 import { usePlayerStats } from './useMatchContext';
 import type { MatchesApiFactory } from '../environment';
@@ -239,26 +238,19 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
   const liveFlip = live?.sides[0].teamId === card.teams[1].id;
   const won: [number, number] = live?.isSchedule ? (liveFlip ? [live.sets[1], live.sets[0]] : [live.sets[0], live.sets[1]]) : card.won;
 
-  // Estimate: season win rates per kind, the game in progress by its legs.
-  const ours = teamProfile(data.season, data.cards, data.games, card.teams[0].id);
-  const theirs = teamProfile(data.season, data.cards, data.games, card.teams[1].id);
-  const outlook = cardOutlook(
-    data.season.slots.map((slot): GameOutlook => {
-      const game = bySchid.get(slot.schid);
-      const kind = slotStructure(slot);
-      const p = log5(shrunk(ours.byStructure[kind]), shrunk(theirs.byStructure[kind]));
-      if (game?.finished) {
-        const winner = gameWinner(game);
-        if (winner !== null) return { state: 'done', winner: (flipOf(game) ? 1 - winner : winner) as 0 | 1 };
-      }
-      if (live && live.schid === slot.schid && !live.gameEnded && live.limitLeg) {
-        const legs: [number, number] = liveFlip ? [live.legs[1], live.legs[0]] : [live.legs[0], live.legs[1]];
-        return { state: 'live', p, legs, need: live.limitLeg };
-      }
-      return { state: 'todo', p };
-    }),
-  );
-  const seasonGames = Object.values(ours.byStructure).reduce((sum, r) => sum + r.games, 0) + Object.values(theirs.byStructure).reduce((sum, r) => sum + r.games, 0);
+  // Estimate: season win rates per kind (without this card's games), the game in progress by its
+  // legs; and the same estimate after each game so far (カード勝率の推移).
+  const { chance, seasonGames } = slotChances(data.season, data.cards, data.games, [card.teams[0].id, card.teams[1].id], new Set(card.games.map((game) => game.mid)));
+  const results = card.games.flatMap((game) => {
+    const winner = game.finished ? gameWinner(game) : null;
+    return winner === null || !game.schid ? [] : [{ schid: game.schid, winner: (flipOf(game) ? 1 - winner : winner) as 0 | 1, endedAt: game.updateTime }];
+  });
+  const liveGame =
+    live && live.schid && !live.gameEnded && live.limitLeg
+      ? { schid: live.schid, legs: (liveFlip ? [live.legs[1], live.legs[0]] : [live.legs[0], live.legs[1]]) as [number, number], need: live.limitLeg }
+      : null;
+  const trail = outlookTrail(data.season.slots, chance, results, liveGame);
+  const outlook = trail[trail.length - 1].outlook;
 
   // Standings if every card of this division today ended as it stands.
   const group = data.standings?.find((entry) => entry.divisionIndex === card.divisionIndex);
@@ -340,8 +332,9 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
       </ol>
       <p className="small-text estimate" data-testid="estimate">
         予測: {names[0]} 勝ち {Math.round(outlook.win * 100)}%{outlook.draw > 0.005 ? ` ・ 引分 ${Math.round(outlook.draw * 100)}%` : ''} ・ {names[1]} 勝ち {Math.round(outlook.loss * 100)}%
-        <span className="muted"> (今季の種別勝率から計算{seasonGames < 20 ? '・データ少なめ' : ''})</span>
+        <span className="muted"> (今季の種別勝率から計算、このカードを除く{seasonGames < 20 ? '・データ少なめ' : ''})</span>
       </p>
+      <CardTrail steps={trail} names={names} labelOf={(schid) => slotLabel(data.season, schid)} basis="今季の種別ごとの勝率 (このカードを除く) から計算した参考値です。" />
 
       {live && !live.gameEnded ? <LiveSheet api={api} live={live} seasonAverage={seasonAverage} /> : null}
 

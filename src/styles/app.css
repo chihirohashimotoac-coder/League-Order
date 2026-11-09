@@ -7613,3 +7613,59 @@ ul.plain {
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
+
+/* ---------------------------------------------------------------------------
+   カード勝率の推移 (card estimate trail)
+   --------------------------------------------------------------------------- */
+
+.card-trail {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-trail svg {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  display: block;
+}
+
+.card-trail .grid {
+  stroke: var(--color-border);
+}
+
+.card-trail .half {
+  stroke: var(--color-border-strong);
+  stroke-dasharray: 4 3;
+}
+
+.card-trail .tick {
+  fill: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.card-trail .swing {
+  fill: var(--color-accent-tint);
+}
+
+.card-trail .trail {
+  stroke: var(--color-accent);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+
+.card-trail .pt {
+  fill: var(--color-surface-1);
+  stroke: var(--color-accent);
+  stroke-width: 2;
+}
+
+.card-trail .pt.a {
+  fill: var(--color-accent);
+}
+
+.card-trail .pt.live {
+  stroke-dasharray: 2 2;
+}
