@@ -80,15 +80,30 @@ export function useFollowLatest<T extends HTMLElement>(options: {
     if (enabled && followingRef.current) toLatest();
   }, [enabled, game, update, toLatest]);
 
-  // The viewer's own scrolling decides; a resize keeps a following box at the bottom.
+  // The viewer's own scrolling decides; a resize keeps a following box at the bottom. A scroll
+  // event that comes with a change of the box's size (the browser clamping or anchoring the
+  // position as the window is resized) is the resize, not the viewer: it never stops following.
   useEffect(() => {
     const element = ref.current;
     if (!enabled || !element) return;
-    const onScroll = (): void => setFollowing(atBottom(element));
+    const sizeOf = (): string => `${element.clientWidth}x${element.clientHeight}`;
+    let size = sizeOf();
+    const onScroll = (): void => {
+      const now = sizeOf();
+      if (now !== size) {
+        size = now;
+        if (followingRef.current) {
+          toLatest();
+          return;
+        }
+      }
+      setFollowing(atBottom(element));
+    };
     element.addEventListener('scroll', onScroll, { passive: true });
     let observer: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(() => {
+        size = sizeOf();
         if (followingRef.current) toLatest();
       });
       observer.observe(element);
