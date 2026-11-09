@@ -7,17 +7,29 @@ import type { Page } from '../navigation';
  * その他 — every screen that is not one of the four main tabs, by its own name, one tap away.
  * Nothing new here: the same screens that were in the bottom bar or on HOME before.
  */
-export function MorePage({ onNavigate, onShowChangelog }: { onNavigate: (page: Page) => void; onShowChangelog: () => void }): React.JSX.Element {
+export function MorePage({
+  onNavigate,
+  onShowChangelog,
+  onRegister,
+}: {
+  onNavigate: (page: Page) => void;
+  onShowChangelog: () => void;
+  /** Without a team: the team screens are replaced by the way to register one. */
+  onRegister?: () => void;
+}): React.JSX.Element {
   const store = useAppStore();
+  const teamless = store.teams.length === 0;
   const groups: { title: string; entries: { key: string; icon: IconName; title: string; meta: string; onSelect: () => void }[] }[] = [
     {
       title: 'チーム',
-      entries: [
-        { key: 'players', icon: 'users', title: 'メンバー', meta: `${store.teamPlayers.length} 名 ・ Rating・PPR・適性`, onSelect: () => onNavigate('players') },
-        { key: 'formats', icon: 'format', title: 'フォーマット', meta: `${store.teamFormats.length} 件 ・ ゲーム構成`, onSelect: () => onNavigate('formats') },
-        { key: 'pairs', icon: 'pair', title: 'ペア相性', meta: `${store.teamPairs.length} 件設定済み ・ 相性・禁止ペア`, onSelect: () => onNavigate('pairs') },
-        { key: 'history', icon: 'history', title: '履歴', meta: `${store.teamOrders.length} 件のオーダー ・ 保存・確定したもの`, onSelect: () => onNavigate('history') },
-      ],
+      entries: teamless
+        ? [{ key: 'register', icon: 'users', title: 'チームを登録', meta: 'メンバー・フォーマット・ペア相性・履歴は登録後に使えます', onSelect: () => onRegister?.() }]
+        : [
+            { key: 'players', icon: 'users', title: 'メンバー', meta: `${store.teamPlayers.length} 名 ・ Rating・PPR・適性`, onSelect: () => onNavigate('players') },
+            { key: 'formats', icon: 'format', title: 'フォーマット', meta: `${store.teamFormats.length} 件 ・ ゲーム構成`, onSelect: () => onNavigate('formats') },
+            { key: 'pairs', icon: 'pair', title: 'ペア相性', meta: `${store.teamPairs.length} 件設定済み ・ 相性・禁止ペア`, onSelect: () => onNavigate('pairs') },
+            { key: 'history', icon: 'history', title: '履歴', meta: `${store.teamOrders.length} 件のオーダー ・ 保存・確定したもの`, onSelect: () => onNavigate('history') },
+          ],
     },
     {
       title: 'アプリ',

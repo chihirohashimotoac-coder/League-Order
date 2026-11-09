@@ -44,6 +44,7 @@ import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { MorePage } from './pages/MorePage';
 import { WelcomePage } from './pages/WelcomePage';
+import { ViewerHome, ViewerOrder } from './pages/ViewerPages';
 import type { NextMatchOrder } from './domain/n01/nextMatch';
 
 // Loaded only when the analytics screen is opened: it adds nothing to start-up and makes no
@@ -155,6 +156,15 @@ export function App(): React.JSX.Element {
     setDraft(null);
     setPage('home');
   }, [store.ready, hasTeams, invalidateGeneration]);
+
+  // Watching without a team opens on 観戦 (on choosing a league, and again after a reload).
+  // Declared after the reset above, which sends a teamless app to ホーム, so this one wins.
+  const viewing = store.ready && !hasTeams && Boolean(store.settings.watch);
+  const wasViewing = useRef(false);
+  useEffect(() => {
+    if (viewing && !wasViewing.current) setPage('watch');
+    wasViewing.current = viewing;
+  }, [viewing]);
 
   // Keep the setup draft in step with the roster and the saved settings.
   useEffect(() => {
@@ -561,27 +571,64 @@ export function App(): React.JSX.Element {
     );
   }
 
-  // No team, but a league chosen to watch: the match screens, with the way to register a team.
+  // No team, but a league chosen to watch: the same five tabs as with a team, in the same places.
+  // Watching, settings and the change log work as they are; ORDER and the team screens say a
+  // team is needed and offer to register one (or the sample) right there.
   if (!hasTeams && store.settings.watch && !registering) {
+    const register = (): void => setRegistering(true);
+    const viewerPage: Page = page === 'result' ? 'setup' : page === 'players' || page === 'formats' || page === 'pairs' || page === 'history' ? 'more' : page;
+    const watching = viewerPage === 'watch' || viewerPage === 'live' || viewerPage === 'matches';
+    const viewerTitle = watching ? store.settings.watch.title : viewerPage === 'home' ? 'ホーム' : PAGE_TITLES[viewerPage];
+    const viewerBack = viewerPage === 'settings' ? BACK_TARGETS.settings : undefined;
     return (
       <div className="app viewer-shell">
         <header className="app-header">
-          <span className="brand-mark" aria-hidden="true">
-            <Icon name="target" size={20} />
-          </span>
+          {viewerBack ? (
+            <button type="button" className="btn icon ghost header-back" onClick={() => setPage(viewerBack)} aria-label="戻る">
+              <Icon name="chevronLeft" size={24} />
+            </button>
+          ) : (
+            <span className="brand-mark" aria-hidden="true">
+              <Icon name="target" size={20} />
+            </span>
+          )}
           <span className="header-titles">
             <span className="kicker">LEAGUE ORDER</span>
-            <h1>{store.settings.watch.title}</h1>
+            <h1>{viewerTitle}</h1>
           </span>
-          <button type="button" className="btn small" onClick={() => setRegistering(true)}>
+          <button type="button" className="btn small" onClick={register}>
             チームを登録
           </button>
         </header>
-        <main className="app-main wide">
-          <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
-            <MatchesEntry page={page === 'matches' ? 'matches' : 'live'} onNavigate={setPage} />
-          </Suspense>
+        <main className={['app-main', watching || viewerPage === 'analytics' || viewerPage === 'home' ? 'wide' : ''].filter(Boolean).join(' ')}>
+          {applyUpdate ? (
+            <div className="notice info">
+              <Icon name="refresh" size={18} />
+              <span className="grow small-text">新しいバージョンがあります。</span>
+              <button type="button" className="btn small primary" onClick={applyUpdate}>
+                更新
+              </button>
+            </div>
+          ) : null}
+          <div className="page-view" key={viewerPage}>
+            {viewerPage === 'home' ? <ViewerHome onRegister={register} onNavigate={setPage} /> : null}
+            {watching ? (
+              <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
+                <MatchesEntry key={viewerPage} page={viewerPage as 'watch' | 'live' | 'matches'} onNavigate={setPage} />
+              </Suspense>
+            ) : null}
+            {viewerPage === 'analytics' ? (
+              <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
+                <AnalyticsEntry onNavigate={setPage} />
+              </Suspense>
+            ) : null}
+            {viewerPage === 'setup' ? <ViewerOrder onRegister={register} onNavigate={setPage} /> : null}
+            {viewerPage === 'more' ? <MorePage onNavigate={setPage} onShowChangelog={() => setShowChangelog(true)} onRegister={register} /> : null}
+            {viewerPage === 'settings' ? <SettingsPage /> : null}
+          </div>
         </main>
+        <TabBar active={TAB_FOR_PAGE[viewerPage] ?? viewerPage} onSelect={setPage} />
+        {showChangelog ? <ChangelogSheet onClose={() => setShowChangelog(false)} /> : null}
       </div>
     );
   }
@@ -754,26 +801,13 @@ export function App(): React.JSX.Element {
         </div>
       </main>
 
-      <nav className="tab-bar" aria-label="メインナビゲーション">
-        {TABS.map((tab) => (
-          <button
-            type="button"
-            key={tab.page}
-            onClick={() =>
-              // Once an order has been generated, the ORDER tab returns to the result
-              // rather than the setup form: that is the screen the captain is working
-              // on, and the header's back arrow still leads to the setup.
-              setPage(tab.page === 'setup' && session?.present.current ? 'result' : tab.page)
-            }
-            aria-current={activeTab === tab.page ? 'page' : undefined}
-          >
-            <span className="tab-icon" aria-hidden="true">
-              <Icon name={tab.icon} size={21} />
-            </span>
-            <span className="tab-label">{tab.label}</span>
-          </button>
-        ))}
-      </nav>
+      <TabBar
+        active={activeTab}
+        // Once an order has been generated, the ORDER tab returns to the result rather than the
+        // setup form: that is the screen the captain is working on, and the header's back arrow
+        // still leads to the setup.
+        onSelect={(next) => setPage(next === 'setup' && session?.present.current ? 'result' : next)}
+      />
 
       {menuOpen ? (
         <MenuDrawer
@@ -823,4 +857,20 @@ function sameMatch(a: MatchInfo, b: MatchInfo): boolean {
 function clearGuests(draft: SetupDraft): SetupDraft {
   const gone = new Set(draft.guests.map((guest) => guest.id));
   return { ...draft, guests: [], participants: draft.participants.filter((config) => !gone.has(config.playerId)) };
+}
+
+/** The bottom bar: the same five tabs with or without a team. */
+function TabBar({ active, onSelect }: { active: Page; onSelect: (page: Page) => void }): React.JSX.Element {
+  return (
+    <nav className="tab-bar" aria-label="メインナビゲーション">
+      {TABS.map((tab) => (
+        <button type="button" key={tab.page} onClick={() => onSelect(tab.page)} aria-current={active === tab.page ? 'page' : undefined}>
+          <span className="tab-icon" aria-hidden="true">
+            <Icon name={tab.icon} size={21} />
+          </span>
+          <span className="tab-label">{tab.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
 }
