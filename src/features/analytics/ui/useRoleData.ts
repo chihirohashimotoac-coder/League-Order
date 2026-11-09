@@ -82,8 +82,12 @@ export interface DetailState {
   contributions: PlayerContributions;
 }
 
-/** Leg reconstruction per selected player; verified figures accumulate for the open period. */
-export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | null, games: GamesLoad | null): DetailState & { run: (personKey: string) => void } {
+/**
+ * Leg reconstruction per selected player; verified figures accumulate for the open period.
+ * Running it again for a player (「再度復元する」), or after the page's refresh, reads that
+ * player's games again instead of reusing the cached reconstructions (`forceRefresh`).
+ */
+export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | null, games: GamesLoad | null, reloadToken = 0): DetailState & { run: (personKey: string) => void } {
   const [state, setState] = useState<DetailState>({ running: null, results: new Map(), contributions: new Map() });
   const controller = useRef<AbortController | null>(null);
 
@@ -99,12 +103,13 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
       controller.current?.abort();
       const c = new AbortController();
       controller.current = c;
+      const again = reloadToken > 0 || state.results.has(personKey);
       setState((s) => ({ ...s, running: personKey }));
       void (async () => {
         try {
           const api = services.createRoleApi ? services.createRoleApi(c.signal, DETAIL_MAX_REQUESTS) : new AnalyticsApi({ signal: c.signal, maxRequests: DETAIL_MAX_REQUESTS });
           const result = await reconstructPerson(
-            { api, cache: services.cache, isOnline: () => navigator.onLine !== false, now: () => Date.now(), signal: c.signal },
+            { api, cache: services.cache, isOnline: () => navigator.onLine !== false, now: () => Date.now(), forceRefresh: again, signal: c.signal },
             { seasons: load.seasons, games: games.games, personKey },
           );
           if (c.signal.aborted) return;
@@ -122,7 +127,7 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
         }
       })();
     },
-    [services, load, games],
+    [services, load, games, reloadToken, state.results],
   );
   return { ...state, run };
 }

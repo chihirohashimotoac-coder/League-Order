@@ -55,7 +55,7 @@ export default function AnalyticsPage({
   const state = usePeriodLoad(resolved, binding?.leagueId ?? null, request, reload);
   const rawLoad = state.status === 'done' ? state.load : null;
   const games = useGamesLoad(resolved, rawLoad, scope, reload);
-  const detail = usePlayerDetail(resolved, rawLoad, games.load);
+  const detail = usePlayerDetail(resolved, rawLoad, games.load, reload);
   // The chosen game kind's view of the seasons: which counters each season contributes.
   const projection = useMemo<Projection | null>(
     () => (state.load ? projectSeasons(state.load.seasons, scope, { games: games.load?.games ?? new Map(), failed: games.load?.failed ?? new Set() }, detail.contributions) : null),
