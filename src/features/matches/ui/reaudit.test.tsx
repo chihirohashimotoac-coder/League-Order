@@ -324,6 +324,8 @@ describe('R02: the game boundary holds while legs are caught up', () => {
 // R03 — a list that did not bring everything says so, on every screen
 // ---------------------------------------------------------------------------
 
+const row = (i: number, start: number) => ({ ...(gameRow(`c${i}`, 'AAAA', 'BBBB', 'sg01', [side('AAAA', [], 2, 501, 30), side('BBBB', [], 0, 300, 30)], { mid: `m${i}`, start, finished: true }) as Record<string, unknown>), startTime: start });
+
 describe('R03: what a game list did not bring is shown, and goes away once it does', () => {
   /** A real MatchesApi for the documents, with the game list answered by `lists` in turn. */
   function hubApi(lists: GameList[]) {
@@ -419,7 +421,6 @@ describe('R03: what a game list did not bring is shown, and goes away once it do
       },
     };
   }
-  const row = (i: number, start: number) => ({ ...(gameRow(`c${i}`, 'AAAA', 'BBBB', 'sg01', [side('AAAA', [], 2, 501, 30), side('BBBB', [], 0, 300, 30)], { mid: `m${i}`, start, finished: true }) as Record<string, unknown>), startTime: start });
 
   it('a page boundary on equal start times is reported as unsure (today and competition); distinct times are not', async () => {
     const api = (rows: Record<string, unknown>[]) => new MatchesApi({ transport: listTransport(() => rows), governor: new RequestGovernor(100_000), pollPerMinute: 100_000 });
@@ -434,5 +435,88 @@ describe('R03: what a game list did not bring is shown, and goes away once it do
     const competition = await api(tiedCompetition).competitionGames(TDID);
     expect(competition.unsure).toBe(true);
     expect(competition.games).toHaveLength(150);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Code review of this change (2026-11-09): four follow-ups
+// ---------------------------------------------------------------------------
+
+describe('review follow-ups', () => {
+  it('a read given up by its caller is not handed to the next caller of the same read', async () => {
+    const seen: (AbortSignal | undefined)[] = [];
+    const transport: AnalyticsTransport = {
+      request: (_operation, params, signal) => {
+        seen.push(signal);
+        return new Promise((resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+          setTimeout(() => resolve(throwsReply(params.mid, 50, 1, [endedLeg(0, 20)])), 0);
+        });
+      },
+    };
+    const api = new MatchesApi({ transport, governor: new RequestGovernor(100_000), pollPerMinute: 100_000 });
+    const first = new AbortController();
+    const dropped = api.throws('gameA', 10, { signal: first.signal }).catch(() => 'aborted');
+    first.abort();
+    const next = await api.throws('gameA', 10, { signal: new AbortController().signal });
+    expect(await dropped).toBe('aborted');
+    expect(next.legs).toHaveLength(1);
+  });
+
+  it('today: a game starting between two page reads (a row read twice) is not reported as unsure', async () => {
+    let rows = Array.from({ length: 150 }, (_, i) => row(i, 1_800_000_000 + i));
+    let calls = 0;
+    const transport: AnalyticsTransport = {
+      request: async (_operation, params) => {
+        calls += 1;
+        if (calls === 2) rows = [...rows, row(500, 1_800_001_000)]; // newest: every row moves down one
+        const sorted = [...rows].sort((a, b) => (b.startTime as number) - (a.startTime as number));
+        const skip = Number(params.skip ?? 0);
+        return { result: 0, list: sorted.slice(skip, skip + Number(params.count)) };
+      },
+    };
+    const api = new MatchesApi({ transport, governor: new RequestGovernor(100_000), pollPerMinute: 100_000 });
+    const board = await api.todayGames(TDID, 0);
+    expect(board.unsure).toBe(false);
+    expect(board.games).toHaveLength(150);
+  });
+
+  it('a finished game whose record lacks an ended leg says so; the retry reads n01 again (not the remembered reply)', async () => {
+    let lacking = true;
+    const { api, calls } = apiOf(() => (lacking ? { ...throwsReply('gameF', 90, 2, [endedLeg(0, 20), endedLeg(2, 80)]), end_match: 1 } : { ...throwsReply('gameF', 95, 2, [endedLeg(0, 20), endedLeg(1, 50), endedLeg(2, 80)]), end_match: 1 }));
+    render(<GameView api={api} mid="gameF" cricket={false} finished names={['A', 'B']} flip={false} />);
+    await flush();
+    expect(screen.getByTestId('legs-status').textContent).toContain('欠けている Leg があります (L2)');
+    expect(screen.queryByLabelText('ゲームの詳細')).toBeNull();
+    lacking = false;
+    fireEvent.click(screen.getByRole('button', { name: '再取得' }));
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(screen.getByLabelText('ゲームの詳細')).toBeTruthy();
+  });
+
+  it('showing the page again while a retry is scheduled keeps the backoff (no early read)', async () => {
+    vi.useFakeTimers();
+    const { api, calls } = apiOf((params) => (!params.since && calls.length === 1 ? throwsReply('gameA', 10, 0, [openLeg(0, 10)]) : new Error('down')));
+    const view = render(<LiveSheet api={api} live={liveAt('gameA', 0, [0, 0])} />);
+    await flush();
+    view.rerender(<LiveSheet api={api} live={liveAt('gameA', 1, [1, 0])} />);
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(screen.getByTestId('legs-status').dataset.sync).toBe('waiting');
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await flush();
+    }
+    expect(calls).toHaveLength(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_RETRY_MS[0]);
+    });
+    await flush();
+    expect(calls).toHaveLength(3);
+    visibility.mockRestore();
   });
 });

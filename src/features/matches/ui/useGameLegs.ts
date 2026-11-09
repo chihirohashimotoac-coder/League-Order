@@ -97,6 +97,8 @@ export function useGameLegs(api: MatchesApi, mid: string, options: { finished: b
   const sync = useRef<{ mid: string; target: number | null; failures: number; whole: boolean }>({ mid, target: null, failures: 0, whole: false });
   // A scheduled read that fell due while the page was hidden: read once it is visible again.
   const dueWhileHidden = useRef(false);
+  // A retry of a finished game reads n01 again instead of the remembered reply.
+  const fresh = useRef(false);
 
   // The whole game, once per mid (and again on a retry).
   useEffect(() => {
@@ -105,8 +107,10 @@ export function useGameLegs(api: MatchesApi, mid: string, options: { finished: b
     let timer: ReturnType<typeof setTimeout> | null = null;
     since.current = { mid, value: null };
     setHeld((current) => (current.mid === mid && current.status === 'ready' ? current : { mid, legs: [], status: 'loading', error: null, replyLeg: null }));
+    const remembered = finished && !fresh.current;
+    fresh.current = false;
     api
-      .throws(mid, null, { finished, signal: controller.signal })
+      .throws(mid, null, { finished: remembered, signal: controller.signal })
       .then((reply) => {
         if (!alive) return;
         if (reply.mid && reply.mid !== mid) throw new Error('別のゲームの記録が返されました。');
@@ -206,38 +210,47 @@ export function useGameLegs(api: MatchesApi, mid: string, options: { finished: b
   }, [api, mid, target, syncAttempt]);
 
   const statusNow = held.mid === mid ? held.status : 'loading';
-  const syncNow = syncState.mid === mid ? syncState.sync : 'idle';
+  // Between the render that finds legs missing and the read starting, it is already "reading".
+  const syncNow = target !== null && (syncState.mid !== mid || syncState.sync === 'idle') ? 'syncing' : syncState.mid === mid ? syncState.sync : 'idle';
 
-  // Reads now: the whole game after a failed first read, the missing legs otherwise.
-  const retry = useCallback(() => {
-    dueWhileHidden.current = false;
-    if (!finished && heldRef.current.mid === mid && heldRef.current.status === 'ready') {
-      sync.current = { ...sync.current, failures: 0, whole: true };
-      setSyncAttempt((n) => n + 1);
-    } else {
-      firstFailures.current = 0;
-      setAttempt((n) => n + 1);
-    }
-  }, [mid, finished]);
+  // Reads now: the missing legs of a live game; otherwise the whole game again (a finished one
+  // from n01, not the remembered reply). A tap starts the automatic reads afresh; coming back
+  // online or to the page does not, so a flaky line still backs off and still stops.
+  const resume = useCallback(
+    (byHand: boolean) => {
+      dueWhileHidden.current = false;
+      if (!finished && heldRef.current.mid === mid && heldRef.current.status === 'ready') {
+        sync.current = { ...sync.current, failures: byHand ? 0 : sync.current.failures, whole: true };
+        setSyncAttempt((n) => n + 1);
+      } else {
+        if (byHand) firstFailures.current = 0;
+        fresh.current = true;
+        setAttempt((n) => n + 1);
+      }
+    },
+    [mid, finished],
+  );
+  const retry = useCallback(() => resume(true), [resume]);
 
-  // Back online, or the page shown again: resume what is waiting, stopped or fell due unseen.
+  // Back online: read what is waiting, stopped or failed now. Shown again: read what fell due
+  // while hidden, or what had stopped — a read already scheduled keeps its backoff.
   const resumable = statusNow === 'error' || syncNow === 'waiting' || syncNow === 'stopped';
+  const stoppedNow = syncNow === 'stopped' || (statusNow === 'error' && firstFailures.current > LEGS_RETRY_MS.length);
   useEffect(() => {
     if (!resumable || typeof window === 'undefined') return;
-    const resume = (): void => {
-      if (hidden()) return;
-      retry();
+    const onOnline = (): void => {
+      if (!hidden()) resume(false);
     };
     const onVisibility = (): void => {
-      if (!hidden() && (dueWhileHidden.current || resumable)) resume();
+      if (!hidden() && (dueWhileHidden.current || stoppedNow)) resume(false);
     };
-    window.addEventListener('online', resume);
+    window.addEventListener('online', onOnline);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      window.removeEventListener('online', resume);
+      window.removeEventListener('online', onOnline);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [resumable, retry]);
+  }, [resumable, stoppedNow, resume]);
 
   if (held.mid !== mid) return { legs: [], status: 'loading', error: null, complete: false, missing: [], sync: 'idle', stale: false, retry };
   const complete = held.status === 'ready' && missing.length === 0;

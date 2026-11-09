@@ -106,10 +106,15 @@ export interface GameList {
   unsure: boolean;
 }
 
-/** True when a page continues the previous one on the same start time (order not guaranteed). */
+/**
+ * True when a page continues the previous one on the same start time (order not guaranteed).
+ * Rows of the new page already read (a game started meanwhile pushed them down a page in a
+ * newest-first list) are not the boundary: the first row not read yet is.
+ */
 function tiedAtBoundary(previous: readonly GameRow[], next: readonly GameRow[]): boolean {
+  const seen = new Set(previous.map((game) => game.mid));
   const last = previous[previous.length - 1]?.startTime ?? null;
-  const first = next[0]?.startTime ?? null;
+  const first = next.find((game) => !seen.has(game.mid))?.startTime ?? null;
   return last !== null && first !== null && last === first;
 }
 
@@ -119,6 +124,8 @@ const GAME_FIELDS = 'mid,tdid,tmid,schid,scid,match_type,title,startTime,endMatc
 export class MatchesApi {
   private readonly memo = new Map<string, Promise<unknown>>();
   private readonly inflight = new Map<string, Promise<unknown>>();
+  /** The signal each in-flight read was sent with: a read already being aborted is never handed on. */
+  private readonly inflightSignal = new WeakMap<Promise<unknown>, AbortSignal | undefined>();
   private readonly transport: AnalyticsTransport;
   private readonly maxRequests: number;
   private readonly timeoutMs: number;
@@ -202,9 +209,14 @@ export class MatchesApi {
   private fresh(operation: AnalyticsOperation, params: Record<string, string>, signal?: AbortSignal): Promise<unknown> {
     const key = this.key(operation, params);
     const running = this.inflight.get(key);
-    if (running) return running;
-    const pending = this.send(operation, params, signal, 'poll').finally(() => this.inflight.delete(key));
+    // Shared with a caller that asks for the same thing — unless that caller has given it up: a
+    // read whose signal is aborted would reject for the new caller too (a retry counted as failed).
+    if (running && !this.inflightSignal.get(running)?.aborted) return running;
+    const pending: Promise<unknown> = this.send(operation, params, signal, 'poll').finally(() => {
+      if (this.inflight.get(key) === pending) this.inflight.delete(key);
+    });
     this.inflight.set(key, pending);
+    this.inflightSignal.set(pending, signal);
     return pending;
   }
 
