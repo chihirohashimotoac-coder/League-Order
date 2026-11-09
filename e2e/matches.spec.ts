@@ -269,6 +269,24 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await noSidewaysScroll(page);
   });
 
+  test('a followed player (注目選手) is listed first on the live board, and stays followed after a reload', async ({ page }) => {
+    await serveN01Canned(page, () => liveBody({ mid: 'c003_db01', schid: 'db01', title: 'Test League A Division ダブルス1', sets: [1, 0] }));
+    await watchWithoutTeam(page);
+    await page.getByRole('tab', { name: 'スタッツ' }).click();
+    await page.getByTestId('stats-tab').getByRole('button', { name: 'A1', exact: true }).click();
+    await page.getByTestId('player-card').getByRole('button', { name: /注目選手に追加/ }).click();
+    await expect(page.getByTestId('player-card').getByRole('button', { name: /注目選手から外す/ })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: '閉じる' }).click();
+    await page.getByRole('tab', { name: 'ライブ' }).click();
+    const followed = page.getByTestId('followed-now');
+    await expect(followed).toContainText('A1');
+    await expect(followed).toContainText('ダブルス1 出場中');
+    await page.reload();
+    await page.getByRole('tab', { name: 'ライブ' }).click();
+    await expect(page.getByTestId('followed-now')).toContainText('A1');
+    await noSidewaysScroll(page);
+  });
+
   test('a failed read says so and offers a retry, never an empty season', async ({ page }) => {
     await page.route(`${N01_API_BASE_URL}/**`, (route) => route.abort('internetdisconnected'));
     await watchWithoutTeam(page);

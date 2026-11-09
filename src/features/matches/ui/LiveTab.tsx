@@ -11,7 +11,7 @@ import { throwEvents } from '../gameStats';
 import { outlookTrail, slotChances } from '../cardTrail';
 import { checkReproduction, projectMany } from '../standings';
 import type { SeasonData } from './useMatchContext';
-import { formatClock, useTodayBoard } from './useMatchContext';
+import { formatClock, useFollowed, useTodayBoard } from './useMatchContext';
 import { GameView } from './GameView';
 import { CardTrail } from './CardTrail';
 import { LiveSheet } from './LiveSheet';
@@ -76,15 +76,19 @@ const slotLabel = (season: SeasonDocument, schid: string | null): string => seas
 export function LiveTab({ data, registered, api, factory }: { data: SeasonData; registered: string[]; api: MatchesApi; factory: MatchesApiFactory }): React.JSX.Element {
   const board = useTodayBoard(api, data.season.tournamentId, true);
   const cards = useMemo(() => (board.games ? boardCards(data.season, board.games) : []), [board.games, data.season]);
+  const followed = useFollowed();
+  // Followed players on today's cards: the game they are in (in progress first), one line each.
+  const spots = useMemo(() => followedSpots(cards, followed.names), [cards, followed.names]);
   const sorted = useMemo(
     () =>
       [...cards].sort(
         (x, y) =>
           Number(y.teams.some((t) => registered.includes(t.id))) - Number(x.teams.some((t) => registered.includes(t.id))) ||
+          Number(spots.some((spot) => spot.card === y)) - Number(spots.some((spot) => spot.card === x)) ||
           Number(!!y.current) - Number(!!x.current) ||
           x.divisionIndex - y.divisionIndex,
       ),
-    [cards, registered],
+    [cards, registered, spots],
   );
   const [chosen, setChosen] = useState<string | null>(null);
   const focus = sorted.find((card) => card.tmid === chosen) ?? sorted.find((card) => card.current) ?? sorted[0] ?? null;
@@ -117,6 +121,29 @@ export function LiveTab({ data, registered, api, factory }: { data: SeasonData; 
         {formatClock(board.fetchedAt)}
         {board.error ? ` ・ 取得エラー (前回の値を表示中)` : ''}
       </p>
+      {spots.length ? (
+        <section className="followed-now" aria-label="注目選手" data-testid="followed-now">
+          <h3 className="section-mini">
+            <span aria-hidden="true">★</span> 注目選手
+          </h3>
+          <ul className="plain">
+            {spots.map((spot) => (
+              <li key={`${spot.name}:${spot.card.tmid}`}>
+                <button type="button" className={`followed-row${spot.live ? ' is-live' : ''}`} onClick={() => setChosen(spot.card.tmid)}>
+                  <strong>{spot.name}</strong>
+                  <span>
+                    {slotLabel(data.season, spot.game.schid)} {spot.live ? '出場中' : '出場済み'}
+                  </span>
+                  <span className="muted small-text">
+                    {spot.card.teams[0].name} vs {spot.card.teams[1].name}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="muted small-text">選手名で照合しています (同姓同名は区別できません)。</p>
+        </section>
+      ) : null}
       <ul className="board" aria-label="本日の対戦">
         {sorted.map((card) => (
           <li key={card.tmid}>
@@ -136,6 +163,32 @@ export function LiveTab({ data, registered, api, factory }: { data: SeasonData; 
       {focus ? <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} /> : null}
     </div>
   );
+}
+
+export interface FollowedSpot {
+  card: BoardCard;
+  game: GameRow;
+  name: string;
+  live: boolean;
+}
+
+/** Each followed player's game on today's board: the game in progress, else the latest one. */
+export function followedSpots(cards: readonly BoardCard[], names: ReadonlySet<string>): FollowedSpot[] {
+  const byName = new Map<string, FollowedSpot>();
+  for (const card of cards) {
+    for (const game of card.games) {
+      for (const side of game.sides) {
+        for (const member of side.members) {
+          const name = member.name.trim();
+          if (!names.has(name)) continue;
+          const spot = { card, game, name, live: !game.finished };
+          const held = byName.get(name);
+          if (!held || (spot.live && !held.live) || (spot.live === held.live && (game.startTime ?? 0) > (held.game.startTime ?? 0))) byName.set(name, spot);
+        }
+      }
+    }
+  }
+  return [...byName.values()].sort((a, b) => Number(b.live) - Number(a.live) || a.name.localeCompare(b.name, 'ja'));
 }
 
 function NextRound({ data, registered }: { data: SeasonData; registered: string[] }): React.JSX.Element | null {

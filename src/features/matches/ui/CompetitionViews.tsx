@@ -6,7 +6,7 @@ import { TTYPE_LABELS, groupMatches, stageLabel } from '../competition';
 import type { GameRow } from '../parse';
 import type { MatchesApiFactory } from '../environment';
 import type { PlayerLine } from './useMatchContext';
-import { formatClock, formatRate, usePlayerStats } from './useMatchContext';
+import { formatClock, formatRate, useFollowed, usePlayerStats } from './useMatchContext';
 
 /**
  * Tournaments and events of any kind (brackets, round robins, single-match events), and the
@@ -262,6 +262,7 @@ export function NowView({ factory, onCompetition, onGame }: { factory: MatchesAp
   const [error, setError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [filter, setFilter] = useState('');
+  const followed = useFollowed();
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -286,6 +287,9 @@ export function NowView({ factory, onCompetition, onGame }: { factory: MatchesAp
     };
   }, [api]);
   if (!rows) return error ? <p className="small-text">取得エラー: {error}</p> : <p className="muted small-text">n01 の進行中の試合を確認中…</p>;
+  const who = (row: GameRow): string[] =>
+    [...new Set(row.sides.flatMap((side) => [side.name, ...side.members.map((member) => member.name)]).map((name) => name.trim()))].filter((name) => followed.names.has(name));
+  const starred = rows.map((row) => ({ row, names: who(row) })).filter((entry) => entry.names.length > 0);
   const needle = filter.trim().toLowerCase();
   const match = (row: GameRow): boolean => !needle || `${row.title} ${row.sides.map((side) => `${side.name} ${side.members.map((m) => m.name).join(' ')}`).join(' ')}`.toLowerCase().includes(needle);
   const competitions = new Map<string, { title: string; rows: GameRow[] }>();
@@ -304,6 +308,27 @@ export function NowView({ factory, onCompetition, onGame }: { factory: MatchesAp
         n01 全体で進行中 {rows.length} 試合{rows.length >= 100 ? ' (新しい順に 100 件まで)' : ''} ・ 取得 {formatClock(fetchedAt)}
       </p>
       <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="大会名・選手名で絞り込み" aria-label="大会名・選手名で絞り込み" />
+      {starred.length ? (
+        <section className="followed-now" aria-label="注目選手" data-testid="followed-now">
+          <h3 className="section-mini">
+            <span aria-hidden="true">★</span> 注目選手が出場中
+          </h3>
+          <ul className="plain">
+            {starred.map(({ row, names }) => (
+              <li key={row.mid}>
+                <button type="button" className="followed-row is-live" onClick={() => onGame(row.mid, `${row.sides[0].name} vs ${row.sides[1].name}`)}>
+                  <strong>{names.join('・')}</strong>
+                  <span>
+                    {row.sides[0].name} {row.sides[0].legsWon ?? 0} - {row.sides[1].legsWon ?? 0} {row.sides[1].name}
+                  </span>
+                  <span className="muted small-text">{row.title}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="muted small-text">選手名で照合しています (同姓同名は区別できません)。</p>
+        </section>
+      ) : null}
       <h3 className="section-mini">大会・リーグ</h3>
       <ul className="match-list">
         {[...competitions.entries()].map(([tdid, entry]) => (

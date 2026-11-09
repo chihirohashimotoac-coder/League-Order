@@ -994,6 +994,14 @@ export interface AppSettings {
   ruleAnswers?: Record<string, RuleAnswerSet>;
   /** The league last watched (リーグを見る), so the match screens open on it. */
   watch?: WatchSettings;
+  /** Players followed in the match screens (注目選手), matched by name. Absent = none. */
+  followed?: FollowedPlayer[];
+}
+
+export interface FollowedPlayer {
+  name: string;
+  /** The team the player was followed from, for display only (matching is by name). */
+  team: string | null;
 }
 
 export interface WatchSettings {

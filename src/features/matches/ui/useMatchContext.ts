@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { MAX_FOLLOWED } from '../watchSettings';
 import { useAppStore } from '../../../state/appStore';
 import type { MatchesApi } from '../api';
 import type { Fixture, GameRow, SeasonDocument } from '../parse';
@@ -264,4 +265,33 @@ export function usePlayerStats(api: MatchesApi | null, tournamentId: string | nu
     };
   }, [api, tournamentId, enabled]);
   return state;
+}
+
+// ---------------------------------------------------------------------------
+// Followed players (注目選手): kept in settings, matched by name
+// ---------------------------------------------------------------------------
+
+export interface Followed {
+  names: ReadonlySet<string>;
+  isFollowed: (name: string) => boolean;
+  toggle: (name: string, team: string | null) => void;
+  full: boolean;
+}
+
+export function useFollowed(): Followed {
+  const store = useAppStore();
+  const stored = store.settings.followed;
+  const list = useMemo(() => stored ?? [], [stored]);
+  const names = useMemo(() => new Set(list.map((entry) => entry.name)), [list]);
+  return {
+    names,
+    isFollowed: (name) => names.has(name.trim()),
+    full: list.length >= MAX_FOLLOWED,
+    toggle: (name, team) => {
+      const key = name.trim();
+      if (!key) return;
+      const next = names.has(key) ? list.filter((entry) => entry.name !== key) : list.length >= MAX_FOLLOWED ? list : [...list, { name: key, team }];
+      store.updateSettings({ followed: next });
+    },
+  };
 }

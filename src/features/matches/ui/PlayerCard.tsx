@@ -6,7 +6,7 @@ import type { PlayerThrowStats } from '../playerCard';
 import { playerGames, playerThrowStats } from '../playerCard';
 import type { ThrowLeg } from '../parse';
 import type { SeasonData } from './useMatchContext';
-import { formatRate } from './useMatchContext';
+import { formatRate, useFollowed } from './useMatchContext';
 
 /**
  * 選手カード: one player's season on one sheet — the Singles 01 average game by game, 100+ and
@@ -77,6 +77,8 @@ export function PlayerCard({
     };
   }, [api, oid, zeroOne.length]);
 
+  const followed = useFollowed();
+  const following = followed.isFollowed(name);
   const stats = throws.kind === 'ready' ? throws.stats : null;
   const pct = (part: number, whole: number): string => (whole > 0 ? `${Math.round((part / whole) * 100)}%` : '—');
 
@@ -91,6 +93,15 @@ export function PlayerCard({
           ) : null}
           {teamId ? ' ・ ' : ''}今季 {games.length} 試合
         </p>
+        <button
+          type="button"
+          className={`btn small follow${following ? ' on' : ''}`}
+          aria-pressed={following}
+          disabled={!following && followed.full}
+          onClick={() => followed.toggle(name, teamId ? (data.season.teams.get(teamId) ?? null) : null)}
+        >
+          <span aria-hidden="true">{following ? '★' : '☆'}</span> {following ? '注目選手から外す' : '注目選手に追加'}
+        </button>
 
         <div className="pc-top">
           <div>
