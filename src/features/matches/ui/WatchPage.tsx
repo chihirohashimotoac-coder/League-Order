@@ -10,7 +10,8 @@ import { percent, playerForms, slotUsage, teamProfile } from '../insights';
 import { useMatchesApiFactory } from '../environment';
 import type { MatchesApiFactory } from '../environment';
 import type { PlayerLine, SeasonData } from './useMatchContext';
-import { formatClock, formatRate, usePlayerStats, useRegisteredTeamMap, useSeasonData, useSeasons } from './useMatchContext';
+import { formatClock, formatRate, seasonStatsSource, usePlayerStats, useRegisteredTeamMap, useSeasonData, useSeasons } from './useMatchContext';
+import { RankingFooter, RankingSearch, rankThenSearch, useShownCount } from './rankingList';
 import { LeaguePicker } from './LeaguePicker';
 import { LiveTab } from './LiveTab';
 import { ResultsTab } from './ResultsTab';
@@ -398,7 +399,7 @@ function value(line: PlayerLine['line'], key: SortKey): number | null {
   }
 }
 
-function StatsTab({
+export function StatsTab({
   data,
   registered,
   api,
@@ -411,23 +412,29 @@ function StatsTab({
   onTeam: (teamId: string) => void;
   onPlayer: (player: PlayerRef) => void;
 }): React.JSX.Element {
-  const stats = usePlayerStats(api, data.season.tournamentId, true);
+  const source = useMemo(() => seasonStatsSource(data.season), [data.season]);
+  const stats = usePlayerStats(api, data.season.tournamentId, true, source);
   const [sort, setSort] = useState<SortKey>('avg');
   const [division, setDivision] = useState<number | 'all'>('all');
   const [qualified, setQualified] = useState(true);
+  const [query, setQuery] = useState('');
+  const [shown, setShown] = useShownCount(`${sort}|${division}|${qualified}|${query}`);
   if (stats.kind === 'loading') return <p className="muted small-text">選手成績を読み込み中…</p>;
-  if (stats.kind === 'error') return <p className="small-text">取得エラー: {stats.message}</p>;
+  if (stats.kind === 'error') return <p className="small-text" role="alert">取得エラー: {stats.message}</p>;
   const maxLegs = Math.max(0, ...stats.value.map((row) => row.line.leg ?? 0));
   const minLegs = Math.ceil(maxLegs * 0.3);
-  const rows = stats.value
+  // Rank under the filters and the sort first, then search: a searched player keeps their real place.
+  const sorted = stats.value
     .filter((row) => division === 'all' || row.divisionIndex === division || data.season.divisions[division as number]?.teamIds.includes(row.teamId ?? ''))
     .filter((row) => !qualified || (row.line.leg ?? 0) >= minLegs)
     .map((row) => ({ row, v: value(row.line, sort) }))
     .filter((entry) => entry.v !== null && (sort !== 'bestLeg' || (entry.v ?? 0) > 0))
-    .sort((a, b) => (sort === 'bestLeg' ? a.v! - b.v! : b.v! - a.v!))
-    .slice(0, 60);
+    .sort((a, b) => (sort === 'bestLeg' ? a.v! - b.v! : b.v! - a.v!));
+  const matched = rankThenSearch(sorted, query, (entry) => entry.row.name);
+  const empty = stats.value.length === 0;
   return (
     <div className="stats-tab" data-testid="stats-tab">
+      <RankingSearch value={query} onChange={setQuery} label="選手名で検索" />
       <div className="chip-row" role="radiogroup" aria-label="並べ替え">
         {SORTS.map(([key, label]) => (
           <button key={key} type="button" className="chip" role="radio" aria-checked={sort === key} onClick={() => setSort(key)}>
@@ -448,41 +455,45 @@ function StatsTab({
           <input type="checkbox" checked={qualified} onChange={(event) => setQualified(event.target.checked)} /> 規定 Leg 数以上 ({minLegs} Leg)
         </label>
       </div>
-      <div className="table-scroll">
-        <table className="rank-table small-text">
-          <thead>
-            <tr>
-              <th scope="col">#</th>
-              <th scope="col">選手</th>
-              <th scope="col">{SORTS.find(([key]) => key === sort)![1]}</th>
-              <th scope="col">平均</th>
-              <th scope="col">Leg</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ row, v }, index) => (
-              <tr key={row.oid} className={row.teamId && registered.includes(row.teamId) ? 'own' : ''}>
-                <td>{index + 1}</td>
-                <th scope="row">
-                  <button type="button" className="linklike" onClick={() => onPlayer({ oid: row.oid, name: row.name, teamId: row.teamId })}>
-                    {row.name}
-                  </button>
-                  {row.teamId ? (
-                    <button type="button" className="linklike muted" onClick={() => onTeam(row.teamId!)}>
-                      {data.season.teams.get(row.teamId) ?? ''}
-                    </button>
-                  ) : null}
-                </th>
-                <td className="num">{sort === 'legRate' || sort === 'break' ? `${v!.toFixed(1)}%` : sort === 'avg' || sort === 'f9' ? v!.toFixed(2) : v}</td>
-                <td className="num">{formatRate(value(row.line, 'avg'))}</td>
-                <td className="num">
-                  {row.line.winLeg ?? 0}/{row.line.leg ?? 0}
-                </td>
+      {empty ? <p className="small-text muted">このシーズンの選手別成績はまだありません。</p> : null}
+      {matched.length > 0 ? (
+        <div className="table-scroll">
+          <table className="rank-table small-text">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">選手</th>
+                <th scope="col">{SORTS.find(([key]) => key === sort)![1]}</th>
+                <th scope="col">平均</th>
+                <th scope="col">Leg</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {matched.slice(0, shown).map(({ rank, item: { row, v } }) => (
+                <tr key={row.oid} className={row.teamId && registered.includes(row.teamId) ? 'own' : ''}>
+                  <td>{rank}</td>
+                  <th scope="row">
+                    <button type="button" className="linklike" onClick={() => onPlayer({ oid: row.oid, name: row.name, teamId: row.teamId })}>
+                      {row.name}
+                    </button>
+                    {row.teamId ? (
+                      <button type="button" className="linklike muted" onClick={() => onTeam(row.teamId!)}>
+                        {data.season.teams.get(row.teamId) ?? ''}
+                      </button>
+                    ) : null}
+                  </th>
+                  <td className="num">{sort === 'legRate' || sort === 'break' ? `${v!.toFixed(1)}%` : sort === 'avg' || sort === 'f9' ? v!.toFixed(2) : v}</td>
+                  <td className="num">{formatRate(value(row.line, 'avg'))}</td>
+                  <td className="num">
+                    {row.line.winLeg ?? '—'}/{row.line.leg ?? '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {!empty ? <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} /> : null}
       <p className="muted small-text">n01 公式のシーズン集計 (tournament/stats)。Break は後攻 Leg の取得率。</p>
     </div>
   );

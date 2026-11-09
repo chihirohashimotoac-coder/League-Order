@@ -8,12 +8,11 @@ import { parseStandings } from '../analytics/api/parse';
 import type { OfficialStandingGroup } from '../analytics/types';
 import type { CardOrder, Fixture, GameDetail, GameRow, LiveResponse, SeasonDocument, ThrowsResponse } from './parse';
 import { MatchSchemaError, parseFixtures, parseGameDetail, parseGameRows, parseLive, parseOrders, parseSeasonDocument, parseThrows } from './parse';
-import { parsePlayerStats } from '../analytics/api/parse';
+import { parsePlayerStats, parseTeamStats } from '../analytics/api/parse';
 import { parseRoster } from '../../integrations/n01/validation';
 import type { N01RosterPlayer } from '../../integrations/n01/types';
-import type { PlayerStatsRow } from '../analytics/types';
-import type { RequestGovernor } from './governor';
-import { sharedGovernor } from './governor';
+import type { PlayerStatsRow, TeamStatsRow } from '../analytics/types';
+import { RequestGovernor, sharedGovernor } from './governor';
 import type { CompetitionDoc, CompetitionSummary, StandingGroup } from './competition';
 import { parseAllStandings, parseCompetition, parseCompetitionList } from './competition';
 
@@ -23,7 +22,16 @@ import { parseAllStandings, parseCompetition, parseCompetitionList } from './com
  * It goes through the app's one audited transport (anonymous GET, no cookies, no HTTP cache,
  * n01 host allow-list) and issues read operations only. Season data is memoised for the life
  * of the instance (one screen visit); live reads are never memoised, but two identical live
- * reads in flight share one request. A request budget stops a runaway loop.
+ * reads in flight share one request.
+ *
+ * Two different limits, never mixed up:
+ * - **budget** (`maxRequests`): a cumulative cap on the one-off reads of a visit (season
+ *   documents, finished games' throws …). It stops a runaway loop and does not recover.
+ * - **polling rate** (`pollPerMinute`): the reads a screen repeats while it stays open (today's
+ *   board, the live list, `since` reads, orders). They are not counted in the budget — a
+ *   spectator may keep the screen open all evening — but each instance may send at most
+ *   `pollPerMinute` of them in any minute, waiting for a slot rather than failing.
+ * Both also take a slot of the app-wide governor (150 / min, HTTP 429 pauses everything).
  *
  * n01's own limit is about 300 requests per minute per IP (manual §7, result -55 / HTTP 429);
  * polling one game every 1.5 s is 40 per minute.
@@ -34,6 +42,12 @@ export const MATCHES_TIMEOUT_MS = 12_000;
 /** Pages of `match/list` read per season (a league season is well under 1,000 games). */
 export const MATCH_ROWS_PAGE = 100;
 export const MATCH_ROWS_MAX_PAGES = 10;
+/** Pages of today's board read at most (newest first): 500 games in 18 hours. */
+export const TODAY_MAX_PAGES = 5;
+/** Polling reads one API instance may send per minute (one screen: board 12 + orders + since reads). */
+export const MATCHES_POLL_PER_MINUTE = 60;
+/** A full, all-finished page of a competition list is re-read after this long (corrections). */
+export const COMPETITION_PAGE_TTL_MS = 3 * 60_000;
 
 export class MatchBudgetError extends Error {
   constructor(readonly limit: number) {
@@ -49,6 +63,27 @@ export interface MatchesApiOptions {
   timeoutMs?: number;
   /** The request budget shared by every match screen (defaults to the app's one). */
   governor?: RequestGovernor;
+  /** Polling reads per minute of this instance (see the class comment). */
+  pollPerMinute?: number;
+  /** This instance's polling limiter (tests pass one with a fake clock). */
+  pollGovernor?: RequestGovernor;
+  now?: () => number;
+}
+
+/** One page of `match/list` as read. */
+interface RowsPage {
+  games: GameRow[];
+  rows: number;
+  unreadable: number;
+}
+
+/** A list read in pages: what was read, and whether it is known to be the whole list. */
+export interface GameList {
+  games: GameRow[];
+  /** The page cap was reached: there may be more games than these. */
+  truncated: boolean;
+  /** Rows n01 sent that could not be read (left out, never filled in). */
+  unreadable: number;
 }
 
 /** Fields of a game row the match screens read (`fields` selects exactly these). */
@@ -61,7 +96,14 @@ export class MatchesApi {
   private readonly maxRequests: number;
   private readonly timeoutMs: number;
   private readonly governor: RequestGovernor;
+  private readonly pollGovernor: RequestGovernor;
+  private readonly now: () => number;
+  /** Competition list pages as last read, for `competitionGames` (bounded: ≤ 10 per competition). */
+  private readonly pages = new Map<string, { at: number; page: RowsPage }>();
+  /** One-off reads sent (counted against `maxRequests`). */
   requestCount = 0;
+  /** Polling reads sent (rate-limited, not counted against `maxRequests`). */
+  pollCount = 0;
 
   constructor(options: MatchesApiOptions = {}) {
     const baseUrl = options.baseUrl ?? N01_API_BASE_URL;
@@ -70,17 +112,32 @@ export class MatchesApi {
     this.maxRequests = options.maxRequests ?? MATCHES_DEFAULT_MAX_REQUESTS;
     this.timeoutMs = options.timeoutMs ?? MATCHES_TIMEOUT_MS;
     this.governor = options.governor ?? sharedGovernor;
+    this.now = options.now ?? (() => Date.now());
+    this.pollGovernor = options.pollGovernor ?? new RequestGovernor(options.pollPerMinute ?? MATCHES_POLL_PER_MINUTE, this.now);
   }
 
   private key(operation: AnalyticsOperation, params: Record<string, string>): string {
     return `${operation}?${Object.keys(params).sort().map((name) => `${name}=${params[name]}`).join('&')}`;
   }
 
-  private async send(operation: AnalyticsOperation, params: Record<string, string>, signal?: AbortSignal): Promise<unknown> {
+  private async send(operation: AnalyticsOperation, params: Record<string, string>, signal?: AbortSignal, kind: 'once' | 'poll' = 'once'): Promise<unknown> {
     if (signal?.aborted) throw new N01Error('aborted', N01_ERROR_MESSAGES.aborted, operation);
-    if (this.requestCount >= this.maxRequests) throw new MatchBudgetError(this.maxRequests);
-    this.requestCount += 1;
-    await this.governor.acquire(signal);
+    if (kind === 'once') {
+      if (this.requestCount >= this.maxRequests) throw new MatchBudgetError(this.maxRequests);
+      this.requestCount += 1;
+    } else {
+      try {
+        await this.pollGovernor.acquire(signal);
+      } catch {
+        throw new N01Error('aborted', N01_ERROR_MESSAGES.aborted, operation);
+      }
+      this.pollCount += 1;
+    }
+    try {
+      await this.governor.acquire(signal);
+    } catch {
+      throw new N01Error('aborted', N01_ERROR_MESSAGES.aborted, operation);
+    }
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -119,7 +176,7 @@ export class MatchesApi {
     const key = this.key(operation, params);
     const running = this.inflight.get(key);
     if (running) return running;
-    const pending = this.send(operation, params, signal).finally(() => this.inflight.delete(key));
+    const pending = this.send(operation, params, signal, 'poll').finally(() => this.inflight.delete(key));
     this.inflight.set(key, pending);
     return pending;
   }
@@ -184,18 +241,37 @@ export class MatchesApi {
    * The league games started since `fromEpochSec` (one league night), finished and in progress:
    * the archive holds games in progress too, with the same `updateTime` as the live list
    * (checked 2026-11-06), so one request draws the whole board. Never memoised.
+   *
+   * Read **newest first** and paged: a night with more than 100 games must not lose the games
+   * just started behind the 100 finished ones before them. Pages may overlap while games are
+   * added (a game pushed to the next page is read twice) — rows are kept once per `mid`. The
+   * result is oldest first; `truncated` says the page cap was reached.
    */
-  async todayGames(tournamentId: string, fromEpochSec: number, signal?: AbortSignal): Promise<GameRow[]> {
-    const params: Record<string, string> = {
-      tdid: tournamentId,
-      tmid__regex: '_lg_',
-      startTime__gte: String(Math.floor(fromEpochSec)),
-      sort: 'startTime',
-      order: 'asc',
-      count: String(MATCH_ROWS_PAGE),
-      fields: GAME_FIELDS,
-    };
-    return (await this.read('match/list', this.fresh('match/list', params, signal), parseGameRows)).games;
+  async todayGames(tournamentId: string, fromEpochSec: number, signal?: AbortSignal): Promise<GameList> {
+    const byMid = new Map<string, GameRow>();
+    let unreadable = 0;
+    let truncated = true;
+    for (let page = 0; page < TODAY_MAX_PAGES; page += 1) {
+      const params: Record<string, string> = {
+        tdid: tournamentId,
+        tmid__regex: '_lg_',
+        startTime__gte: String(Math.floor(fromEpochSec)),
+        sort: 'startTime',
+        order: 'desc',
+        count: String(MATCH_ROWS_PAGE),
+        fields: GAME_FIELDS,
+      };
+      if (page > 0) params.skip = String(page * MATCH_ROWS_PAGE);
+      const result = await this.read('match/list', this.fresh('match/list', params, signal), parseGameRows);
+      unreadable += result.unreadable;
+      for (const game of result.games) if (!byMid.has(game.mid)) byMid.set(game.mid, game);
+      if (result.rows < MATCH_ROWS_PAGE) {
+        truncated = false;
+        break;
+      }
+    }
+    const games = [...byMid.values()].sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0));
+    return { games, truncated, unreadable };
   }
 
   /** Every leg of a game, throw by throw; with `since`, only the legs changed after it. Finished games are memoised. */
@@ -211,9 +287,18 @@ export class MatchesApi {
     return this.read('team/order/list', this.fresh('team/order/list', { tdid: tournamentId, tmid }), parseOrders);
   }
 
-  /** n01's own season figures per player (`player_stats_list`). */
+  /** n01's own season figures per team member of a **team** event (`player_stats_list`). */
   playerStats(tournamentId: string): Promise<PlayerStatsRow[]> {
     return this.read('tournament/stats', this.memoised('tournament/stats', { tdid: tournamentId, kind: 'player_stats_list' }), parsePlayerStats);
+  }
+
+  /**
+   * n01's own figures per entry (`stats_list`, manual: チーム/プレーヤー単位の集計). In an
+   * individual event (`team_games` 0) an entry is a player (or a pair written as one entry),
+   * and this is where its figures are — `player_stats_list` is for team events only.
+   */
+  entryStats(tournamentId: string): Promise<TeamStatsRow[]> {
+    return this.read('tournament/stats', this.memoised('tournament/stats', { tdid: tournamentId, kind: 'stats_list' }), parseTeamStats);
   }
 
   /** Every member of every team of a season (names for the stats rows). */
@@ -231,9 +316,18 @@ export class MatchesApi {
     return this.read('tournament/get', this.memoised('tournament/get', { tdid }), (raw) => parseCompetition(raw, tdid));
   }
 
-  /** Every game of a competition (all kinds), oldest first; `live` = in progress only, never memoised. */
-  async competitionGames(tdid: string, options: { live?: boolean; signal?: AbortSignal } = {}): Promise<{ games: GameRow[]; truncated: boolean }> {
-    const games: GameRow[] = [];
+  /**
+   * Every game of a competition (all kinds), oldest first; `live` = in progress only, never
+   * memoised.
+   *
+   * Pages are kept per instance and re-read when they can have changed: a page holding a game
+   * in progress, the last (short) page — new games are appended there — and any page older than
+   * {@link COMPETITION_PAGE_TTL_MS} (a corrected or deleted game). A full, all-finished, recent
+   * page is reused, so a 500-game event costs one or two requests per refresh, not five.
+   */
+  async competitionGames(tdid: string, options: { live?: boolean; signal?: AbortSignal } = {}): Promise<GameList> {
+    const byMid = new Map<string, GameRow>();
+    let unreadable = 0;
     for (let page = 0; page < MATCH_ROWS_MAX_PAGES; page += 1) {
       const params: Record<string, string> = { tdid, sort: 'startTime', order: 'asc', count: String(MATCH_ROWS_PAGE), fields: GAME_FIELDS };
       if (options.live) {
@@ -241,12 +335,21 @@ export class MatchesApi {
         params.endMatch = '0';
       }
       if (page > 0) params.skip = String(page * MATCH_ROWS_PAGE);
-      const request = options.live || page === 0 ? this.fresh('match/list', params, options.signal) : this.memoised('match/list', params);
-      const result = await this.read('match/list', request, parseGameRows);
-      games.push(...result.games);
-      if (result.rows < MATCH_ROWS_PAGE) return { games, truncated: false };
+      const key = this.key('match/list', params);
+      const held = options.live ? undefined : this.pages.get(key);
+      const reusable =
+        held && held.page.rows === MATCH_ROWS_PAGE && held.page.unreadable === 0 && held.page.games.every((game) => game.finished) && this.now() - held.at < COMPETITION_PAGE_TTL_MS;
+      let result: RowsPage;
+      if (reusable) result = held.page;
+      else {
+        result = await this.read('match/list', this.fresh('match/list', params, options.signal), parseGameRows);
+        if (!options.live) this.pages.set(key, { at: this.now(), page: result });
+      }
+      unreadable += result.unreadable;
+      for (const game of result.games) byMid.set(game.mid, game);
+      if (result.rows < MATCH_ROWS_PAGE) return { games: [...byMid.values()], truncated: false, unreadable };
     }
-    return { games, truncated: true };
+    return { games: [...byMid.values()], truncated: true, unreadable };
   }
 
   /** Games in progress anywhere on n01 (competitions and n01 Online / Live), newest started first. */

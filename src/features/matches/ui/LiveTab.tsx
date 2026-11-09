@@ -11,7 +11,7 @@ import { throwEvents } from '../gameStats';
 import { outlookTrail, slotChances } from '../cardTrail';
 import { checkReproduction, projectMany } from '../standings';
 import type { SeasonData } from './useMatchContext';
-import { formatClock, useFollowed, useTodayBoard } from './useMatchContext';
+import { formatClock, seasonStatsSource, useFollowed, useTodayBoard } from './useMatchContext';
 import { GameView } from './GameView';
 import { CardTrail } from './CardTrail';
 import { LiveSheet } from './LiveSheet';
@@ -338,7 +338,8 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
   })();
 
   // Each singles player's season average (n01's own figure), matched within the team by exact name.
-  const stats = usePlayerStats(api, data.season.tournamentId, !card.finished);
+  const statsSource = useMemo(() => seasonStatsSource(data.season), [data.season]);
+  const stats = usePlayerStats(api, data.season.tournamentId, !card.finished, statsSource);
   const seasonAverage: [number | null, number | null] | undefined =
     live && stats.kind === 'ready'
       ? ([0, 1] as const).map((side) => {
@@ -390,7 +391,7 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
       </p>
       <CardTrail steps={trail} names={names} labelOf={(schid) => slotLabel(data.season, schid)} basis="今季の種別ごとの勝率 (このカードを除く) から計算した参考値です。" />
 
-      {live && !live.gameEnded ? <LiveSheet api={api} live={live} seasonAverage={seasonAverage} /> : null}
+      {live && !live.gameEnded ? <LiveSheet key={live.mid} api={api} live={live} seasonAverage={seasonAverage} /> : null}
 
       {selectedGame && !(live && !live.gameEnded && live.mid === selectedGame.mid) ? (
         <details className="game-block" open>
