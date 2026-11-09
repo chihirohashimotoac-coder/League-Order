@@ -1,3 +1,4 @@
+import { isTeamEvent } from './parse';
 import type { GameRow } from './parse';
 
 /**
@@ -88,7 +89,7 @@ export function parseCompetition(raw: unknown, tdid: string): CompetitionDoc {
     status: num(t.status),
     leagueId: str(t.lgid),
     url: typeof raw.url === 'string' && raw.url.startsWith('https://n01darts.com/') ? raw.url : null,
-    teamGames: num(t.team_games) === 1,
+    teamGames: isTeamEvent(t),
     entries,
     divisions: titles(t.lg_title),
     rrGroups: titles(t.rr_title),

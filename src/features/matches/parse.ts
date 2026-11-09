@@ -75,6 +75,7 @@ export interface SeasonDocument {
   status: number | null;
   /** The page participants and spectators open (from n01, never built from the id). */
   url: string | null;
+  /** A team event: see `isTeamEvent`. */
   teamGames: boolean;
   teams: Map<string, string>;
   divisions: SeasonDivision[];
@@ -111,6 +112,17 @@ function slotsOf(schedule: unknown): SeasonSlot[] {
     });
   });
   return slots;
+}
+
+/**
+ * A team event (its games are played by members of team entries) — manual: チーム戦では形式の設定に
+ * `setOrder` (1: オーダーを使う). `team_games` alone is not enough: ATDO / TDA leagues are team
+ * leagues with `team_games` 0 and `lg_setting.setOrder` 1 (checked 2026-11-09), while an individual
+ * tournament (`t_xMuJ_7854`) has `setOrder` 0 in every format setting.
+ */
+export function isTeamEvent(t: Record<string, unknown>): boolean {
+  if (num(t.team_games) === 1) return true;
+  return Object.entries(t).some(([key, value]) => key.endsWith('_setting') && isRec(value) && num(value.setOrder) === 1);
 }
 
 /** The games a division plays: its own schedule when it has one, else the base schedule. */
@@ -184,7 +196,7 @@ export function parseSeasonDocument(raw: unknown, tournamentId: string): SeasonD
     title: str(t.title) ?? tournamentId,
     status: num(t.status),
     url: typeof body.url === 'string' && body.url.startsWith('https://n01darts.com/') ? body.url : null,
-    teamGames: num(t.team_games) === 1,
+    teamGames: isTeamEvent(t),
     teams,
     divisions,
     slots,

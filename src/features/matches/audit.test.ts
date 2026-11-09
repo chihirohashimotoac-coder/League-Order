@@ -3,7 +3,8 @@ import { MatchesApi, MatchBudgetError, COMPETITION_PAGE_TTL_MS, MATCHES_POLL_PER
 import type { AnalyticsOperation, AnalyticsTransport } from '../analytics/api/readApi';
 import { RequestGovernor } from './governor';
 import { gameStats } from './gameStats';
-import { parseGameRows, parseLive, parseThrows, parseSeasonDocument, withLiveLeg } from './parse';
+import { isTeamEvent, parseGameRows, parseLive, parseThrows, parseSeasonDocument, withLiveLeg } from './parse';
+import { parseCompetition } from './competition';
 import type { LiveLeg, LiveThrow, ThrowLeg } from './parse';
 import { playerForms, pooledRate } from './insights';
 import { playerGames, playerThrowStats } from './playerCard';
@@ -202,6 +203,28 @@ describe('F04: lists longer than a page', () => {
     c.state.now += 10_000;
     const second = await api.competitionGames(TDID);
     expect(second.games.find((game) => game.mid === 'm20')?.finished).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F01 — which stats a competition has: team or individual event
+// ---------------------------------------------------------------------------
+
+describe('F01: team or individual event (where the per-player figures are)', () => {
+  it('a team league with team_games 0 but lg_setting.setOrder 1 (ATDO / TDA, 2026-11-09) is a team event', () => {
+    const atdo = { tdid: 't_ABvC_5234', team_games: 0, lg_setting: { setOrder: 1, schedule: [{ schid: 'kwcg', num_part: 4 }] } };
+    expect(isTeamEvent(atdo)).toBe(true);
+    expect(parseSeasonDocument({ result: 0, tournament: { ...atdo, title: 'ATDO', entry_list: [], lg_table: [] } }, 't_ABvC_5234').teamGames).toBe(true);
+  });
+
+  it('an individual tournament (t_xMuJ_7854: team_games 0, setOrder 0 everywhere, default schedules) is not', () => {
+    const solo = { tdid: 't_xMuJ_7854', team_games: 0, rr_setting: { setOrder: 0, schedule: [{ schid: 'k1ze', num_part: 4 }] }, t_setting: { setOrder: 0 } };
+    expect(isTeamEvent(solo)).toBe(false);
+    expect(parseCompetition({ result: 0, tournament: { ...solo, title: 'Open', entry_list: [] } }, 't_xMuJ_7854').teamGames).toBe(false);
+  });
+
+  it('team_games 1 is a team event', () => {
+    expect(isTeamEvent({ team_games: 1 })).toBe(true);
   });
 });
 
