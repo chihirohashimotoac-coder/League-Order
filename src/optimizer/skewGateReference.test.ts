@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { GameSlotDef, OrderInput, Player } from '../domain/types';
 import type { OpponentContext } from '../domain/prediction/opponentContext';
 import { createParticipantConfig } from '../domain/orders/participants';
@@ -78,6 +78,42 @@ const HUGE = spec([
   ...Array.from({ length: 3 }, (): [string, number] => ['TRIOS', 3]),
 ]);
 
+/**
+ * Both searches below are bounded by the node limit only, never by the clock (the same rule as
+ * the backtest, scripts/backtest.ts `UNTIMED`). The two used to get 1 500 ms and 600 ms of wall
+ * clock each: under a loaded test run (parallel workers) the reference search's beam reached
+ * its deadline sooner, kept fewer line-ups and returned one with unevenness 6 against the plain
+ * search's 4 — a comparison of unequal search effort, not of the re-ranking (audit R04,
+ * reproduced with a clock running 8× fast). With equal, clock-free effort the comparison is
+ * the same on any machine. The app keeps its time limit; a search the clock cut short is
+ * reported as unfinished (`exhaustive: false`), which the last test here pins.
+ */
+const NODE_LIMIT = 20_000;
+const UNTIMED_MS = 10 * 60 * 1000;
+
+function contexts(count: number, seed: number) {
+  const made = make(count, HUGE, seed);
+  const ctx = prepare({ ...made, settings: { ...made.settings, nodeLimit: NODE_LIMIT } });
+  const weights = ctx.input.weights;
+  const evenCtx = prepare({
+    ...ctx.input,
+    weights: { ...weights, fairness: weights.fairness + EVEN_REFERENCE_BOOST, roleFairness: weights.roleFairness + EVEN_REFERENCE_BOOST },
+  });
+  return { ctx, evenCtx };
+}
+
+/** Runs `run` with `performance.now()` advancing `factor` times faster than real time (a slower CPU). */
+function withSlowClock<T>(factor: number, run: () => T): T {
+  const real = performance.now.bind(performance);
+  const base = real();
+  const spy = vi.spyOn(performance, 'now').mockImplementation(() => base + (real() - base) * factor);
+  try {
+    return run();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
 describe('the even line-up is the most even one found', () => {
   // Found by a sweep (opponent data, three roles, Hard conditions): re-ranking the even
   // candidates by match outcome traded a step of role evenness for estimated match value.
@@ -86,16 +122,25 @@ describe('the even line-up is the most even one found', () => {
     [8, 1],
     [8, 5],
   ])('%i players, seed %i: re-ranking never returns a less even line-up than the plain search', (count, seed) => {
-    const ctx = prepare(make(count, HUGE, seed));
-    const reference = searchEvenReference(ctx, new Set(), 1500)!;
-    const weights = ctx.input.weights;
-    const evenCtx = prepare({
-      ...ctx.input,
-      weights: { ...weights, fairness: weights.fairness + EVEN_REFERENCE_BOOST, roleFairness: weights.roleFairness + EVEN_REFERENCE_BOOST },
-    });
+    const { ctx, evenCtx } = contexts(count, seed);
+    const reference = searchEvenReference(ctx, new Set(), UNTIMED_MS / 0.4)!;
     const candidates = buildAllCandidates(evenCtx);
-    const plain = searchOnce(evenCtx, buildBoundContext(evenCtx, candidates), candidates, 600, new Set())!;
+    const plain = searchOnce(evenCtx, buildBoundContext(evenCtx, candidates), candidates, UNTIMED_MS, new Set())!;
+    expect(plain.nodes).toBe(NODE_LIMIT + 1); // stopped by the node limit, not by the clock
     expect(unevenness(ctx, reference.selection)).toBeLessThanOrEqual(unevenness(evenCtx, plain.selection) + 1e-9);
+  });
+
+  it('the node-bounded reference does not depend on how fast the machine is', () => {
+    const { ctx } = contexts(8, 1);
+    const normal = searchEvenReference(ctx, new Set(), UNTIMED_MS / 0.4)!;
+    const slow = withSlowClock(40, () => searchEvenReference(ctx, new Set(), UNTIMED_MS / 0.4)!);
+    expect(slow.selection.map((combo) => combo.members.join('.'))).toEqual(normal.selection.map((combo) => combo.members.join('.')));
+  });
+
+  it('a reference search the clock cuts short is reported unfinished, never as the most even line-up for certain', () => {
+    const { ctx } = contexts(8, 1);
+    const cut = withSlowClock(40, () => searchEvenReference(ctx, new Set(), 1500)!);
+    expect(cut.exhaustive).toBe(false);
   });
 });
 

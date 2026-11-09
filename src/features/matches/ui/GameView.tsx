@@ -7,6 +7,7 @@ import { gameStats } from '../gameStats';
 import type { SideStats } from '../gameStats';
 import { CricketGrid, ZeroOneGrid } from './ScoreGrid';
 import { FinishChances, RaceChart } from './LegCharts';
+import { LegsStatusLine } from './LegsStatusLine';
 
 /**
  * One game, the way n01's match Details and score sheet show it — and side by side.
@@ -93,6 +94,8 @@ export function GameView({
 
   return (
     <div className="game-view" data-testid="game-view">
+      {!history.complete ? <LegsStatusLine history={history} /> : null}
+      {history.complete ? (
       <div className="table-scroll">
         <table className="compare small-text" aria-label="ゲームの詳細">
           <thead>
@@ -115,11 +118,13 @@ export function GameView({
           </tbody>
         </table>
       </div>
-      <p className="muted small-text">
-        n01 の記録から League Order が計算 (ブル決着の Leg は平均・ダーツ数に含めません。First 9 は各 Leg の最初の 3 ラウンドの得点 ÷ 実際の本数 × 3)。
-        {history.stale ? ' 終わった Leg の記録を再取得しています。' : ''}
-      </p>
-      {!cricket ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
+      ) : null}
+      {history.complete ? (
+        <p className="muted small-text">
+          n01 の記録から League Order が計算 (ブル決着の Leg は平均・ダーツ数に含めません。First 9 は各 Leg の最初の 3 ラウンドの得点 ÷ 実際の本数 × 3)。
+        </p>
+      ) : null}
+      {!cricket && history.complete ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
       {all.length > 0 ? (
         <div className="chip-row" role="tablist" aria-label="Leg">
           {all.map((entry) => {

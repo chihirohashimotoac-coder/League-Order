@@ -5,6 +5,7 @@ import { withLiveLeg } from '../parse';
 import { gameStats } from '../gameStats';
 import { checkoutRoute, freshLegChance, legChance, liveEstimateScope, shrunkAverage } from '../checkout';
 import { useGameLegs } from './useGameLegs';
+import { LegsStatusLine } from './LegsStatusLine';
 import { raceChance } from '../probability';
 import { ZeroOneGrid } from './ScoreGrid';
 import { FinishChances, RaceChart } from './LegCharts';
@@ -30,9 +31,11 @@ const fmt = (value: number | null, digits = 2): string => (value === null ? '—
 export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live: LiveState; seasonAverage?: [number | null, number | null] }): React.JSX.Element {
   const cricket = live.matchType === 'cricket';
   const leg = live.leg;
-  const legIndex = leg?.index ?? null;
+  // Where the game is: the live leg, or n01's current leg when the poller carries no leg.
+  const legIndex = leg?.index ?? live.currentLeg ?? null;
   const history = useGameLegs(api, live.mid, { finished: false, liveLegIndex: legIndex });
-  const complete = history.status === 'ready';
+  // Every ended leg is held: only then are the game's figures and the estimate shown.
+  const complete = history.complete;
 
   // The live leg laid over the legs read for this game, keeping its own bull flag and darts.
   const all = useMemo(() => withLiveLeg(history.legs, leg), [history.legs, leg]);
@@ -105,7 +108,7 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
         ))}
       </div>
 
-      {!complete || history.stale ? <LegsStatusLine status={history.status} stale={history.stale} error={history.error} onRetry={history.retry} /> : null}
+      {!complete ? <LegsStatusLine history={history} /> : null}
       {complete ? (
       <table className="ns-stats" aria-label="このゲームのスタッツ">
         <tbody>
@@ -220,28 +223,6 @@ export function LiveSheet({ api, live, seasonAverage }: { api: MatchesApi; live:
         ) : null}
       </div>
     </section>
-  );
-}
-
-function LegsStatusLine({ status, stale, error, onRetry }: { status: 'loading' | 'ready' | 'error'; stale: boolean; error: string | null; onRetry: () => void }): React.JSX.Element {
-  return (
-    <p className={`small-text legs-status ${status}`} role={status === 'error' ? 'alert' : 'status'} data-testid="legs-status">
-      {status === 'loading'
-        ? 'このゲームの記録を取得中… (平均などは記録がそろってから表示します)'
-        : status === 'error'
-          ? `このゲームの記録を取得できませんでした${error ? ` (${error})` : ''}。平均などは表示していません。`
-          : stale
-            ? '終わった Leg の記録を再取得しています。'
-            : ''}
-      {status === 'error' ? (
-        <>
-          {' '}
-          <button type="button" className="btn small" onClick={onRetry}>
-            再取得
-          </button>
-        </>
-      ) : null}
-    </p>
   );
 }
 
