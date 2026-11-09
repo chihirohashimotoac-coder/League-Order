@@ -28,7 +28,7 @@ async function createKalavinka(page: Page): Promise<void> {
 }
 
 async function openAnalytics(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /データ分析/ }).click();
+  await page.locator('.tab-bar').getByRole('button', { name: '分析', exact: true }).click();
   await expect(page.getByTestId('analytics-page')).toBeVisible();
 }
 

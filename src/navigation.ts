@@ -13,6 +13,8 @@ export const PAGES = [
   'analytics',
   'matches',
   'live',
+  'watch',
+  'more',
 ] as const;
 
 export type Page = (typeof PAGES)[number];
@@ -30,37 +32,46 @@ export const PAGE_TITLES: Record<Page, string> = {
   result: 'オーダー結果',
   history: '履歴',
   settings: '設定',
-  analytics: 'データ分析',
-  matches: '日程・結果',
-  live: 'ライブ',
+  analytics: '分析',
+  // The three entries of the match screens are one screen (観戦) with its own tabs.
+  matches: '観戦',
+  live: '観戦',
+  watch: '観戦',
+  more: 'その他',
 };
 
-/** Tabs shown in the bottom bar, in order. */
+/**
+ * Tabs shown in the bottom bar, in order: watching, analysis and orders are the three main uses;
+ * everything else (members, formats, pairs, history, settings, change log) is one tap away
+ * under その他.
+ */
 export const TABS: { page: Page; label: string; icon: IconName }[] = [
   { page: 'home', label: 'ホーム', icon: 'home' },
-  { page: 'players', label: 'メンバー', icon: 'users' },
-  { page: 'formats', label: 'フォーマット', icon: 'format' },
+  { page: 'watch', label: '観戦', icon: 'trophy' },
+  { page: 'analytics', label: '分析', icon: 'chart' },
   { page: 'setup', label: 'オーダー', icon: 'target' },
-  { page: 'history', label: '履歴', icon: 'history' },
+  { page: 'more', label: 'その他', icon: 'menu' },
 ];
 
 /** Which tab is highlighted for a page that is not itself a tab. */
 export const TAB_FOR_PAGE: Partial<Record<Page, Page>> = {
   result: 'setup',
-  pairs: 'home',
-  settings: 'home',
-  analytics: 'home',
-  matches: 'home',
-  live: 'home',
+  live: 'watch',
+  matches: 'watch',
+  players: 'more',
+  formats: 'more',
+  pairs: 'more',
+  history: 'more',
+  settings: 'more',
 };
 
 /** Pages reached from another screen rather than from the tab bar. */
 export const BACK_TARGETS: Partial<Record<Page, Page>> = {
-  pairs: 'home',
-  settings: 'home',
-  analytics: 'home',
-  matches: 'home',
-  live: 'home',
+  players: 'more',
+  formats: 'more',
+  pairs: 'more',
+  history: 'more',
+  settings: 'more',
   result: 'setup',
 };
 
@@ -69,16 +80,18 @@ export const BACK_TARGETS: Partial<Record<Page, Page>> = {
  * SETUP, so its trail is ホーム › オーダー設定 › オーダー結果.
  */
 export const BREADCRUMB_PARENT: Partial<Record<Page, Page>> = {
-  players: 'home',
-  pairs: 'home',
-  formats: 'home',
+  players: 'more',
+  pairs: 'more',
+  formats: 'more',
+  history: 'more',
+  settings: 'more',
+  more: 'home',
   setup: 'home',
   result: 'setup',
-  history: 'home',
-  settings: 'home',
   analytics: 'home',
   matches: 'home',
   live: 'home',
+  watch: 'home',
 };
 
 /** Short breadcrumb label; HOME reads ホーム rather than the team name. */
@@ -114,11 +127,12 @@ export const MENU_GROUPS: { title: string; kicker: string; entries: MenuEntry[] 
     ],
   },
   {
-    title: '試合',
+    title: '観戦・分析',
     kicker: 'MATCH',
     entries: [
       { page: 'live', label: 'ライブ', icon: 'target', note: '進行中の全カードを観戦' },
       { page: 'matches', label: '日程・結果', icon: 'trophy', note: '結果・順位・スタッツ' },
+      { page: 'analytics', label: '分析', icon: 'chart', note: '選手・チームの成績分析' },
     ],
   },
   {
@@ -128,7 +142,6 @@ export const MENU_GROUPS: { title: string; kicker: string; entries: MenuEntry[] 
       { page: 'players', label: 'メンバー', icon: 'users', note: 'Rating・PPR・適性' },
       { page: 'formats', label: 'フォーマット', icon: 'format', note: 'ゲーム構成' },
       { page: 'pairs', label: 'ペア相性', icon: 'pair', note: '相性・禁止ペア' },
-      { page: 'analytics', label: 'データ分析', icon: 'chart', note: 'n01 の成績分析' },
     ],
   },
   {

@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { clickGenerate } from './ruleQuestions';
+import { tab } from './nav';
 
 /**
  * Automated accessibility audit (axe-core, WCAG 2.0 / 2.1 A + AA rules) of every main
@@ -21,9 +22,6 @@ async function audit(page: Page, label: string): Promise<void> {
   expect(summary, label).toEqual([]);
 }
 
-function tab(page: Page, name: string) {
-  return page.locator('.tab-bar').getByRole('button', { name, exact: true });
-}
 
 test('every main screen passes the WCAG AA audit', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });

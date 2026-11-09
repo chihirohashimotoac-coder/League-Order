@@ -1,7 +1,7 @@
 {
   "name": "darts-league-order",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "description": "Darts League Order Optimizer - offline-first PWA for generating fair, strong darts league line-ups",
   "scripts": {
@@ -20,6 +20,7 @@
     "verify:n01": "tsx scripts/verify-n01.ts",
     "verify:analytics-n01": "tsx scripts/verify-analytics-n01.ts",
     "verify:analytics-roles": "tsx scripts/verify-analytics-roles.ts",
+    "validate:live-estimate": "tsx scripts/validate-live-estimate.ts",
     "backtest": "tsx scripts/backtest.ts",
     "backtest:check": "tsx scripts/backtest-check.ts"
   },

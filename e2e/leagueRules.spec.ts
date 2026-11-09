@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { clickGenerate } from './ruleQuestions';
+import { tab } from './nav';
 
 /**
  * League rules (リーグ規則・必須条件) end to end, in a real browser on the production build
@@ -12,9 +13,6 @@ import { clickGenerate } from './ruleQuestions';
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 
-function tab(page: Page, name: string) {
-  return page.locator('.tab-bar').getByRole('button', { name, exact: true });
-}
 
 async function openSample(page: Page): Promise<void> {
   await page.emulateMedia({ reducedMotion: 'reduce' });

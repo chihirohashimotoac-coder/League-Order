@@ -64,8 +64,22 @@ export default function AnalyticsPage({
 
   if (!team || !binding) {
     return (
-      <EmptyState kicker="ANALYTICS" title="n01 と連携したチームで使えます" icon="target">
-        <p className="small-text">ホーム画面の「n01から作成」でリーグのチームを連携すると、選手・チームの成績を分析できます。</p>
+      <EmptyState
+        kicker="ANALYTICS"
+        title="n01 と連携したチームで使えます"
+        icon="target"
+        action={
+          <div className="row wrap" style={{ gap: 8, justifyContent: 'center' }}>
+            <button type="button" className="btn primary" onClick={() => onNavigate('home')}>
+              ホームでチームを連携
+            </button>
+            <button type="button" className="btn" onClick={() => onNavigate('matches')}>
+              観戦でスタッツを見る
+            </button>
+          </div>
+        }
+      >
+        <p className="small-text">ホームの「n01から作成」でリーグのチームを連携すると、選手・チームの複数シーズンの成績を分析できます。リーグのスタッツ・選手カードは観戦からチームなしで見られます。</p>
       </EmptyState>
     );
   }

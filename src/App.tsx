@@ -42,6 +42,7 @@ import { SetupPage, type SetupDraft } from './pages/SetupPage';
 import { ResultPage } from './pages/ResultPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { MorePage } from './pages/MorePage';
 import { WelcomePage } from './pages/WelcomePage';
 import type { NextMatchOrder } from './domain/n01/nextMatch';
 
@@ -608,7 +609,7 @@ export function App(): React.JSX.Element {
 
   const hasActionBar =
     page === 'setup' || page === 'result' || page === 'players' || page === 'formats';
-  const wide = page === 'home' || page === 'result' || page === 'analytics' || page === 'matches';
+  const wide = page === 'home' || page === 'result' || page === 'analytics' || page === 'matches' || page === 'live' || page === 'watch';
   const backTarget = BACK_TARGETS[page];
   const activeTab = TAB_FOR_PAGE[page] ?? page;
   const teamName = store.activeTeam?.name ?? 'チーム未設定';
@@ -739,12 +740,13 @@ export function App(): React.JSX.Element {
           <HistoryPage onOpen={openSavedOrder} onNewOrder={() => startNewOrder()} />
         ) : null}
         {page === 'settings' ? <SettingsPage /> : null}
+        {page === 'more' ? <MorePage onNavigate={setPage} onShowChangelog={() => setShowChangelog(true)} /> : null}
         {page === 'analytics' ? (
           <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
             <AnalyticsEntry onNavigate={setPage} />
           </Suspense>
         ) : null}
-        {page === 'matches' || page === 'live' ? (
+        {page === 'matches' || page === 'live' || page === 'watch' ? (
           <Suspense fallback={<p className="small-text muted">読み込み中…</p>}>
             <MatchesEntry page={page} onNavigate={setPage} />
           </Suspense>
@@ -778,7 +780,7 @@ export function App(): React.JSX.Element {
           page={page}
           teamName={teamName}
           leagueName={store.activeTeam?.leagueName}
-          showAnalytics={!!store.activeTeam?.n01}
+          showAnalytics
           working={solution ? { lifecycle, version: latest?.version ?? 0 } : null}
           onNavigate={setPage}
           onNewOrder={() => startNewOrder()}

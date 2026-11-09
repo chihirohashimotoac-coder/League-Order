@@ -34,6 +34,12 @@ interface PlayerRef {
   teamId: string | null;
 }
 
+/** The tab last shown in this session (the 観戦 tab of the bottom bar reopens it). */
+let rememberedTab: WatchTab = 'live';
+export function lastWatchTab(): WatchTab {
+  return rememberedTab;
+}
+
 const TABS: [WatchTab, string][] = [
   ['live', 'ライブ'],
   ['results', '日程・結果'],
@@ -58,7 +64,14 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   const current = seasons.kind === 'ready' ? (seasons.value.find((entry) => entry.status === 30) ?? seasons.value[0])?.tournamentId ?? null : null;
   const tdid = league ? (tournamentId ?? current) : null;
   const data = useSeasonData(tdid ? api : null, tdid);
-  const [tab, setTab] = useState<WatchTab>(initialTab);
+  const [tab, setTabState] = useState<WatchTab>(initialTab);
+  const setTab = (next: WatchTab): void => {
+    rememberedTab = next;
+    setTabState(next);
+  };
+  useEffect(() => {
+    rememberedTab = initialTab;
+  }, [initialTab]);
   const [picking, setPicking] = useState(false);
   const [now, setNow] = useState(false);
   const [game, setGame] = useState<{ mid: string; title?: string } | null>(null);

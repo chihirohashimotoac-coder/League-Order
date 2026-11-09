@@ -43,8 +43,9 @@ export interface WorkingOrderSummary {
 /**
  * HOME — the face of the app.
  *
- * One dominant action (new order), the active team as a scoreboard, then the rest in
- * decreasing weight: members and formats as tiles, pairs / history / settings as rows.
+ * The captain's next match first, then the three things the app is used for — watching (ライブ,
+ * 日程・結果・順位), analysis, and the new order — then the active team as a scoreboard and the
+ * rest in decreasing weight: members and formats as tiles, pairs / history / settings as rows.
  */
 export function HomePage({
   onNavigate,
@@ -115,17 +116,6 @@ export function HomePage({
       meta: `${store.teamPairs.length} 件設定済み`,
       onSelect: () => onNavigate('pairs'),
     },
-    ...(team?.n01
-      ? [
-          {
-            key: 'analytics',
-            icon: 'spark' as IconName,
-            title: 'データ分析',
-            meta: '選手・チームの成績分析',
-            onSelect: () => onNavigate('analytics'),
-          },
-        ]
-      : []),
     {
       key: 'history',
       icon: 'history',
@@ -176,6 +166,40 @@ export function HomePage({
           {team?.n01 ? (
             <NextMatchCard team={team} onStart={() => setNextMatchFlow(team)} onSync={() => setSyncing(team)} />
           ) : null}
+          <section className="watch-strip" aria-labelledby="watch-strip-title">
+            <h2 className="section-mini" id="watch-strip-title">
+              観戦・分析
+            </h2>
+            <div className="quick-grid watch-grid">
+              <button type="button" className="quick-tile" onClick={() => onNavigate('live')} data-testid="home-live">
+                <span className="tile-icon" aria-hidden="true">
+                  <Icon name="target" />
+                </span>
+                <span>
+                  <span className="title">ライブ</span>
+                  <span className="meta">{team?.n01 ? `${team.n01.leagueTitle} の試合` : 'n01 の試合を観戦'}</span>
+                </span>
+              </button>
+              <button type="button" className="quick-tile" onClick={() => onNavigate('matches')} data-testid="home-results">
+                <span className="tile-icon" aria-hidden="true">
+                  <Icon name="trophy" />
+                </span>
+                <span>
+                  <span className="title">日程・結果</span>
+                  <span className="meta">結果・順位・スタッツ</span>
+                </span>
+              </button>
+              <button type="button" className="quick-tile" onClick={() => onNavigate('analytics')} data-testid="home-analytics">
+                <span className="tile-icon" aria-hidden="true">
+                  <Icon name="chart" />
+                </span>
+                <span>
+                  <span className="title">分析</span>
+                  <span className="meta">{team?.n01 ? '選手・チームの成績' : 'n01 連携チームで利用'}</span>
+                </span>
+              </button>
+            </div>
+          </section>
           <section className="hero" aria-labelledby="hero-title">
             <span className="kicker">
               <KineticText text="LEAGUE ORDER" variant="track" step={30} />
@@ -262,24 +286,6 @@ export function HomePage({
           <TeamInsight orders={store.teamOrders} players={strengthPlayers} onShowStrength={() => setShowStrength(true)} />
 
           <div className="quick-grid">
-            <button type="button" className="quick-tile" onClick={() => onNavigate('live')} data-testid="home-live">
-              <span className="tile-icon" aria-hidden="true">
-                <Icon name="target" />
-              </span>
-              <span>
-                <span className="title">ライブ</span>
-                <span className="meta">{team?.n01 ? `${team.n01.leagueTitle} の試合を観戦` : 'n01 リーグの試合を観戦'}</span>
-              </span>
-            </button>
-            <button type="button" className="quick-tile" onClick={() => onNavigate('matches')} data-testid="home-results">
-              <span className="tile-icon" aria-hidden="true">
-                <Icon name="trophy" />
-              </span>
-              <span>
-                <span className="title">日程・結果</span>
-                <span className="meta">結果・順位・スタッツ</span>
-              </span>
-            </button>
             <button type="button" className="quick-tile" onClick={() => onNavigate('players')}>
               <span className="tile-icon" aria-hidden="true">
                 <Icon name="users" />

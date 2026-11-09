@@ -12,7 +12,7 @@ import { TDID, gameRow, list, liveBody, side, tournamentDoc } from './testFixtur
 
 /**
  * Regression tests of the technical audit of 2026-11-09 (docs/AUDIT_2026-11-09.md), one block
- * per finding. Each one fails on the code before its fix.
+ * per finding. Those of F02, F04 and F07–F10 fail on main 53d04de (checked before the fix).
  */
 
 /** A fake clock shared by the two governors: sleeping advances it. */

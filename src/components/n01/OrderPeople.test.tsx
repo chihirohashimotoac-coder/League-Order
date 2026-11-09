@@ -1,3 +1,4 @@
+import { openScreen } from '../../test/appHarness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -133,7 +134,7 @@ describe('今回だけの助っ人 from the next-match flow', () => {
 
     // Not a member of the team, in storage or on screen …
     expect((await storedPlayers()).some((entry) => entry.name === '助っ人 花子')).toBe(false);
-    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'メンバー' }));
+    await openScreen(user, 'メンバー');
     await screen.findByText('橋本 千尋');
     expect(screen.queryByText('助っ人 花子')).toBeNull();
 
@@ -324,7 +325,7 @@ describe('助っ人 on the ordinary SETUP screen', () => {
     cleanup();
     renderApp();
     await screen.findByRole('heading', { name: 'kalavinka', level: 1 });
-    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: '履歴' }));
+    await openScreen(user, '履歴');
     await user.click(await screen.findByRole('button', { name: /助っ人|ORDER|20\d\d|下書き|未確定|バランス|勝利|対戦/ }));
     const preview = await screen.findByRole('dialog');
     // The saved order lists the helper by name too.

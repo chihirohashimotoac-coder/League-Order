@@ -22,7 +22,7 @@ async function open(page: Page): Promise<void> {
   await wizard.getByRole('button', { name: /kalavinka/ }).click();
   await wizard.getByRole('button', { name: 'このチームを作成' }).click();
   await expect(page.getByRole('heading', { name: 'kalavinka', level: 1 })).toBeVisible();
-  await page.getByRole('button', { name: /データ分析/ }).click();
+  await page.locator('.tab-bar').getByRole('button', { name: '分析', exact: true }).click();
   await expect(page.getByTestId('metric-3DA')).toBeVisible();
 }
 

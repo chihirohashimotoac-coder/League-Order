@@ -84,3 +84,19 @@ export function renderApp(): ReturnType<typeof render> {
   );
 }
 
+
+/**
+ * Opens a main screen from the bottom bar. Members, formats, pairs, history and settings live
+ * under その他 (v1.5.0): the bar's その他, then the screen by name.
+ */
+export async function openScreen(user: { click: (element: Element) => Promise<void> }, name: string): Promise<void> {
+  const { screen, within } = await import('@testing-library/react');
+  const nav = screen.getByRole('navigation', { name: 'メインナビゲーション' });
+  if (['メンバー', 'フォーマット', 'ペア相性', '履歴', '設定 / バックアップ'].includes(name)) {
+    await user.click(within(nav).getByRole('button', { name: 'その他' }));
+    const more = await screen.findByTestId('more-page');
+    await user.click(within(more).getByRole('button', { name: new RegExp(`^${name.replace(/[/]/g, '\\/')}`) }));
+    return;
+  }
+  await user.click(within(nav).getByRole('button', { name }));
+}

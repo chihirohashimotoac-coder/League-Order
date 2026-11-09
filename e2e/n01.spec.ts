@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01, type N01ServerControl } from './n01Server';
 import { clickGenerate } from './ruleQuestions';
 import { waitForRest } from './axe';
+import { tab } from './nav';
 
 /**
  * n01 integration in a real browser, against the fixture n01 server.
@@ -23,9 +24,6 @@ async function audit(page: Page, label: string): Promise<void> {
   expect(summary, label).toEqual([]);
 }
 
-function tab(page: Page, name: string) {
-  return page.locator('.tab-bar').getByRole('button', { name, exact: true });
-}
 
 async function start(page: Page): Promise<N01ServerControl> {
   await pinFixtureClock(page);
