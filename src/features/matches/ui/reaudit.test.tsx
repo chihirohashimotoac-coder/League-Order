@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MatchesApi } from '../api';
+import { LIST_LIMITS, MatchesApi } from '../api';
+import type { GameList } from '../api';
 import type { AnalyticsOperation, AnalyticsTransport } from '../../analytics/api/readApi';
 import { RequestGovernor } from '../governor';
-import { parseLive } from '../parse';
+import { parseFixtures, parseLive, parseSeasonDocument } from '../parse';
 import type { LiveState } from '../parse';
-import { liveBody } from '../testFixtures';
+import { TDID, fixtures, gameRow, liveBody, side, tournamentDoc } from '../testFixtures';
+import { buildCards } from '../cards';
+import type { MatchesApiFactory } from '../environment';
+import { HUB_IDLE_MS, TournamentHub } from './CompetitionViews';
+import { LiveTab } from './LiveTab';
+import { ListCoverage } from './ListCoverage';
+import type { SeasonData } from './useMatchContext';
+import { AppStoreProvider } from '../../../state/appStore';
 import { LiveSheet } from './LiveSheet';
 import { GameView } from './GameView';
 import { SYNC_RETRY_MS } from './useGameLegs';
@@ -309,5 +317,122 @@ describe('R02: the game boundary holds while legs are caught up', () => {
     releaseSince(throwsReply('gameA', 30, 1, [endedLeg(0, 20)]));
     await flush();
     expect(screen.getByLabelText('ゲームの詳細').textContent).toContain('141');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R03 — a list that did not bring everything says so, on every screen
+// ---------------------------------------------------------------------------
+
+describe('R03: what a game list did not bring is shown, and goes away once it does', () => {
+  /** A real MatchesApi for the documents, with the game list answered by `lists` in turn. */
+  function hubApi(lists: GameList[]) {
+    const transport: AnalyticsTransport = {
+      request: async (operation) => {
+        if (operation === 'tournament/get') return { result: 0, tournament: { tdid: TDID, title: 'Open', status: 30, team_games: 0, entry_list: [] } };
+        if (operation === 'tournament/standings') return { result: -51 };
+        throw new Error(`unexpected ${operation}`);
+      },
+    };
+    const api = new MatchesApi({ transport, governor: new RequestGovernor(100_000), pollPerMinute: 100_000 });
+    let read = 0;
+    api.competitionGames = async () => lists[Math.min(read++, lists.length - 1)];
+    return api;
+  }
+  const none: GameList = { games: [], truncated: false, unreadable: 0, unsure: false };
+
+  it('competition: none / one unreadable / capped / tied page boundary are told apart; a full read clears the note', async () => {
+    vi.useFakeTimers();
+    const api = hubApi([{ ...none, unreadable: 1 }, { ...none, truncated: true }, { ...none, unsure: true }, none]);
+    render(<TournamentHub api={api} tdid={TDID} tab="live" onGame={() => undefined} />);
+    await flush();
+    // One row unreadable: never "no game in progress" as if the list were whole.
+    expect(screen.getByTestId('competition-live-empty').textContent).not.toContain('いま進行中の試合はありません');
+    expect(screen.getByTestId('list-coverage').textContent).toContain('読めなかった試合 1 件');
+    const next = async () => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(HUB_IDLE_MS * 1.25);
+      });
+      await flush();
+    };
+    await next();
+    expect(screen.getByTestId('list-coverage').textContent).toContain(`古い順に ${LIST_LIMITS.competition.games.toLocaleString('ja-JP')} 件まで`);
+    await next();
+    expect(screen.getByTestId('list-coverage').textContent).toContain('欠けている可能性');
+    await next();
+    expect(screen.queryByTestId('list-coverage')).toBeNull();
+    expect(screen.getByTestId('competition-live-empty').textContent).toContain('いま進行中の試合はありません');
+  });
+
+  function boardData(): SeasonData {
+    const season = parseSeasonDocument(tournamentDoc(), TDID);
+    const fx = parseFixtures(fixtures());
+    return { season, fixtures: fx, games: [], cards: buildCards(season, fx, []), standings: [], standingsError: null, unreadableGames: 0, truncated: false };
+  }
+
+  it('today’s board: none / one unreadable / capped are told apart; a full read clears the note', async () => {
+    vi.useFakeTimers();
+    const lists: GameList[] = [{ ...none, unreadable: 1 }, { ...none, truncated: true }, none];
+    const { api } = apiOf(() => new Error('not used'));
+    let read = 0;
+    api.todayGames = async () => lists[Math.min(read++, lists.length - 1)];
+    const factory: MatchesApiFactory = () => api;
+    render(
+      <AppStoreProvider>
+        <LiveTab data={boardData()} registered={[]} api={api} factory={factory} />
+      </AppStoreProvider>,
+    );
+    await flush();
+    await flush();
+    expect(screen.getByTestId('live-empty').textContent).not.toContain('いま進行中・本日終了した試合はありません');
+    expect(screen.getByTestId('list-coverage').textContent).toContain('読めなかった試合 1 件');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(75_000);
+    });
+    await flush();
+    expect(screen.getByTestId('list-coverage').textContent).toContain(`新しい順に ${LIST_LIMITS.today.games} 件まで`);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(75_000);
+    });
+    await flush();
+    expect(screen.queryByTestId('list-coverage')).toBeNull();
+    expect(screen.getByTestId('live-empty').textContent).toContain('いま進行中・本日終了した試合はありません');
+  });
+
+  it('season results: the note follows the season list (capped, unreadable, tied, whole)', () => {
+    const view = render(<ListCoverage state={{ truncated: true, unreadable: 2 }} kind="season" />);
+    expect(view.container.textContent).toContain(`古い順に ${LIST_LIMITS.season.games.toLocaleString('ja-JP')} 件まで`);
+    expect(view.container.textContent).toContain('読めなかった試合 2 件');
+    view.rerender(<ListCoverage state={{ truncated: false, unreadable: 0, unsure: true }} kind="season" />);
+    expect(view.container.textContent).toContain('欠けている可能性');
+    view.rerender(<ListCoverage state={{ truncated: false, unreadable: 0 }} kind="season" />);
+    expect(view.container.textContent).toBe('');
+  });
+
+  /** n01's match/list over `rows` (sorted by startTime as asked, offset paging). */
+  function listTransport(rows: () => Record<string, unknown>[]): AnalyticsTransport {
+    return {
+      request: async (_operation, params) => {
+        const sorted = [...rows()].sort((a, b) => (params.order === 'desc' ? (b.startTime as number) - (a.startTime as number) : (a.startTime as number) - (b.startTime as number)));
+        const skip = Number(params.skip ?? 0);
+        return { result: 0, list: sorted.slice(skip, skip + Number(params.count)) };
+      },
+    };
+  }
+  const row = (i: number, start: number) => ({ ...(gameRow(`c${i}`, 'AAAA', 'BBBB', 'sg01', [side('AAAA', [], 2, 501, 30), side('BBBB', [], 0, 300, 30)], { mid: `m${i}`, start, finished: true }) as Record<string, unknown>), startTime: start });
+
+  it('a page boundary on equal start times is reported as unsure (today and competition); distinct times are not', async () => {
+    const api = (rows: Record<string, unknown>[]) => new MatchesApi({ transport: listTransport(() => rows), governor: new RequestGovernor(100_000), pollPerMinute: 100_000 });
+    const distinct = Array.from({ length: 150 }, (_, i) => row(i, 1_800_000_000 + i));
+    expect((await api(distinct).todayGames(TDID, 0)).unsure).toBe(false);
+    expect((await api(distinct).competitionGames(TDID)).unsure).toBe(false);
+    // Rows 45–54 started in the same second: the newest-first page boundary (row 50) and the
+    // oldest-first boundary (row 100 → none here) — today's list crosses the tie.
+    const tiedToday = Array.from({ length: 150 }, (_, i) => row(i, i >= 45 && i <= 54 ? 1_800_000_050 : 1_800_000_000 + i));
+    expect((await api(tiedToday).todayGames(TDID, 0)).unsure).toBe(true);
+    const tiedCompetition = Array.from({ length: 150 }, (_, i) => row(i, i >= 95 && i <= 104 ? 1_800_000_100 : 1_800_000_000 + i));
+    const competition = await api(tiedCompetition).competitionGames(TDID);
+    expect(competition.unsure).toBe(true);
+    expect(competition.games).toHaveLength(150);
   });
 });

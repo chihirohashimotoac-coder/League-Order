@@ -7855,3 +7855,11 @@ ul.plain {
 .more-page .card + .card {
   margin-top: var(--space-3);
 }
+
+/* A paged game list that did not bring everything (re-audit R03): one quiet line, warning ink. */
+.list-coverage {
+  margin: 4px 0 8px;
+  padding-left: 8px;
+  border-left: 3px solid var(--color-warning);
+  color: var(--color-warning);
+}

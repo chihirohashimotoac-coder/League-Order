@@ -19,6 +19,7 @@ import { MatchSheet } from './MatchSheet';
 import { NowView, TournamentHub } from './CompetitionViews';
 import { PlayerCard } from './PlayerCard';
 import { shortSlot } from './CardTrail';
+import { ListCoverage } from './ListCoverage';
 
 /**
  * 観戦 (WATCH): one page for any n01 league, with or without a team. Four tabs —
@@ -199,8 +200,8 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
           <p className="muted small-text matches-meta">
             n01 公式データ ・ 取得 {formatClock(data.fetchedAt)}
             {registered.length ? ` ・ 登録チーム ${registered.map((id) => data.value.season.teams.get(id)).join('・')}` : ''}
-            {data.value.unreadableGames > 0 ? ` ・ 読めなかった試合 ${data.value.unreadableGames} 件 (集計外)` : ''}
           </p>
+          <ListCoverage state={{ truncated: data.value.truncated, unreadable: data.value.unreadableGames, unsure: data.value.unsureGames }} kind="season" />
           {tab === 'live' ? <LiveTab data={data.value} registered={registered} api={api} factory={factory} /> : null}
           {tab === 'results' ? <ResultsTab data={data.value} registered={registered} api={api} onTeam={setTeam} /> : null}
           {tab === 'standings' ? <StandingsTab data={data.value} registered={registered} onTeam={setTeam} /> : null}
