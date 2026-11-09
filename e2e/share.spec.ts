@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { clickGenerate } from './ruleQuestions';
+import { tab } from './nav';
 
 /**
  * End-to-end coverage of the share feature (追加要件 §13, §14).
@@ -345,7 +346,7 @@ test.describe('long orders and Japanese text', () => {
 
   test('renders long Japanese names without clipping the layout (追加要件 §11, §13)', async ({ page }) => {
     await openApp(page);
-    await page.locator('.tab-bar').getByRole('button', { name: 'メンバー', exact: true }).click();
+    await tab(page, 'メンバー').click();
     await page.getByRole('button', { name: 'メンバーを追加' }).click();
     await page.getByLabel('名前 (必須)').fill('ながいなまえのせんしゅさんです');
     await page.getByRole('button', { name: '保存', exact: true }).click();
