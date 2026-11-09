@@ -7672,6 +7672,9 @@ ul.plain {
 
 /* 前節比 (movement since the previous round) */
 .standings td.move {
+  /* Holds its screen-reader text: an absolutely placed .sr-only would otherwise be placed
+     against the page and stick out past the table's scroll box (sideways page scroll). */
+  position: relative;
   white-space: nowrap;
   color: var(--color-text-muted);
 }
