@@ -578,7 +578,7 @@ export function App(): React.JSX.Element {
     const register = (): void => setRegistering(true);
     const viewerPage: Page = page === 'result' ? 'setup' : page === 'players' || page === 'formats' || page === 'pairs' || page === 'history' ? 'more' : page;
     const watching = viewerPage === 'watch' || viewerPage === 'live' || viewerPage === 'matches';
-    const viewerTitle = watching ? store.settings.watch.title : viewerPage === 'home' ? PAGE_TITLES.home : PAGE_TITLES[viewerPage];
+    const viewerTitle = watching ? store.settings.watch.title : viewerPage === 'home' ? 'ホーム' : PAGE_TITLES[viewerPage];
     const viewerBack = viewerPage === 'settings' ? BACK_TARGETS.settings : undefined;
     return (
       <div className="app viewer-shell">

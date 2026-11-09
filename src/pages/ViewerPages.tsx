@@ -55,7 +55,7 @@ export function ViewerHome({ onRegister, onNavigate }: ViewerActions): React.JSX
         </button>
       </Card>
       <Card kicker="TEAM" title="チームを登録すると">
-        <ul className="plain-list small-text">
+        <ul className="plain-list small-text" style={{ marginBottom: 12 }}>
           <li>オーダーの作成・保存・確定</li>
           <li>メンバー・フォーマット・ペア相性の管理</li>
           <li>n01 と連携したチームの選手・チーム分析</li>
