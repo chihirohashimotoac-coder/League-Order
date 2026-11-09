@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01 } from './n01Server';
+import { tab } from './nav';
 
 /**
  * Final visual QA (MASTER SPEC Phase 6 §10): one screenshot per n01 screen, at phone
@@ -22,9 +23,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(DIR!, `${String(index).padStart(2, '0')}-${name}.png`), fullPage: false });
 }
 
-function tab(page: Page, name: string) {
-  return page.locator('.tab-bar').getByRole('button', { name, exact: true });
-}
 
 test('n01 screens', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile', 'phone screenshots only');

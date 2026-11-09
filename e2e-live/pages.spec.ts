@@ -4,7 +4,7 @@ import { expect, test, type Page, type Response } from '@playwright/test';
  * The published site, in a real browser, against the real n01 API (no mocks, no routes).
  *
  *  1. create the ATDO team (kalavinka when it is in the season, else the first team listed),
- *  2. open データ分析 → PLAYER, then TEAM, and generate one order,
+ *  2. open 分析 (bottom bar) → PLAYER, then TEAM, and generate one order,
  *  3. prove from the browser's own network log that stats_list, player_stats_list, standings
  *     and the whole-league roster were each requested for the season and succeeded (HTTP 200,
  *     readable by this origin, i.e. a CORS header the browser accepted), and that the page
@@ -80,7 +80,7 @@ test('published site: ATDO team → PLAYER / TEAM analytics → one order, again
   const team = await createAtdoTeam(page);
   info.annotations.push({ type: 'team', description: team });
 
-  await page.getByRole('button', { name: /データ分析/ }).click();
+  await page.locator('.tab-bar').getByRole('button', { name: '分析', exact: true }).click();
   await expect(page.getByTestId('analytics-page')).toBeVisible();
   await expect(page.getByTestId('metric-3DA')).toBeVisible({ timeout: 90_000 });
   await expect(page.getByTestId('analytics-updated')).toContainText('最終取得');
@@ -92,7 +92,7 @@ test('published site: ATDO team → PLAYER / TEAM analytics → one order, again
   await page.screenshot({ path: `smoke-results/team-analytics-${info.project.name}.png`, fullPage: true });
 
   // One existing feature, as a visitor would use it: generate an order.
-  await page.getByRole('button', { name: '戻る' }).click();
+  await page.locator('.tab-bar').getByRole('button', { name: 'ホーム', exact: true }).click();
   await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await page.getByRole('button', { name: 'オーダーを生成' }).click();

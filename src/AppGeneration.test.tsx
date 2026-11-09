@@ -6,7 +6,7 @@ import 'fake-indexeddb/auto';
 import '@testing-library/jest-dom/vitest';
 import { openBackend, resetBackendCache } from './storage/db';
 import { DEFAULT_SETTINGS, Repository } from './storage/repository';
-import { TEAM_A, TEAM_B, formatFor, renderApp, roster, seed } from './test/appHarness';
+import { TEAM_A, TEAM_B, formatFor, renderApp, roster, seed, openScreen } from './test/appHarness';
 import { generateOrder } from './optimizer/generateOrder';
 import { createVersion } from './domain/orders/lifecycle';
 import { createParticipantConfig } from './domain/orders/participants';
@@ -248,7 +248,7 @@ describe('a generation that finishes after a saved order was opened', () => {
     await waitFor(async () => expect(await storedOrders()).toHaveLength(1));
 
     const pending = await startGeneration(user);
-    await user.click(within(nav()).getByRole('button', { name: '履歴' }));
+    await openScreen(user, '履歴');
     await user.click(await screen.findByRole('button', { name: /SAVED/ }));
     await user.click(await screen.findByRole('button', { name: 'このオーダーを開いて編集' }));
     await screen.findByRole('heading', { name: 'オーダー結果' });
@@ -316,7 +316,7 @@ describe('an order record whose team does not match its line-up (written by the 
     const user = userEvent.setup();
     renderApp();
     await screen.findByRole('heading', { name: 'チームB', level: 1 });
-    await user.click(within(nav()).getByRole('button', { name: '履歴' }));
+    await openScreen(user, '履歴');
     await user.click(await screen.findByRole('button', { name: /混在したオーダー/ }));
     await user.click(await screen.findByRole('button', { name: 'このオーダーを開いて編集' }));
     await screen.findByRole('heading', { name: 'オーダー結果' });

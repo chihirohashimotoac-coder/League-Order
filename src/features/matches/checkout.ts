@@ -25,8 +25,16 @@ export function checkoutRoute(left: number, dartsInHand = 3): string[] | null {
 }
 
 // ---------------------------------------------------------------------------
-// Leg estimate (予測) from the points left, the averages and who throws next
+// Leg estimate (参考予測) from the points left, the averages and who throws next
 // ---------------------------------------------------------------------------
+//
+// A reference model (docs/LIVE_ESTIMATE.md). The leg chance is recalibrated on one season of
+// real games and checked on another; the game chance is not checked. Its assumptions are
+// fixed numbers, not a player's record: an average with little evidence is
+// pulled towards 45; finishing takes about 1.6 visits from a number with a standard route and
+// 2 otherwise; the spread of visits is a fixed function of their mean. It is applied only to a
+// 01 leg with the points left, the next thrower and (for the game) the start score and the legs
+// needed known — see `liveEstimateScope`. Never to Cricket, never with 501 assumed.
 
 const erf = (x: number): number => {
   // Abramowitz–Stegun 7.1.26.
@@ -50,8 +58,27 @@ function visits(left: number, average: number): { mean: number; sd: number } {
   return { mean, sd: 0.45 * Math.sqrt(mean) + 0.5 };
 }
 
-/** Chance that side 0 wins the leg. `next` throws first from here. */
+/**
+ * Recalibration of the raw model: p' = σ(a · logit p), symmetric (left / right is arbitrary).
+ * `a` was fitted (log loss) on 60 finished games of ATDO 2026 2nd and checked on 60 games of a
+ * different season, ATDO 2026 3rd: Brier 0.2412 → 0.2263 there (always-50 %: 0.25). The raw
+ * model is far too sure near the end of a leg — league players need more than ~1.6 visits to
+ * check out. See docs/LIVE_ESTIMATE.md and `scripts/validate-live-estimate.ts`.
+ */
+export const LEG_CALIBRATION = 0.46;
+
+function calibrate(p: number): number {
+  const clamped = Math.min(0.99, Math.max(0.01, p));
+  return 1 / (1 + Math.exp(-LEG_CALIBRATION * Math.log(clamped / (1 - clamped))));
+}
+
+/** Chance that side 0 wins the leg (recalibrated). `next` throws first from here. */
 export function legChance(left: [number, number], average: [number, number], next: 0 | 1): number {
+  return calibrate(rawLegChance(left, average, next));
+}
+
+/** The model before recalibration (kept for re-fitting / checking `LEG_CALIBRATION`). */
+export function rawLegChance(left: [number, number], average: [number, number], next: 0 | 1): number {
   const a = visits(left[0], average[0]);
   const b = visits(left[1], average[1]);
   const sd = Math.sqrt(a.sd * a.sd + b.sd * b.sd);
@@ -60,7 +87,32 @@ export function legChance(left: [number, number], average: [number, number], nex
   return Math.min(0.99, Math.max(0.01, phi((b.mean - a.mean + edge) / sd)));
 }
 
-/** Chance that side 0 wins a fresh leg from the two averages (throwing first alternates). */
-export function freshLegChance(average: [number, number]): number {
-  return (legChance([501, 501], average, 0) + legChance([501, 501], average, 1)) / 2;
+/** Chance that side 0 wins a fresh leg of `start` from the two averages (throwing first alternates). */
+export function freshLegChance(average: [number, number], start = 501): number {
+  return (legChance([start, start], average, 0) + legChance([start, start], average, 1)) / 2;
+}
+
+/** What the live estimate needs, and why it is withheld when something is missing. */
+export type EstimateScope =
+  | { leg: true; game: true }
+  | { leg: true; game: false; reason: string }
+  | { leg: false; game: false; reason: string };
+
+export function liveEstimateScope(input: {
+  cricket: boolean;
+  left: [number, number] | null;
+  thrower: 0 | 1 | null;
+  startScore: number | null;
+  limitLeg: number | null;
+  drawMode: number | null;
+  /** The game's throws are all read (the averages come from them). */
+  complete: boolean;
+}): EstimateScope {
+  if (input.cricket) return { leg: false, game: false, reason: 'Cricket は対象外です' };
+  if (!input.complete) return { leg: false, game: false, reason: 'このゲームの記録がそろっていません' };
+  if (!input.left || input.thrower === null) return { leg: false, game: false, reason: 'Leg の合間です' };
+  if (!input.startScore || input.startScore <= 0) return { leg: true, game: false, reason: '開始点数が不明です' };
+  if (!input.limitLeg || input.limitLeg < 1) return { leg: true, game: false, reason: '勝利に必要な Leg 数が不明です' };
+  if (input.drawMode === 1) return { leg: true, game: false, reason: '引き分けのある形式は対象外です' };
+  return { leg: true, game: true };
 }

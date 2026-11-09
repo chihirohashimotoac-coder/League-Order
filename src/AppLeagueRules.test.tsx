@@ -6,7 +6,7 @@ import 'fake-indexeddb/auto';
 import '@testing-library/jest-dom/vitest';
 import { openBackend, resetBackendCache } from './storage/db';
 import { Repository } from './storage/repository';
-import { TEAM_A, TEAM_B, formatFor, renderApp, roster } from './test/appHarness';
+import { TEAM_A, TEAM_B, formatFor, renderApp, roster, openScreen } from './test/appHarness';
 import { DEFAULT_SETTINGS } from './storage/repository';
 import type { GenerateResult, LeagueFormat, OrderInput, RuleAnswerSet } from './domain/types';
 
@@ -67,7 +67,7 @@ describe('league rules in the app', () => {
     const user = userEvent.setup();
     renderApp();
     await screen.findByRole('navigation', { name: 'メインナビゲーション' });
-    await user.click(within(nav()).getByRole('button', { name: /フォーマット/ }));
+    await openScreen(user, 'フォーマット');
     await user.click(await screen.findByText('テスト 3ゲーム'));
     const editor = await screen.findByTestId('league-rules-editor');
     await user.click(within(editor).getByText('リーグ規則 (必須条件)'));

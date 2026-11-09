@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { describeN01Error } from '../../../integrations/n01/client';
+import { useMemo, useState } from 'react';
 import type { MatchesApi } from '../api';
 import type { LiveLeg, ThrowLeg } from '../parse';
-import { mergeLegs } from '../parse';
+import { withLiveLeg } from '../parse';
+import { useGameLegs } from './useGameLegs';
 import { gameStats } from '../gameStats';
 import type { SideStats } from '../gameStats';
 import { CricketGrid, ZeroOneGrid } from './ScoreGrid';
@@ -18,7 +18,8 @@ import { FinishChances, RaceChart } from './LegCharts';
  *   Cricket hits / marks.
  *
  * A finished game is read once (`match/throws`, memoised). A game in progress takes its current
- * leg from the live poller and re-reads the other legs only when a leg ends.
+ * leg from the live poller and re-reads the other legs only when a leg ends. The legs belong to
+ * this `mid` only (`useGameLegs`); a failed read shows as such, with a retry.
  */
 
 const fmt = (value: number | null, digits = 2): string => (value === null ? '—' : value.toFixed(digits));
@@ -46,56 +47,12 @@ export function GameView({
   /** Open this leg with this visit marked (a highlight). */
   focus?: { leg: number; n01Side: 0 | 1; round: number } | null;
 }): React.JSX.Element {
-  const [legs, setLegs] = useState<ThrowLeg[]>([]);
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [error, setError] = useState('');
   const [chosen, setChosen] = useState<number | null>(focus?.leg ?? null);
-  const [since, setSince] = useState<number | null>(null);
   const liveIndex = liveLeg?.index ?? null;
-
-  useEffect(() => {
-    let alive = true;
-    setState('loading');
-    api
-      .throws(mid, null, { finished })
-      .then((reply) => {
-        if (!alive) return;
-        setLegs(reply.legs);
-        setSince(reply.updateTime);
-        setState('ready');
-      })
-      .catch((reason) => {
-        if (!alive) return;
-        setError(describeN01Error(reason));
-        setState('error');
-      });
-    return () => {
-      alive = false;
-    };
-  }, [api, mid, finished]);
-
-  // A leg ended (the live leg moved on): re-read only the legs changed since the last read.
-  useEffect(() => {
-    if (finished || liveIndex === null || since === null || state !== 'ready') return;
-    let alive = true;
-    api
-      .throws(mid, since)
-      .then((reply) => {
-        if (!alive || !reply.changed) return;
-        setLegs((held) => mergeLegs(held, reply.legs));
-        if (reply.updateTime) setSince(reply.updateTime);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-    // Only when the live leg index changes.
-  }, [liveIndex]);
-
-  const all = useMemo(() => {
-    if (!liveLeg) return legs;
-    return mergeLegs(legs, [{ ...liveLeg, bull: false, dartsTotal: null }]);
-  }, [legs, liveLeg]);
+  const history = useGameLegs(api, mid, { finished, liveLegIndex: liveIndex });
+  const legs = history.legs;
+  const state = history.status;
+  const all = useMemo(() => withLiveLeg(legs, liveLeg), [legs, liveLeg]);
   const stats = useMemo(() => gameStats(all, cricket), [all, cricket]);
   const card = (pair: [SideStats, SideStats]): [SideStats, SideStats] => (flip ? [pair[1], pair[0]] : pair);
   const [a, b] = card(stats);
@@ -103,8 +60,18 @@ export function GameView({
   const shown = chosen ?? (all.length ? all[all.length - 1].index : null);
   const leg = all.find((entry) => entry.index === shown) ?? null;
 
-  if (state === 'loading' && !liveLeg) return <p className="muted small-text">記録を読み込み中…</p>;
-  if (state === 'error' && !liveLeg) return <p className="small-text">取得エラー: {error}</p>;
+  // Figures are computed from the whole game only: until it is read, none are shown.
+  if (state === 'loading') return <p className="muted small-text" role="status">記録を読み込み中…</p>;
+  if (state === 'error') {
+    return (
+      <p className="small-text" role="alert" data-testid="legs-status">
+        このゲームの記録を取得できませんでした{history.error ? ` (${history.error})` : ''}。{' '}
+        <button type="button" className="btn small" onClick={history.retry}>
+          再取得
+        </button>
+      </p>
+    );
+  }
 
   const rows: [string, string, string][] = [
     ['Legs', String(a.legsWon), String(b.legsWon)],
@@ -148,7 +115,10 @@ export function GameView({
           </tbody>
         </table>
       </div>
-      <p className="muted small-text">n01 の記録から League Order が計算 (ブル決着の Leg は平均・ダーツ数に含めません)。</p>
+      <p className="muted small-text">
+        n01 の記録から League Order が計算 (ブル決着の Leg は平均・ダーツ数に含めません。First 9 は各 Leg の最初の 3 ラウンドの得点 ÷ 実際の本数 × 3)。
+        {history.stale ? ' 終わった Leg の記録を再取得しています。' : ''}
+      </p>
       {!cricket ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
       {all.length > 0 ? (
         <div className="chip-row" role="tablist" aria-label="Leg">

@@ -180,11 +180,15 @@ export interface BoardState {
   games: GameRow[] | null;
   error: string | null;
   fetchedAt: number | null;
+  /** The page cap was reached (more games than shown may exist). */
+  truncated: boolean;
+  /** Rows n01 sent that could not be read. */
+  unreadable: number;
 }
 
 /** 5 s while a game is in progress, 15 s when the last three polls brought nothing new, 60 s with nothing live. */
 export function useTodayBoard(api: MatchesApi | null, tournamentId: string | null, enabled: boolean): BoardState {
-  const [state, setState] = useState<BoardState>({ games: null, error: null, fetchedAt: null });
+  const [state, setState] = useState<BoardState>({ games: null, error: null, fetchedAt: null, truncated: false, unreadable: 0 });
   useEffect(() => {
     if (!api || !tournamentId || !enabled) return;
     let alive = true;
@@ -194,31 +198,47 @@ export function useTodayBoard(api: MatchesApi | null, tournamentId: string | nul
     const controller = new AbortController();
     const tick = async (): Promise<void> => {
       if (document.visibilityState === 'hidden') {
-        timer = setTimeout(() => void tick(), 2000);
+        timer = setTimeout(() => {
+          timer = null;
+          void tick();
+        }, 2000);
         return;
       }
       let delay = 5000;
       try {
-        const games = await api.todayGames(tournamentId, Date.now() / 1000 - 18 * 3600, controller.signal);
+        const list = await api.todayGames(tournamentId, Date.now() / 1000 - 18 * 3600, controller.signal);
         if (!alive) return;
+        const games = list.games;
         const max = Math.max(0, ...games.map((game) => game.updateTime ?? 0));
         quiet = max > lastMax ? 0 : quiet + 1;
         lastMax = Math.max(lastMax, max);
         const live = games.some((game) => !game.finished);
         delay = !live ? 60_000 : quiet >= 3 ? 15_000 : 5000;
-        setState({ games, error: null, fetchedAt: Date.now() });
+        setState({ games, error: null, fetchedAt: Date.now(), truncated: list.truncated, unreadable: list.unreadable });
       } catch (error) {
         if (!alive) return;
         delay = 20_000;
         setState((current) => ({ ...current, error: describeN01Error(error) }));
       }
       // ±20 % so phones on one Wi-Fi do not poll in step.
-      if (alive) timer = setTimeout(() => void tick(), delay * (0.8 + Math.random() * 0.4));
+      if (alive) timer = setTimeout(() => {
+        timer = null;
+        void tick();
+      }, delay * (0.8 + Math.random() * 0.4));
     };
+    // Back from the background: read now rather than at the end of a long quiet interval.
+    const onVisible = (): void => {
+      if (document.visibilityState !== 'visible' || !alive || timer === null) return;
+      clearTimeout(timer);
+      timer = null;
+      void tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     void tick();
     return () => {
       alive = false;
       controller.abort();
+      document.removeEventListener('visibilitychange', onVisible);
       if (timer) clearTimeout(timer);
     };
   }, [api, tournamentId, enabled]);
@@ -230,6 +250,7 @@ export function useTodayBoard(api: MatchesApi | null, tournamentId: string | nul
 // ---------------------------------------------------------------------------
 
 export interface PlayerLine {
+  /** Team event: the season member id (`oid`). Individual event: the entry id (`tpid`). */
   oid: string;
   name: string;
   teamId: string | null;
@@ -237,33 +258,60 @@ export interface PlayerLine {
   line: PlayerStatsRow['line'];
 }
 
-export function usePlayerStats(api: MatchesApi | null, tournamentId: string | null, enabled: boolean): Load<PlayerLine[]> {
-  const [state, setState] = useState<Load<PlayerLine[]>>({ kind: 'loading' });
+/**
+ * Where a competition's per-player figures are (manual: `stats_list` = チーム/プレーヤー単位,
+ * `player_stats_list` = 選手単位 (チーム戦)):
+ * - team event (`team_games` 1): `player_stats_list`, one row per team member (`oid`), the
+ *   member's team in `tpid`. Team totals (`stats_list`) are never handed out to members.
+ * - individual event: `stats_list`, one row per entry (`tpid`), named from the entry list.
+ */
+export type StatsSource = { teamGames: true } | { teamGames: false; entries: ReadonlyMap<string, string> };
+
+/** A league season's source: by its own `team_games` flag. */
+export function seasonStatsSource(season: SeasonDocument): StatsSource {
+  return season.teamGames ? { teamGames: true } : { teamGames: false, entries: season.teams };
+}
+
+export interface PlayerStatsLoad {
+  /** `entry` = an individual event's entries; `member` = a team event's members. */
+  unit: 'entry' | 'member';
+  rows: PlayerLine[];
+}
+
+export function usePlayerStats(api: MatchesApi | null, tournamentId: string | null, enabled: boolean, source: StatsSource | null): Load<PlayerLine[]> & { unit?: PlayerStatsLoad['unit'] } {
+  const [state, setState] = useState<Load<PlayerLine[]> & { unit?: PlayerStatsLoad['unit'] }>({ kind: 'loading' });
+  const teamGames = source?.teamGames ?? null;
+  const entries = source && !source.teamGames ? source.entries : null;
   useEffect(() => {
-    if (!api || !tournamentId || !enabled) return;
+    if (!api || !tournamentId || !enabled || teamGames === null) return;
     let alive = true;
     setState({ kind: 'loading' });
-    Promise.all([api.playerStats(tournamentId), api.roster(tournamentId).catch(() => [])])
-      .then(([rows, roster]) => {
-        if (!alive) return;
-        const names = new Map(roster.map((player) => [player.oid, player]));
-        setState({
-          kind: 'ready',
-          fetchedAt: Date.now(),
-          value: rows.map((row) => ({
-            oid: row.oid,
-            name: row.name ?? names.get(row.oid)?.name ?? '(名前なし)',
-            teamId: row.teamId ?? names.get(row.oid)?.teamId ?? null,
-            divisionIndex: row.divisionIndex,
-            line: row.line,
-          })),
-        });
-      })
+    const load: Promise<PlayerStatsLoad> = teamGames
+      ? Promise.all([api.playerStats(tournamentId), api.roster(tournamentId).catch(() => [])]).then(([rows, roster]) => {
+          const names = new Map(roster.map((player) => [player.oid, player]));
+          return {
+            unit: 'member' as const,
+            rows: rows.map((row) => ({
+              oid: row.oid,
+              name: row.name ?? names.get(row.oid)?.name ?? '(名前なし)',
+              teamId: row.teamId ?? names.get(row.oid)?.teamId ?? null,
+              divisionIndex: row.divisionIndex,
+              line: row.line,
+            })),
+          };
+        })
+      : api.entryStats(tournamentId).then((rows) => ({
+          unit: 'entry' as const,
+          // The entry is its own "team": division filters and the registered-entry highlight work by it.
+          rows: rows.map((row) => ({ oid: row.teamId, name: entries?.get(row.teamId) ?? '(名前なし)', teamId: row.teamId, divisionIndex: row.divisionIndex, line: row.line })),
+        }));
+    load
+      .then((result) => alive && setState({ kind: 'ready', fetchedAt: Date.now(), value: result.rows, unit: result.unit }))
       .catch((error) => alive && setState({ kind: 'error', message: describeN01Error(error) }));
     return () => {
       alive = false;
     };
-  }, [api, tournamentId, enabled]);
+  }, [api, tournamentId, enabled, teamGames, entries]);
   return state;
 }
 

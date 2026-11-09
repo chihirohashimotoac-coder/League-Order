@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { clickGenerate } from '../e2e/ruleQuestions';
+import { tab } from '../e2e/nav';
 
 /**
  * v1.4 navigation and controls on the preview's app page (its sample team, no service worker):
@@ -18,7 +19,6 @@ async function audit(page: Page, label: string): Promise<void> {
   expect(summary, label).toEqual([]);
 }
 
-const tab = (page: Page, name: string) => page.locator('.tab-bar').getByRole('button', { name, exact: true });
 
 test.beforeEach(async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });

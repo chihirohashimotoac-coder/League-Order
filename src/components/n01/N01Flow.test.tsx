@@ -1,3 +1,4 @@
+import { openScreen } from '../../test/appHarness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -105,7 +106,7 @@ describe('n01 team creation', () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
-    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'フォーマット' }));
+    await openScreen(user, 'フォーマット');
     await user.click(await screen.findByRole('button', { name: /ATDO 2026 3rd A Division.*n01 管理/ }));
     const viewer = await screen.findByRole('dialog', { name: 'n01 管理フォーマット' });
     expect(within(viewer).getByTestId('managed-format-source')).toHaveTextContent('ATDO');
@@ -118,7 +119,7 @@ describe('n01 team creation', () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
-    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'メンバー' }));
+    await openScreen(user, 'メンバー');
     const row = (await screen.findByText('中村 蓮')).closest('.list-row')!;
     expect(row).toHaveTextContent('戦力データ未設定');
     expect(row).not.toHaveTextContent('PPR 0');

@@ -245,3 +245,84 @@ function singlesDetailsFor63Cz(): Record<string, unknown> {
     }),
   );
 }
+
+/**
+ * Audit F06 (2026-11-09): cached reconstructions expire, an explicit refresh reads them again,
+ * a disagreement with n01's totals re-reads the cached games once, and a game that cannot be
+ * read again is reported as stale — never as freshly checked.
+ */
+describe('leg reconstruction freshness (audit F06)', () => {
+  const games = withDetailSides(desperadoGames());
+  const seasonGames = new Map([[TDID_2024_2ND, { tournamentId: TDID_2024_2ND, games, dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, complete: true }]]);
+  const detailsById = Object.fromEntries(details().map((d) => [d.gameId, wireDetail(d)]));
+  const DAY = 24 * 60 * 60 * 1000;
+
+  function timed(fake: FakeGames, clock: { now: number }, cache: AnalyticsCache, forceRefresh = false): GamesContext {
+    return { api: new AnalyticsApi({ transport: fake }), cache, isOnline: () => true, now: () => clock.now, forceRefresh };
+  }
+  const run = (ctx: GamesContext) => {
+    const s = season2024Data();
+    return reconstructPerson(ctx, { seasons: [s], games: seasonGames, personKey: s.players.find((p) => p.oid === '63Cz')!.personKey });
+  };
+  const gets = (fake: FakeGames, from: number) => fake.calls.slice(from).filter((c) => c.operation === 'match/get').map((c) => c.params.mid);
+  const stored = Object.keys(detailsById).filter((id) => games.some((g) => g.gameId === id && g.sides.some((s) => s.players.some((p) => p.oid === '63Cz'))));
+
+  it('8 days later (past the finished-season TTL) the 8 stored games are read again', async () => {
+    const clock = { now: 1_800_000_000_000 };
+    const cache = new AnalyticsCache({ memoryOnly: true, now: () => clock.now });
+    const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById);
+    await run(timed(fake, clock, cache));
+    expect(stored).toHaveLength(8);
+    const before = fake.calls.length;
+    // Within the TTL: the stored games come from the cache.
+    clock.now += DAY;
+    await run(timed(fake, clock, cache));
+    expect(gets(fake, before).filter((mid) => stored.includes(mid))).toEqual([]);
+    const later = fake.calls.length;
+    clock.now += 7 * DAY;
+    await run(timed(fake, clock, cache));
+    expect(new Set(gets(fake, later).filter((mid) => stored.includes(mid)))).toEqual(new Set(stored));
+  });
+
+  it('an explicit refresh reads the stored games again at once', async () => {
+    const clock = { now: 1_800_000_000_000 };
+    const cache = new AnalyticsCache({ memoryOnly: true, now: () => clock.now });
+    const fake = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById);
+    await run(timed(fake, clock, cache));
+    const before = fake.calls.length;
+    await run(timed(fake, clock, cache, true));
+    expect(new Set(gets(fake, before).filter((mid) => stored.includes(mid)))).toEqual(new Set(stored));
+  });
+
+  it('a correction on n01: a cached pre-correction record → it is read again (same day) and the season verifies', async () => {
+    const clock = { now: 1_800_000_000_000 };
+    const cache = new AnalyticsCache({ memoryOnly: true, now: () => clock.now });
+    // First read: one multi-thrower game as it was before a correction — its first leg missing
+    // (entered later on n01), so its legs do not add up to the game's totals.
+    const target = details().find((d) => d.gameId === 'VU6AjbQE_1724326953016')!;
+    const before = { ...detailsById, VU6AjbQE_1724326953016: wireDetail({ ...target, legs: target.legs.slice(1) }) };
+    const old = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, before);
+    const first = await run(timed(old, clock, cache));
+    expect(first.checks[0].verified.score).toBe(false); // the pre-correction record cannot be rebuilt
+
+    // Later the same day (cache still fresh), n01 now serves the corrected game.
+    clock.now += 11 * 60 * 1000;
+    const fixed = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById);
+    const second = await run(timed(fixed, clock, cache));
+    expect(gets(fixed, 0)).toContain('VU6AjbQE_1724326953016');
+    expect(second.checks[0]).toMatchObject({ state: 'partly-verified', verified: { score: true } });
+    expect(second.stale).toEqual([]);
+  });
+
+  it('expired and n01 unreachable for those games: the old reconstruction is kept and reported as stale', async () => {
+    const clock = { now: 1_800_000_000_000 };
+    const cache = new AnalyticsCache({ memoryOnly: true, now: () => clock.now });
+    await run(timed(new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById), clock, cache));
+    clock.now += 8 * DAY;
+    const down = new FakeGames({ [TDID_2024_2ND]: games.map(wireGame) }, detailsById);
+    for (const id of stored) down.failing.add(id);
+    const result = await run(timed(down, clock, cache));
+    expect(result.stale).toEqual([{ tournamentId: TDID_2024_2ND, title: season2024Data().title, games: 8 }]);
+    expect(result.checks[0].verified.score).toBe(true); // the figures stay, flagged as not re-checked
+  });
+});

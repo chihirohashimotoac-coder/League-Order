@@ -75,6 +75,7 @@ export interface SeasonDocument {
   status: number | null;
   /** The page participants and spectators open (from n01, never built from the id). */
   url: string | null;
+  /** A team event: see `isTeamEvent`. */
   teamGames: boolean;
   teams: Map<string, string>;
   divisions: SeasonDivision[];
@@ -111,6 +112,17 @@ function slotsOf(schedule: unknown): SeasonSlot[] {
     });
   });
   return slots;
+}
+
+/**
+ * A team event (its games are played by members of team entries) — manual: チーム戦では形式の設定に
+ * `setOrder` (1: オーダーを使う). `team_games` alone is not enough: ATDO / TDA leagues are team
+ * leagues with `team_games` 0 and `lg_setting.setOrder` 1 (checked 2026-11-09), while an individual
+ * tournament (`t_xMuJ_7854`) has `setOrder` 0 in every format setting.
+ */
+export function isTeamEvent(t: Record<string, unknown>): boolean {
+  if (num(t.team_games) === 1) return true;
+  return Object.entries(t).some(([key, value]) => key.endsWith('_setting') && isRec(value) && num(value.setOrder) === 1);
 }
 
 /** The games a division plays: its own schedule when it has one, else the base schedule. */
@@ -184,7 +196,7 @@ export function parseSeasonDocument(raw: unknown, tournamentId: string): SeasonD
     title: str(t.title) ?? tournamentId,
     status: num(t.status),
     url: typeof body.url === 'string' && body.url.startsWith('https://n01darts.com/') ? body.url : null,
-    teamGames: num(t.team_games) === 1,
+    teamGames: isTeamEvent(t),
     teams,
     divisions,
     slots,
@@ -456,6 +468,8 @@ export interface LiveThrow01 {
   darts: number;
   finish: boolean;
   member: string | null;
+  /** The thrower's team member id (`member.oid`), team events only. */
+  memberId?: string | null;
 }
 
 export interface LiveThrowCricket {
@@ -466,6 +480,7 @@ export interface LiveThrowCricket {
   marks: number;
   points: number;
   member: string | null;
+  memberId?: string | null;
 }
 
 export type LiveThrow = LiveThrow01 | LiveThrowCricket;
@@ -487,6 +502,13 @@ export interface LiveLeg {
   marks: [number[], number[]] | null;
   points: [number, number] | null;
   throws: LiveThrow[];
+  /**
+   * Decided by the bull (middle for diddle, `middle_for_diddle` 1): n01 does not count its darts
+   * and points (manual: Leg の形式, shared by `match/live` and `match/throws`).
+   */
+  bull: boolean;
+  /** Darts thrown per side in the leg, as n01 counts them (`darts`). */
+  dartsTotal: [number, number] | null;
 }
 
 export interface LiveSide {
@@ -516,6 +538,8 @@ export interface LiveState {
   legs: [number, number];
   limitLeg: number | null;
   limitSet: number | null;
+  /** `format.draw_mode` (1 = a game may end drawn), `null` when absent. */
+  drawMode: number | null;
   startScore: number | null;
   currentLeg: number | null;
   currentSet: number | null;
@@ -532,17 +556,18 @@ const pair = (value: unknown): [number, number] | null =>
 function liveThrow(value: unknown, cricket: boolean): LiveThrow | null {
   if (!isRec(value) || (value.p !== 0 && value.p !== 1)) return null;
   const member = isRec(value.member) ? str(value.member.name) : null;
+  const memberId = isRec(value.member) ? str(value.member.oid) : null;
   const round = num(value.r) ?? 0;
   if (cricket) {
     const hits = Array.isArray(value.darts)
       ? value.darts.filter(isRec).map((dart) => ({ number: num(dart.number) ?? 0, mark: num(dart.mark) ?? 0 }))
       : [];
-    return { kind: 'cricket', side: value.p, round, hits, marks: num(value.marks) ?? 0, points: num(value.points) ?? 0, member };
+    return { kind: 'cricket', side: value.p, round, hits, marks: num(value.marks) ?? 0, points: num(value.points) ?? 0, member, memberId };
   }
   const score = num(value.score);
   const left = num(value.left);
   if (score === null || left === null) return null;
-  return { kind: '01', side: value.p, round, score, left, darts: num(value.darts) ?? 3, finish: num(value.finish) === 1, member };
+  return { kind: '01', side: value.p, round, score, left, darts: num(value.darts) ?? 3, finish: num(value.finish) === 1, member, memberId };
 }
 
 export function parseLiveLeg(value: unknown, cricket: boolean): LiveLeg | null {
@@ -565,6 +590,8 @@ export function parseLiveLeg(value: unknown, cricket: boolean): LiveLeg | null {
     marks: marksRaw ? [marksRaw[0].map((n) => num(n) ?? 0), marksRaw[1].map((n) => num(n) ?? 0)] : null,
     points: pair(value.score),
     throws: Array.isArray(value.throws) ? value.throws.map((t) => liveThrow(t, cricket)).filter((t): t is LiveThrow => t !== null) : [],
+    bull: num(value.middle_for_diddle) === 1,
+    dartsTotal: pair(value.darts),
   };
 }
 
@@ -606,6 +633,7 @@ export function parseLive(raw: unknown): LiveResponse {
     legs: pair(body.legs) ?? [0, 0],
     limitLeg: num(format.limit_leg),
     limitSet: num(format.limit_set),
+    drawMode: num(format.draw_mode),
     startScore: num(format.start_score),
     currentLeg: num(body.current_leg),
     currentSet: num(body.current_set),
@@ -619,12 +647,8 @@ export function parseLive(raw: unknown): LiveResponse {
 // match/throws — every leg of a game, throw by throw (since = only legs changed after it)
 // ---------------------------------------------------------------------------
 
-export interface ThrowLeg extends LiveLeg {
-  /** Decided by the bull: its darts and points are not counted in averages. */
-  bull: boolean;
-  /** Darts thrown per side in the leg, as n01 counts them. */
-  dartsTotal: [number, number] | null;
-}
+/** A leg of `match/throws`: the same format as the live leg (bull and darts included). */
+export type ThrowLeg = LiveLeg;
 
 export interface ThrowsResponse {
   changed: boolean;
@@ -636,9 +660,7 @@ export interface ThrowsResponse {
 }
 
 export function parseThrowLeg(value: unknown, cricket: boolean): ThrowLeg | null {
-  const leg = parseLiveLeg(value, cricket);
-  if (!leg || !isRec(value)) return null;
-  return { ...leg, bull: num(value.middle_for_diddle) === 1, dartsTotal: pair(value.darts) };
+  return parseLiveLeg(value, cricket);
 }
 
 export function parseThrows(raw: unknown): ThrowsResponse {
@@ -649,6 +671,15 @@ export function parseThrows(raw: unknown): ThrowsResponse {
   }
   const legs = Array.isArray(body.leg_data) ? body.leg_data.map((leg) => parseThrowLeg(leg, cricket)).filter((leg): leg is ThrowLeg => leg !== null) : [];
   return { changed: true, mid: str(body.mid), updateTime: num(body.updateTime), matchType: cricket ? 'cricket' : '01', gameEnded: num(body.end_match) === 1, legs };
+}
+
+/**
+ * The legs held with the live poller's current leg laid over them. The live leg is the newest
+ * state of that leg (a corrected visit included), so it replaces the held one whole — with its
+ * own bull flag and darts count, read from the same leg format (never forced to "not bull").
+ */
+export function withLiveLeg(held: readonly ThrowLeg[], live: LiveLeg | null | undefined): ThrowLeg[] {
+  return live ? mergeLegs(held, [live]) : [...held];
 }
 
 /** Merges a `since` reply into the legs held: a returned leg replaces the one held, whole. */

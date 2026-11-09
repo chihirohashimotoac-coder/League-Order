@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Sheet } from '../../../components/ui';
 import type { MatchesApi } from '../api';
-import { MIN_SAMPLE, playerForms } from '../insights';
+import { MIN_SAMPLE, playerForms, pooledRate } from '../insights';
 import type { PlayerThrowStats } from '../playerCard';
 import { playerGames, playerThrowStats } from '../playerCard';
 import type { ThrowLeg } from '../parse';
@@ -47,7 +47,9 @@ export function PlayerCard({
   const zeroOne = games.filter((game) => game.matchType === '01');
   const form = useMemo(() => (teamId ? playerForms(data.season, data.games, teamId).find((entry) => entry.oid === oid) ?? null : null), [data, teamId, oid]);
   const trend = games.filter((game) => game.singlesAverage !== null).map((game) => game.singlesAverage!);
-  const season = trend.length ? trend.reduce((a, b) => a + b, 0) / trend.length : null;
+  // Season 3DA = Σ points × 3 ÷ Σ darts of the singles 01 games (n01's own definition), not the
+  // mean of the game averages: a short game must not weigh as much as a long one.
+  const season = pooledRate(games.flatMap((game) => (game.singlesPair ? [game.singlesPair] : [])));
   const [throws, setThrows] = useState<Throws>({ kind: 'loading', done: 0, total: zeroOne.length });
 
   useEffect(() => {
@@ -180,8 +182,9 @@ export function PlayerCard({
         )}
 
         <p className="muted small-text">
-          League Order が n01 の記録から集計。平均は n01 の各試合の合計から、100+・上がり圏・180・High Out・最短 Leg は {stats?.games ?? zeroOne.length} 試合の投擲記録から (ブル決着の Leg を除く)。上がり圏はラウンド単位 (n01 はダブルへの本数を記録しないため)。
+          League Order が n01 の記録から集計。平均は n01 の各試合の合計の通算 (Σ得点 × 3 ÷ Σダーツ数) で、100+・上がり圏・180・High Out・最短 Leg は {stats?.games ?? zeroOne.length} 試合の投擲記録から (ブル決着の Leg を除く)。上がり圏はラウンド単位 (n01 はダブルへの本数を記録しないため)。
           {throws.kind === 'ready' && throws.failed ? ` ${throws.failed} 試合の記録を読めませんでした。` : ''}
+          {stats && stats.ambiguous ? ` 同じ名前の選手がいて投げた人を判別できないラウンド ${stats.ambiguous} 件は、誰の成績にも数えていません。` : ''}
         </p>
       </div>
     </Sheet>

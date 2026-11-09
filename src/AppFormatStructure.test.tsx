@@ -6,7 +6,7 @@ import 'fake-indexeddb/auto';
 import '@testing-library/jest-dom/vitest';
 import { openBackend, resetBackendCache } from './storage/db';
 import { Repository } from './storage/repository';
-import { TEAM_A, renderApp, roster, seed } from './test/appHarness';
+import { TEAM_A, renderApp, roster, seed, openScreen } from './test/appHarness';
 import { generateOrder } from './optimizer/generateOrder';
 import { createParticipantConfig } from './domain/orders/participants';
 import { DEFAULT_OPTIMIZER_SETTINGS, PRESETS } from './domain/orders/presets';
@@ -43,12 +43,11 @@ const LEGACY: LeagueFormat = {
 };
 
 type User = ReturnType<typeof userEvent.setup>;
-const nav = (): HTMLElement => screen.getByRole('navigation', { name: 'メインナビゲーション' });
 const stored = async () => new Repository(await openBackend()).loadAll();
 
 async function openFormats(user: User): Promise<void> {
   await screen.findByRole('heading', { name: 'チームA', level: 1 });
-  await user.click(within(nav()).getByRole('button', { name: 'フォーマット' }));
+  await openScreen(user, 'フォーマット');
 }
 
 describe('a stored self-contradicting format', () => {
@@ -183,7 +182,7 @@ describe('a stored self-contradicting format', () => {
     const user = userEvent.setup();
     renderApp();
     await screen.findByRole('heading', { name: 'チームA', level: 1 });
-    await user.click(within(nav()).getByRole('button', { name: '履歴' }));
+    await openScreen(user, '履歴');
     await user.click(await screen.findByRole('button', { name: /古い形式のオーダー/ }));
     await user.click(await screen.findByRole('button', { name: 'このオーダーを開いて編集' }));
     await screen.findByRole('heading', { name: 'オーダー結果' });

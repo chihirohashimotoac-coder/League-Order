@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { clickGenerate } from './ruleQuestions';
+import { tab } from './nav';
 
 /**
  * vNext regressions in a real browser: text selection inside sheets, Rating + PPR,
@@ -13,9 +14,6 @@ async function openFresh(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 }
 
-function tab(page: Page, name: string) {
-  return page.locator('.tab-bar').getByRole('button', { name, exact: true });
-}
 
 /**
  * Wait for every finite CSS animation on the page to end. A sheet slides up over 0.2s

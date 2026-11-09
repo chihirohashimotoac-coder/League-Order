@@ -5,8 +5,16 @@ import type { CompetitionDoc, CompetitionMatch, StandingGroup } from '../competi
 import { TTYPE_LABELS, groupMatches, stageLabel } from '../competition';
 import type { GameRow } from '../parse';
 import type { MatchesApiFactory } from '../environment';
-import type { PlayerLine } from './useMatchContext';
+import type { PlayerLine, StatsSource } from './useMatchContext';
 import { formatClock, formatRate, useFollowed, usePlayerStats } from './useMatchContext';
+import { RankingFooter, RankingSearch, rankThenSearch, useShownCount } from './rankingList';
+
+/** Refresh of a competition's games: while a game is on, and while it is running but between games. */
+export const HUB_LIVE_MS = 10_000;
+export const HUB_IDLE_MS = 60_000;
+export const HUB_ERROR_MS = 20_000;
+/** n01 tournament status 40 = finished (manual): no more games will start. */
+const FINISHED = 40;
 
 /**
  * Tournaments and events of any kind (brackets, round robins, single-match events), and the
@@ -69,32 +77,52 @@ export function TournamentHub({
 }): React.JSX.Element {
   const [doc, setDoc] = useState<CompetitionDoc | null>(null);
   const [rows, setRows] = useState<GameRow[] | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const [standings, setStandings] = useState<StandingGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [open, setOpen] = useState<string | null>(null);
 
-  // The document once; the games now, and every 10 s while any is in progress and visible.
+  // The document once; the games now, then every 10 s while a game is in progress, every 60 s
+  // while the event runs with nothing on (before the first game, between rounds) — a game that
+  // starts later appears without a manual refresh — and not at all once the event is finished
+  // with nothing in progress. Hidden: no request; visible again: read at once.
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const controller = new AbortController();
     const load = async (): Promise<void> => {
-      try {
-        if (document.visibilityState !== 'hidden') {
-          const [competition, games] = await Promise.all([api.competition(tdid), api.competitionGames(tdid, { signal: controller.signal })]);
+      timer = null;
+      let delay = HUB_LIVE_MS;
+      if (document.visibilityState !== 'hidden') {
+        try {
+          const [first, games] = await Promise.all([api.competition(tdid), api.competitionGames(tdid, { signal: controller.signal })]);
+          if (!alive) return;
+          // Nothing in progress: read the status again (the event may have finished since the page opened).
+          const competition = games.games.some((game) => !game.finished) ? first : await api.competitionNow(tdid, controller.signal).catch(() => first);
           if (!alive) return;
           setDoc(competition);
           setRows(games.games);
+          setTruncated(games.truncated);
           setFetchedAt(Date.now());
           setError(null);
-          if (!games.games.some((game) => !game.finished)) return;
+          const live = games.games.some((game) => !game.finished);
+          if (!live && competition.status === FINISHED) return;
+          delay = live ? HUB_LIVE_MS : HUB_IDLE_MS;
+        } catch (reason) {
+          if (!alive) return;
+          setError(describeN01Error(reason));
+          delay = HUB_ERROR_MS;
         }
-      } catch (reason) {
-        if (alive) setError(describeN01Error(reason));
       }
-      if (alive) timer = setTimeout(() => void load(), 10_000 * (0.8 + Math.random() * 0.4));
+      if (alive) timer = setTimeout(() => void load(), delay * (0.8 + Math.random() * 0.4));
     };
+    const onVisible = (): void => {
+      if (document.visibilityState !== 'visible' || !alive || timer === null) return;
+      clearTimeout(timer);
+      void load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     void load();
     api
       .allStandings(tdid)
@@ -103,12 +131,14 @@ export function TournamentHub({
     return () => {
       alive = false;
       controller.abort();
+      document.removeEventListener('visibilitychange', onVisible);
       if (timer) clearTimeout(timer);
     };
   }, [api, tdid]);
 
   const matches = useMemo(() => (rows && doc ? groupMatches(rows, doc.entries, doc.tdid) : []), [rows, doc]);
-  const stats = usePlayerStats(api, tdid, tab === 'stats');
+  const source = useMemo<StatsSource | null>(() => (doc ? (doc.teamGames ? { teamGames: true } : { teamGames: false, entries: doc.entries }) : null), [doc]);
+  const stats = usePlayerStats(api, tdid, tab === 'stats', source);
 
   if (error && !rows) return <p className="small-text" role="alert">取得エラー: {error}</p>;
   if (!rows || !doc) return <p className="muted small-text">読み込み中…</p>;
@@ -138,10 +168,13 @@ export function TournamentHub({
           </>
         ) : null}
         {error ? ' ・ 更新エラー (前回の値を表示中)' : ''}
+        {truncated ? ' ・ 試合が多いため先頭 1,000 件まで' : ''}
       </p>
       {tab === 'live' ? (
         liveMatches.length === 0 ? (
-          <p className="small-text">いま進行中の試合はありません。「試合」タブで結果を見られます。</p>
+          <p className="small-text">
+            いま進行中の試合はありません。{doc.status === FINISHED ? 'この大会は終了しています。' : '始まると自動で表示します。'}「試合」タブで結果を見られます。
+          </p>
         ) : (
           <ul className="match-list">
             {liveMatches.map((match) => (
@@ -209,48 +242,69 @@ export function TournamentHub({
           <p className="small-text muted">この大会には順位表がありません (トーナメント形式)。「試合」タブで勝ち上がりを見られます。</p>
         )
       ) : null}
-      {tab === 'stats' ? <PlayerRanking state={stats} entries={doc.entries} /> : null}
+      {tab === 'stats' ? <PlayerRanking state={stats} entries={doc.entries} teamGames={doc.teamGames} /> : null}
     </div>
   );
 }
 
-function PlayerRanking({ state, entries }: { state: ReturnType<typeof usePlayerStats>; entries: Map<string, string> }): React.JSX.Element {
+function PlayerRanking({ state, entries, teamGames }: { state: ReturnType<typeof usePlayerStats>; entries: Map<string, string>; teamGames: boolean }): React.JSX.Element {
+  const [query, setQuery] = useState('');
+  const [shown, setShown] = useShownCount(query);
   if (state.kind === 'loading') return <p className="muted small-text">成績を読み込み中…</p>;
-  if (state.kind === 'error') return <p className="small-text">取得エラー: {state.message}</p>;
+  if (state.kind === 'error') return <p className="small-text" role="alert">取得エラー: {state.message}</p>;
   const avg = (row: PlayerLine): number | null => (row.line.score !== null && row.line.darts ? (row.line.score / row.line.darts) * 3 : null);
-  const rows = [...state.value].filter((row) => avg(row) !== null).sort((a, b) => avg(b)! - avg(a)!).slice(0, 60);
-  if (rows.length === 0) return <p className="small-text muted">この大会の選手別成績はありません。</p>;
+  const nameOf = (row: PlayerLine): string => (row.name !== '(名前なし)' ? row.name : entries.get(row.oid) ?? row.oid);
+  const sorted = [...state.value].filter((row) => avg(row) !== null).sort((a, b) => avg(b)! - avg(a)!);
+  if (sorted.length === 0) {
+    return (
+      <p className="small-text muted">
+        {state.value.length === 0
+          ? 'この大会の選手別成績はまだありません。'
+          : `01 の成績がある${teamGames ? '選手' : 'エントリー'}はいません (Cricket の成績はこの一覧では未対応です)。`}
+      </p>
+    );
+  }
+  const matched = rankThenSearch(sorted, query, nameOf);
   return (
-    <div className="table-scroll">
-      <table className="rank-table small-text">
-        <thead>
-          <tr>
-            <th scope="col">#</th>
-            <th scope="col">選手</th>
-            <th scope="col">平均</th>
-            <th scope="col">180</th>
-            <th scope="col">High Out</th>
-            <th scope="col">Leg</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={row.oid}>
-              <td>{index + 1}</td>
-              <th scope="row">
-                {row.name !== '(名前なし)' ? row.name : entries.get(row.oid) ?? row.oid}
-                {row.teamId && entries.get(row.teamId) && entries.get(row.teamId) !== row.name ? <span className="muted"> {entries.get(row.teamId)}</span> : null}
-              </th>
-              <td className="num">{formatRate(avg(row))}</td>
-              <td className="num">{row.line.ton80 ?? 0}</td>
-              <td className="num">{row.line.highOut ?? '—'}</td>
-              <td className="num">
-                {row.line.winLeg ?? 0}/{row.line.leg ?? 0}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="ranking" data-testid="player-ranking">
+      <RankingSearch value={query} onChange={setQuery} label={teamGames ? '選手名で検索' : '名前で検索'} />
+      {matched.length > 0 ? (
+        <div className="table-scroll">
+          <table className="rank-table small-text">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">{teamGames ? '選手' : 'エントリー'}</th>
+                <th scope="col">01 平均</th>
+                <th scope="col">180</th>
+                <th scope="col">High Out</th>
+                <th scope="col">Leg</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matched.slice(0, shown).map(({ rank, item: row }) => (
+                <tr key={row.oid}>
+                  <td>{rank}</td>
+                  <th scope="row">
+                    {nameOf(row)}
+                    {row.teamId && entries.get(row.teamId) && entries.get(row.teamId) !== row.name ? <span className="muted"> {entries.get(row.teamId)}</span> : null}
+                  </th>
+                  <td className="num">{formatRate(avg(row))}</td>
+                  <td className="num">{row.line.ton80 ?? '—'}</td>
+                  <td className="num">{row.line.highOut ?? '—'}</td>
+                  <td className="num">
+                    {row.line.winLeg ?? '—'}/{row.line.leg ?? '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} noun={teamGames ? '選手' : 'エントリー'} />
+      <p className="muted small-text">
+        n01 公式の集計 ({teamGames ? '選手単位 player_stats_list' : 'エントリー単位 stats_list'})。順位は 01 平均の順です。
+      </p>
     </div>
   );
 }

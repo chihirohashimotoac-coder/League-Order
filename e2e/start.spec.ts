@@ -4,6 +4,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01 } from './n01Server';
 import { clickGenerate } from './ruleQuestions';
+import { tab } from './nav';
 
 /**
  * Getting started, in a real browser, for every kind of captain:
@@ -21,9 +22,6 @@ test.use({ serviceWorkers: 'block' });
 
 const SHOTS = process.env.SCREENSHOTS;
 
-function tab(page: Page, name: string) {
-  return page.locator('.tab-bar').getByRole('button', { name, exact: true });
-}
 
 async function audit(page: Page, label: string): Promise<void> {
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();

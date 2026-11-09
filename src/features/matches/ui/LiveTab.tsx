@@ -11,7 +11,7 @@ import { throwEvents } from '../gameStats';
 import { outlookTrail, slotChances } from '../cardTrail';
 import { checkReproduction, projectMany } from '../standings';
 import type { SeasonData } from './useMatchContext';
-import { formatClock, useFollowed, useTodayBoard } from './useMatchContext';
+import { formatClock, seasonStatsSource, useFollowed, useTodayBoard } from './useMatchContext';
 import { GameView } from './GameView';
 import { CardTrail } from './CardTrail';
 import { LiveSheet } from './LiveSheet';
@@ -338,7 +338,8 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
   })();
 
   // Each singles player's season average (n01's own figure), matched within the team by exact name.
-  const stats = usePlayerStats(api, data.season.tournamentId, !card.finished);
+  const statsSource = useMemo(() => seasonStatsSource(data.season), [data.season]);
+  const stats = usePlayerStats(api, data.season.tournamentId, !card.finished, statsSource);
   const seasonAverage: [number | null, number | null] | undefined =
     live && stats.kind === 'ready'
       ? ([0, 1] as const).map((side) => {
@@ -385,12 +386,12 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
         })}
       </ol>
       <p className="small-text estimate" data-testid="estimate">
-        予測: {names[0]} 勝ち {Math.round(outlook.win * 100)}%{outlook.draw > 0.005 ? ` ・ 引分 ${Math.round(outlook.draw * 100)}%` : ''} ・ {names[1]} 勝ち {Math.round(outlook.loss * 100)}%
+        参考予測: {names[0]} 勝ち {Math.round(outlook.win * 100)}%{outlook.draw > 0.005 ? ` ・ 引分 ${Math.round(outlook.draw * 100)}%` : ''} ・ {names[1]} 勝ち {Math.round(outlook.loss * 100)}%
         <span className="muted"> (今季の種別勝率から計算、このカードを除く{seasonGames < 20 ? '・データ少なめ' : ''})</span>
       </p>
       <CardTrail steps={trail} names={names} labelOf={(schid) => slotLabel(data.season, schid)} basis="今季の種別ごとの勝率 (このカードを除く) から計算した参考値です。" />
 
-      {live && !live.gameEnded ? <LiveSheet api={api} live={live} seasonAverage={seasonAverage} /> : null}
+      {live && !live.gameEnded ? <LiveSheet key={live.mid} api={api} live={live} seasonAverage={seasonAverage} /> : null}
 
       {selectedGame && !(live && !live.gameEnded && live.mid === selectedGame.mid) ? (
         <details className="game-block" open>

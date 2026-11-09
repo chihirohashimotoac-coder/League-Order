@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01 } from './n01Server';
+import { tab } from './nav';
 
 /**
  * 今回限りの助っ人 and 次回から参加するメンバー in a real browser (mobile and desktop),
@@ -57,10 +58,10 @@ test('a helper and a next-time member, from the next-match flow to a reload', as
   await page.getByRole('button', { name: /下書きを保存/ }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'kalavinka', level: 1 })).toBeVisible();
-  await page.locator('.tab-bar').getByRole('button', { name: 'メンバー', exact: true }).click();
+  await tab(page, 'メンバー').click();
   await expect(page.getByText('新人 次郎')).toBeVisible();
   await expect(page.getByText('助っ人 花子')).toHaveCount(0);
-  await page.locator('.tab-bar').getByRole('button', { name: '履歴', exact: true }).click();
+  await tab(page, '履歴').click();
   await page.locator('.list-row').first().click();
   await expect(page.getByRole('dialog')).toContainText('助っ人 花子');
 });

@@ -225,6 +225,11 @@ export function ReconstructionPanel({
             </li>
           ))}
           {result.notAttempted.length > 0 ? <li>通信の上限のため未取得: {result.notAttempted.map((s) => s.title).join('、')}</li> : null}
+          {result.stale.length > 0 ? (
+            <li data-testid="reconstruction-stale">
+              再取得できず保存済みの記録を使用 (最新とは限りません): {result.stale.map((s) => `${s.title} ${s.games}ゲーム`).join('、')}
+            </li>
+          ) : null}
           {result.failures.slice(0, 3).map((f) => (
             <li key={f}>{f}</li>
           ))}

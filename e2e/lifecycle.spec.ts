@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { clickGenerate } from './ruleQuestions';
+import { tab } from './nav';
 
 /**
  * Order lifecycle, versioning and season-commit safety (追加要件 §16).
@@ -17,9 +18,6 @@ async function openApp(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 }
 
-function tab(page: Page, name: string) {
-  return page.locator('.tab-bar').getByRole('button', { name, exact: true });
-}
 
 async function generate(page: Page): Promise<void> {
   await page.getByRole('button', { name: '新しいオーダーを作る' }).click();

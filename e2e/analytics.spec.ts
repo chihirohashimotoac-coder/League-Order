@@ -28,7 +28,7 @@ async function createKalavinka(page: Page): Promise<void> {
 }
 
 async function openAnalytics(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /データ分析/ }).click();
+  await page.locator('.tab-bar').getByRole('button', { name: '分析', exact: true }).click();
   await expect(page.getByTestId('analytics-page')).toBeVisible();
 }
 
@@ -110,7 +110,7 @@ test.describe('PLAYER ANALYTICS', () => {
     await page.screenshot({ path: `test-results/analytics-doubles-${info.project.name}.png`, fullPage: true });
     // Switching back and forth does not refetch the game rows already loaded.
     const listed = extras.log.filter((e) => e.startsWith('match/list')).length;
-    await page.getByRole('button', { name: 'その他', exact: true }).click();
+    await page.getByTestId('scope-bar').getByRole('button', { name: 'その他', exact: true }).click();
     await expect(page.getByRole('button', { name: 'チーム戦' })).toBeVisible();
     await page.getByRole('button', { name: '01全体', exact: true }).click();
     expect(extras.log.filter((e) => e.startsWith('match/list')).length).toBe(listed);
@@ -136,7 +136,7 @@ test.describe('PLAYER ANALYTICS', () => {
     await expect(page.getByTestId('analytics-banner-stale').or(page.getByTestId('analytics-banner-error'))).toBeVisible();
     // Back to the app and generate an order as usual.
     n01.offline = false;
-    await page.getByRole('button', { name: '戻る' }).click();
+    await page.locator('.tab-bar').getByRole('button', { name: 'ホーム', exact: true }).click();
     await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
     await clickGenerate(page);

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { answerUnrestricted, clickGenerate } from './ruleQuestions';
+import { tab } from './nav';
 
 /**
  * Final acceptance coverage: the operational guarantees a captain depends on at a venue.
@@ -21,9 +22,6 @@ async function openFresh(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
 }
 
-function tab(page: Page, name: string) {
-  return page.locator('.tab-bar').getByRole('button', { name, exact: true });
-}
 
 async function generate(page: Page): Promise<void> {
   // "New order" lives on the home screen; these tests reach it from wherever they are.
