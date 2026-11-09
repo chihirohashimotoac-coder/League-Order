@@ -7117,6 +7117,21 @@ ul.plain {
   background-repeat: no-repeat;
 }
 
+/* League Order's own marking (n01 uses one colour): 100+ bold, 140+ accent, 180 red. */
+.ns-table td.t100 {
+  font-weight: 700;
+}
+
+.ns-table td.t140 {
+  font-weight: 700;
+  color: var(--color-accent-text);
+}
+
+.ns-table td.t180 {
+  font-weight: 800;
+  color: var(--color-danger);
+}
+
 .ns-table col.c-side {
   width: 20.5%;
 }

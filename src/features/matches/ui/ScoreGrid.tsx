@@ -1,4 +1,4 @@
-import type { LiveLeg, LiveThrow } from "../parse";
+import type { LiveLeg, LiveThrow } from '../parse';
 
 /**
  * The 01 score sheet as n01's viewer draws it (`n01_view.js` `initScore` / `addRound`,
@@ -9,13 +9,20 @@ import type { LiveLeg, LiveThrow } from "../parse";
  * - a visit of 100 or more has the score circled (n01's `circleTon`), drawn as a background
  *   so the cell keeps its size and the number its font size;
  * - the finishing visit shows the darts used at the double, `x1` / `x2` / `x3`, in the Scored
- *   cell with the To Go cell blank (n01 never writes 0 there) and no circle.
+ *   cell with the To Go cell blank (n01 never writes 0 there) and no circle;
+ * - League Order adds what n01 does not: 100+ bold, 140+ in the accent colour, 180 in red.
  *
  * `order` maps the two columns to n01's sides (the card's left team first).
  */
 
-type Visit = Extract<LiveThrow, { kind: "01" }>;
-type CricketVisit = Extract<LiveThrow, { kind: "cricket" }>;
+/**
+ * League Order's own marking on top of n01's circle: 100+ bold, 140+ bold in the accent
+ * colour, 180 heavier in red (n01 draws every score in one colour).
+ */
+const tone = (score: number): string => (score === 180 ? ' ton t180' : score >= 140 ? ' ton t140' : score >= 100 ? ' ton t100' : '');
+
+type Visit = Extract<LiveThrow, { kind: '01' }>;
+type CricketVisit = Extract<LiveThrow, { kind: 'cricket' }>;
 
 export function ZeroOneGrid({
   leg,
@@ -27,7 +34,7 @@ export function ZeroOneGrid({
   spare = 0,
   label,
 }: {
-  leg: Pick<LiveLeg, "throws" | "start" | "first">;
+  leg: Pick<LiveLeg, 'throws' | 'start' | 'first'>;
   startScore?: number | null;
   /** Live: the side to throw next, whose next cell is highlighted. */
   thrower?: 0 | 1 | null;
@@ -41,17 +48,14 @@ export function ZeroOneGrid({
 }): React.JSX.Element {
   const rounds = new Map<number, [Visit | null, Visit | null]>();
   for (const entry of leg.throws) {
-    if (entry.kind !== "01") continue;
+    if (entry.kind !== '01') continue;
     const row = rounds.get(entry.round) ?? [null, null];
     row[entry.side] = entry;
     rounds.set(entry.round, row);
   }
   const last = Math.max(0, ...rounds.keys());
   // The round the next visit goes into.
-  const nextRound =
-    thrower === null
-      ? null
-      : leg.throws.filter((entry) => entry.side === thrower).length + 1;
+  const nextRound = thrower === null ? null : leg.throws.filter((entry) => entry.side === thrower).length + 1;
   const shown = Math.max(minRows, last + spare, nextRound ?? 0);
   const start = leg.start ?? [startScore ?? 501, startScore ?? 501];
 
@@ -59,11 +63,7 @@ export function ZeroOneGrid({
     const entry = rounds.get(round)?.[side] ?? null;
     if (entry?.finish) {
       return [
-        <td
-          key="s"
-          className="sc out"
-          aria-label={`${entry.score} で上がり (${entry.darts}本目)`}
-        >
+        <td key="s" className="sc out" aria-label={`${entry.score} で上がり (${entry.darts}本目)`}>
           x{entry.darts}
         </td>,
         <td key="g" className="tg" />,
@@ -71,20 +71,11 @@ export function ZeroOneGrid({
     }
     const waiting = !entry && nextRound === round && thrower === side;
     return [
-      <td
-        key="s"
-        className={`sc${waiting ? " waiting" : ""}${entry && entry.score >= 100 ? " ton" : ""}`}
-      >
-        {entry ? (
-          entry.score
-        ) : waiting ? (
-          <span className="ns-dot" aria-label="投擲中" />
-        ) : (
-          ""
-        )}
+      <td key="s" className={`sc${waiting ? ' waiting' : ''}${entry ? tone(entry.score) : ''}`}>
+        {entry ? entry.score : waiting ? <span className="ns-dot" aria-label="投擲中" /> : ''}
       </td>,
       <td key="g" className="tg">
-        {entry ? entry.left : ""}
+        {entry ? entry.left : ''}
       </td>,
     ];
   };
@@ -103,12 +94,12 @@ export function ZeroOneGrid({
         {names ? (
           <tr className="names">
             <th scope="colgroup" colSpan={2}>
-              {firstCol === 0 ? "* " : ""}
+              {firstCol === 0 ? '* ' : ''}
               {names[0]}
             </th>
             <th aria-hidden="true" />
             <th scope="colgroup" colSpan={2}>
-              {firstCol === 1 ? "* " : ""}
+              {firstCol === 1 ? '* ' : ''}
               {names[1]}
             </th>
           </tr>
@@ -148,14 +139,14 @@ export function CricketGrid({
   names,
   label,
 }: {
-  leg: Pick<LiveLeg, "throws" | "first">;
+  leg: Pick<LiveLeg, 'throws' | 'first'>;
   order?: [0 | 1, 0 | 1];
   names?: [string, string];
   label?: string;
 }): React.JSX.Element {
   const rounds = new Map<number, [CricketVisit | null, CricketVisit | null]>();
   for (const entry of leg.throws) {
-    if (entry.kind !== "cricket") continue;
+    if (entry.kind !== 'cricket') continue;
     const row = rounds.get(entry.round) ?? [null, null];
     row[entry.side] = entry;
     rounds.set(entry.round, row);
@@ -163,31 +154,20 @@ export function CricketGrid({
   const last = Math.max(0, ...rounds.keys());
   const firstCol = leg.first === null ? null : leg.first === order[0] ? 0 : 1;
   const hits = (entry: CricketVisit): string =>
-    entry.hits
-      .map(
-        (hit) =>
-          `${hit.mark === 3 ? "T" : hit.mark === 2 ? "D" : "S"}${hit.number === 25 ? "B" : hit.number}`,
-      )
-      .join(" ") || "—";
+    entry.hits.map((hit) => `${hit.mark === 3 ? 'T' : hit.mark === 2 ? 'D' : 'S'}${hit.number === 25 ? 'B' : hit.number}`).join(' ') || '—';
   const cells = (side: 0 | 1, round: number): React.JSX.Element[] => {
     const entry = rounds.get(round)?.[side] ?? null;
     return [
       <td key="h" className="hits">
-        {entry ? hits(entry) : ""}
+        {entry ? hits(entry) : ''}
       </td>,
-      <td key="m" className="sc">
-        {entry
-          ? `${entry.marks}M${entry.points ? ` +${entry.points}` : ""}`
-          : ""}
+      <td key="m" className={`sc${entry && entry.marks >= 5 ? ' t140' : ''}`}>
+        {entry ? `${entry.marks}M${entry.points ? ` +${entry.points}` : ''}` : ''}
       </td>,
     ];
   };
   return (
-    <table
-      className="ns-table cricket-sheet"
-      data-testid="score-sheet"
-      aria-label={label}
-    >
+    <table className="ns-table cricket-sheet" data-testid="score-sheet" aria-label={label}>
       <colgroup>
         <col className="c-hits" />
         <col className="c-marks" />
@@ -199,12 +179,12 @@ export function CricketGrid({
         {names ? (
           <tr className="names">
             <th scope="colgroup" colSpan={2}>
-              {firstCol === 0 ? "* " : ""}
+              {firstCol === 0 ? '* ' : ''}
               {names[0]}
             </th>
             <th aria-hidden="true" />
             <th scope="colgroup" colSpan={2}>
-              {firstCol === 1 ? "* " : ""}
+              {firstCol === 1 ? '* ' : ''}
               {names[1]}
             </th>
           </tr>
