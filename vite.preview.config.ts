@@ -31,6 +31,9 @@ export default defineConfig({
     // `PREVIEW_APP_LINK=0` leaves out the link to the app page, for hosts that publish only the
     // scenarios page (the app itself needs its own page, storage and worker).
     __PREVIEW_APP_LINK__: JSON.stringify(process.env.PREVIEW_APP_LINK !== '0'),
+    // `PREVIEW_DEMO_N01=1` answers n01 from the bundled synthetic leagues, for hosts where the
+    // preview cannot reach n01 (the claude.ai review page). Never set for GitHub Pages.
+    __PREVIEW_DEMO_N01__: JSON.stringify(process.env.PREVIEW_DEMO_N01 === '1'),
   },
   resolve: {
     // The app registers its service worker through vite-plugin-pwa's virtual module; the preview

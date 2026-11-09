@@ -120,6 +120,11 @@ export interface AppStore extends AppData {
   deleteOrder(orderId: string): DeleteOrderResult;
   saveSettings(settings: AppSettings): void;
   /**
+   * Merges `change` into the latest settings, including a change made earlier in the same
+   * tick that has not rendered yet (two writes in one handler must not drop each other).
+   */
+  updateSettings(change: Partial<AppSettings>): void;
+  /**
    * Applies a finalized version's appearances to the season totals, idempotently.
    * Re-running it for the same version changes nothing; running it for a newer version
    * applies only the difference (see `domain/orders/seasonLedger.ts`).
@@ -253,6 +258,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
     },
     [toast],
   );
+
+  // The settings as last written, ahead of the render that will show them.
+  const settingsRef = useRef(data.settings);
+  settingsRef.current = data.settings;
 
   const store = useMemo<AppStore>(() => {
     const activeTeamId =
@@ -477,11 +486,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
         return { ok: true, reason: 'deleted', message: '削除しました' };
       },
 
-      saveSettings: (settings) =>
+      saveSettings: (settings) => {
+        settingsRef.current = settings;
         write(
           (current) => ({ ...current, settings }),
           (repository) => repository.saveSettings(settings),
-        ),
+        );
+      },
+
+      updateSettings: (change) => {
+        const next = { ...settingsRef.current, ...change };
+        settingsRef.current = next;
+        write(
+          (current) => ({ ...current, settings: { ...current.settings, ...change } }),
+          (repository) => repository.saveSettings(next),
+        );
+      },
 
       commitSeason: (order, version) => {
         const existing = seasonCommitFor(order.id);

@@ -11,10 +11,17 @@
  */
 
 /**
- * The published origin of n01's external integration API (n01 External Integration API
- * Manual, https://push.n01darts.com/api/v1/n01_api_manual_en.html — pointed out in the
- * PR review; the manual itself could not be read from the build environment, so
- * `npm run verify:n01` is still the check).
+ * The origin the app reads n01 from.
+ *
+ * The manual (n01 外部連携API マニュアル, served at https://push.n01darts.com/api/v1/n01_api_manual_ja.html
+ * and documented with the base URL https://api.n01darts.com/api/v1) names `api.n01darts.com`.
+ * Checked on 2026-11-06: `push.n01darts.com` serves the same API (the manual itself, `league/list`,
+ * `match/live` …) with `Access-Control-Allow-Origin: *`, and every contract check
+ * (`npm run verify:n01`, `verify:analytics-n01`, `verify:analytics-roles`) passes against it.
+ * `api.n01darts.com` could not be reached from the environment that made the check (its network
+ * policy refused the host), so its CORS and behaviour are unverified there — the origin is kept
+ * as it is rather than switched blind. Switching is this one constant plus the allow-list below,
+ * after the same checks pass against the new host.
  */
 export const N01_API_BASE_URL = 'https://push.n01darts.com/api/v1';
 

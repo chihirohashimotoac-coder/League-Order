@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01 } from './n01Server';
+import { clickGenerate } from './ruleQuestions';
 
 /**
  * Getting started, in a real browser, for every kind of captain:
@@ -64,7 +65,7 @@ async function manualTeam(
 async function generateFromNextStep(page: Page): Promise<void> {
   await page.getByTestId('next-step').getByRole('button', { name: 'オーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 }
 
@@ -132,7 +133,7 @@ test.describe('manual entry, no n01 needed', () => {
     await page.getByTestId('next-step').getByRole('button', { name: 'オーダーを作る' }).click();
     await expect(page.getByTestId('setup-strength-basis')).toContainText('戦力評価 PPR 100%');
     await expect(page.getByTestId('setup-strength-basis')).toContainText('PPR (3投平均) だけで評価します');
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     await expect(page.getByTestId('result-strength-basis')).toContainText('PPR (3投平均) だけで評価しています');
     expect(server.log).toEqual([]);
@@ -257,7 +258,7 @@ test.describe('layout at 320 / 390 / 768 / 1440 px', () => {
       await tab(page, 'オーダー').click();
       await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
       await shot('07-setup');
-      await page.getByRole('button', { name: 'オーダーを生成' }).click();
+      await clickGenerate(page);
       await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
       await shot('08-result');
       if (viewport.width === 390) await audit(page, 'result');

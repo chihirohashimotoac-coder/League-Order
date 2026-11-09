@@ -262,6 +262,24 @@ export function HomePage({
           <TeamInsight orders={store.teamOrders} players={strengthPlayers} onShowStrength={() => setShowStrength(true)} />
 
           <div className="quick-grid">
+            <button type="button" className="quick-tile" onClick={() => onNavigate('live')} data-testid="home-live">
+              <span className="tile-icon" aria-hidden="true">
+                <Icon name="target" />
+              </span>
+              <span>
+                <span className="title">ライブ</span>
+                <span className="meta">{team?.n01 ? `${team.n01.leagueTitle} の試合を観戦` : 'n01 リーグの試合を観戦'}</span>
+              </span>
+            </button>
+            <button type="button" className="quick-tile" onClick={() => onNavigate('matches')} data-testid="home-results">
+              <span className="tile-icon" aria-hidden="true">
+                <Icon name="trophy" />
+              </span>
+              <span>
+                <span className="title">日程・結果</span>
+                <span className="meta">結果・順位・スタッツ</span>
+              </span>
+            </button>
             <button type="button" className="quick-tile" onClick={() => onNavigate('players')}>
               <span className="tile-icon" aria-hidden="true">
                 <Icon name="users" />

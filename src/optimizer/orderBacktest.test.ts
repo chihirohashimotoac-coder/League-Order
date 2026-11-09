@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { OrderInput, OrderSolution } from '../domain/types';
 import { generateOrder } from './generateOrder';
 import { validateHardConstraints } from './constraints/validate';
+import { leagueRuleViolations } from '../domain/orders/leagueRules';
 import { atdoSpec, fixtureLeagues, tdoSpec } from '../test/n01/leagues';
 import { playedTeamMatches, replayMatch, type ReplayedMatch } from '../test/n01/replay';
 import { PERTURBATIONS, orderBacktestSummary, sensitivity } from '../test/n01/orderBacktest';
@@ -92,7 +93,20 @@ describe('optimizer backtest: model-estimated win, recommended vs actually field
   });
 
   it('on average estimates a higher match win than the order actually fielded, and never far lower', () => {
-    const summary = orderBacktestSummary([...atdo, ...tdo], generate);
+    // ATDO and TDO cap Singles and Doubles at one appearance per player (ruleCatalog.ts), and
+    // every recommendation keeps to it. The synthetic fielded orders do not all respect it: an
+    // order the league would refuse is no yardstick, so the uplift is measured against the
+    // fielded orders that keep the same rules.
+    for (const replay of [...atdo, ...tdo]) {
+      const { input } = replay.order;
+      expect(input.leagueRules?.maxPerStructure).toEqual({ SINGLES: 1, DOUBLES: 1 });
+      expect(leagueRuleViolations(input.leagueRules, input.games, generate(input)[0].assignments, input.participants, String)).toEqual([]);
+    }
+    const legal = [...atdo, ...tdo].filter(
+      (replay) => leagueRuleViolations(replay.order.input.leagueRules, replay.order.input.games, replay.actual, replay.order.input.participants, String).length === 0,
+    );
+    expect(legal.length).toBeGreaterThanOrEqual(10);
+    const summary = orderBacktestSummary(legal, generate);
     // Fairness stays a soft term, so the recommendation may give up a little estimated
     // win to share games — but only a little.
     expect(summary.meanUplift).toBeGreaterThan(0);

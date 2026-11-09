@@ -22,6 +22,8 @@ import {
 } from '../domain/n01/parse';
 import { DEFAULT_SETTINGS, type Snapshot } from './repository';
 import { parseLeagueRules } from '../domain/orders/leagueRules';
+import { parseRuleAnswers } from '../domain/orders/ruleResolution';
+import { parseFollowed, parseWatch } from '../features/matches/watchSettings';
 
 /**
  * JSON export / import (spec §23).
@@ -308,6 +310,9 @@ export function parseBackup(raw: string): ImportResult {
         : undefined,
     ),
     n01: parseN01Settings(settingsRow.n01),
+    ...(isRecord(settingsRow.ruleAnswers) ? { ruleAnswers: parseRuleAnswers(settingsRow.ruleAnswers) } : {}),
+    ...(parseWatch(settingsRow.watch) ? { watch: parseWatch(settingsRow.watch)! } : {}),
+    ...(parseFollowed(settingsRow.followed)?.length ? { followed: parseFollowed(settingsRow.followed)! } : {}),
   };
 
   if (teams.length === 0) errors.push('チームが 1 件も含まれていません。');

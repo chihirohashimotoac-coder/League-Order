@@ -11,7 +11,10 @@ import type {
   PresetKey,
 } from '../domain/types';
 import { GAME_KIND_LABELS, LEAGUE_STATUS_LABELS, PRESET_KEYS, PRESET_LABELS, formatDiscipline } from '../domain/types';
-import { leagueRulesSnapshot, leagueStatusOf, needsLeagueStatus } from '../domain/orders/leagueRules';
+import { leagueStatusOf, needsLeagueStatus } from '../domain/orders/leagueRules';
+import { resolveOrderRules, structureCounts, withAnswers } from '../domain/orders/ruleResolution';
+import type { AskableKind } from '../domain/orders/ruleResolution';
+import { RuleConditionsCard, RuleQuestionSheet } from '../components/RuleConditions';
 import { LeagueRulesSummary } from '../components/LeagueRules';
 import { scopeForPreset, weightsForPreset } from '../domain/orders/presets';
 import { formatStructureIssues, totalSlots } from '../domain/games/format';
@@ -111,11 +114,16 @@ export function SetupPage({
   const [detailFor, setDetailFor] = useState<Player | null>(null);
   const [showPolicy, setShowPolicy] = useState(false);
   const [guestDraft, setGuestDraft] = useState<Player | null>(null);
+  // `generate`: the questions were opened by the generate button, so confirming generates.
+  const [asking, setAsking] = useState<null | 'edit' | 'generate'>(null);
 
   const format = store.teamFormats.find((entry) => entry.id === draft.formatId) ?? store.teamFormats[0];
   const games = format?.games ?? [];
   const slots = totalSlots(games);
   const structureIssues = useMemo(() => formatStructureIssues(games), [games]);
+  // The caps the order is made under: league catalog, format editor, the captain's answers.
+  const ruleAnswers = store.settings.ruleAnswers;
+  const resolution = useMemo(() => (format ? resolveOrderRules(format, ruleAnswers) : null), [format, ruleAnswers]);
 
   const configById = useMemo(
     () => new Map(draft.participants.map((config) => [config.playerId, config])),
@@ -125,7 +133,7 @@ export function SetupPage({
   const included = draft.participants.filter((config) => config.include);
   const discipline = formatDiscipline(format);
   // A helper cap needs every participant's league status; nobody is assumed REGULAR.
-  const statusRequired = needsLeagueStatus(format?.leagueRules);
+  const statusRequired = needsLeagueStatus(resolution?.rules);
   // Opponent data for the next match (n01 teams only). The context is built against the
   // format chosen here and travels inside the order, so the saved order can always be
   // re-evaluated exactly as it was generated.
@@ -211,7 +219,8 @@ export function SetupPage({
     });
   };
 
-  const build = (): OrderInput | null => {
+  const build = (rulesOverride?: typeof resolution): OrderInput | null => {
+    const resolved = rulesOverride ?? resolution;
     if (!format) {
       toast.show('フォーマットを選択してください', 'error');
       return null;
@@ -227,11 +236,16 @@ export function SetupPage({
       );
       return null;
     }
-    const leagueRules = leagueRulesSnapshot(format.leagueRules);
     if (structureIssues.length > 0) {
       toast.show(`生成できません: ${structureIssues[0].message} フォーマット画面で修正してください。`, 'error');
       return null;
     }
+    // Caps nobody has stated yet are asked first; nothing is generated on a guess.
+    if (resolved && resolved.pending.length > 0) {
+      setAsking('generate');
+      return null;
+    }
+    const leagueRules = resolved?.rules;
     return {
       teamId: store.activeTeamId ?? '',
       formatId: format.id,
@@ -326,6 +340,7 @@ export function SetupPage({
           </select>
         </Field>
         <LeagueRulesSummary rules={format?.leagueRules} />
+        {resolution ? <RuleConditionsCard resolution={resolution} onEditAnswers={() => setAsking('edit')} /> : null}
         {structureIssues.length > 0 ? (
           <div className="notice warn" role="alert" data-testid="setup-format-issue">
             <Icon name="alert" size={18} />
@@ -588,6 +603,35 @@ export function SetupPage({
           )}
         </button>
       </div>
+
+      {asking && resolution && format ? (
+        (() => {
+          const counts = structureCounts(format.games);
+          const editable = resolution.kinds
+            .filter((row) => row.state === 'pending' || (row.state === 'decided' && row.origin === 'answer'))
+            .map((row) => row.kind as AskableKind);
+          const kinds = asking === 'generate' ? resolution.pending : editable;
+          return (
+            <RuleQuestionSheet
+              kinds={kinds}
+              initial={(store.settings.ruleAnswers?.[resolution.scope]?.caps ?? {}) as Partial<Record<AskableKind, number>>}
+              gamesOf={(kind) => counts.get(kind) ?? 0}
+              confirmLabel={asking === 'generate' ? 'この条件で生成' : '保存'}
+              onCancel={() => setAsking(null)}
+              onConfirm={(caps) => {
+                const answers = withAnswers(store.settings.ruleAnswers, resolution.scope, caps, Date.now());
+                store.updateSettings({ ruleAnswers: answers });
+                const mode = asking;
+                setAsking(null);
+                if (mode === 'generate') {
+                  const input = build(resolveOrderRules(format, answers));
+                  if (input) onGenerate(input);
+                } else toast.show('出場条件を保存しました', 'ok');
+              }}
+            />
+          );
+        })()
+      ) : null}
 
       {detailFor
         ? (() => {

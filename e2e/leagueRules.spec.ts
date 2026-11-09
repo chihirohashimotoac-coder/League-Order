@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { clickGenerate } from './ruleQuestions';
 
 /**
  * League rules (リーグ規則・必須条件) end to end, in a real browser on the production build
@@ -71,7 +72,7 @@ test('rules → generate → hand-made breach refuses finalize → undo → v1 k
   // The helper cap needs every status; nothing is generated (or assumed) until it is stated.
   const notice = page.getByTestId('league-status-notice');
   await expect(notice).toContainText('未設定');
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByText(/大会資格が未設定の参加者がいます/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
 
@@ -83,7 +84,7 @@ test('rules → generate → hand-made breach refuses finalize → undo → v1 k
   await expect(notice).toBeHidden();
   await expect(page.locator('.participant').filter({ hasText: '遠藤' }).getByTestId('league-status-tag')).toHaveText('大会: 助っ人');
 
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
   const panel = page.getByTestId('league-rules-panel');
   await expect(panel.getByTestId('rules-status')).toHaveText(/すべて満たしています/);
@@ -124,7 +125,7 @@ test('rule screens fit 320 / 390 / 768 / 1440 px with 44px targets and pass the 
   await tab(page, 'ホーム').click();
   await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await page.getByTestId('league-status-notice').getByRole('button', { name: '名簿メンバーを正規登録にする' }).click();
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByTestId('league-rules-panel')).toBeVisible();
   const first = await page.getByRole('combobox', { name: 'Game 1 Singles 501 のスロット 1' }).inputValue();
   await page.getByRole('combobox', { name: 'Game 6 Singles 501 のスロット 1' }).selectOption(first);

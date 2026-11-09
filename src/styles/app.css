@@ -6293,3 +6293,1505 @@ select:not([multiple]) {
   border-color: var(--color-warning);
   color: var(--color-warning);
 }
+
+/* ------------------------------------------------------------------ */
+/* MATCH RESULTS / LIVE MATCH (features/matches)                       */
+/* Built from the existing tokens; no new colours or type sizes.        */
+/* ------------------------------------------------------------------ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.matches,
+.live {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.matches-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.matches-bar select {
+  width: 100%;
+}
+
+.matches-meta a {
+  color: var(--color-accent-text);
+}
+
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.match-list,
+.live-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.match-row,
+.live-card-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.match-row[aria-expanded='true'],
+.live-card-row[aria-pressed='true'] {
+  border-color: var(--color-accent);
+}
+
+.match-teams {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  font-weight: 600;
+}
+
+.match-teams > span:last-child {
+  text-align: right;
+}
+
+.match-teams .own,
+.live-card-row .own,
+.standings tr.own th,
+.projected li.own {
+  color: var(--color-accent-text);
+}
+
+.match-score {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15em;
+}
+
+.match-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.tag.state-live {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.tag.state-official {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.tag.state-unrecorded {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.match-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 4px 4px;
+  min-width: 0;
+}
+
+.match-games,
+.standings,
+.compare,
+.players-form,
+.cricket-marks {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.match-games th,
+.match-games td,
+.standings th,
+.standings td,
+.compare th,
+.compare td,
+.players-form th,
+.players-form td {
+  padding: 6px 6px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.match-games th[scope='row'] > span,
+.match-games td > span {
+  display: block;
+}
+
+.match-games td.won .names {
+  font-weight: 700;
+}
+
+.match-games td.won .names::after {
+  content: ' ◯';
+  color: var(--color-success);
+}
+
+.match-games td.legs {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.leg-list {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.intel {
+  border-top: 1px dashed var(--color-border-strong);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.intel-title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 1em;
+}
+
+.intel-block h4 {
+  margin: 0 0 4px;
+  font-size: 0.95em;
+}
+
+.intel-block ul,
+.projected {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.intel-block li.surprise {
+  color: var(--color-warning);
+}
+
+.live-board {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-1);
+  min-width: 0;
+}
+
+.live-card-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.live-card-score {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  font-weight: 600;
+}
+
+.live-card-score > span:nth-child(3) {
+  text-align: right;
+}
+
+.live-card-score > span:last-child {
+  grid-column: 1 / -1;
+  text-align: center;
+}
+
+.live-card-score strong {
+  font-size: 1.4em;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-game-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.live-sides {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.live-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.live-side.throwing {
+  border-color: var(--color-accent);
+}
+
+.live-side.won {
+  border-color: var(--color-success);
+}
+
+.live-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.live-main {
+  font-size: 2.4em;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.cricket-marks th,
+.cricket-marks td {
+  text-align: center;
+  padding: 2px 6px;
+}
+
+.throws {
+  margin: 0;
+  padding-left: 1.6em;
+}
+
+.live-status.retrying,
+.live-status.budget {
+  color: var(--color-warning);
+}
+
+.rule-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.match-games th[scope='row'] > span:first-child {
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* WATCH hub (features/matches/ui/WatchPage.tsx) — existing tokens only */
+/* ------------------------------------------------------------------ */
+.watch,
+.live-hub,
+.results,
+.match-center,
+.focus-card,
+.stats-tab,
+.standings-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.watch-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.watch-bar select {
+  flex: 1;
+  min-width: 0;
+}
+
+.league-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.league-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.welcome-divider {
+  margin: 8px 0 0;
+  font-size: 1.05em;
+}
+
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  vertical-align: middle;
+}
+
+.board {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 46%);
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+}
+
+.board-tile {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  scroll-snap-align: start;
+}
+
+.board-tile .t {
+  grid-column: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.board-tile .s {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-size: 1.3em;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-tile .g {
+  grid-column: 1 / -1;
+  font-size: 0.85em;
+}
+
+.board-tile.is-live {
+  border-color: var(--color-danger);
+}
+
+.board-tile[aria-pressed='true'] {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.board-tile .own,
+.focus-head .own,
+.linklike.own,
+li.own,
+tr.own th,
+.match-teams .own {
+  color: var(--color-accent-text);
+}
+
+.focus-card {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-1);
+}
+
+.focus-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  font-weight: 700;
+}
+
+.focus-head > :last-child {
+  text-align: right;
+}
+
+.focus-head strong {
+  font-size: 1.6em;
+  font-variant-numeric: tabular-nums;
+}
+
+.flow {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.flow li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  background: transparent;
+  padding: 0;
+}
+
+.dot.a {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.dot.b {
+  background: var(--color-surface-1);
+  border-color: var(--color-text-secondary);
+  box-shadow: inset 0 0 0 6px var(--color-text-secondary);
+}
+
+.dot.live {
+  border-color: var(--color-danger);
+  border-style: dashed;
+}
+
+.dot.todo {
+  opacity: 0.45;
+}
+
+.dot[aria-pressed='true'] {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.dot-label {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.mini-flow {
+  display: flex;
+  gap: 3px;
+}
+
+.mini-flow i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border-strong);
+}
+
+.mini-flow i.a {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.mini-flow i.b {
+  background: var(--color-text-secondary);
+  border-color: var(--color-text-secondary);
+}
+
+.mini-flow i.live {
+  border-color: var(--color-danger);
+}
+
+.scoreboard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.game-block summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+
+.game-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.compare td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare th.center,
+.center {
+  text-align: center;
+}
+
+.section-mini {
+  margin: 4px 0;
+  font-size: 0.95em;
+}
+
+ol.plain,
+ul.plain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.events .ev-180,
+.events .ev-highOut,
+.events .ev-nineMark {
+  font-weight: 700;
+}
+
+.events .ev-card {
+  color: var(--color-accent-text);
+  font-weight: 700;
+}
+
+.estimate {
+  margin: 0;
+  text-align: center;
+}
+
+.game-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.game-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+}
+
+.game-row .side,
+.game-row .game-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.game-row .side.right {
+  text-align: right;
+}
+
+.game-row .won {
+  font-weight: 700;
+}
+
+.game-row .legs {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  text-align: inherit;
+}
+
+.rank-table,
+.grid-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-table th,
+.rank-table td,
+.grid-table th,
+.grid-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+}
+
+.rank-table td.num {
+  text-align: right;
+}
+
+.rank-table th .linklike {
+  display: block;
+  font-size: 0.85em;
+}
+
+.grid-table td {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.grid-table td.self {
+  background: var(--color-surface-2);
+}
+
+.viewer-shell .app-header .btn {
+  margin-left: auto;
+}
+
+.league-picker form {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.league-picker input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Live score sheet (features/matches/ui/LiveSheet.tsx)                */
+/* The scoreboard layout spectators know: legs on top, Scored / To Go,  */
+/* the points left large at the bottom. Existing tokens only.           */
+/* ------------------------------------------------------------------ */
+.n01-sheet {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-1);
+}
+
+.ns-head {
+  background: var(--color-text);
+  color: var(--color-paper);
+  padding: 8px 12px 10px;
+}
+
+.ns-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  text-align: center;
+}
+
+.ns-live {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 0.8em;
+  background: var(--color-paper);
+  color: var(--color-text);
+}
+
+.ns-live.done {
+  background: transparent;
+  color: var(--color-paper);
+}
+
+.ns-names {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 1.15em;
+}
+
+.ns-names > span {
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.ns-names strong {
+  font-size: 2em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.ns-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.ns-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.ns-table th {
+  font-weight: 500;
+  font-size: 0.85em;
+  padding: 4px 2px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+}
+
+.ns-table td {
+  border: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 1.6em;
+  padding: 4px 2px;
+  height: 1.7em;
+}
+
+.ns-table td.mid {
+  background: var(--color-surface-2);
+  font-size: 1.35em;
+}
+
+.ns-table tr.start td.sc {
+  background: var(--color-surface-2);
+}
+
+.ns-table td.waiting {
+  background: var(--color-warning-fill);
+}
+
+/* n01's circleTon (n01.css .ton): a visit of 100+ is circled. A background, so neither the
+   cell nor the number changes size; capped at a little wider than three digits. */
+.ns-table td.ton {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cellipse cx='50' cy='50' rx='45' ry='45' fill='none' stroke='%23808080' stroke-opacity='0.4' stroke-width='3' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+  background-size: min(100%, 28vmin, 3.2em) 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* League Order's own marking (n01 uses one colour): 100+ bold, 140+ accent, 180 red. */
+.ns-table td.t100 {
+  font-weight: 700;
+}
+
+.ns-table td.t140 {
+  font-weight: 700;
+  color: var(--color-accent-text);
+}
+
+.ns-table td.t180 {
+  font-weight: 800;
+  color: var(--color-danger);
+}
+
+.ns-table col.c-side {
+  width: 20.5%;
+}
+
+.ns-table col.c-mid {
+  width: 18%;
+}
+
+.ns-table td.sc,
+.ns-table td.tg {
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ns-table tr.names th {
+  font-weight: 700;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+/* The finished game history: the same grid, a step smaller than the live board. */
+.ns-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ns-grid-wrap .ns-table {
+  background: var(--color-surface-1);
+}
+
+.ns-grid-wrap .ns-table td {
+  font-size: 1.3em;
+}
+
+.ns-grid-wrap .ns-table td.mid {
+  font-size: 1.1em;
+}
+
+.ns-table.cricket-sheet col.c-hits {
+  width: 25%;
+}
+
+.ns-table.cricket-sheet col.c-marks {
+  width: 16%;
+}
+
+.ns-grid-wrap .ns-table.cricket-sheet td {
+  font-size: 0.95em;
+}
+
+.ns-table.cricket-sheet td.hits {
+  overflow-wrap: anywhere;
+}
+
+.ns-table.cricket td {
+  font-size: 1.3em;
+}
+
+.ns-dot {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 50%;
+  border: 3px solid var(--color-border-strong);
+  border-top-color: var(--color-text-secondary);
+  animation: ns-spin 1s linear infinite;
+}
+
+@keyframes ns-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ns-dot {
+    animation: none;
+  }
+}
+
+.ns-left {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px;
+  background: var(--color-text);
+}
+
+.ns-big {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 3.4em;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--color-paper);
+  font-variant-numeric: tabular-nums;
+  border-radius: 4px;
+  padding: 4px 0;
+}
+
+.ns-big.on {
+  background: var(--color-paper);
+  color: var(--color-text);
+}
+
+.ns-member {
+  font-size: 0.25em;
+  font-weight: 600;
+}
+
+.ns-stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15em;
+}
+
+.ns-stats td,
+.ns-stats th {
+  text-align: center;
+  padding: 4px 6px;
+}
+
+.ns-stats th {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.ns-plus {
+  border-top: 1px dashed var(--color-border-strong);
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ns-route {
+  margin: 0;
+}
+
+.ns-route strong {
+  font-size: 1.2em;
+  letter-spacing: 0.04em;
+}
+
+.ns-chance {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ns-chance .bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--color-surface-3);
+  overflow: hidden;
+}
+
+.ns-chance .bar i {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+}
+
+.ns-form {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ns-form td,
+.ns-form th {
+  text-align: center;
+  padding: 2px 4px;
+}
+
+.ns-form th {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.ns-legs {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+/* ---------------------------------------------------------------------------
+   見どころ (highlights) and a visit pointed at in the score sheet
+   --------------------------------------------------------------------------- */
+
+.highlights {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-1);
+}
+
+.hl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hl-list li + li {
+  border-top: 1px solid var(--color-border);
+}
+
+.hl-row {
+  display: grid;
+  grid-template-columns: 4.8em minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hl-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.hl-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hl-kind {
+  font-size: 0.75em;
+  font-weight: 700;
+  text-align: center;
+  border-radius: 4px;
+  padding: 1px 0;
+  border: 1px solid var(--color-border-strong);
+}
+
+.hl-kind.k-comeback {
+  background: var(--color-text);
+  border-color: var(--color-text);
+  color: var(--color-paper);
+}
+
+.hl-kind.k-highOut {
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.hl-kind.k-ton80 {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.hl-go {
+  color: var(--color-accent-text);
+  white-space: nowrap;
+}
+
+.ns-table tr.marked td.mid {
+  background: var(--color-warning-fill);
+}
+
+.ns-table td.mark {
+  box-shadow: inset 0 0 0 3px var(--color-warning-fill);
+}
+
+/* ---------------------------------------------------------------------------
+   Points-left race and finishing chances (League Order's own figures)
+   --------------------------------------------------------------------------- */
+
+.race {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.race svg {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  display: block;
+}
+
+.race .grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.race .tick {
+  fill: var(--color-text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.race .line polyline {
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+
+.race .c0 polyline {
+  stroke: var(--color-accent);
+}
+
+.race .c0 circle {
+  fill: var(--color-accent);
+}
+
+.race .c1 polyline {
+  stroke: var(--color-updated);
+}
+
+.race .c1 circle {
+  fill: var(--color-updated);
+}
+
+.race figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.race-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.race-key i {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.race-key i.c0 {
+  background: var(--color-accent);
+}
+
+.race-key i.c1 {
+  background: var(--color-updated);
+}
+
+.finish-chances {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 7em) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.fc-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.fc-rate {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.fc-pips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.fc-pip {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.7em;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.fc-pip.hit {
+  background: var(--color-success);
+  border-color: var(--color-success);
+  color: var(--color-accent-ink);
+}
+
+/* ---------------------------------------------------------------------------
+   選手カード (player card)
+   --------------------------------------------------------------------------- */
+
+.player-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pc-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.pc-big {
+  font-size: 2.2em;
+  font-weight: 800;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-spark .area {
+  fill: var(--color-accent-tint);
+}
+
+.pc-spark .stroke {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.pc-spark .end {
+  fill: var(--color-accent);
+}
+
+.pc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5em, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.pc-grid > div {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-paper);
+}
+
+.pc-grid > div.wide {
+  grid-column: 1 / -1;
+}
+
+.pc-grid dt {
+  font-size: 0.75em;
+  color: var(--color-text-muted);
+}
+
+.pc-grid dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+   カード勝率の推移 (card estimate trail)
+   --------------------------------------------------------------------------- */
+
+.card-trail {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-trail svg {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  display: block;
+}
+
+.card-trail .grid {
+  stroke: var(--color-border);
+}
+
+.card-trail .half {
+  stroke: var(--color-border-strong);
+  stroke-dasharray: 4 3;
+}
+
+.card-trail .tick {
+  fill: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.card-trail .swing {
+  fill: var(--color-accent-tint);
+}
+
+.card-trail .trail {
+  stroke: var(--color-accent);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+
+.card-trail .pt {
+  fill: var(--color-surface-1);
+  stroke: var(--color-accent);
+  stroke-width: 2;
+}
+
+.card-trail .pt.a {
+  fill: var(--color-accent);
+}
+
+.card-trail .pt.live {
+  stroke-dasharray: 2 2;
+}
+
+/* 前節比 (movement since the previous round) */
+.standings td.move {
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.standings td.move.up {
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.standings td.move.down {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+   注目選手 (followed players)
+   --------------------------------------------------------------------------- */
+
+.btn.follow {
+  align-self: flex-start;
+}
+
+.btn.follow.on {
+  border-color: var(--color-warning-fill);
+}
+
+.btn.follow span[aria-hidden='true'] {
+  color: var(--color-warning);
+}
+
+.followed-now {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-warning-fill);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+}
+
+.followed-now h3 span {
+  color: var(--color-warning);
+}
+
+.followed-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.followed-now li:first-child .followed-row {
+  border-top: 0;
+}
+
+.followed-row.is-live strong::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  vertical-align: middle;
+}
+
+.followed-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* 起用傾向 (slot usage) */
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-table {
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-table th[scope='col'] {
+  font-weight: 500;
+  color: var(--color-text-muted);
+  min-width: 2.2em;
+}
+
+.usage-table th[scope='row'] {
+  text-align: left;
+  white-space: nowrap;
+  padding-right: 6px;
+}
+
+.usage-table td {
+  text-align: center;
+  min-width: 2.2em;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--color-paper);
+}
+
+.usage-table td.strong {
+  font-weight: 700;
+}
+
+/* Column heads of the standings stay on one line (the table scrolls inside its own box). */
+.standings thead th {
+  white-space: nowrap;
+}

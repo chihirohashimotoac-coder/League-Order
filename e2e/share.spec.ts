@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { clickGenerate } from './ruleQuestions';
 
 /**
  * End-to-end coverage of the share feature (追加要件 §13, §14).
@@ -18,7 +19,7 @@ async function openApp(page: Page): Promise<void> {
 async function generate(page: Page): Promise<void> {
   await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 }
 
@@ -141,7 +142,7 @@ test.describe('share screen', () => {
   test('shows the match header in the image and the text', async ({ page }) => {
     await openApp(page);
     await fillMatchInfo(page, { league: '秋季リーグ', opponent: 'Team B', date: '2026-10-08' });
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     await openShare(page);
 
@@ -326,7 +327,7 @@ test.describe('long orders and Japanese text', () => {
     await expect(page.getByText('インポートしました')).toBeVisible();
 
     await page.locator('.tab-bar').getByRole('button', { name: 'オーダー', exact: true }).click();
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     await openShare(page);
 
@@ -353,7 +354,7 @@ test.describe('long orders and Japanese text', () => {
     await page.locator('.tab-bar').getByRole('button', { name: 'オーダー', exact: true }).click();
     await openMatchFields(page);
     await page.getByLabel('対戦相手 (任意)').fill('とてもながいあいてチームのなまえ');
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
     await openShare(page);
 

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { clickGenerate } from './ruleQuestions';
 
 /**
  * End-to-end coverage of the captain's actual workflow in a real browser.
@@ -32,7 +33,7 @@ function tab(page: Page, name: string) {
 async function generate(page: Page): Promise<void> {
   await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
-  await page.getByRole('button', { name: 'オーダーを生成' }).click();
+  await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'オーダー', exact: true })).toBeVisible();
 }
@@ -159,7 +160,7 @@ test.describe('order generation workflow', () => {
     await page.getByLabel('青木 を参加者に含める').check();
     await page.getByLabel('馬場 を参加者に含める').check();
 
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByText('オーダーを生成できませんでした')).toBeVisible();
     await expect(page.getByText(/3 名必要/)).toBeVisible();
     await expect(page.getByText('解決の候補').first()).toBeVisible();
@@ -176,7 +177,7 @@ test.describe('order generation workflow', () => {
     await page.getByRole('button', { name: '閉じる' }).click();
     await expect(page.getByText(/範囲 G4/)).toBeVisible();
 
-    await page.getByRole('button', { name: 'オーダーを生成' }).click();
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
 
     // Games 1-3 are the first three order rows; 遠藤 must not appear in them.

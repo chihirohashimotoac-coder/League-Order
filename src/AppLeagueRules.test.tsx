@@ -8,7 +8,7 @@ import { openBackend, resetBackendCache } from './storage/db';
 import { Repository } from './storage/repository';
 import { TEAM_A, TEAM_B, formatFor, renderApp, roster } from './test/appHarness';
 import { DEFAULT_SETTINGS } from './storage/repository';
-import type { GenerateResult, LeagueFormat, OrderInput } from './domain/types';
+import type { GenerateResult, LeagueFormat, OrderInput, RuleAnswerSet } from './domain/types';
 
 vi.mock('./pwa', () => ({ onUpdateAvailable: () => () => undefined, initServiceWorker: () => undefined }));
 
@@ -39,7 +39,7 @@ beforeEach(() => {
 type User = ReturnType<typeof userEvent.setup>;
 const nav = (): HTMLElement => screen.getByRole('navigation', { name: 'メインナビゲーション' });
 
-async function seedWith(format: LeagueFormat): Promise<void> {
+async function seedWith(format: LeagueFormat, ruleAnswers?: Record<string, RuleAnswerSet>): Promise<void> {
   await new Repository(await openBackend()).replaceAll({
     teams: [
       { id: TEAM_A, name: 'チームA', createdAt: 1 },
@@ -50,7 +50,7 @@ async function seedWith(format: LeagueFormat): Promise<void> {
     pairs: [],
     orders: [],
     seasonCommits: [],
-    settings: { ...DEFAULT_SETTINGS, activeTeamId: TEAM_A },
+    settings: { ...DEFAULT_SETTINGS, activeTeamId: TEAM_A, ...(ruleAnswers ? { ruleAnswers } : {}) },
   });
   resetBackendCache();
 }
@@ -136,7 +136,8 @@ describe('league rules in the app', () => {
     expect(saved.versions[0].leagueRules).toEqual({ maxPerStructure: { SINGLES: 1 }, maxHelpers: 1 });
   });
 
-  it('a format without rules shows nothing of them and asks nothing', async () => {
+  it('a format without rules asks only about the kinds it plays twice, and generates nothing before the answer', async () => {
+    // テスト 3ゲーム: Singles ×2, Doubles ×1 → only the Singles question.
     await seedWith(formatFor(TEAM_A));
     const user = userEvent.setup();
     renderApp();
@@ -144,11 +145,47 @@ describe('league rules in the app', () => {
     await openSetup(user);
     expect(screen.queryByTestId('league-rules-summary')).not.toBeInTheDocument();
     expect(screen.queryByTestId('league-status-notice')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('league-status-tag')).not.toBeInTheDocument();
+    expect(screen.getByTestId('rule-conditions-pending')).toHaveTextContent('シングルス');
+    expect(screen.getByTestId('rule-conditions-pending')).not.toHaveTextContent('ダブルス');
     await user.click(screen.getByRole('button', { name: /オーダーを生成/ }));
+    const dialog = await screen.findByRole('dialog', { name: '出場回数の確認' });
+    expect(within(dialog).getByText('同じ選手がシングルスに2回出場しても良いですか？')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/ダブルスに2回/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/トリオス|ガロン/)).not.toBeInTheDocument();
+    // Unanswered: nothing can be confirmed, nothing is generated.
+    expect(within(dialog).getByTestId('rule-questions-confirm')).toBeDisabled();
+    expect(runner.inputs).toHaveLength(0);
+    await user.click(within(dialog).getByRole('radio', { name: 'いいえ' }));
+    await user.click(within(dialog).getByTestId('rule-questions-confirm'));
     await waitFor(() => expect(runner.inputs).toHaveLength(1));
-    expect('leagueRules' in runner.inputs[0]).toBe(false);
+    expect(runner.inputs[0].leagueRules).toEqual({
+      maxPerStructure: { SINGLES: 1 },
+      origins: { 'structure:SINGLES': 'answer' },
+    });
+    // The answer is stored for the scope and reused: no question the next time.
+    await waitFor(async () => {
+      const settings = (await new Repository(await openBackend()).loadAll()).settings;
+      expect(settings.ruleAnswers?.[`format:${TEAM_A}_fmt`]?.caps).toEqual({ SINGLES: 1 });
+    });
     await screen.findByRole('button', { name: /オーダーを確定/ });
-    expect(screen.queryByTestId('league-rules-panel')).not.toBeInTheDocument();
+  });
+
+  it('a stored answer is reused, shown as the captain\'s own condition, and can be changed', async () => {
+    await seedWith(formatFor(TEAM_A), { [`format:${TEAM_A}_fmt`]: { caps: { SINGLES: 2 }, updatedAt: 1 } });
+    const user = userEvent.setup();
+    renderApp();
+    await screen.findByRole('navigation', { name: 'メインナビゲーション' });
+    await openSetup(user);
+    expect(screen.queryByTestId('rule-conditions-pending')).not.toBeInTheDocument();
+    expect(screen.getByTestId('rule-conditions-own')).toHaveTextContent('ユーザーが指定した出場条件');
+    expect(screen.getByTestId('rule-conditions-own')).toHaveTextContent('シングルス: 1人2回まで');
+    expect(screen.queryByTestId('rule-conditions-league')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('rule-conditions-edit'));
+    const dialog = await screen.findByRole('dialog', { name: '出場回数の確認' });
+    expect(within(dialog).getByRole('radio', { name: 'はい' })).toHaveAttribute('aria-checked', 'true');
+    await user.click(within(dialog).getByRole('radio', { name: 'いいえ' }));
+    await user.click(within(dialog).getByRole('button', { name: '保存' }));
+    expect(await screen.findByTestId('rule-conditions-own')).toHaveTextContent('シングルス: 1人1回まで');
+    expect(runner.inputs).toHaveLength(0);
   });
 });

@@ -270,6 +270,30 @@ export interface LeagueRules {
   maxSameDoublesPair?: number;
   /** Distinct helpers (league status HELPER) fielded in one order. */
   maxHelpers?: number;
+  /**
+   * Where each cap comes from, keyed like the editor (`structure:SINGLES`, `pair` …). Absent on
+   * rules made before it existed and on rules typed in the format editor, which read as
+   * `format`. Never changes what is counted, only how the rule is labelled.
+   */
+  origins?: Partial<Record<string, LeagueRuleOrigin>>;
+  /** The catalog entry (`domain/orders/ruleCatalog.ts`) the league caps came from. */
+  catalogId?: string;
+}
+
+/**
+ * - `official`: the league's published regulations (catalog, basis official).
+ * - `requirement`: a rule the League Order owner stated for the league (catalog, basis requirement).
+ * - `format`: written in the format editor.
+ * - `answer`: the captain's answer to "may one player play this twice?".
+ */
+export const LEAGUE_RULE_ORIGINS = ['official', 'requirement', 'format', 'answer'] as const;
+
+export type LeagueRuleOrigin = (typeof LEAGUE_RULE_ORIGINS)[number];
+
+/** The captain's answers for one scope (`n01:<lgid>` or `format:<id>`): cap per player-count kind. */
+export interface RuleAnswerSet {
+  caps: Partial<Record<StructuralKind, number>>;
+  updatedAt: number;
 }
 
 /**
@@ -966,4 +990,24 @@ export interface AppSettings {
   customWeights: ScoreWeights;
   /** Absent on settings stored before the n01 integration; read back with the defaults. */
   n01?: N01Settings;
+  /** Answers to the appearance-count questions, by scope. Absent = none given yet. */
+  ruleAnswers?: Record<string, RuleAnswerSet>;
+  /** The league last watched (リーグを見る), so the match screens open on it. */
+  watch?: WatchSettings;
+  /** Players followed in the match screens (注目選手), matched by name. Absent = none. */
+  followed?: FollowedPlayer[];
+}
+
+export interface FollowedPlayer {
+  name: string;
+  /** The team the player was followed from, for display only (matching is by name). */
+  team: string | null;
+}
+
+export interface WatchSettings {
+  /** A league (its seasons) or one tournament / event. */
+  kind: 'league' | 'tournament';
+  /** `lgid` or `tdid`. */
+  id: string;
+  title: string;
 }

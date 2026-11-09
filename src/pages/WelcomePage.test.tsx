@@ -14,6 +14,7 @@ import { Repository } from '../storage/repository';
 import { FAIL, createFixtureTransport } from '../test/n01/transport';
 import { FIXTURE_NOW } from '../test/n01/leagues';
 import { validateFormat } from '../domain/games/format';
+import { answerRuleQuestions } from '../test/ruleQuestions';
 
 vi.mock('../pwa', () => ({ onUpdateAvailable: () => () => undefined, initServiceWorker: () => undefined }));
 
@@ -145,6 +146,11 @@ describe('manual setup', () => {
     expect(basis).toHaveTextContent('戦力評価 PPR 100%');
     expect(basis).toHaveTextContent('Rating が未入力のため、PPR (3投平均) だけで評価します');
     await user.click(screen.getByRole('button', { name: 'オーダーを生成' }));
+    // 01のみ 5ゲーム: Singles ×2, Doubles ×2, Trios ×1 → two questions, none about Trios.
+    expect(await answerRuleQuestions(user)).toEqual([
+      '同じ選手がダブルスに2回出場しても良いですか？',
+      '同じ選手がシングルスに2回出場しても良いですか？',
+    ]);
     await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
   }, 40_000);
 
@@ -281,6 +287,8 @@ describe('n01 wizard dead ends lead back to manual entry', () => {
     await screen.findByRole('heading', { name: 'オフライン', level: 1 });
     await user.click(within(screen.getByTestId('next-step')).getByRole('button', { name: 'オーダーを作る' }));
     await user.click(await screen.findByRole('button', { name: 'オーダーを生成' }));
+    // シングルス4ゲーム → the Singles question only.
+    expect(await answerRuleQuestions(user, 'はい')).toEqual(['同じ選手がシングルスに2回出場しても良いですか？']);
     await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
     await waitFor(() => expect(screen.queryByText(/n01 に接続できませんでした/)).toBeNull());
   }, 40_000);

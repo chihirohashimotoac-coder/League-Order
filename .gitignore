@@ -19,3 +19,5 @@ blob-report/
 *.tsbuildinfo
 backtest-report/
 smoke-results/
+dist-artifact
+dist-live

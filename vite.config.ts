@@ -50,6 +50,7 @@ export default defineConfig({
   ],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
+    __PREVIEW_DEMO_N01__: 'false',
   },
   build: {
     target: 'es2022',
