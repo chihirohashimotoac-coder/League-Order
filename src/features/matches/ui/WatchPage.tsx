@@ -5,7 +5,7 @@ import { useAppStore } from '../../../state/appStore';
 import type { WatchSettings } from '../../../domain/types';
 import type { Page } from '../../../navigation';
 import type { MatchesApi } from '../api';
-import { checkReproduction } from '../standings';
+import { checkReproduction, roundMovement } from '../standings';
 import { percent, playerForms, teamProfile } from '../insights';
 import { useMatchesApiFactory } from '../environment';
 import type { MatchesApiFactory } from '../environment';
@@ -224,6 +224,26 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   );
 }
 
+function MovementCells({ move }: { move: { change: number; behind: number } | undefined }): React.JSX.Element {
+  if (!move) {
+    return (
+      <>
+        <td>—</td>
+        <td>—</td>
+      </>
+    );
+  }
+  return (
+    <>
+      <td>{move.behind === 0 ? '—' : move.behind}</td>
+      <td className={move.change > 0 ? 'move up' : move.change < 0 ? 'move down' : 'move'}>
+        <span aria-hidden="true">{move.change > 0 ? `▲${move.change}` : move.change < 0 ? `▼${-move.change}` : '−'}</span>
+        <span className="sr-only">{move.change > 0 ? `${move.change} 上昇` : move.change < 0 ? `${-move.change} 下降` : '変わらず'}</span>
+      </td>
+    </>
+  );
+}
+
 function Retry({ message, onRetry }: { message: string; onRetry: () => void }): React.JSX.Element {
   return (
     <div className="notice danger" role="alert">
@@ -247,6 +267,7 @@ function StandingsTab({ data, registered, onTeam }: { data: SeasonData; register
       {data.standings.map((group) => {
         const cards = data.cards.filter((card) => card.divisionIndex === group.divisionIndex);
         const check = checkReproduction(data.season.pointRule, group, cards);
+        const movement = check.ok ? roundMovement(data.season.pointRule, group, cards) : null;
         const teams = group.rows.map((row) => row.teamId);
         const cell = (a: string, b: string): string => {
           const scores = cards
@@ -267,6 +288,12 @@ function StandingsTab({ data, registered, onTeam }: { data: SeasonData; register
                     <th scope="col">分</th>
                     <th scope="col">負</th>
                     <th scope="col">勝ち点</th>
+                    {movement ? (
+                      <>
+                        <th scope="col">首位差</th>
+                        <th scope="col">前節比</th>
+                      </>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -283,6 +310,7 @@ function StandingsTab({ data, registered, onTeam }: { data: SeasonData; register
                       <td>{row.drawn}</td>
                       <td>{row.lost}</td>
                       <td>{row.points}</td>
+                      {movement ? <MovementCells move={movement.rows.get(row.teamId)} /> : null}
                     </tr>
                   ))}
                 </tbody>
@@ -318,6 +346,11 @@ function StandingsTab({ data, registered, onTeam }: { data: SeasonData; register
               </div>
             </details>
             <p className="muted small-text">{check.ok ? '勝ち点の計算規則を確認済み: 試合中は「このまま終わった場合の順位」を表示します。' : `順位予測なし: ${check.reason}`}</p>
+            {movement ? (
+              <p className="muted small-text">
+                首位差・前節比: League Order が公式勝ち点の式で計算。前節比は {movement.round} の結果を除いた順位との比較で、勝ち点だけで並べた順位 (同点は同順位) です。
+              </p>
+            ) : null}
           </Card>
         );
       })}

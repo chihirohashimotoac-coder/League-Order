@@ -117,3 +117,50 @@ export function projectMany(rule: PointRule, group: OfficialStandingGroup, resul
       tied: all.filter((other) => other.projectedPoints === row.projectedPoints).length > 1,
     }));
 }
+
+// ---------------------------------------------------------------------------
+// Movement since the previous round (前節比)
+// ---------------------------------------------------------------------------
+
+export interface RoundMovement {
+  /** The latest round with an official result (its cards are what the movement shows). */
+  round: string;
+  rows: Map<string, { position: number; previous: number; change: number; behind: number }>;
+}
+
+/** Position by points: teams on equal points share the best position. */
+function positions(points: ReadonlyMap<string, number>): Map<string, number> {
+  const values = [...points.values()];
+  return new Map([...points.entries()].map(([id, value]) => [id, values.filter((other) => other > value).length + 1]));
+}
+
+/**
+ * Each team's position by points now and before the latest round (the official card results of
+ * that round left out), and its points behind the leader. Positions are by points only (ties
+ * shared), not n01's tie-breakers. Only call after `checkReproduction` passed; `cards` are the
+ * division's cards in schedule order, the round being a card's title.
+ */
+export function roundMovement(rule: PointRule, group: OfficialStandingGroup, cards: readonly MatchCard[]): RoundMovement | null {
+  const roundOf = (card: MatchCard): string => card.title || card.divisionTitle;
+  const played = cards.filter((card) => card.official);
+  if (played.length === 0) return null;
+  const order = [...new Set(cards.map(roundOf))];
+  const latest = order.filter((round) => played.some((card) => roundOf(card) === round)).pop()!;
+  if (!played.some((card) => roundOf(card) !== latest)) return null;
+  const base = new Map(group.rows.map((row) => [row.teamId, 0]));
+  const now = computedPoints(rule, played);
+  const before = computedPoints(
+    rule,
+    played.filter((card) => roundOf(card) !== latest),
+  );
+  if (!now || !before) return null;
+  const pointsNow = new Map([...base].map(([id]) => [id, now.get(id) ?? 0]));
+  const pointsBefore = new Map([...base].map(([id]) => [id, before.get(id) ?? 0]));
+  const p = positions(pointsNow);
+  const q = positions(pointsBefore);
+  const top = Math.max(...pointsNow.values());
+  return {
+    round: latest,
+    rows: new Map([...pointsNow.keys()].map((id) => [id, { position: p.get(id)!, previous: q.get(id)!, change: q.get(id)! - p.get(id)!, behind: top - pointsNow.get(id)! }])),
+  };
+}

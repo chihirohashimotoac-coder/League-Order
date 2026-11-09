@@ -7669,3 +7669,19 @@ ul.plain {
 .card-trail .pt.live {
   stroke-dasharray: 2 2;
 }
+
+/* 前節比 (movement since the previous round) */
+.standings td.move {
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.standings td.move.up {
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.standings td.move.down {
+  color: var(--color-danger);
+  font-weight: 700;
+}
