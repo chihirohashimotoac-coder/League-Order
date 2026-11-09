@@ -6855,41 +6855,14 @@ tr.own th,
   padding-top: 6px;
 }
 
-.compare td.num,
-.score-sheet td.num {
+.compare td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
 .compare th.center,
-.score-sheet th.center,
 .center {
   text-align: center;
-}
-
-.score-sheet {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.score-sheet th,
-.score-sheet td {
-  padding: 3px 6px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.score-sheet .t100 {
-  font-weight: 700;
-}
-
-.score-sheet .t140 {
-  font-weight: 700;
-  color: var(--color-accent-text);
-}
-
-.score-sheet .t180 {
-  font-weight: 800;
-  color: var(--color-danger);
 }
 
 .section-mini {
@@ -7122,7 +7095,6 @@ ul.plain {
 }
 
 .ns-table td.mid {
-  width: 18%;
   background: var(--color-surface-2);
   font-size: 1.35em;
 }
@@ -7135,18 +7107,69 @@ ul.plain {
   background: var(--color-warning-fill);
 }
 
-.ns-table td.t100 {
-  font-weight: 700;
+/* n01's circleTon (n01.css .ton): a visit of 100+ is circled. A background, so neither the
+   cell nor the number changes size; capped at a little wider than three digits. */
+.ns-table td.ton {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cellipse cx='50' cy='50' rx='45' ry='45' fill='none' stroke='%23808080' stroke-opacity='0.4' stroke-width='3' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+  background-size: min(100%, 28vmin, 3.2em) 100%;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
-.ns-table td.t140 {
-  font-weight: 700;
-  color: var(--color-accent-text);
+.ns-table col.c-side {
+  width: 20.5%;
 }
 
-.ns-table td.t180 {
-  font-weight: 800;
-  color: var(--color-danger);
+.ns-table col.c-mid {
+  width: 18%;
+}
+
+.ns-table td.sc,
+.ns-table td.tg {
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ns-table tr.names th {
+  font-weight: 700;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+/* The finished game history: the same grid, a step smaller than the live board. */
+.ns-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ns-grid-wrap .ns-table {
+  background: var(--color-surface-1);
+}
+
+.ns-grid-wrap .ns-table td {
+  font-size: 1.3em;
+}
+
+.ns-grid-wrap .ns-table td.mid {
+  font-size: 1.1em;
+}
+
+.ns-table.cricket-sheet col.c-hits {
+  width: 25%;
+}
+
+.ns-table.cricket-sheet col.c-marks {
+  width: 16%;
+}
+
+.ns-grid-wrap .ns-table.cricket-sheet td {
+  font-size: 0.95em;
+}
+
+.ns-table.cricket-sheet td.hits {
+  overflow-wrap: anywhere;
 }
 
 .ns-table.cricket td {

@@ -186,7 +186,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     const view = detail.getByTestId('game-view');
     await expect(view).toContainText('180');
     await expect(view).toContainText('High Out');
-    await expect(view.getByTestId('score-sheet')).toContainText('40 (3本)');
+    await expect(view.getByTestId('score-sheet')).toContainText('x3');
     await expect(detail.getByTestId('intel-opponent')).toContainText('対戦 (公式)');
     await noSidewaysScroll(page);
     await detail.getByRole('button', { name: /一覧に戻る/ }).click();
