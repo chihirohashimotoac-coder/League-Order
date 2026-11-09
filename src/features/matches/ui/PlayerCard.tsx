@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Sheet } from '../../../components/ui';
 import type { MatchesApi } from '../api';
-import { percent, playerForms } from '../insights';
+import { MIN_SAMPLE, playerForms } from '../insights';
 import type { PlayerThrowStats } from '../playerCard';
 import { playerGames, playerThrowStats } from '../playerCard';
 import type { ThrowLeg } from '../parse';
@@ -155,7 +155,10 @@ export function PlayerCard({
                 <div key={kind}>
                   <dt>{STRUCTURE_LABEL[kind] ?? kind}</dt>
                   <dd>
-                    {record.wins}-{record.games - record.wins} <span className="muted">({percent(record)})</span>
+                    {record.wins}-{record.games - record.wins}{' '}
+                    <span className="muted">
+                      ({Math.round((record.wins / record.games) * 100)}%{record.games < MIN_SAMPLE ? '・参考' : ''})
+                    </span>
                   </dd>
                 </div>
               ))}
