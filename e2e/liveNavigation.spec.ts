@@ -200,3 +200,51 @@ test('a league whose event is a knockout tournament (JDO) shows its matches', as
   await expect(hub.getByTestId('competition-match')).toContainText('3 - 1');
   await noSidewaysScroll(page);
 });
+
+test('on a large screen two cards sit side by side; phones keep one', async ({ page, isMobile }) => {
+  const log = await serveNight(page);
+  await page.goto('/');
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  await expect(page.getByTestId('live-board')).toBeVisible();
+  const toggle = page.getByTestId('pair-toggle');
+  if (isMobile) {
+    await expect(toggle).toHaveCount(0);
+    await expect(page.getByTestId('focus-card')).toHaveCount(1);
+    return;
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  const left = page.locator('[data-testid="focus-card"][data-pane="left"]');
+  const right = page.locator('[data-testid="focus-card"][data-pane="right"]');
+  await expect(left).toHaveAttribute('aria-label', '左: Arrows 対 Corks');
+  await expect(right).toHaveAttribute('aria-label', '右: Bulls 対 Doubles');
+  // Both live, each followed by its own card: the leg in progress and the points left.
+  await expect(left.getByTestId('live-leg')).toContainText('シングルス1');
+  await expect(right.getByTestId('live-leg')).toContainText('ダブルス1');
+  await expect(left.getByTestId('next-thrower')).toContainText('256');
+  await expect(right.getByTestId('next-thrower')).toBeVisible();
+  await expect.poll(() => log.some((entry) => entry.startsWith('match/live') && entry.includes('c004'))).toBe(true);
+  // The tiles say which pane holds them; side by side, with no sideways scroll.
+  const tiles = page.getByTestId('board-tile');
+  await expect(tiles.nth(0)).toHaveAttribute('data-pane', 'left');
+  await expect(tiles.nth(1)).toHaveAttribute('data-pane', 'right');
+  const a = (await left.boundingBox())!;
+  const b = (await right.boundingBox())!;
+  expect(b.x).toBeGreaterThanOrEqual(a.x + a.width);
+  expect(Math.abs(a.y - b.y)).toBeLessThan(2);
+  await noSidewaysScroll(page);
+  // An earlier game opens in its own pane only.
+  await left.getByTestId('game-tab').nth(1).click();
+  await expect(left.getByTestId('game-block')).toContainText('ダブルス1');
+  await expect(right.getByTestId('live-board')).toBeVisible();
+  // Narrower than the pair width: one card again, the choice kept for when there is room.
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await expect(page.getByTestId('focus-card')).toHaveCount(1);
+  await expect(toggle).toHaveCount(0);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.getByTestId('focus-card')).toHaveCount(2);
+  await toggle.click();
+  await expect(page.getByTestId('focus-card')).toHaveCount(1);
+});

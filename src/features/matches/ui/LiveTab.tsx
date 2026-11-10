@@ -30,7 +30,32 @@ import { ListCoverage, listIncomplete } from './ListCoverage';
  * one line that keeps the live game in sight and returns to it. Everything else — the estimate,
  * who plays next and how strong they are, the events, the standings if it ended now — follows
  * below, never on another page.
+ *
+ * On a large screen (1200 px and up) two cards can be shown side by side (「2 カードを並べる」):
+ * the chosen card on the left, another on the right. A tap on a tile not shown puts it in the
+ * pane shown longer, so the card just picked stays; the tiles say which pane holds them.
  */
+
+/** Width from which two cards fit side by side (each pane keeps the phone layout of the sheet). */
+export const PAIR_MIN_WIDTH = 1200;
+
+/** Whether two cards were shown side by side last time (this session). */
+let rememberedPair = false;
+
+function useWideScreen(): boolean {
+  const query = `(min-width: ${PAIR_MIN_WIDTH}px)`;
+  const read = (): boolean => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
+  const [wide, setWide] = useState(read);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const list = window.matchMedia(query);
+    const onChange = (): void => setWide(list.matches);
+    onChange();
+    list.addEventListener('change', onChange);
+    return () => list.removeEventListener('change', onChange);
+  }, [query]);
+  return wide;
+}
 
 export interface PlayerRef {
   oid: string;
@@ -146,6 +171,34 @@ export function LiveTab({
   }, [compact, sorted.length]);
   const focus = sorted.find((card) => card.tmid === chosen) ?? sorted.find((card) => card.current) ?? sorted[0] ?? null;
 
+  // Two cards side by side (large screens): the right pane's card, and which pane a new pick replaces.
+  const wide = useWideScreen();
+  const [pairWanted, setPairWanted] = useState(rememberedPair);
+  const pair = pairWanted && wide && many;
+  const [second, setSecond] = useState<string | null>(null);
+  const [lastSet, setLastSet] = useState<'left' | 'right'>('left');
+  const right = pair && focus ? (sorted.find((card) => card.tmid === second && card.tmid !== focus.tmid) ?? sorted.find((card) => card.tmid !== focus.tmid && card.current) ?? sorted.find((card) => card.tmid !== focus.tmid) ?? null) : null;
+  const paneOf = (tmid: string): 'left' | 'right' | null => (focus?.tmid === tmid ? 'left' : right?.tmid === tmid ? 'right' : null);
+  const pick = (tmid: string): void => {
+    if (!pair) {
+      setChosen(tmid);
+      return;
+    }
+    if (paneOf(tmid)) return;
+    // The pane shown longer gives way: the card picked just before stays in sight.
+    if (lastSet === 'left') {
+      setSecond(tmid);
+      setLastSet('right');
+    } else {
+      setChosen(tmid);
+      setLastSet('left');
+    }
+  };
+  const togglePair = (): void => {
+    rememberedPair = !pairWanted;
+    setPairWanted(!pairWanted);
+  };
+
   if (board.games === null) {
     return board.error ? (
       <p className="small-text" role="alert">
@@ -169,12 +222,19 @@ export function LiveTab({
   }
 
   return (
-    <div className="live-hub" data-testid="live-hub">
-      <p className="muted small-text live-meta">
-        <span className="live-dot" aria-hidden="true" /> 進行中 {cards.filter((card) => card.current).length} ・ 本日 {cards.length} カード ・ 一覧の取得{' '}
-        {formatClock(board.fetchedAt)}
-        {board.error ? ` ・ 取得エラー (前回の値を表示中)` : ''}
-      </p>
+    <div className={`live-hub${pair ? ' is-pair' : ''}`} data-testid="live-hub">
+      <div className="live-meta-row">
+        <p className="muted small-text live-meta">
+          <span className="live-dot" aria-hidden="true" /> 進行中 {cards.filter((card) => card.current).length} ・ 本日 {cards.length} カード ・ 一覧の取得{' '}
+          {formatClock(board.fetchedAt)}
+          {board.error ? ` ・ 取得エラー (前回の値を表示中)` : ''}
+        </p>
+        {wide && many ? (
+          <button type="button" className="chip pair-toggle" aria-pressed={pair} onClick={togglePair} data-testid="pair-toggle">
+            2 カードを並べる
+          </button>
+        ) : null}
+      </div>
       <ListCoverage state={board} kind="today" />
       {spots.length ? (
         <section className="followed-now" aria-label="注目選手" data-testid="followed-now">
@@ -208,7 +268,19 @@ export function LiveTab({
           const people = game && game.sides.every((side) => side.members.length > 0 && side.members.length <= 2) ? (flip ? [game.sides[1], game.sides[0]] : [...game.sides]).map((side) => side.members.map((m) => m.name).join('/')) : null;
           return (
             <li key={card.tmid}>
-              <button type="button" className={`board-tile${game ? ' is-live' : ''}`} aria-pressed={focus?.tmid === card.tmid} onClick={() => setChosen(card.tmid)} data-testid="board-tile">
+              <button
+                type="button"
+                className={`board-tile${game ? ' is-live' : ''}`}
+                aria-pressed={paneOf(card.tmid) !== null}
+                onClick={() => pick(card.tmid)}
+                data-testid="board-tile"
+                data-pane={pair ? (paneOf(card.tmid) ?? undefined) : undefined}
+              >
+                {pair && paneOf(card.tmid) ? (
+                  <span className="pane-tag" aria-label={paneOf(card.tmid) === 'left' ? '左に表示中' : '右に表示中'}>
+                    {paneOf(card.tmid) === 'left' ? '左' : '右'}
+                  </span>
+                ) : null}
                 <span className={`t${registered.includes(card.teams[0].id) ? ' own' : ''}`}>{card.teams[0].name}</span>
                 <strong className="s">
                   {card.won[0]}-{card.won[1]}
@@ -229,7 +301,14 @@ export function LiveTab({
           );
         })}
       </ul>
-      {focus ? <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} /> : null}
+      {pair && focus && right ? (
+        <div className="focus-pair" data-testid="focus-pair">
+          <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} pane="left" />
+          <FocusCard key={right.tmid} card={right} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} pane="right" />
+        </div>
+      ) : focus ? (
+        <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} />
+      ) : null}
     </div>
   );
 }
@@ -287,7 +366,10 @@ function FocusCard({
   factory,
   api,
   onPlayer,
+  pane,
 }: {
+  /** Side by side: which pane this card is in. */
+  pane?: 'left' | 'right';
   card: BoardCard;
   data: SeasonData;
   registered: string[];
@@ -449,7 +531,7 @@ function FocusCard({
   const pct = (p: number): string => `${Math.round(p * 100)}%`;
 
   return (
-    <section className="focus-card" aria-label={`${names[0]} 対 ${names[1]}`} data-testid="focus-card">
+    <section className="focus-card" aria-label={`${pane === 'left' ? '左: ' : pane === 'right' ? '右: ' : ''}${names[0]} 対 ${names[1]}`} data-testid="focus-card" data-pane={pane}>
       <header className="focus-head">
         <span className={registered.includes(card.teams[0].id) ? 'own' : ''}>{names[0]}</span>
         <strong aria-label={`獲得ゲーム ${won[0]} 対 ${won[1]}`}>
