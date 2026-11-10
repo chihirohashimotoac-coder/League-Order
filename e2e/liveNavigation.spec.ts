@@ -124,6 +124,34 @@ test('an earlier game of the card opens in place; the live game stays one tap aw
   await expect(games.nth(3)).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('right after a game ends, the previous game’s tab opens that game (the list of games is a few seconds behind)', async ({ page }) => {
+  let next = false;
+  await serveNight(page, { nextGameStarted: () => next });
+  await page.goto('/');
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  const focus = page.getByTestId('focus-card');
+  const games = focus.getByTestId('game-tab');
+  await expect(games.nth(3)).toContainText('LIVE');
+
+  // Singles 2 starts: the live game says so at once; the game list still has Singles 1 unfinished.
+  next = true;
+  await expect(focus.getByTestId('live-leg')).toContainText('シングルス2');
+  await expect(games.nth(4)).toContainText('LIVE');
+  await expect(games.nth(4)).toHaveAttribute('aria-pressed', 'true');
+  await expect(games.nth(4)).toBeEnabled();
+  await expect(games.nth(3)).not.toContainText('LIVE');
+
+  // The previous game's tab opens the previous game — not the live one again.
+  await games.nth(3).click();
+  await expect(games.nth(3)).toHaveAttribute('aria-pressed', 'true');
+  await expect(focus.getByTestId('game-block')).toContainText('シングルス1');
+  await expect(focus.getByTestId('game-block')).toContainText('青木 一郎');
+  await expect(focus.getByTestId('live-board')).toBeHidden();
+  await focus.getByTestId('back-to-live').click();
+  await expect(focus.getByTestId('live-leg')).toContainText('シングルス2');
+  await expect(games.nth(4)).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('another team’s card is one tap away from anywhere on the page', async ({ page }) => {
   await openNight(page);
   // Scrolling down: the tiles stay under the header, shrink to two lines, and nothing below moves.

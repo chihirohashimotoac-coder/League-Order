@@ -462,15 +462,18 @@ function FocusCard({
           const game = bySchid.get(slot.schid);
           const winner = game ? gameWinner(game) : null;
           const cardWinner = game && winner !== null ? (flipOf(game) ? 1 - winner : winner) : null;
-          const isLive = !!game && !game.finished;
+          // Which game is live is the poller's word (1.5 s) once it has one: the board's rows are a
+          // few seconds older, and right after a game ends they still call the previous game
+          // unfinished and do not hold the next one yet.
+          const isLive = liveSchid !== null ? slot.schid === liveSchid : !!game && !game.finished;
           const legs = game ? (flipOf(game) ? [game.sides[1].legsWon ?? 0, game.sides[0].legsWon ?? 0] : [game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0]) : null;
           return (
             <li key={slot.schid}>
               <button
                 type="button"
-                className={`game-tab${cardWinner === 0 ? ' a' : cardWinner === 1 ? ' b' : ''}${isLive ? ' is-live' : ''}${!game ? ' todo' : ''}`}
+                className={`game-tab${cardWinner === 0 ? ' a' : cardWinner === 1 ? ' b' : ''}${isLive ? ' is-live' : ''}${!game && !isLive ? ' todo' : ''}`}
                 aria-pressed={selected === slot.schid}
-                disabled={!game}
+                disabled={!game && !isLive}
                 onClick={() => setPicked(isLive ? null : slot.schid)}
                 title={slot.label}
                 data-testid="game-tab"

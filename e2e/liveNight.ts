@@ -52,7 +52,16 @@ const today = (): unknown[] => [
   gameRow('c004', 'BBBB', 'DDDD', 'db01', [side('BBBB', [['b1', '佐藤 B1'], ['b2', '鈴木 B2']], 0, 300, 18), side('DDDD', [['d1', '田中 D1'], ['d2', '千葉 D2']], 1, 501, 18)], { start: 1_800_001_000, finished: false, mid: 'c004_db01' }),
 ];
 
-export async function serveNight(page: Page): Promise<string[]> {
+export interface NightOptions {
+  /**
+   * True once Singles 1 has ended and Singles 2 has started — as `match/live` says it. The
+   * game list (today's board) is left as it was: it is read less often than the live game, so
+   * for a few seconds it still calls Singles 1 unfinished and does not hold Singles 2.
+   */
+  nextGameStarted?: () => boolean;
+}
+
+export async function serveNight(page: Page, options: NightOptions = {}): Promise<string[]> {
   const log: string[] = [];
   const c001 = c001Rows().map((row) => ({ ...(row as object), tmid: `${TDID}_lg_0_c001_AAAA_BBBB` }));
   await page.route(`${N01_API_BASE_URL}/**`, async (route) => {
@@ -83,7 +92,19 @@ export async function serveNight(page: Page): Promise<string[]> {
       const mid = q.get('mid') ?? '';
       const live = mid === 'c003_sg01';
       body = { result: 0, changed: 1, mid, match_type: mid.endsWith('db02') ? 'cricket' : '01', end_match: live ? 0 : 1, current_leg: live ? 2 : undefined, updateTime: 1_800_000_500_000, leg_data: live ? [...SG01, SG01_LIVE] : (GAMES[mid] ?? []) };
-    } else if (operation === 'match/live' && q.get('tmid')?.includes('c003'))
+    } else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.nextGameStarted?.())
+      body = liveBody({
+        mid: 'c003_sg02',
+        schid: 'sg02',
+        title: 'Test League A Division シングルス2',
+        updateTime: 1_800_000_020_000,
+        sets: [3, 1],
+        legs: [0, 0],
+        current_leg: 0,
+        players: [{ name: 'Arrows', tpid: 'AAAA', order: [{ oid: 'a2', name: '井上 次郎' }] }, { name: 'Corks', tpid: 'CCCC', order: [{ oid: 'c2', name: '木村 守' }] }],
+        leg: { ...leg(0, 0, [[60], []], null), thrower: 1, round: 1, member: { oid: 'c2', name: '木村 守' } },
+      });
+    else if (operation === 'match/live' && q.get('tmid')?.includes('c003'))
       body = liveBody({
         mid: 'c003_sg01',
         schid: 'sg01',
