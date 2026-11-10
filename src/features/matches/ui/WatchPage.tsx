@@ -14,6 +14,7 @@ import { formatClock, formatRate, seasonStatsSource, usePlayerStats, useRegister
 import { RankingFooter, RankingSearch, rankThenSearch, useShownCount } from './rankingList';
 import { LeaguePicker } from './LeaguePicker';
 import { LiveTab } from './LiveTab';
+import type { PlayerRef } from './LiveTab';
 import { ResultsTab } from './ResultsTab';
 import { MatchSheet } from './MatchSheet';
 import { NowView, TournamentHub } from './CompetitionViews';
@@ -29,11 +30,6 @@ import { ListCoverage } from './ListCoverage';
 
 export type WatchTab = 'live' | 'results' | 'standings' | 'stats';
 
-interface PlayerRef {
-  oid: string;
-  name: string;
-  teamId: string | null;
-}
 
 /** The tab last shown in this session (the 観戦 tab of the bottom bar reopens it). */
 let rememberedTab: WatchTab = 'live';
@@ -78,6 +74,9 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   const [game, setGame] = useState<{ mid: string; title?: string } | null>(null);
   const [team, setTeam] = useState<string | null>(null);
   const season = data.kind === 'ready' ? data.value.season : null;
+  // A league's event that is not played as a league table (an open tournament kept under a
+  // league, as JDO's are: brackets, round robins): shown with the tournament views.
+  const bracketEvent = league !== null && season !== null && season.divisions.length === 0 ? season : null;
   const teamMap = useRegisteredTeamMap(season);
   const registered = useMemo(() => [...teamMap.keys()], [teamMap]);
   const [player, setPlayer] = useState<PlayerRef | null>(null);
@@ -163,7 +162,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     <div className="segmented" role="tablist" aria-label="表示">
       {TABS.map(([key, label]) => (
         <button key={key} type="button" role="tab" aria-selected={tab === key} aria-pressed={tab === key} onClick={() => setTab(key)}>
-          {key === 'results' && !league ? '試合' : label}
+          {key === 'results' && (!league || bracketEvent) ? '試合' : label}
         </button>
       ))}
     </div>
@@ -195,14 +194,18 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
         </p>
       ) : null}
       {data.kind === 'error' ? <Retry message={data.message} onRetry={() => setRefresh((n) => n + 1)} /> : null}
-      {data.kind === 'ready' ? (
+      {bracketEvent ? (
+        <TournamentHub key={`${bracketEvent.tournamentId}:${refresh}`} api={api} tdid={bracketEvent.tournamentId} tab={tab} onGame={(mid, title) => setGame({ mid, title })} />
+      ) : data.kind === 'ready' ? (
         <>
-          <p className="muted small-text matches-meta">
-            n01 公式データ ・ 取得 {formatClock(data.fetchedAt)}
-            {registered.length ? ` ・ 登録チーム ${registered.map((id) => data.value.season.teams.get(id)).join('・')}` : ''}
-          </p>
+          {tab !== 'live' ? (
+            <p className="muted small-text matches-meta">
+              n01 公式データ ・ 取得 {formatClock(data.fetchedAt)}
+              {registered.length ? ` ・ 登録チーム ${registered.map((id) => data.value.season.teams.get(id)).join('・')}` : ''}
+            </p>
+          ) : null}
           <ListCoverage state={{ truncated: data.value.truncated, unreadable: data.value.unreadableGames, unsure: data.value.unsureGames }} kind="season" />
-          {tab === 'live' ? <LiveTab data={data.value} registered={registered} api={api} factory={factory} /> : null}
+          {tab === 'live' ? <LiveTab data={data.value} registered={registered} api={api} factory={factory} onPlayer={openPlayer} /> : null}
           {tab === 'results' ? <ResultsTab data={data.value} registered={registered} api={api} onTeam={setTeam} /> : null}
           {tab === 'standings' ? <StandingsTab data={data.value} registered={registered} onTeam={setTeam} /> : null}
           {tab === 'stats' ? <StatsTab data={data.value} registered={registered} api={api} onTeam={setTeam} onPlayer={openPlayer} /> : null}

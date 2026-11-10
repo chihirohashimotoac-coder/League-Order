@@ -17,6 +17,12 @@ interface Hit {
   note: string;
 }
 
+/**
+ * Organisations whose competitions are looked up by name on n01 each time (never a list baked
+ * into the build: JDO keeps every open tournament as its own n01 league, new ones each season).
+ */
+const ORGANISATIONS = ['JDO'] as const;
+
 const STATUS: Record<number, string> = { 10: '準備中', 20: '受付中', 25: '作成中', 30: '開催中', 40: '終了' };
 
 export function LeaguePicker({
@@ -37,8 +43,8 @@ export function LeaguePicker({
   const [query, setQuery] = useState('');
   const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'error'; message: string } | { kind: 'hits'; hits: Hit[] }>({ kind: 'idle' });
 
-  const search = async (): Promise<void> => {
-    const text = query.trim();
+  const search = async (typed: string = query): Promise<void> => {
+    const text = typed.trim();
     if (!text) return;
     const reference = parseCompetitionReference(text);
     if (reference?.kind === 'league') {
@@ -64,7 +70,7 @@ export function LeaguePicker({
       return;
     }
     const hits: Hit[] = [
-      ...(leagues.status === 'fulfilled' ? leagues.value.slice(0, 15).map((hit) => ({ target: { kind: 'league' as const, id: hit.leagueId, title: hit.title || hit.leagueId }, note: 'リーグ' })) : []),
+      ...(leagues.status === 'fulfilled' ? leagues.value.slice(0, 30).map((hit) => ({ target: { kind: 'league' as const, id: hit.leagueId, title: hit.title || hit.leagueId }, note: 'リーグ' })) : []),
       ...(tournaments.status === 'fulfilled'
         ? tournaments.value
             .filter((hit) => !hit.leagueId)
@@ -94,6 +100,22 @@ export function LeaguePicker({
             いま n01 で進行中
           </button>
         ) : null}
+      </div>
+      <div className="chip-row" role="group" aria-label="団体から探す">
+        {ORGANISATIONS.map((name) => (
+          <button
+            key={name}
+            type="button"
+            className="chip"
+            disabled={state.kind === 'busy'}
+            onClick={() => {
+              setQuery(name);
+              void search(name);
+            }}
+          >
+            {name} の大会・リーグを探す
+          </button>
+        ))}
       </div>
       <form
         className="row"

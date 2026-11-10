@@ -184,11 +184,12 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await expect(page.getByTestId('board-tile')).toContainText('Arrows');
     await expect(page.getByTestId('board-tile')).toContainText('1-0');
     const focus = page.getByTestId('focus-card');
-    await expect(focus.locator('.flow .dot')).toHaveCount(5);
+    await expect(focus.getByTestId('game-tab')).toHaveCount(5);
     await expect(focus.getByTestId('estimate')).toContainText('予測');
+    await focus.getByTestId('estimate').click();
     await expect(focus.getByTestId('card-trail')).toContainText('Arrows の勝率 (予測) の推移');
     await expect(focus.getByTestId('next-thrower')).toContainText('C1');
-    await expect(focus.getByTestId('upcoming')).toContainText('シングルス1 A1 vs C1');
+    await expect(focus.getByTestId('upcoming')).toContainText('シングルス1 A1 (75.2) vs C1');
     // The game in progress as a scoreboard: Scored / To Go, the points left, the game's figures,
     // then League Order's own figures (leg / game chance).
     const board = focus.getByTestId('live-board');

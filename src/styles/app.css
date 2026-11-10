@@ -6667,28 +6667,87 @@ select:not([multiple]) {
 .board {
   list-style: none;
   margin: 0;
-  padding: 0 0 4px;
+  /* Room for the chosen tile's ring on every side: a box that scrolls sideways clips anything
+     drawn outside it, which is what cut the ring off at the top and the left. */
+  padding: 4px;
+  margin-inline: -4px;
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(150px, 46%);
+  grid-auto-columns: minmax(168px, 47%);
   gap: 8px;
   overflow-x: auto;
   scroll-snap-type: x proximity;
+  scroll-padding-inline: 4px;
+}
+
+/* One card today: the tile is as wide as the screen. */
+.board:not(:has(li + li)) {
+  grid-auto-columns: 100%;
+}
+
+/* Two or more cards: the tiles stay under the header while the page scrolls — another team's
+   card is one tap away from anywhere on the page. */
+.live-hub > .board:has(li + li) {
+  position: sticky;
+  top: calc(var(--watch-sticky-top, 66px) + var(--safe-top, 0px));
+  z-index: 3;
+  background: var(--color-bg);
+  box-shadow: 0 6px 8px -8px rgb(23 32 38 / 35%);
+}
+
+.board > li {
+  display: flex;
+  min-width: 0;
+}
+
+.board-sentinel {
+  height: 0;
+  margin-bottom: -12px;
+}
+
+/* Stuck under the header: two lines per tile (teams and score on one, the live game below). */
+.board.is-stuck .board-tile {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  padding: 5px 8px;
+  gap: 0 6px;
+}
+
+.board.is-stuck .board-tile .t {
+  grid-column: auto;
+  grid-row: 1;
+  font-size: 0.9em;
+}
+
+.board.is-stuck .board-tile .t:nth-of-type(2) {
+  text-align: right;
+}
+
+.board.is-stuck .board-tile .s {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 1.05em;
+}
+
+.board.is-stuck .board-tile .p {
+  display: none;
 }
 
 .board-tile {
+  position: relative;
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
   gap: 2px 8px;
   padding: 8px 10px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   background: var(--color-surface-1);
   color: var(--color-text);
   font: inherit;
   text-align: left;
   scroll-snap-align: start;
+  cursor: pointer;
 }
 
 .board-tile .t {
@@ -6707,18 +6766,39 @@ select:not([multiple]) {
   font-variant-numeric: tabular-nums;
 }
 
-.board-tile .g {
+.board-tile .g,
+.board-tile .p {
   grid-column: 1 / -1;
-  font-size: 0.85em;
+  font-size: 0.82em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.board-tile.is-live {
-  border-color: var(--color-danger);
-}
-
+/* The chosen card: the ring is drawn on the tile's own border (same box, same radius), so it
+   can neither be clipped nor sit off the edge; the tint and the bar say it without colour alone. */
 .board-tile[aria-pressed='true'] {
-  outline: 2px solid var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  background: var(--color-accent-tint);
+}
+
+.board-tile:focus-visible {
+  outline: 2px solid var(--color-text);
   outline-offset: 1px;
+}
+
+.live-tag {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--color-danger);
+  color: #ffffff;
+  font-size: 0.78em;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  vertical-align: 1px;
 }
 
 .board-tile .own,
@@ -6754,60 +6834,289 @@ tr.own th,
   font-variant-numeric: tabular-nums;
 }
 
-.flow {
+.game-tabs {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(52px, 1fr);
   gap: 6px;
-  justify-content: center;
+  overflow-x: auto;
+  /* The chosen tab's ring is inside its border; the padding keeps the focus ring whole too. */
+  padding: 3px;
+  margin: -3px;
 }
 
-.flow li {
+.game-tabs > li {
+  display: flex;
+  min-width: 0;
+}
+
+.game-tab {
+  width: 100%;
+  min-height: var(--tap-target);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-}
-
-.dot {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 2px solid var(--color-border-strong);
-  background: transparent;
-  padding: 0;
-}
-
-.dot.a {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-.dot.b {
+  justify-content: center;
+  gap: 1px;
+  padding: 5px 4px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
   background: var(--color-surface-1);
-  border-color: var(--color-text-secondary);
-  box-shadow: inset 0 0 0 6px var(--color-text-secondary);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
 }
 
-.dot.live {
-  border-color: var(--color-danger);
-  border-style: dashed;
-}
-
-.dot.todo {
-  opacity: 0.45;
-}
-
-.dot[aria-pressed='true'] {
-  outline: 2px solid var(--color-text);
-  outline-offset: 2px;
-}
-
-.dot-label {
-  font-size: 10px;
+.game-tab .n {
+  font-size: 0.78em;
+  font-weight: 700;
   color: var(--color-text-secondary);
+}
+
+.game-tab .r {
+  font-size: 0.95em;
+  white-space: nowrap;
+}
+
+.game-tab .r b {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.game-tab .r b.win {
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+/* Won by the card's left team: a bar on the left; by the right team: on the right. */
+.game-tab.a {
+  border-left: 4px solid var(--color-accent);
+}
+
+.game-tab.b {
+  border-right: 4px solid var(--color-text-secondary);
+}
+
+.game-tab.is-live {
+  border-color: var(--color-danger);
+}
+
+.game-tab.todo {
+  border-style: dashed;
+  color: var(--color-text-muted);
+  background: transparent;
+  cursor: default;
+}
+
+.game-tab[aria-pressed='true'] {
+  background: var(--color-accent-tint);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.game-tab:focus-visible,
+.leg-tab:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 1px;
+}
+
+.live-return {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--tap-target);
+  padding: 6px 10px;
+  border: 1px solid var(--color-danger);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.9em;
+  text-align: left;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-return .go {
+  font-weight: 700;
+  color: var(--color-accent-text);
+  white-space: nowrap;
+}
+
+.game-block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.05em;
+}
+
+.game-block-people {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.game-block-people > :last-child {
+  text-align: right;
+}
+
+.outlook {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
+.outlook > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px 10px;
+  min-height: var(--tap-target);
+  padding: 6px 0;
+  cursor: pointer;
+  font-size: 0.92em;
+}
+
+.outlook[open] {
+  padding-bottom: 10px;
+}
+
+/* Live sheet: which leg is on, the players' season figures, the row of legs. */
+.ns-title strong {
+  font-size: 1.12em;
+}
+
+.ns-need {
+  opacity: 0.85;
+}
+
+.live-meta {
+  margin: 0;
+}
+
+.ns-levels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2px 12px;
+  padding: 8px 12px;
+  background: var(--color-paper);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.88em;
+}
+
+.ns-levels > ul:nth-of-type(2) {
+  text-align: right;
+}
+
+.ns-levels li {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ns-levels .lv {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ns-levels .lv strong {
+  color: var(--color-text);
+  font-size: 1.15em;
+}
+
+.ns-levels > p {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  text-align: center;
+}
+
+.ns-legtabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(84px, 1fr);
+  gap: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.leg-tab {
+  min-height: var(--tap-target);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.leg-tab .l {
+  font-weight: 700;
+  font-size: 0.9em;
+}
+
+.leg-tab .w {
+  font-size: 0.78em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.leg-tab.is-live {
+  border-color: var(--color-danger);
+}
+
+.leg-tab.is-live .w {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.leg-tab[aria-pressed='true'] {
+  background: var(--color-accent-tint);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.leg-tab:disabled {
+  border-style: dashed;
+  cursor: default;
+  opacity: 0.7;
+}
+
+.ns-past-bar .btn {
+  white-space: nowrap;
+  flex: none;
+}
+
+.ns-past-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--color-accent-tint);
+}
+
+.ns-left-note {
+  margin: 0;
+  padding: 0 10px;
+  background: var(--color-text);
+  color: var(--color-paper);
+  text-align: center;
 }
 
 .mini-flow {
@@ -6842,10 +7151,10 @@ tr.own th,
   gap: 8px;
 }
 
-.game-block summary {
-  cursor: pointer;
-  font-weight: 600;
-  padding: 6px 0;
+.game-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .game-view {
@@ -7020,7 +7329,7 @@ ul.plain {
 .ns-head {
   background: var(--color-text);
   color: var(--color-paper);
-  padding: 8px 12px 10px;
+  padding: 8px 12px 8px;
 }
 
 .ns-title {
@@ -7217,7 +7526,7 @@ ul.plain {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  padding: 10px;
+  padding: 0 10px 10px;
   background: var(--color-text);
 }
 
