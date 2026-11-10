@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/icons';
 import type { MatchesApi } from '../api';
 import type { CardOrder, GameRow, LiveState, SeasonDocument } from '../parse';
 import { parseLeagueTmid, slotOf, slotsFor } from '../parse';
-import { gameWinner, sideRate } from '../cards';
+import { gameWinner } from '../cards';
 import type { LiveStatus } from '../livePoller';
 import { LivePoller, medianMs } from '../livePoller';
 import type { LiveEvent } from '../gameStats';
@@ -13,18 +13,30 @@ import { checkReproduction, projectMany } from '../standings';
 import type { SeasonData } from './useMatchContext';
 import { formatClock, seasonStatsSource, useFollowed, useTodayBoard } from './useMatchContext';
 import { GameView } from './GameView';
-import { CardTrail } from './CardTrail';
+import { CardTrail, shortSlot } from './CardTrail';
 import { LiveSheet } from './LiveSheet';
+import type { PlayerLevel } from './LiveSheet';
 import { usePlayerStats } from './useMatchContext';
 import type { MatchesApiFactory } from '../environment';
 import { ListCoverage, listIncomplete } from './ListCoverage';
 
 /**
- * LIVE (ライブ). The first screen answers, without scrolling: which cards are on and their score,
- * the chosen card's games so far, the score left and who throws next. Everything else — the
- * score sheet of any game, the events, the estimate and the standings if it ended now — is
- * on the same screen below, never another page.
+ * LIVE (ライブ). The first screen answers, without scrolling: which cards are on and their score
+ * (the tiles stay at the top while the page scrolls, so another team's card is one tap away),
+ * the chosen card's games as a row of tabs — won, in progress, to come — and, right under it,
+ * the game in progress: which leg is on, the score left and who throws next.
+ *
+ * A tap on an earlier game shows that game in the same place (its legs, its score sheets), with
+ * one line that keeps the live game in sight and returns to it. Everything else — the estimate,
+ * who plays next and how strong they are, the events, the standings if it ended now — follows
+ * below, never on another page.
  */
+
+export interface PlayerRef {
+  oid: string;
+  name: string;
+  teamId: string | null;
+}
 
 export interface BoardCard {
   tmid: string;
@@ -74,7 +86,20 @@ export function boardCards(season: SeasonDocument, games: readonly GameRow[]): B
 
 const slotLabel = (season: SeasonDocument, schid: string | null): string => slotOf(season, schid)?.label ?? 'ゲーム';
 
-export function LiveTab({ data, registered, api, factory }: { data: SeasonData; registered: string[]; api: MatchesApi; factory: MatchesApiFactory }): React.JSX.Element {
+export function LiveTab({
+  data,
+  registered,
+  api,
+  factory,
+  onPlayer,
+}: {
+  data: SeasonData;
+  registered: string[];
+  api: MatchesApi;
+  factory: MatchesApiFactory;
+  /** Opens a player's card (season figures, results). */
+  onPlayer?: (player: PlayerRef) => void;
+}): React.JSX.Element {
   const board = useTodayBoard(api, data.season.tournamentId, true);
   const cards = useMemo(() => (board.games ? boardCards(data.season, board.games) : []), [board.games, data.season]);
   const followed = useFollowed();
@@ -92,6 +117,33 @@ export function LiveTab({ data, registered, api, factory }: { data: SeasonData; 
     [cards, registered, spots],
   );
   const [chosen, setChosen] = useState<string | null>(null);
+  // The tiles stay under the header while the page scrolls (two or more cards); once they are
+  // stuck there they shrink to two lines, so they do not take the room of the game below.
+  const sentinel = useRef<HTMLDivElement | null>(null);
+  const [stuck, setStuck] = useState(false);
+  const many = sorted.length > 1;
+  useEffect(() => {
+    const node = sentinel.current;
+    if (!node || !many || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => setStuck(!entry.isIntersecting && entry.boundingClientRect.top < 120), { rootMargin: '-72px 0px 0px 0px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [many]);
+  // Shrinking the tiles must not move the page: the room they give up is kept as a margin, so
+  // nothing below shifts (browsers without scroll anchoring — iOS Safari — would jump otherwise).
+  const boardRef = useRef<HTMLUListElement | null>(null);
+  const fullHeight = useRef(0);
+  const compact = stuck && many;
+  useLayoutEffect(() => {
+    const node = boardRef.current;
+    if (!node) return;
+    if (!compact) {
+      node.style.marginBottom = '';
+      fullHeight.current = node.getBoundingClientRect().height;
+      return;
+    }
+    node.style.marginBottom = `${Math.max(0, fullHeight.current - node.getBoundingClientRect().height)}px`;
+  }, [compact, sorted.length]);
   const focus = sorted.find((card) => card.tmid === chosen) ?? sorted.find((card) => card.current) ?? sorted[0] ?? null;
 
   if (board.games === null) {
@@ -147,23 +199,37 @@ export function LiveTab({ data, registered, api, factory }: { data: SeasonData; 
           <p className="muted small-text">選手名で照合しています (同姓同名は区別できません)。</p>
         </section>
       ) : null}
-      <ul className="board" aria-label="本日の対戦">
-        {sorted.map((card) => (
-          <li key={card.tmid}>
-            <button type="button" className={`board-tile${card.current ? ' is-live' : ''}`} aria-pressed={focus?.tmid === card.tmid} onClick={() => setChosen(card.tmid)} data-testid="board-tile">
-              <span className={`t${registered.includes(card.teams[0].id) ? ' own' : ''}`}>{card.teams[0].name}</span>
-              <strong className="s">
-                {card.won[0]}-{card.won[1]}
-              </strong>
-              <span className={`t${registered.includes(card.teams[1].id) ? ' own' : ''}`}>{card.teams[1].name}</span>
-              <span className="g muted">
-                {card.current ? `${slotLabel(data.season, card.current.schid)} ${card.current.sides[0].legsWon ?? 0}-${card.current.sides[1].legsWon ?? 0}` : card.finished ? '終了' : '休憩中'}
-              </span>
-            </button>
-          </li>
-        ))}
+      <div ref={sentinel} className="board-sentinel" aria-hidden="true" />
+      <ul ref={boardRef} className={`board${compact ? ' is-stuck' : ''}`} aria-label="本日の対戦">
+        {sorted.map((card) => {
+          const game = card.current;
+          const legs = game ? ([game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0] as const) : null;
+          const flip = game ? game.sides[0].teamId === card.teams[1].id : false;
+          const people = game && game.sides.every((side) => side.members.length > 0 && side.members.length <= 2) ? (flip ? [game.sides[1], game.sides[0]] : [...game.sides]).map((side) => side.members.map((m) => m.name).join('/')) : null;
+          return (
+            <li key={card.tmid}>
+              <button type="button" className={`board-tile${game ? ' is-live' : ''}`} aria-pressed={focus?.tmid === card.tmid} onClick={() => setChosen(card.tmid)} data-testid="board-tile">
+                <span className={`t${registered.includes(card.teams[0].id) ? ' own' : ''}`}>{card.teams[0].name}</span>
+                <strong className="s">
+                  {card.won[0]}-{card.won[1]}
+                </strong>
+                <span className={`t${registered.includes(card.teams[1].id) ? ' own' : ''}`}>{card.teams[1].name}</span>
+                <span className="g">
+                  {game && legs ? (
+                    <>
+                      <span className="live-tag">LIVE</span> {shortSlot(slotLabel(data.season, game.schid))} ・ Leg {legs[0] + legs[1] + 1} ({flip ? `${legs[1]}-${legs[0]}` : `${legs[0]}-${legs[1]}`})
+                    </>
+                  ) : (
+                    <span className="muted">{card.finished ? '終了' : '休憩中 (次のゲーム待ち)'}</span>
+                  )}
+                </span>
+                {people ? <span className="p muted">{people.join(' vs ')}</span> : null}
+              </button>
+            </li>
+          );
+        })}
       </ul>
-      {focus ? <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} /> : null}
+      {focus ? <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} /> : null}
     </div>
   );
 }
@@ -213,7 +279,23 @@ function NextRound({ data, registered }: { data: SeasonData; registered: string[
   );
 }
 
-function FocusCard({ card, data, registered, todayCards, factory, api }: { card: BoardCard; data: SeasonData; registered: string[]; todayCards: BoardCard[]; factory: MatchesApiFactory; api: MatchesApi }): React.JSX.Element {
+function FocusCard({
+  card,
+  data,
+  registered,
+  todayCards,
+  factory,
+  api,
+  onPlayer,
+}: {
+  card: BoardCard;
+  data: SeasonData;
+  registered: string[];
+  todayCards: BoardCard[];
+  factory: MatchesApiFactory;
+  api: MatchesApi;
+  onPlayer?: (player: PlayerRef) => void;
+}): React.JSX.Element {
   const liveApi = useMemo(() => factory({ maxRequests: 100_000 }), [factory]);
   const [live, setLive] = useState<LiveState | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ kind: 'idle' });
@@ -340,19 +422,31 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
     return spans.length ? spans.reduce((a, b) => a + b, 0) / spans.length : null;
   })();
 
-  // Each singles player's season average (n01's own figure), matched within the team by exact name.
+  // Season figures of the players (n01's own), matched within the team by exact name — only
+  // when exactly one member of the team has that name; otherwise no figure at all.
   const statsSource = useMemo(() => seasonStatsSource(data.season), [data.season]);
-  const stats = usePlayerStats(api, data.season.tournamentId, !card.finished, statsSource);
-  const seasonAverage: [number | null, number | null] | undefined =
-    live && stats.kind === 'ready'
-      ? ([0, 1] as const).map((side) => {
-          const members = live.sides[side].members;
-          if (members.length !== 1) return null;
-          const hits = stats.value.filter((row) => row.teamId === live.sides[side].teamId && row.name === members[0]);
-          const line = hits.length === 1 ? hits[0].line : null;
-          return line && line.score !== null && line.darts ? (line.score / line.darts) * 3 : null;
-        }) as [number | null, number | null]
-      : undefined;
+  const stats = usePlayerStats(api, data.season.tournamentId, data.season.teamGames, statsSource);
+  const levelOf = (teamId: string | null, name: string): PlayerLevel => {
+    const hits = stats.kind === 'ready' && stats.unit === 'member' ? stats.value.filter((row) => row.teamId === teamId && row.name.trim() === name.trim()) : [];
+    const hit = hits.length === 1 ? hits[0] : null;
+    const line = hit?.line ?? null;
+    return { oid: hit?.oid ?? null, name, teamId, average: line && line.score !== null && line.darts ? (line.score / line.darts) * 3 : null, legs: line?.leg ?? null, legsWon: line?.winLeg ?? null };
+  };
+  const levels: [PlayerLevel[], PlayerLevel[]] | undefined =
+    live && stats.kind === 'ready' ? [live.sides[0].members.map((name) => levelOf(live.sides[0].teamId, name)), live.sides[1].members.map((name) => levelOf(live.sides[1].teamId, name))] : undefined;
+  const withAverage = (teamId: string, members: readonly string[]): string =>
+    members
+      .map((name) => {
+        const average = levelOf(teamId, name).average;
+        return average === null ? name : `${name} (${average.toFixed(1)})`;
+      })
+      .join('・');
+  const anyAverage = stats.kind === 'ready' && stats.value.length > 0;
+
+  const liveSchid = live && !live.gameEnded ? live.schid : null;
+  const showsLive = liveSchid !== null && selected === liveSchid;
+  const liveLabel = liveSchid ? slotLabel(data.season, liveSchid) : null;
+  const pct = (p: number): string => `${Math.round(p * 100)}%`;
 
   return (
     <section className="focus-card" aria-label={`${names[0]} 対 ${names[1]}`} data-testid="focus-card">
@@ -363,45 +457,77 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
         </strong>
         <span className={registered.includes(card.teams[1].id) ? 'own' : ''}>{names[1]}</span>
       </header>
-      <ol className="flow" aria-label="ゲームの流れ">
+      <ol className="game-tabs" aria-label="ゲームの流れ" data-testid="game-tabs">
         {schedule.map((slot) => {
           const game = bySchid.get(slot.schid);
           const winner = game ? gameWinner(game) : null;
           const cardWinner = game && winner !== null ? (flipOf(game) ? 1 - winner : winner) : null;
-          const isLive = game && !game.finished;
+          // Which game is live is the poller's word (1.5 s) once it has one: the board's rows are a
+          // few seconds older, and right after a game ends they still call the previous game
+          // unfinished and do not hold the next one yet.
+          const isLive = liveSchid !== null ? slot.schid === liveSchid : !!game && !game.finished;
+          const legs = game ? (flipOf(game) ? [game.sides[1].legsWon ?? 0, game.sides[0].legsWon ?? 0] : [game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0]) : null;
           return (
             <li key={slot.schid}>
               <button
                 type="button"
-                className={`dot${cardWinner === 0 ? ' a' : cardWinner === 1 ? ' b' : ''}${isLive ? ' live' : ''}${!game ? ' todo' : ''}`}
+                className={`game-tab${cardWinner === 0 ? ' a' : cardWinner === 1 ? ' b' : ''}${isLive ? ' is-live' : ''}${!game && !isLive ? ' todo' : ''}`}
                 aria-pressed={selected === slot.schid}
-                disabled={!game}
-                onClick={() => setPicked(slot.schid)}
+                disabled={!game && !isLive}
+                onClick={() => setPicked(isLive ? null : slot.schid)}
                 title={slot.label}
+                data-testid="game-tab"
               >
+                <span className="n" aria-hidden="true">
+                  {shortSlot(slot.label)}
+                </span>
+                <span className="r" aria-hidden="true">
+                  {isLive ? <span className="live-tag">LIVE</span> : legs ? (
+                    <>
+                      <b className={cardWinner === 0 ? 'win' : undefined}>{legs[0]}</b>-<b className={cardWinner === 1 ? 'win' : undefined}>{legs[1]}</b>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </span>
                 <span className="sr-only">
                   {slot.label} {cardWinner === 0 ? `${names[0]} 勝ち` : cardWinner === 1 ? `${names[1]} 勝ち` : isLive ? '進行中' : '未実施'}
+                  {legs && !isLive ? ` ${legs[0]} 対 ${legs[1]}` : ''}
                 </span>
               </button>
-              <span className="dot-label">{slot.label.replace(/シングルス/u, 'S').replace(/ダブルス/u, 'D').replace(/トリオス/u, 'T').replace(/チーム/u, 'Team')}</span>
             </li>
           );
         })}
       </ol>
-      <p className="small-text estimate" data-testid="estimate">
-        参考予測: {names[0]} 勝ち {Math.round(outlook.win * 100)}%{outlook.draw > 0.005 ? ` ・ 引分 ${Math.round(outlook.draw * 100)}%` : ''} ・ {names[1]} 勝ち {Math.round(outlook.loss * 100)}%
-        <span className="muted"> (今季の種別勝率から計算、このカードを除く{seasonGames < 20 ? '・データ少なめ' : ''})</span>
-      </p>
-      <CardTrail steps={trail} names={names} labelOf={(schid) => slotLabel(data.season, schid)} basis="今季の種別ごとの勝率 (このカードを除く) から計算した参考値です。" />
 
-      {live && !live.gameEnded ? <LiveSheet key={live.mid} api={api} live={live} seasonAverage={seasonAverage} /> : null}
+      {live && !live.gameEnded && !showsLive ? (
+        <button type="button" className="live-return" onClick={() => setPicked(null)} data-testid="back-to-live">
+          <span className="live-tag">LIVE</span>
+          <span className="grow">
+            {liveLabel} ・ Leg {(live.leg?.index ?? live.currentLeg ?? 0) + 1} ・ {live.legs[0]}-{live.legs[1]}
+            {live.leg?.left ? ` ・ 残り ${live.leg.left[0]} / ${live.leg.left[1]}` : ''}
+          </span>
+          <span className="go">ライブに戻る</span>
+        </button>
+      ) : null}
 
-      {selectedGame && !(live && !live.gameEnded && live.mid === selectedGame.mid) ? (
-        <details className="game-block" open>
-          <summary>
-            {slotLabel(data.season, selectedGame.schid)} ・ {selectedGame.finished ? '終了' : '進行中'} ・ {names[0]} {sideRate(selectedGame, flipOf(selectedGame) ? 1 : 0)?.toFixed(2) ?? '—'} / {names[1]}{' '}
-            {sideRate(selectedGame, flipOf(selectedGame) ? 0 : 1)?.toFixed(2) ?? '—'}
-          </summary>
+      {live && !live.gameEnded ? (
+        <div hidden={!showsLive}>
+          <LiveSheet key={live.mid} api={api} live={live} title={liveLabel ?? undefined} levels={levels} onPlayer={onPlayer} />
+        </div>
+      ) : null}
+
+      {selectedGame && !showsLive ? (
+        <section className="game-block" aria-label={slotLabel(data.season, selectedGame.schid)} data-testid="game-block">
+          <h3 className="game-block-head">
+            {slotLabel(data.season, selectedGame.schid)}
+            <span className={`tag state-${selectedGame.finished ? 'official' : 'live'}`}>{selectedGame.finished ? '終了' : '進行中'}</span>
+          </h3>
+          <p className="small-text game-block-people">
+            <span>{(flipOf(selectedGame) ? selectedGame.sides[1] : selectedGame.sides[0]).members.map((m) => m.name).join(' / ') || names[0]}</span>
+            <span className="muted">vs</span>
+            <span>{(flipOf(selectedGame) ? selectedGame.sides[0] : selectedGame.sides[1]).members.map((m) => m.name).join(' / ') || names[1]}</span>
+          </p>
           <GameView
             key={selectedGame.mid}
             api={api}
@@ -412,7 +538,42 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
             flip={flipOf(selectedGame)}
             liveLeg={live && live.mid === selectedGame.mid && !live.gameEnded ? live.leg : null}
           />
-        </details>
+        </section>
+      ) : null}
+
+      <details className="outlook" data-testid="outlook">
+        <summary data-testid="estimate">
+          <span>
+            参考予測: {names[0]} <strong>{pct(outlook.win)}</strong>
+            {outlook.draw > 0.005 ? ` ・ 引分 ${pct(outlook.draw)}` : ''} ・ {names[1]} <strong>{pct(outlook.loss)}</strong>
+          </span>
+          <span className="muted small-text">推移を見る</span>
+        </summary>
+        <p className="muted small-text">
+          今季の種別勝率から計算 (このカードを除く{seasonGames < 20 ? '・データ少なめ' : ''})。
+        </p>
+        <CardTrail steps={trail} names={names} labelOf={(schid) => slotLabel(data.season, schid)} basis="今季の種別ごとの勝率 (このカードを除く) から計算した参考値です。" />
+      </details>
+
+      {upcoming.length > 0 ? (
+        <div className="upcoming" data-testid="upcoming">
+          <h3 className="section-mini">このあとの出場予定{minutesPerGame ? ` (1ゲーム 約${Math.round(minutesPerGame)}分)` : ''}</h3>
+          <ol className="plain small-text">
+            {upcoming.map((slot, index) => {
+              const a = orderOf(card.teams[0].id, slot.schid);
+              const b = orderOf(card.teams[1].id, slot.schid);
+              return (
+                <li key={slot.schid}>
+                  <strong>{slot.label}</strong> {a?.members.length ? withAverage(card.teams[0].id, a.members) : '(未提出)'} vs {b?.members.length ? withAverage(card.teams[1].id, b.members) : '(未提出)'}
+                  {minutesPerGame ? <span className="muted"> ・ 約{Math.round(minutesPerGame * (index + (card.current ? 1 : 0)))}分後</span> : null}
+                </li>
+              );
+            })}
+          </ol>
+          <p className="muted small-text">
+            オーダーは n01 に提出された内容。{anyAverage ? '( ) 内は今季の平均 (n01 公式)。' : ''}時刻はこの対戦の終了ゲームの平均から計算した目安です。
+          </p>
+        </div>
       ) : null}
 
       {events.length > 0 ? (
@@ -425,25 +586,6 @@ function FocusCard({ card, data, registered, todayCards, factory, api }: { card:
               </li>
             ))}
           </ol>
-        </div>
-      ) : null}
-
-      {upcoming.length > 0 ? (
-        <div className="upcoming" data-testid="upcoming">
-          <h3 className="section-mini">このあとの出場予定{minutesPerGame ? ` (1ゲーム 約${Math.round(minutesPerGame)}分)` : ''}</h3>
-          <ol className="plain small-text">
-            {upcoming.map((slot, index) => {
-              const a = orderOf(card.teams[0].id, slot.schid);
-              const b = orderOf(card.teams[1].id, slot.schid);
-              return (
-                <li key={slot.schid}>
-                  <strong>{slot.label}</strong> {a?.members.join('・') || '(未提出)'} vs {b?.members.join('・') || '(未提出)'}
-                  {minutesPerGame ? <span className="muted"> ・ 約{Math.round(minutesPerGame * (index + (card.current ? 1 : 0)))}分後</span> : null}
-                </li>
-              );
-            })}
-          </ol>
-          <p className="muted small-text">オーダーは n01 に提出された内容。時刻はこの対戦の終了ゲームの平均から計算した目安です。</p>
         </div>
       ) : null}
 

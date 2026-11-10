@@ -212,6 +212,9 @@ test.describe('U02: the live score sheet follows the newest visit', () => {
     await expect.poll(() => gap(box)).toBeLessThanOrEqual(2);
 
     // Reading history, then the next game of the card starts: the new game opens at its newest.
+    // (After the resize the top of the box may sit under the header and the tiles that stay
+    // below it: put the box in the open, where a finger can reach it.)
+    await box.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await readHistory(page, box, isMobile);
     await expect.poll(() => following(box)).toBe('false');
     game.mid = 'c003_sg01';
