@@ -59,10 +59,16 @@ export interface NightOptions {
    * for a few seconds it still calls Singles 1 unfinished and does not hold Singles 2.
    */
   nextGameStarted?: () => boolean;
+  /** A third card today (c006, Corks – Bulls): its team game played, the next not started. */
+  thirdCard?: boolean;
 }
 
 export async function serveNight(page: Page, options: NightOptions = {}): Promise<string[]> {
   const log: string[] = [];
+  const third = (): unknown[] =>
+    options.thirdCard
+      ? [gameRow('c006', 'CCCC', 'BBBB', 'tm01', [side('CCCC', [['c1', '加藤 健'], ['c2', '木村 守'], ['c3', '工藤 仁'], ['c4', '小林 学']], 1, 1001, 33), side('BBBB', [['b1', '佐藤 B1'], ['b2', '鈴木 B2'], ['b3', '瀬川 B3'], ['b4', '曽根 B4']], 0, 692, 30)], { start: 1_799_999_000, mid: 'c006_tm01' })]
+      : [];
   const c001 = c001Rows().map((row) => ({ ...(row as object), tmid: `${TDID}_lg_0_c001_AAAA_BBBB` }));
   await page.route(`${N01_API_BASE_URL}/**`, async (route) => {
     const url = new URL(route.request().url());
@@ -86,8 +92,8 @@ export async function serveNight(page: Page, options: NightOptions = {}): Promis
     else if (operation === 'league/schedule/get') body = fixtures();
     else if (operation === 'tournament/standings')
       body = { result: 0, tdid: TDID, groups: [{ kind: 'lg', index: 0, title: 'A Division', players: [{ tpid: 'AAAA', name: 'Arrows', rank: 1, p: 1, w: 1, d: 0, l: 0, pts: 5 }, { tpid: 'BBBB', name: 'Bulls', rank: 2, p: 1, w: 0, d: 0, l: 1, pts: 2 }, { tpid: 'CCCC', name: 'Corks', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 }, { tpid: 'DDDD', name: 'Doubles', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 }] }] };
-    else if (operation === 'match/list' && q.get('startTime__gte')) body = list(today());
-    else if (operation === 'match/list') body = list([...c001, ...today()]);
+    else if (operation === 'match/list' && q.get('startTime__gte')) body = list([...today(), ...third()]);
+    else if (operation === 'match/list') body = list([...c001, ...today(), ...third()]);
     else if (operation === 'match/throws') {
       const mid = q.get('mid') ?? '';
       const live = mid === 'c003_sg01';

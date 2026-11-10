@@ -8268,24 +8268,25 @@ ul.plain {
 }
 
 /* Today's board: with two or more cards on a very wide screen, the cards become a column on the
-   left and the chosen card fills the rest (the live sheet then splits in two by itself). */
+   left and the chosen card fills the rest (the live sheet then splits in two by itself). Not
+   while two cards are shown side by side: the tiles then stay a row on top. */
 @media (min-width: 1500px) {
-  .app-main.wide:has(.live-hub > .board > li + li) {
+  .app-main.wide:has(.live-hub:not(.is-pair) > .board > li + li) {
     max-width: 1560px;
   }
 
-  .live-hub:has(> .board > li + li) {
+  .live-hub:not(.is-pair):has(> .board > li + li) {
     display: grid;
     grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
     gap: 12px 16px;
     align-items: start;
   }
 
-  .live-hub:has(> .board > li + li) > * {
+  .live-hub:not(.is-pair):has(> .board > li + li) > * {
     grid-column: 1 / -1;
   }
 
-  .live-hub:has(> .board > li + li) > .board {
+  .live-hub:not(.is-pair):has(> .board > li + li) > .board {
     grid-column: 1;
     grid-auto-flow: row;
     grid-auto-columns: auto;
@@ -8296,7 +8297,58 @@ ul.plain {
     overflow-y: auto;
   }
 
-  .live-hub:has(> .board > li + li) > .focus-card {
+  .live-hub:not(.is-pair):has(> .board > li + li) > .focus-card {
     grid-column: 2;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Two cards side by side (large screens, 「2 カードを並べる」)          */
+/* Each pane keeps the single-column sheet; the page uses the width.   */
+/* ------------------------------------------------------------------ */
+.live-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.pair-toggle {
+  min-height: 36px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.pane-tag {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  padding: 1px 8px;
+  border-radius: 0 10px 0 8px;
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-size: 0.75em;
+  font-weight: 800;
+}
+
+.board-tile:has(.pane-tag) .s {
+  margin-top: 10px;
+}
+
+.focus-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (min-width: 1200px) {
+  .app-main.wide:has(.live-hub.is-pair) {
+    max-width: min(1840px, calc(100vw - 32px));
+  }
+
+  .live-hub.is-pair > .board {
+    grid-auto-columns: minmax(220px, 280px);
   }
 }
