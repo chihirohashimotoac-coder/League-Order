@@ -181,7 +181,9 @@ export function LiveTab({
   const paneOf = (tmid: string): 'left' | 'right' | null => (focus?.tmid === tmid ? 'left' : right?.tmid === tmid ? 'right' : null);
   const pick = (tmid: string): void => {
     if (!pair) {
+      // One card shown: it is the left pane's card, and the one just picked (kept when widened).
       setChosen(tmid);
+      setLastSet('left');
       return;
     }
     if (paneOf(tmid)) return;
