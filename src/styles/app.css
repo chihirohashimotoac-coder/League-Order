@@ -8352,3 +8352,540 @@ ul.plain {
     grid-auto-columns: minmax(220px, 280px);
   }
 }
+
+/* ===========================================================================
+   v1.10.0: UI/UX audit 2026-11-12 (three rounds)
+   =========================================================================== */
+
+/* --- 観戦: the bar — what is watched, the season, refresh ------------------- */
+.watch-bar {
+  flex-wrap: wrap;
+}
+.watch-bar .watch-target {
+  min-width: 0;
+  max-width: 100%;
+}
+.watch-bar.has-season .watch-target {
+  flex: 0 1 auto;
+  max-width: 46%;
+}
+.watch-target-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A native select under a readable label: the closed control shows the short name, the list it
+   opens shows every full title. */
+.season-pick {
+  position: relative;
+  flex: 1 1 140px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap-target);
+  padding: 0 10px;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  font-size: 14px;
+  font-weight: 700;
+}
+.season-pick-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.season-pick select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.season-pick:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.watch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* --- 日程・結果: the next round first ---------------------------------------- */
+.next-round {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--color-accent);
+  border-radius: 12px;
+  background: var(--color-accent-tint);
+}
+.next-round .round {
+  margin: 0;
+}
+.next-round-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+.list-divider {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+}
+.match-row:focus-visible,
+.path-row:focus-visible,
+.division-summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* --- Match center ----------------------------------------------------------- */
+.match-center-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.copy-link {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.copy-link-url {
+  width: min(100%, 420px);
+  font-size: 12px;
+}
+.match-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.match-body.is-split {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.match-body.is-split .game-list {
+  position: sticky;
+  top: calc(72px + var(--safe-top));
+}
+.match-body.is-split .game-row {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) auto minmax(0, 1fr);
+}
+.match-body.is-split .game-row[aria-expanded='true'] {
+  border-color: var(--color-accent);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+  background: var(--color-accent-tint);
+}
+.game-row[aria-expanded='true'] {
+  border-color: var(--color-accent);
+}
+.game-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 4px;
+  min-width: 0;
+}
+.game-pane {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-1);
+}
+.game-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+.game-panel-head .slot {
+  font-weight: 700;
+}
+.game-panel-head .duel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  font-size: 1.05em;
+}
+.game-panel-head .duel > span:last-child {
+  text-align: right;
+}
+.game-panel-head .duel strong {
+  font-size: 1.4em;
+  font-variant-numeric: tabular-nums;
+}
+.game-panel-head .won {
+  font-weight: 800;
+}
+.gv-sheet-title {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.leg-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.leg-chips .chip {
+  flex: none;
+}
+
+/* --- Live: each name above its own points left -------------------------------- */
+.ns-left {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  padding-top: 4px;
+}
+.ns-col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  gap: 2px;
+}
+.ns-col.side-0 {
+  grid-column: 1;
+  grid-row: 1;
+}
+.ns-col.side-1 {
+  grid-column: 3;
+  grid-row: 1;
+}
+.ns-name {
+  color: var(--color-paper);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+.ns-left > .ns-legs {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  color: var(--color-paper);
+  font-size: 1.9em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  padding: 0 4px;
+}
+.ns-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 4px 10px 6px;
+  background: var(--color-text);
+  color: var(--color-paper);
+  font-size: 13px;
+}
+.ns-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ns-status.tone-ok .ns-status-dot {
+  background: #5fd38d;
+}
+.ns-status.tone-error {
+  background: var(--color-danger);
+}
+.ns-status.tone-paused .ns-status-dot {
+  background: var(--color-warning-fill);
+}
+.ns-status-time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.92;
+}
+
+/* --- 順位 ------------------------------------------------------------------- */
+.standings .source-row th {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: left;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.standings .source.official {
+  color: var(--color-text-secondary);
+}
+.standings th.own-calc,
+.standings td.own-calc {
+  background: var(--color-accent-tint);
+}
+.standings .source.own-calc {
+  color: var(--color-accent-text);
+  border-left: 2px solid var(--color-accent);
+}
+.standings th.own-calc:first-of-type {
+  border-left: 2px solid var(--color-accent);
+}
+.standings td.points {
+  font-weight: 800;
+}
+.th-sub,
+.td-sub {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+.standings.is-narrow th,
+.standings.is-narrow td {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.standings.is-narrow tbody th {
+  max-width: 7.5em;
+  overflow-wrap: anywhere;
+}
+.standings-split {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.standings-summary {
+  position: sticky;
+  top: calc(72px + var(--safe-top));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.division-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.division-summary[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+.division-summary-title {
+  font-weight: 800;
+}
+.division-summary-rows {
+  display: grid;
+  gap: 1px;
+  font-size: 12.5px;
+}
+.division-summary-row {
+  display: grid;
+  grid-template-columns: 1.6em minmax(0, 1fr) auto;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.division-summary-row .n {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.division-summary-row.own {
+  color: var(--color-accent-text);
+  font-weight: 700;
+}
+.round-robin[open] > summary {
+  margin-bottom: 6px;
+}
+
+/* --- ランキングの順位列 ------------------------------------------------------ */
+.rank-head {
+  white-space: nowrap;
+}
+.rank-table tr.me {
+  background: var(--color-accent-tint);
+}
+
+/* --- Team sheet: the season it describes ------------------------------------- */
+.sheet-season {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-accent-tint);
+}
+
+/* --- 大会: rounds, search, the chosen match beside them ----------------------- */
+.rounds {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.rounds-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.round-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.round-chips .chip {
+  flex: none;
+}
+.rounds.is-split {
+  display: grid;
+  grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.rounds.is-split .match-row[aria-current='true'] {
+  border-color: var(--color-accent);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+  background: var(--color-accent-tint);
+}
+.rounds-pane {
+  position: sticky;
+  top: calc(72px + var(--safe-top));
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-1);
+}
+.rounds-pane-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.rounds-pane-empty {
+  margin: 24px 8px;
+}
+/* Names and the score of a match: close together on a wide list, not at its two ends. */
+.duel-row .match-teams {
+  grid-template-columns: minmax(0, 1fr) 4.5em minmax(0, 1fr);
+  justify-items: stretch;
+}
+.duel-row .match-teams > span:first-child {
+  text-align: right;
+}
+.duel-row .match-score {
+  text-align: center;
+}
+.duel-row .match-teams > span:last-child {
+  text-align: left;
+}
+@media (min-width: 900px) {
+  .duel-row .match-teams {
+    max-width: 640px;
+    margin: 0 auto;
+    width: 100%;
+  }
+}
+.bracket-path {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 8px;
+}
+.bracket-path ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.path-row {
+  display: grid;
+  grid-template-columns: 9em minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.path-label {
+  color: var(--color-text-secondary);
+  font-weight: 700;
+}
+.stats-split {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+@media (min-width: 1100px) {
+  .stats-split.has-pick {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .stats-split.has-pick .picked-player {
+    position: sticky;
+    top: calc(72px + var(--safe-top));
+  }
+}
+.picked-player {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-accent);
+  border-radius: 12px;
+  background: var(--color-surface-1);
+}
+.picked-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.picked-head strong {
+  display: block;
+  font-size: 1.1em;
+}
+.picked-player .match-list > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

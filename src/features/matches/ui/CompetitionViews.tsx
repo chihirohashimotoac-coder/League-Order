@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { onRadioGroupKeyDown, rovingTabIndex } from '../../../components/ui';
 import { describeN01Error } from '../../../integrations/n01/client';
 import type { MatchesApi } from '../api';
 import type { CompetitionDoc, CompetitionMatch, StandingGroup } from '../competition';
-import { TTYPE_LABELS, groupMatches, stageLabel } from '../competition';
+import { TTYPE_LABELS, bracketLinks, groupMatches, matchesOfPlayer, stageLabel } from '../competition';
+import type { WatchLink } from '../watchLink';
+import { watchLinkUrl } from '../watchLink';
 import type { GameRow } from '../parse';
 import type { MatchesApiFactory } from '../environment';
 import type { PlayerLine, StatsSource } from './useMatchContext';
 import { formatClock, formatRate, useFollowed, usePlayerStats } from './useMatchContext';
-import { RankingFooter, RankingSearch, rankThenSearch, useShownCount } from './rankingList';
+import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch, useShownCount } from './rankingList';
+import { CopyLink } from './CopyLink';
+import { MatchPane } from './MatchSheet';
 import { ListCoverage, listIncomplete } from './ListCoverage';
 import type { ListCoverageState } from './ListCoverage';
 
@@ -26,9 +31,16 @@ const FINISHED = 40;
 
 export type HubTab = 'live' | 'results' | 'standings' | 'stats';
 
-function MatchRow({ match, onOpen }: { match: CompetitionMatch; onOpen: () => void }): React.JSX.Element {
+function MatchRow({ match, onOpen, selected = false }: { match: CompetitionMatch; onOpen: () => void; selected?: boolean }): React.JSX.Element {
   return (
-    <button type="button" className={`match-row state-${match.finished ? 'official' : 'live'}`} onClick={onOpen} data-testid="competition-match">
+    <button
+      type="button"
+      className={`match-row duel-row state-${match.finished ? 'official' : 'live'}`}
+      aria-current={selected ? 'true' : undefined}
+      onClick={onOpen}
+      data-testid="competition-match"
+      data-match-key={match.key}
+    >
       <span className="match-teams">
         <span>{match.names[0]}</span>
         <span className="match-score">
@@ -39,7 +51,7 @@ function MatchRow({ match, onOpen }: { match: CompetitionMatch; onOpen: () => vo
       <span className="match-tags">
         <span className={`tag state-${match.finished ? 'official' : 'live'}`}>{match.finished ? '終了' : '進行中'}</span>
         {match.games.length > 1 ? <span className="muted small-text">{match.games.length} ゲーム</span> : null}
-        <span className="muted small-text">{formatClock(match.startTime ? match.startTime * 1000 : null)}</span>
+        <span className="muted small-text">{match.startTime ? `開始 ${formatClock(match.startTime * 1000)}` : '開始時刻 未取得'}</span>
       </span>
     </button>
   );
@@ -66,16 +78,46 @@ function CardGames({ match, onGame }: { match: CompetitionMatch; onGame: (game: 
   );
 }
 
+/** The names a match is found by: both entries and every player of its games. */
+function matchNames(match: CompetitionMatch): string {
+  return [...match.names, ...match.games.flatMap((game) => game.sides.flatMap((side) => [side.name, ...side.members.map((member) => member.name)]))].join(' ');
+}
+
+/** Who a ranking row is, for following them to their matches: the public id, never the name alone. */
+export interface PickedPlayer {
+  oid: string;
+  name: string;
+  unit: 'entry' | 'member';
+  rank: number;
+}
+
 export function TournamentHub({
   api,
+  factory,
   tdid,
   tab,
   onGame,
+  selectedMid = null,
+  inline = false,
+  onCloseMatch,
+  link,
+  onTitle,
 }: {
   api: MatchesApi;
+  /** For the match shown in place on a large screen. */
+  factory?: MatchesApiFactory;
   tdid: string;
   tab: HubTab;
   onGame: (mid: string, title?: string) => void;
+  /** The match shown beside the rounds (large screens); `null` = none chosen. */
+  selectedMid?: string | null;
+  /** True when the chosen match is shown in place (`selectedMid`), not in a sheet. */
+  inline?: boolean;
+  onCloseMatch?: () => void;
+  /** The league / season or tournament a copied link starts from. */
+  link?: WatchLink;
+  /** Reports the competition's title once it is read. */
+  onTitle?: (title: string) => void;
 }): React.JSX.Element {
   const [doc, setDoc] = useState<CompetitionDoc | null>(null);
   const [rows, setRows] = useState<GameRow[] | null>(null);
@@ -84,6 +126,17 @@ export function TournamentHub({
   const [error, setError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  // What is searched and chosen is the hub's, not a tab's: it is still there after a visit to
+  // another tab of the same competition.
+  const [matchQuery, setMatchQuery] = useState('');
+  const [stage, setStage] = useState<string>('all');
+  const [statsQuery, setStatsQuery] = useState('');
+  const [picked, setPicked] = useState<PickedPlayer | null>(null);
+  const reportTitle = useRef(onTitle);
+  reportTitle.current = onTitle;
+  useEffect(() => {
+    if (doc) reportTitle.current?.(doc.title);
+  }, [doc]);
 
   // The document once; the games now, then every 10 s while a game is in progress, every 60 s
   // while the event runs with nothing on (before the first game, between rounds) — a game that
@@ -145,17 +198,47 @@ export function TournamentHub({
   if (error && !rows) return <p className="small-text" role="alert">取得エラー: {error}</p>;
   if (!rows || !doc) return <p className="muted small-text">読み込み中…</p>;
 
+  const labelOf = (match: CompetitionMatch): string => (match.place ? stageLabel(match.place, { rrGroups: doc.rrGroups, divisions: doc.divisions, rounds: doc.rounds }) : 'その他');
   const stages = new Map<string, CompetitionMatch[]>();
   for (const match of matches) {
-    const label = match.place ? stageLabel(match.place, { rrGroups: doc.rrGroups, divisions: doc.divisions, rounds: doc.rounds }) : 'その他';
+    const label = labelOf(match);
     stages.set(label, [...(stages.get(label) ?? []), match]);
   }
+  // The latest round first, as before.
+  const stageList = [...stages.entries()].reverse();
+  const shownStage = stage !== 'all' && stages.has(stage) ? stage : 'all';
+  const visibleStages = stageList
+    .filter(([label]) => shownStage === 'all' || label === shownStage)
+    .map(([label, list]) => [label, [...list].reverse().filter((match) => matchesQuery(matchNames(match), matchQuery))] as const)
+    .filter(([, list]) => list.length > 0);
+  const visibleCount = visibleStages.reduce((sum, [, list]) => sum + list.length, 0);
   const liveMatches = matches.filter((match) => !match.finished);
   const opened = open ? matches.find((match) => match.key === open) ?? null : null;
+  const titleOf = (match: CompetitionMatch): string => `${match.names[0]} vs ${match.names[1]}`;
   const openMatch = (match: CompetitionMatch): void => {
-    if (match.games.length === 1) onGame(match.games[0].mid, `${match.names[0]} vs ${match.names[1]}`);
+    if (match.games.length === 1) onGame(match.games[0].mid, titleOf(match));
     else setOpen(match.key === open ? null : match.key);
   };
+  const selectedMatch = selectedMid ? (matches.find((match) => match.games.some((game) => game.mid === selectedMid)) ?? null) : null;
+  const links = selectedMatch ? bracketLinks(selectedMatch, matches) : null;
+  const pickedMatches = picked ? matchesOfPlayer(matches, picked) : [];
+  const rowOf = (match: CompetitionMatch): React.JSX.Element => (
+    <li key={match.key}>
+      <MatchRow match={match} onOpen={() => openMatch(match)} selected={inline && selectedMatch?.key === match.key} />
+      {opened?.key === match.key ? <CardGames match={match} onGame={(game) => onGame(game.mid, titleOf(match))} /> : null}
+    </li>
+  );
+  const pathRow = (label: string, match: CompetitionMatch): React.JSX.Element => (
+    <li key={`${label}:${match.key}`}>
+      <button type="button" className="path-row" onClick={() => openMatch(match)}>
+        <span className="path-label">{label}</span>
+        <span className="path-match">
+          {match.names[0]} <strong>{match.score[0]} - {match.score[1]}</strong> {match.names[1]}
+        </span>
+        <span className="muted small-text">{labelOf(match)}</span>
+      </button>
+    </li>
+  );
 
   return (
     <div className="competition" data-testid="tournament-hub">
@@ -165,7 +248,7 @@ export function TournamentHub({
           <>
             {' ・ '}
             <a href={doc.url} target="_blank" rel="noreferrer noopener">
-              n01 で開く
+              n01 の大会ページを開く
             </a>
           </>
         ) : null}
@@ -179,31 +262,74 @@ export function TournamentHub({
             {doc.status === FINISHED ? 'この大会は終了しています。' : '始まると自動で表示します。'}「試合」タブで結果を見られます。
           </p>
         ) : (
-          <ul className="match-list">
-            {liveMatches.map((match) => (
-              <li key={match.key}>
-                <MatchRow match={match} onOpen={() => openMatch(match)} />
-                {opened?.key === match.key ? <CardGames match={match} onGame={(game) => onGame(game.mid)} /> : null}
-              </li>
-            ))}
-          </ul>
+          <ul className="match-list">{liveMatches.map(rowOf)}</ul>
         )
       ) : null}
-      {tab === 'results'
-        ? [...stages.entries()].reverse().map(([label, list]) => (
-            <section key={label} className="round">
-              <h3 className="section-mini">{label}</h3>
-              <ul className="match-list">
-                {[...list].reverse().map((match) => (
-                  <li key={match.key}>
-                    <MatchRow match={match} onOpen={() => openMatch(match)} />
-                    {opened?.key === match.key ? <CardGames match={match} onGame={(game) => onGame(game.mid)} /> : null}
-                  </li>
+      {tab === 'results' ? (
+        <div className={`rounds${inline ? ' is-split' : ''}`} data-testid="rounds">
+          <div className="rounds-list">
+            <RankingSearch value={matchQuery} onChange={setMatchQuery} label={doc.teamGames ? 'チーム名・選手名で試合を検索' : '選手名で試合を検索'} />
+            {stageList.length > 1 ? (
+              <div className="chip-row round-chips" role="radiogroup" aria-label="ラウンド" onKeyDown={onRadioGroupKeyDown} data-testid="round-chips">
+                <button type="button" className="chip" role="radio" aria-checked={shownStage === 'all'} tabIndex={rovingTabIndex(shownStage === 'all', 0, true)} onClick={() => setStage('all')}>
+                  すべて <span className="badge">{matches.length}</span>
+                </button>
+                {stageList.map(([label, list]) => (
+                  <button key={label} type="button" className="chip" role="radio" aria-checked={shownStage === label} tabIndex={rovingTabIndex(shownStage === label, 1, true)} onClick={() => setStage(label)}>
+                    {label} <span className="badge">{list.length}</span>
+                  </button>
                 ))}
-              </ul>
-            </section>
-          ))
-        : null}
+              </div>
+            ) : null}
+            <p className="muted small-text" aria-live="polite" data-testid="rounds-count">
+              {matchQuery.trim() !== ''
+                ? visibleCount === 0
+                  ? `「${matchQuery.trim()}」に一致する試合はありません (取得済み ${matches.length} 試合)`
+                  : `「${matchQuery.trim()}」に一致 ${visibleCount} 試合 (取得済み ${matches.length} 試合)`
+                : `${visibleCount} / ${matches.length} 試合を表示`}
+              {listIncomplete(coverage) ? ' ・ 一覧の一部は未取得' : ''}
+            </p>
+            {visibleStages.map(([label, list]) => (
+              <section key={label} className="round">
+                <h3 className="section-mini">{label}</h3>
+                <ul className="match-list">{list.map(rowOf)}</ul>
+              </section>
+            ))}
+          </div>
+          {inline ? (
+            <div className="rounds-pane" data-testid="rounds-pane">
+              {selectedMid && factory ? (
+                <>
+                  <div className="rounds-pane-bar">
+                    <strong>{selectedMatch ? `${labelOf(selectedMatch)} ・ ${titleOf(selectedMatch)}` : '選択した試合'}</strong>
+                    <span className="row" style={{ gap: 8 }}>
+                      {link ? <CopyLink url={watchLinkUrl({ ...link, mid: selectedMid })} label="リンクをコピー" /> : null}
+                      {onCloseMatch ? (
+                        <button type="button" className="btn small ghost" onClick={onCloseMatch}>
+                          閉じる
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                  {links ? (
+                    <section className="bracket-path" aria-label="勝ち上がり" data-testid="bracket-path">
+                      <h3 className="section-mini">勝ち上がり (この試合の前後)</h3>
+                      <ul className="plain">
+                        {links.before.map((before, side) => (before && selectedMatch ? pathRow(`${selectedMatch.names[side]} の前の試合`, before) : null))}
+                        {links.after ? pathRow('勝者の次の試合', links.after) : null}
+                      </ul>
+                      <p className="muted small-text">同じエントリー ID が前後のラウンドに 1 試合だけある場合に表示します (n01 の公開データ)。</p>
+                    </section>
+                  ) : null}
+                  <MatchPane key={selectedMid} mid={selectedMid} factory={factory} />
+                </>
+              ) : (
+                <p className="muted small-text rounds-pane-empty">左の一覧から試合を選ぶと、ここにスコアと Leg ごとの記録を表示します。ラウンドと選んだ試合を並べて確認できます。</p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {tab === 'standings' ? (
         standings && standings.length > 0 ? (
           standings.map((group) => (
@@ -242,16 +368,69 @@ export function TournamentHub({
             </section>
           ))
         ) : (
-          <p className="small-text muted">この大会には順位表がありません (トーナメント形式)。「試合」タブで勝ち上がりを見られます。</p>
+          <p className="small-text muted">
+            この大会には順位表がありません (トーナメント形式)。大会の最終順位は「試合」タブの勝ち上がりで確認できます。「スタッツ」の 01 平均順位は成績の並びで、大会の順位ではありません。
+          </p>
         )
       ) : null}
-      {tab === 'stats' ? <PlayerRanking state={stats} entries={doc.entries} teamGames={doc.teamGames} /> : null}
+      {tab === 'stats' ? (
+        <div className={`stats-split${picked ? ' has-pick' : ''}`}>
+          <PlayerRanking state={stats} entries={doc.entries} teamGames={doc.teamGames} query={statsQuery} onQuery={setStatsQuery} picked={picked} onPick={setPicked} />
+          {picked ? (
+            <section className="picked-player" aria-label={`${picked.name} の試合`} data-testid="picked-player">
+              <header className="picked-head">
+                <span>
+                  <span className="kicker">選択中の{picked.unit === 'entry' ? 'エントリー' : '選手'}</span>
+                  <strong>{picked.name}</strong>
+                  <span className="muted small-text"> 01 平均順位 {picked.rank} 位</span>
+                </span>
+                <button type="button" className="btn small ghost" onClick={() => setPicked(null)}>
+                  選択を解除
+                </button>
+              </header>
+              {pickedMatches.length > 0 ? (
+                <>
+                  <p className="muted small-text">この大会の試合 {pickedMatches.length} 件 (新しいラウンド順)。試合を選ぶとスコアと Leg の記録を開きます。</p>
+                  <ul className="match-list">
+                    {[...pickedMatches].reverse().map((match) => (
+                      <li key={match.key}>
+                        <span className="muted small-text">{labelOf(match)}</span>
+                        <MatchRow match={match} onOpen={() => openMatch(match)} />
+                        {opened?.key === match.key ? <CardGames match={match} onGame={(game) => onGame(game.mid, titleOf(match))} /> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="small-text" data-testid="picked-unmatched">
+                  この{picked.unit === 'entry' ? 'エントリー' : '選手'}の試合を、公開データの ID では特定できませんでした。同じ名前の別人を取り違えないよう、名前だけでは照合しません。「試合」タブの検索で名前から探せます。
+                </p>
+              )}
+            </section>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function PlayerRanking({ state, entries, teamGames }: { state: ReturnType<typeof usePlayerStats>; entries: Map<string, string>; teamGames: boolean }): React.JSX.Element {
-  const [query, setQuery] = useState('');
+function PlayerRanking({
+  state,
+  entries,
+  teamGames,
+  query,
+  onQuery,
+  picked,
+  onPick,
+}: {
+  state: ReturnType<typeof usePlayerStats>;
+  entries: Map<string, string>;
+  teamGames: boolean;
+  query: string;
+  onQuery: (next: string) => void;
+  picked: PickedPlayer | null;
+  onPick: (next: PickedPlayer | null) => void;
+}): React.JSX.Element {
   const [shown, setShown] = useShownCount(query);
   if (state.kind === 'loading') return <p className="muted small-text">成績を読み込み中…</p>;
   if (state.kind === 'error') return <p className="small-text" role="alert">取得エラー: {state.message}</p>;
@@ -268,15 +447,19 @@ function PlayerRanking({ state, entries, teamGames }: { state: ReturnType<typeof
     );
   }
   const matched = rankThenSearch(sorted, query, nameOf);
+  const unit: PickedPlayer['unit'] = state.unit ?? (teamGames ? 'member' : 'entry');
   return (
     <div className="ranking" data-testid="player-ranking">
-      <RankingSearch value={query} onChange={setQuery} label={teamGames ? '選手名で検索' : '名前で検索'} />
+      <RankingSearch value={query} onChange={onQuery} label={teamGames ? '選手名で検索' : '名前で検索'} />
       {matched.length > 0 ? (
         <div className="table-scroll">
           <table className="rank-table small-text">
             <thead>
               <tr>
-                <th scope="col">#</th>
+                <th scope="col" className="rank-head" data-testid="rank-head">
+                  01 平均
+                  <span className="th-sub">順位</span>
+                </th>
                 <th scope="col">{teamGames ? '選手' : 'エントリー'}</th>
                 <th scope="col">01 平均</th>
                 <th scope="col">180</th>
@@ -286,10 +469,12 @@ function PlayerRanking({ state, entries, teamGames }: { state: ReturnType<typeof
             </thead>
             <tbody>
               {matched.slice(0, shown).map(({ rank, item: row }) => (
-                <tr key={row.oid}>
+                <tr key={row.oid} className={picked?.oid === row.oid ? 'me' : ''} aria-current={picked?.oid === row.oid ? 'true' : undefined}>
                   <td>{rank}</td>
                   <th scope="row">
-                    {nameOf(row)}
+                    <button type="button" className="linklike" aria-pressed={picked?.oid === row.oid} onClick={() => onPick(picked?.oid === row.oid ? null : { oid: row.oid, name: nameOf(row), unit, rank })}>
+                      {nameOf(row)}
+                    </button>
                     {row.teamId && entries.get(row.teamId) && entries.get(row.teamId) !== row.name ? <span className="muted"> {entries.get(row.teamId)}</span> : null}
                   </th>
                   <td className="num">{formatRate(avg(row))}</td>
@@ -306,11 +491,13 @@ function PlayerRanking({ state, entries, teamGames }: { state: ReturnType<typeof
       ) : null}
       <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} noun={teamGames ? '選手' : 'エントリー'} />
       <p className="muted small-text">
-        n01 公式の集計 ({teamGames ? '選手単位 player_stats_list' : 'エントリー単位 stats_list'})。順位は 01 平均の順です。
+        n01 公式の集計 ({teamGames ? '選手単位 player_stats_list' : 'エントリー単位 stats_list'})。左端は 01 平均で並べた順位です (大会の最終順位とは別)。名前を選ぶと、その{teamGames ? '選手' : 'エントリー'}の試合を表示します。
       </p>
     </div>
   );
 }
+
+const formatTime = (ms: number): string => new Date(ms).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 /** Everything in progress on n01 now: competitions (open their hub) and single games. */
 export function NowView({ factory, onCompetition, onGame }: { factory: MatchesApiFactory; onCompetition: (tdid: string, title: string) => void; onGame: (mid: string, title?: string) => void }): React.JSX.Element {
@@ -378,7 +565,9 @@ export function NowView({ factory, onCompetition, onGame }: { factory: MatchesAp
                   <span>
                     {row.sides[0].name} {row.sides[0].legsWon ?? 0} - {row.sides[1].legsWon ?? 0} {row.sides[1].name}
                   </span>
-                  <span className="muted small-text">{row.title}</span>
+                  <span className="muted small-text">
+                    {row.title} ・ {row.startTime ? `開始 ${formatClock(row.startTime * 1000)}` : '開始時刻 未取得'}
+                  </span>
                 </button>
               </li>
             ))}
@@ -415,6 +604,9 @@ export function NowView({ factory, onCompetition, onGame }: { factory: MatchesAp
               </span>
               <span className="match-tags">
                 <span className="muted small-text">{row.matchType === 'cricket' ? 'Cricket' : '01'}</span>
+                <span className="muted small-text" data-testid="now-times">
+                  {row.startTime ? `開始 ${formatClock(row.startTime * 1000)}` : '開始時刻 未取得'} ・ {row.updateTime ? `最終更新 ${formatTime(row.updateTime)}` : '更新時刻 未取得'}
+                </span>
               </span>
             </button>
           </li>

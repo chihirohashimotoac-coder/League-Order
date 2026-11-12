@@ -46,6 +46,7 @@ import { MorePage } from './pages/MorePage';
 import { WelcomePage } from './pages/WelcomePage';
 import { ViewerHome, ViewerOrder } from './pages/ViewerPages';
 import type { NextMatchOrder } from './domain/n01/nextMatch';
+import { readWatchLink, replaceWatchLink, useWatchLink } from './features/matches/watchLink';
 
 // Loaded only when the analytics screen is opened: it adds nothing to start-up and makes no
 // network request until then.
@@ -67,7 +68,9 @@ const MatchesEntry = lazy(() => import('./features/matches/ui/MatchesEntry'));
 export function App(): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
-  const [page, setPage] = useState<Page>('home');
+  // A link to a card or a game (new tab, reload) opens 観戦 straight away.
+  const [page, setPage] = useState<Page>(() => (readWatchLink() ? 'watch' : 'home'));
+  const watchLink = useWatchLink();
   const [session, setSession] = useState<UndoableState | null>(null);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   /** The input of the attempt the diagnostics describe (it never replaces the order's own). */
@@ -143,7 +146,15 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     window.scrollTo(0, 0);
     if (page !== 'formats') setFormatToEdit(null);
+    // The address names a card only while 観戦 is shown.
+    if (page !== 'watch' && page !== 'matches' && page !== 'live' && readWatchLink()) replaceWatchLink(null);
   }, [page]);
+
+  // A link arriving while another screen is open (pasted into the address bar, back / forward).
+  const linkKey = watchLink ? JSON.stringify(watchLink) : null;
+  useEffect(() => {
+    if (linkKey) setPage((current) => (current === 'watch' || current === 'matches' || current === 'live' ? current : 'watch'));
+  }, [linkKey]);
 
   // "Delete everything" returns to the first-run state, so nothing from the old data may
   // linger in the working copy.
@@ -159,7 +170,7 @@ export function App(): React.JSX.Element {
 
   // Watching without a team opens on 観戦 (on choosing a league, and again after a reload).
   // Declared after the reset above, which sends a teamless app to ホーム, so this one wins.
-  const viewing = store.ready && !hasTeams && Boolean(store.settings.watch);
+  const viewing = store.ready && !hasTeams && (Boolean(store.settings.watch) || watchLink !== null);
   const wasViewing = useRef(false);
   useEffect(() => {
     if (viewing && !wasViewing.current) setPage('watch');
@@ -574,11 +585,11 @@ export function App(): React.JSX.Element {
   // No team, but a league chosen to watch: the same five tabs as with a team, in the same places.
   // Watching, settings and the change log work as they are; ORDER and the team screens say a
   // team is needed and offer to register one (or the sample) right there.
-  if (!hasTeams && store.settings.watch && !registering) {
+  if (!hasTeams && (store.settings.watch || watchLink) && !registering) {
     const register = (): void => setRegistering(true);
     const viewerPage: Page = page === 'result' ? 'setup' : page === 'players' || page === 'formats' || page === 'pairs' || page === 'history' ? 'more' : page;
     const watching = viewerPage === 'watch' || viewerPage === 'live' || viewerPage === 'matches';
-    const viewerTitle = watching ? store.settings.watch.title : viewerPage === 'home' ? 'ホーム' : PAGE_TITLES[viewerPage];
+    const viewerTitle = watching ? (store.settings.watch?.title ?? PAGE_TITLES.watch) : viewerPage === 'home' ? 'ホーム' : PAGE_TITLES[viewerPage];
     const viewerBack = viewerPage === 'settings' ? BACK_TARGETS.settings : undefined;
     return (
       <div className="app viewer-shell">

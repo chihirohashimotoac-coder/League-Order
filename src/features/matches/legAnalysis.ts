@@ -124,6 +124,12 @@ export interface HighlightGame {
   flip: boolean;
   /** Team names in card order. */
   names: [string, string];
+  /**
+   * The players of each side in card order (from the game row). A visit that carries no thrower
+   * of its own (a singles game) is then credited to the player, not the team; with several
+   * players on the side and no thrower recorded, to the pair — never to one of them by guess.
+   */
+  members?: [string[], string[]];
 }
 
 /** Every candidate in one game; `cardHighlights` merges and ranks a card's candidates. */
@@ -131,10 +137,14 @@ export function gameHighlights(legs: readonly LegLike[], game: HighlightGame): H
   const out: Highlight[] = [];
   const card = (side: 0 | 1): 0 | 1 => (game.flip ? ((1 - side) as 0 | 1) : side);
   const base = (leg: LegLike, side: 0 | 1, round: number) => ({ schid: game.schid, slotLabel: game.slotLabel, leg: leg.index, n01Side: side, cardSide: card(side), round });
+  const sideName = (side: 0 | 1): string => {
+    const players = (game.members?.[card(side)] ?? []).map((name) => name.trim()).filter(Boolean);
+    return players.length > 0 ? players.join(' / ') : game.names[card(side)];
+  };
   for (const leg of legs) {
     if (leg.bull) continue;
     for (const entry of leg.throws) {
-      const who = entry.member ?? game.names[card(entry.side)];
+      const who = entry.member ?? sideName(entry.side);
       if (entry.kind === '01') {
         if (entry.score === 180) out.push({ ...base(leg, entry.side, entry.round), id: `${game.schid}:${leg.index}:${entry.side}:${entry.round}:180`, kind: 'ton80', who, value: 1, start: leg.start?.[entry.side] ?? null, detail: '180' });
         if (entry.finish && entry.score >= HIGH_OUT_AT)
@@ -153,7 +163,7 @@ export function gameHighlights(legs: readonly LegLike[], game: HighlightGame): H
         ...base(leg, winner, finishVisit.round),
         id: `${game.schid}:${leg.index}:fast`,
         kind: 'fastLeg',
-        who: finishVisit.member ?? game.names[card(winner)],
+        who: finishVisit.member ?? sideName(winner),
         value: darts,
         start: leg.start?.[winner] ?? before(leg.throws.find((entry): entry is Visit01 => entry.kind === '01' && entry.side === winner)!),
         detail: `${darts} 本`,
@@ -173,7 +183,7 @@ export function gameHighlights(legs: readonly LegLike[], game: HighlightGame): H
         ...base(leg, winner, worst.visits),
         id: `${game.schid}:${leg.index}:comeback`,
         kind: 'comeback',
-        who: game.names[card(winner)],
+        who: sideName(winner),
         value: worst.by,
         start: null,
         detail: `残り ${worst.mine} 対 ${worst.theirs} から`,

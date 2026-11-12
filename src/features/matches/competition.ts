@@ -207,6 +207,44 @@ export function groupMatches(rows: readonly GameRow[], entries: Map<string, stri
   });
 }
 
+/** Elimination brackets: a winner of round r plays in round r + 1 of the same bracket. */
+const BRACKET_TTYPES = new Set(['t', 's2', 'dw', 'dl']);
+
+export interface BracketLinks {
+  /** The match each side came through in the round before (row side order), when it is certain. */
+  before: [CompetitionMatch | null, CompetitionMatch | null];
+  /** The match the winner went on to, when it is certain. */
+  after: CompetitionMatch | null;
+}
+
+/**
+ * How a bracket match connects to the rounds around it, read from the entry ids only: the same
+ * entry (`tpid`) in exactly one match of the neighbouring round of the same bracket. Anything
+ * else — round robins, league cards, single matches, an entry without an id, two candidate
+ * matches — gives no connection: none is ever drawn from names or from position in a list.
+ */
+export function bracketLinks(match: CompetitionMatch, all: readonly CompetitionMatch[]): BracketLinks | null {
+  const place = match.place;
+  if (!place || !BRACKET_TTYPES.has(place.ttype)) return null;
+  const sides = match.games[0].sides.map((side) => side.teamId) as [string, string];
+  const inStage = (stage: number, tpid: string): CompetitionMatch | null => {
+    if (!tpid) return null;
+    const hits = all.filter((other) => other.place?.ttype === place.ttype && other.place.stage === stage && other.games[0].sides.some((side) => side.teamId === tpid));
+    return hits.length === 1 ? hits[0] : null;
+  };
+  const winner = match.finished && match.score[0] !== match.score[1] ? sides[match.score[0] > match.score[1] ? 0 : 1] : null;
+  const links: BracketLinks = { before: [inStage(place.stage - 1, sides[0]), inStage(place.stage - 1, sides[1])], after: winner ? inStage(place.stage + 1, winner) : null };
+  return links.before[0] || links.before[1] || links.after ? links : null;
+}
+
+/** The matches of one entry (individual events) or of one team member (team events), by id only. */
+export function matchesOfPlayer(all: readonly CompetitionMatch[], player: { oid: string; unit: 'entry' | 'member' }): CompetitionMatch[] {
+  if (!player.oid) return [];
+  return all.filter((match) =>
+    match.games.some((game) => game.sides.some((side) => (player.unit === 'entry' ? side.teamId === player.oid : side.members.some((member) => member.oid === player.oid)))),
+  );
+}
+
 /** Reads what a viewer pasted: a league, a tournament, or one match (id or n01 page link). */
 export type CompetitionReference = { kind: 'league'; id: string } | { kind: 'tournament'; id: string } | { kind: 'match'; id: string } | null;
 

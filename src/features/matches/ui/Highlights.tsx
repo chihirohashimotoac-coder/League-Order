@@ -44,7 +44,7 @@ export function Highlights({ card, api, onOpen }: { card: MatchCard; api: Matche
         const entry = games[next++];
         try {
           const reply = await api.throws(entry.game!.mid, null, { finished: true });
-          candidates.push(...gameHighlights(reply.legs, { schid: entry.slot.schid, slotLabel: entry.slot.label, flip: entry.flip, names }));
+          candidates.push(...gameHighlights(reply.legs, { schid: entry.slot.schid, slotLabel: entry.slot.label, flip: entry.flip, names, members: entry.members }));
         } catch {
           failed += 1;
         }
@@ -89,6 +89,7 @@ export function Highlights({ card, api, onOpen }: { card: MatchCard; api: Matche
                 <strong>{item.who}</strong> {item.detail}
                 <span className="muted small-text">
                   {' '}
+                  {item.who === card.teams[item.cardSide].name ? '' : `${card.teams[item.cardSide].name} ・ `}
                   {item.slotLabel} L{item.leg + 1}
                 </span>
               </span>

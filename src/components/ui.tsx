@@ -292,6 +292,24 @@ export function onRadioGroupKeyDown(event: ReactKeyboardEvent<HTMLElement>): voi
   radios[next].click();
 }
 
+/**
+ * Arrow-key movement for an ARIA `tablist` of `role="tab"` buttons (WAI-ARIA APG, automatic
+ * activation): Left / Right move focus and select the neighbouring tab, Home / End jump to the
+ * ends. Give the selected tab `tabIndex={0}` and the others `-1`, so Tab enters the list once
+ * and the next Tab leaves it for the panel.
+ */
+export function onTabListKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
+  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft' && event.key !== 'Home' && event.key !== 'End') return;
+  const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]:not([disabled])'));
+  const current = tabs.indexOf(document.activeElement as HTMLElement);
+  if (current < 0 || tabs.length === 0) return;
+  event.preventDefault();
+  const last = tabs.length - 1;
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? last : event.key === 'ArrowRight' ? (current + 1) % tabs.length : (current - 1 + tabs.length) % tabs.length;
+  tabs[next].focus();
+  tabs[next].click();
+}
+
 /** Tab stop of one radio in a roving group: the selected one, else the first. */
 export function rovingTabIndex(selected: boolean, index: number, anySelected: boolean): 0 | -1 {
   return selected || (!anySelected && index === 0) ? 0 : -1;
