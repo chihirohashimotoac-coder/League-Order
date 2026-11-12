@@ -270,13 +270,12 @@ describe('F12: every player of a ranking can be reached', () => {
     await flush();
   }
 
-  it('60 first, then the rest; the 61st and later keep their rank', async () => {
+  it('every entry at once, as many as n01 lists; the last keeps its rank', async () => {
     await open();
     const rows = () => screen.getByTestId('player-ranking').querySelectorAll('tbody tr');
-    expect(rows()).toHaveLength(60);
-    expect(screen.getByTestId('ranking-footer').textContent).toContain('60 / 75 件を表示');
-    fireEvent.click(screen.getByRole('button', { name: 'さらに 15 件' }));
     expect(rows()).toHaveLength(75);
+    expect(screen.getByTestId('ranking-footer').textContent).toContain('75 件を表示');
+    expect(screen.queryByRole('button', { name: /さらに|すべて表示/u })).toBeNull();
     expect(rows()[74].textContent).toContain('75');
     expect(rows()[74].textContent).toContain('Player 075');
   });
@@ -305,7 +304,7 @@ describe('F12: every player of a ranking can be reached', () => {
       await flush();
       await flush();
       const rows = () => screen.getByTestId('stats-tab').querySelectorAll('tbody tr');
-      expect(rows()).toHaveLength(60);
+      expect(rows()).toHaveLength(70);
       fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Member 68' } });
       expect(rows()).toHaveLength(1);
       expect(rows()[0].querySelector('td')?.textContent).toBe('68');
@@ -313,6 +312,45 @@ describe('F12: every player of a ranking can be reached', () => {
       expect(rows()).toHaveLength(1);
       expect(rows()[0].textContent).toContain('Member 68');
     })();
+  });
+
+  it('league スタッツ: every player n01 lists by default; the minimum legs and a missing figure leave no one out silently', async () => {
+    const season = parseSeasonDocument(tournamentDoc(), TDID);
+    const data: SeasonData = { season, fixtures: parseFixtures(fixtures()), games: [], cards: buildCards(season, parseFixtures(fixtures()), []), standings: [], standingsError: null, unreadableGames: 0, truncated: false };
+    // 136 players as in a real season: legs 1…45 (most 45 → minimum 14), one in three has no won leg.
+    const players = Array.from({ length: 136 }, (_, i) => {
+      const leg = (i % 45) + 1;
+      const won = i % 3 === 0 ? 0 : Math.ceil(leg / 2);
+      return { oid: `p${i}`, tpid: i % 2 ? 'AAAA' : 'BBBB', oname: `P${String(i + 1).padStart(3, '0')}`, score: 3000 - i, darts: 100, leg, winLeg: won, best: won ? 18 + (i % 20) : 0 };
+    });
+    const qualified = players.filter((p) => p.leg >= 14).length;
+    const noBest = players.filter((p) => p.best === 0).length;
+    const { api } = apiOf((operation) => {
+      if (operation === 'tournament/stats') return { result: 0, stats: Object.fromEntries(players.map((p) => [p.oid, p])) };
+      if (operation === 'team/player/list') return { result: 0, list: [] };
+      return list([]);
+    });
+    render(<StatsTab data={data} registered={[]} api={api} onTeam={() => undefined} onPlayer={() => undefined} />);
+    await flush();
+    await flush();
+    const tab = screen.getByTestId('stats-tab');
+    const rows = () => tab.querySelectorAll('tbody tr');
+    const footer = () => screen.getByTestId('ranking-footer').textContent;
+    expect(rows()).toHaveLength(136);
+    expect(footer()).toContain('136 人を表示');
+    const box = screen.getByRole('checkbox', { name: /規定 Leg 数以上 \(14 Leg\)/u });
+    expect((box as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(box);
+    expect(rows()).toHaveLength(qualified);
+    expect(footer()).toContain(`${qualified} / 136 人を表示`);
+    fireEvent.click(box);
+    // Best Leg: players with no won leg stay, unranked at the end.
+    fireEvent.click(screen.getByRole('radio', { name: 'Best Leg' }));
+    expect(rows()).toHaveLength(136);
+    const last = rows()[135].querySelectorAll('td');
+    expect(last[0].textContent).toBe('—');
+    expect(last[1].textContent).toBe('—');
+    expect(rows()[136 - noBest - 1].querySelector('td')?.textContent).toBe(String(136 - noBest));
   });
 });
 

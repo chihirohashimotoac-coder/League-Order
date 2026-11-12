@@ -10,7 +10,7 @@ import type { GameRow } from '../parse';
 import type { MatchesApiFactory } from '../environment';
 import type { PlayerLine, StatsSource } from './useMatchContext';
 import { formatClock, formatRate, useFollowed, usePlayerStats } from './useMatchContext';
-import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch, useShownCount } from './rankingList';
+import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './rankingList';
 import { CopyLink } from './CopyLink';
 import { MatchPane } from './MatchSheet';
 import { ListCoverage, listIncomplete } from './ListCoverage';
@@ -431,7 +431,6 @@ function PlayerRanking({
   picked: PickedPlayer | null;
   onPick: (next: PickedPlayer | null) => void;
 }): React.JSX.Element {
-  const [shown, setShown] = useShownCount(query);
   if (state.kind === 'loading') return <p className="muted small-text">成績を読み込み中…</p>;
   if (state.kind === 'error') return <p className="small-text" role="alert">取得エラー: {state.message}</p>;
   const avg = (row: PlayerLine): number | null => (row.line.score !== null && row.line.darts ? (row.line.score / row.line.darts) * 3 : null);
@@ -468,7 +467,7 @@ function PlayerRanking({
               </tr>
             </thead>
             <tbody>
-              {matched.slice(0, shown).map(({ rank, item: row }) => (
+              {matched.map(({ rank, item: row }) => (
                 <tr key={row.oid} className={picked?.oid === row.oid ? 'me' : ''} aria-current={picked?.oid === row.oid ? 'true' : undefined}>
                   <td>{rank}</td>
                   <th scope="row">
@@ -489,7 +488,7 @@ function PlayerRanking({
           </table>
         </div>
       ) : null}
-      <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} noun={teamGames ? '選手' : 'エントリー'} />
+      <RankingFooter matched={matched.length} total={sorted.length} query={query} noun={teamGames ? '選手' : 'エントリー'} />
       <p className="muted small-text">
         n01 公式の集計 ({teamGames ? '選手単位 player_stats_list' : 'エントリー単位 stats_list'})。左端は 01 平均で並べた順位です (大会の最終順位とは別)。名前を選ぶと、その{teamGames ? '選手' : 'エントリー'}の試合を表示します。
       </p>

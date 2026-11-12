@@ -16,7 +16,7 @@ import type { WatchLink } from '../watchLink';
 import { closeWatchLink, pushWatchLink, replaceWatchLink, takeRequestedWatchTab, useWatchLink } from '../watchLink';
 import type { PlayerLine, SeasonData } from './useMatchContext';
 import { formatClock, formatRate, seasonStatsSource, usePlayerStats, useRegisteredTeamMap, useSeasonData, useSeasons } from './useMatchContext';
-import { RankingFooter, RankingSearch, rankThenSearch, useShownCount } from './rankingList';
+import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './rankingList';
 import { LeaguePicker } from './LeaguePicker';
 import { LiveTab } from './LiveTab';
 import type { PlayerRef } from './LiveTab';
@@ -59,7 +59,8 @@ export interface StatsView {
   division: number | 'all';
   qualified: boolean;
 }
-const STATS_VIEW: StatsView = { query: '', sort: 'avg', division: 'all', qualified: true };
+// Every player n01 lists is shown by default; the minimum legs is a filter the viewer turns on.
+const STATS_VIEW: StatsView = { query: '', sort: 'avg', division: 'all', qualified: false };
 
 export default function WatchPage({ initialTab, onNavigate }: { initialTab: WatchTab; onNavigate?: (page: Page) => void }): React.JSX.Element {
   const store = useAppStore();
@@ -652,19 +653,24 @@ export function StatsTab({
   const setDivision = (next: number | 'all'): void => change({ division: next });
   const setQualified = (next: boolean): void => change({ qualified: next });
   const setQuery = (next: string): void => change({ query: next });
-  const [shown, setShown] = useShownCount(`${sort}|${division}|${qualified}|${query}`);
   if (stats.kind === 'loading') return <p className="muted small-text">選手成績を読み込み中…</p>;
   if (stats.kind === 'error') return <p className="small-text" role="alert">取得エラー: {stats.message}</p>;
   const maxLegs = Math.max(0, ...stats.value.map((row) => row.line.leg ?? 0));
   const minLegs = Math.ceil(maxLegs * 0.3);
   // Rank under the filters and the sort first, then search: a searched player keeps their real place.
-  const sorted = stats.value
+  // A player with no figure for the chosen sort (no won leg for Best Leg, no leg thrown second for
+  // Break, …) stays in the list, unranked at the end, so the list keeps n01's count.
+  const filtered = stats.value
     .filter((row) => division === 'all' || row.divisionIndex === division || data.season.divisions[division as number]?.teamIds.includes(row.teamId ?? ''))
     .filter((row) => !qualified || (row.line.leg ?? 0) >= minLegs)
-    .map((row) => ({ row, v: value(row.line, sort) }))
-    .filter((entry) => entry.v !== null && (sort !== 'bestLeg' || (entry.v ?? 0) > 0))
-    .sort((a, b) => (sort === 'bestLeg' ? a.v! - b.v! : b.v! - a.v!));
-  const matched = rankThenSearch(sorted, query, (entry) => entry.row.name);
+    .map((row) => ({ row, v: value(row.line, sort), avg: value(row.line, 'avg') ?? -1 }));
+  const hasFigure = (v: number | null): v is number => v !== null && (sort !== 'bestLeg' || v > 0);
+  const sorted = filtered.filter((entry) => hasFigure(entry.v)).sort((a, b) => (sort === 'bestLeg' ? a.v! - b.v! : b.v! - a.v!));
+  const unranked = filtered.filter((entry) => !hasFigure(entry.v)).sort((a, b) => b.avg - a.avg);
+  const matched: { rank: number | null; item: (typeof filtered)[number] }[] = [
+    ...rankThenSearch(sorted, query, (entry) => entry.row.name),
+    ...unranked.filter((entry) => matchesQuery(entry.row.name, query)).map((item) => ({ rank: null, item })),
+  ];
   const empty = stats.value.length === 0;
   return (
     <div className="stats-tab" data-testid="stats-tab">
@@ -706,9 +712,9 @@ export function StatsTab({
               </tr>
             </thead>
             <tbody>
-              {matched.slice(0, shown).map(({ rank, item: { row, v } }) => (
+              {matched.map(({ rank, item: { row, v } }) => (
                 <tr key={row.oid} className={row.teamId && registered.includes(row.teamId) ? 'own' : ''}>
-                  <td>{rank}</td>
+                  <td>{rank ?? '—'}</td>
                   <th scope="row">
                     {stats.unit === 'entry' ? (
                       // An individual season: the row is an entry — its sheet is the entry's results.
@@ -728,7 +734,7 @@ export function StatsTab({
                       </>
                     )}
                   </th>
-                  <td className="num">{sort === 'legRate' || sort === 'break' ? `${v!.toFixed(1)}%` : sort === 'avg' || sort === 'f9' ? v!.toFixed(2) : v}</td>
+                  <td className="num">{rank === null || v === null ? '—' : sort === 'legRate' || sort === 'break' ? `${v.toFixed(1)}%` : sort === 'avg' || sort === 'f9' ? v.toFixed(2) : v}</td>
                   <td className="num">{formatRate(value(row.line, 'avg'))}</td>
                   <td className="num">
                     {row.line.winLeg ?? '—'}/{row.line.leg ?? '—'}
@@ -739,9 +745,9 @@ export function StatsTab({
           </table>
         </div>
       ) : null}
-      {!empty ? <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} noun={stats.unit === 'entry' ? 'エントリー' : '選手'} /> : null}
+      {!empty ? <RankingFooter matched={matched.length} total={filtered.length} of={stats.value.length} query={query} noun={stats.unit === 'entry' ? 'エントリー' : '選手'} /> : null}
       <p className="muted small-text">
-        n01 公式のシーズン集計 (tournament/stats)。左端は選んだ指標 ({SORTS.find(([key]) => key === sort)![1]}) で並べた順位です (リーグの公式順位とは別)。Break は後攻 Leg の取得率。
+        n01 公式のシーズン集計 (tournament/stats)。左端は選んだ指標 ({SORTS.find(([key]) => key === sort)![1]}) で並べた順位です (リーグの公式順位とは別)。その指標の記録がない選手は「—」で末尾に並びます。Break は後攻 Leg の取得率。
       </p>
     </div>
   );
