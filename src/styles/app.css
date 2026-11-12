@@ -9207,3 +9207,32 @@ ul.plain {
   margin-top: var(--space-5, 28px);
   border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
 }
+/* A game opened on a phone comes to the top of the screen below the sticky header. */
+.match-center .game-list > li {
+  scroll-margin-top: calc(76px + var(--safe-top));
+}
+/* The bar stays one line on a phone: the season takes what the two buttons leave. */
+.watch-bar.has-season {
+  flex-wrap: nowrap;
+}
+.watch-bar.has-season .watch-target {
+  max-width: 40%;
+}
+.watch-bar.has-season .season-pick {
+  flex: 1 1 0;
+}
+@media (min-width: 900px) {
+  /* Controls as wide as their content needs, not the width of the page. */
+  .watch-bar.has-season .watch-target {
+    max-width: 380px;
+  }
+  .watch-bar.has-season .season-pick {
+    flex: 0 1 440px;
+  }
+  .watch-bar .watch-refresh {
+    margin-left: auto;
+  }
+  .watch > .segmented[role='tablist'] {
+    max-width: 640px;
+  }
+}

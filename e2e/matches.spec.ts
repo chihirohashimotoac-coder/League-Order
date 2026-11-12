@@ -245,7 +245,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
 
     await page.getByRole('tab', { name: '順位' }).click();
     await expect(page.getByTestId('standings-tab')).toContainText('Arrows');
-    await page.getByText('星取表 (獲得ゲーム数)').first().click();
+    await page.getByText('星取表 (獲得ゲーム数 ・ n01 公式結果)').first().click();
     await expect(page.getByTestId('round-robin')).toContainText('3-2');
     await page.getByRole('tab', { name: 'スタッツ' }).click();
     await expect(page.getByTestId('stats-tab').locator('tbody tr').first()).toContainText('A1');

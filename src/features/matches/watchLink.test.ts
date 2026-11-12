@@ -38,6 +38,11 @@ describe('shortTitles', () => {
     expect(map.get('JDO2026 ATDO OPEN ダブルス')).toBe('ダブルス');
   });
 
+  it('keeps the year and the season number of long season names', () => {
+    const map = shortTitles(['2026 ATDO DARTS LEAGUE 3rd', '2026 ATDO DARTS LEAGUE 2nd', '2025 ATDO DARTS LEAGUE 4th']);
+    expect(map.get('2026 ATDO DARTS LEAGUE 3rd')).toBe('2026 3rd');
+  });
+
   it('keeps short season names whole (the year and the season number stay)', () => {
     const map = shortTitles(['2026 ATDO 3rd', '2026 ATDO 2nd', '2025 ATDO 4th']);
     expect(map.get('2026 ATDO 3rd')).toBe('2026 ATDO 3rd');
