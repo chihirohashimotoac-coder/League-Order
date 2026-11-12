@@ -97,7 +97,7 @@ export function ShareSheet({
   const [editMatch, setEditMatch] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // The image at its own size, to read every line before sending it.
+  // The image across the whole width of the sheet, to read every line before sending it.
   const [zoom, setZoom] = useState(false);
 
   // Capability detection happens once: on a desktop browser without the Web Share API
@@ -360,9 +360,9 @@ export function ShareSheet({
               ) : null}
               <button type="button" className="btn small share-zoom" aria-pressed={zoom} onClick={() => setZoom(!zoom)} data-testid="share-zoom">
                 <Icon name="image" size={16} />
-                {zoom ? '縮小して全体を表示' : '原寸で内容を確認'}
+                {zoom ? '縮小して全体を表示' : '拡大して内容を確認'}
               </button>
-              <div className={`share-stage${zoom ? ' is-zoomed' : ''}`} tabIndex={zoom ? 0 : undefined} role={zoom ? 'region' : undefined} aria-label={zoom ? '共有画像 (原寸・スクロールで確認)' : undefined}>
+              <div className={`share-stage${zoom ? ' is-zoomed' : ''}`} tabIndex={zoom ? 0 : undefined} role={zoom ? 'region' : undefined} aria-label={zoom ? '共有画像 (拡大・スクロールで確認)' : undefined}>
                 <div className="share-previews">
                   {images.map((image) => (
                     <figure key={image.page}>

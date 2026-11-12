@@ -9108,16 +9108,19 @@ ul.plain {
   max-height: 70vh;
   overflow: auto;
 }
+/* Zoomed: each page fills the sheet's width (never wider than the image itself) and the box
+   scrolls down, so every line can be read on a phone without scrolling sideways. */
 .share-stage.is-zoomed .share-previews {
-  width: max-content;
+  flex-direction: column;
+  align-items: center;
 }
 .share-stage.is-zoomed .share-previews figure {
-  width: auto;
-  max-width: none;
+  flex: none;
+  width: 100%;
+  max-width: 1080px;
 }
 .share-stage.is-zoomed .share-preview {
-  width: auto;
-  max-width: none;
+  width: 100%;
 }
 
 /* --- 候補の違い -------------------------------------------------------------------------------- */
@@ -9239,4 +9242,27 @@ ul.plain {
 /* One card today: its tile keeps a tile's width instead of stretching across the page. */
 .live-hub > .board:not(:has(> li + li)) {
   grid-auto-columns: minmax(240px, 420px);
+}
+
+/* Design check 2026-11-12 */
+/* A phone: the legs won take less room between the two scores, so three digits sit inside their box. */
+@container (max-width: 520px) {
+  .ns-left > .ns-legs {
+    font-size: 1.25em;
+    padding: 0;
+    white-space: nowrap;
+  }
+  .ns-left {
+    gap: 6px;
+  }
+  .ns-big {
+    font-size: 3em;
+  }
+}
+/* A ranking with nobody chosen keeps a readable measure instead of the page's full width. */
+@media (min-width: 1100px) {
+  .stats-split:not(.has-pick) > .ranking,
+  .stats-tab {
+    max-width: 820px;
+  }
 }
