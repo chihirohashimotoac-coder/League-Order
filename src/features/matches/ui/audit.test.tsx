@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MatchesApi } from '../api';
 import type { AnalyticsOperation, AnalyticsTransport } from '../../analytics/api/readApi';
 import { RequestGovernor } from '../governor';
@@ -270,13 +270,12 @@ describe('F12: every player of a ranking can be reached', () => {
     await flush();
   }
 
-  it('60 first, then the rest; the 61st and later keep their rank', async () => {
+  it('every entry at once, as many as n01 lists; the last keeps its rank', async () => {
     await open();
     const rows = () => screen.getByTestId('player-ranking').querySelectorAll('tbody tr');
-    expect(rows()).toHaveLength(60);
-    expect(screen.getByTestId('ranking-footer').textContent).toContain('60 / 75 件を表示');
-    fireEvent.click(screen.getByRole('button', { name: 'さらに 15 件' }));
     expect(rows()).toHaveLength(75);
+    expect(screen.getByTestId('ranking-footer').textContent).toContain('75 件を表示');
+    expect(screen.queryByRole('button', { name: /さらに|すべて表示/u })).toBeNull();
     expect(rows()[74].textContent).toContain('75');
     expect(rows()[74].textContent).toContain('Player 075');
   });
@@ -305,7 +304,7 @@ describe('F12: every player of a ranking can be reached', () => {
       await flush();
       await flush();
       const rows = () => screen.getByTestId('stats-tab').querySelectorAll('tbody tr');
-      expect(rows()).toHaveLength(60);
+      expect(rows()).toHaveLength(70);
       fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Member 68' } });
       expect(rows()).toHaveLength(1);
       expect(rows()[0].querySelector('td')?.textContent).toBe('68');
@@ -313,6 +312,154 @@ describe('F12: every player of a ranking can be reached', () => {
       expect(rows()).toHaveLength(1);
       expect(rows()[0].textContent).toContain('Member 68');
     })();
+  });
+
+  it('league スタッツ: every player n01 lists by default; the minimum legs and a missing figure leave no one out silently', async () => {
+    const season = parseSeasonDocument(tournamentDoc(), TDID);
+    const data: SeasonData = { season, fixtures: parseFixtures(fixtures()), games: [], cards: buildCards(season, parseFixtures(fixtures()), []), standings: [], standingsError: null, unreadableGames: 0, truncated: false };
+    // 136 players as in a real season: legs 1…45 (most 45 → minimum 14), one in three has no won leg.
+    const players = Array.from({ length: 136 }, (_, i) => {
+      const leg = (i % 45) + 1;
+      const won = i % 3 === 0 ? 0 : Math.ceil(leg / 2);
+      return { oid: `p${i}`, tpid: i % 2 ? 'AAAA' : 'BBBB', oname: `P${String(i + 1).padStart(3, '0')}`, score: 3000 - i, darts: 100, leg, winLeg: won, best: won ? 18 + (i % 20) : 0 };
+    });
+    const qualified = players.filter((p) => p.leg >= 14).length;
+    const noBest = players.filter((p) => p.best === 0).length;
+    const { api } = apiOf((operation) => {
+      if (operation === 'tournament/stats') return { result: 0, stats: Object.fromEntries(players.map((p) => [p.oid, p])) };
+      if (operation === 'team/player/list') return { result: 0, list: [] };
+      return list([]);
+    });
+    render(<StatsTab data={data} registered={[]} api={api} onTeam={() => undefined} onPlayer={() => undefined} />);
+    await flush();
+    await flush();
+    const tab = screen.getByTestId('stats-tab');
+    const rows = () => tab.querySelectorAll('tbody tr');
+    const footer = () => screen.getByTestId('ranking-footer').textContent;
+    expect(rows()).toHaveLength(136);
+    expect(footer()).toContain('136 人を表示');
+    const box = screen.getByRole('checkbox', { name: /規定 Leg 数以上 \(14 Leg\)/u });
+    expect((box as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(box);
+    expect(rows()).toHaveLength(qualified);
+    expect(footer()).toContain(`${qualified} / 136 人を表示`);
+    fireEvent.click(box);
+    // Best Leg: players with no won leg stay, unranked at the end.
+    fireEvent.click(screen.getByRole('radio', { name: 'Best Leg' }));
+    expect(rows()).toHaveLength(136);
+    const last = rows()[135];
+    expect(last.querySelector('td')?.textContent).toBe('—');
+    expect(last.querySelector('td.sorted')?.textContent).toBe('—');
+    expect(rows()[136 - noBest - 1].querySelector('td')?.textContent).toBe(String(136 - noBest));
+  });
+});
+
+describe('league スタッツ: the columns', () => {
+  async function open(extra: Record<string, unknown> = {}) {
+    const season = parseSeasonDocument(tournamentDoc(), TDID);
+    const data: SeasonData = { season, fixtures: parseFixtures(fixtures()), games: [], cards: buildCards(season, parseFixtures(fixtures()), []), standings: [], standingsError: null, unreadableGames: 0, truncated: false };
+    const row = { oid: 'awzo', tpid: 'AAAA', opid: '02-0051', oname: '馬場 善久', score: 14279, darts: 554, winLeg: 30, leg: 35, a_b: 15, w_b: 11, winMatch: 0, match: 5, winSet: 15, set: 15, ton00: 41, ton40: 17, ton70: 0, ton80: 4, highOut: 105, highOutCount: 1, best: 14, worst: 23, f9Score: 7633, f9Darts: 252, r_g: 1, ho: 1, hc: 0, ...extra };
+    const { api } = apiOf((operation) => {
+      if (operation === 'tournament/stats') return { result: 0, stats: { awzo: row } };
+      if (operation === 'team/player/list') return { result: 0, list: [] };
+      return list([]);
+    });
+    render(<StatsTab data={data} registered={[]} api={api} onTeam={() => undefined} onPlayer={() => undefined} />);
+    await flush();
+    await flush();
+    const table = screen.getByTestId('stats-table');
+    const heads = () => [...table.querySelectorAll('thead th')].map((th) => th.textContent?.replace(/[▲▼]/gu, ''));
+    const cells = () => [...table.querySelectorAll('tbody tr:first-child td')].map((td) => td.textContent);
+    return { table, heads, cells };
+  }
+
+  it('by default: 平均 · First 9 · Leg · 180 · High Out, once each, with the sorted one marked', async () => {
+    const { table, heads, cells } = await open();
+    expect(heads()).toEqual(['平均順位', '選手', '平均', 'First 9', 'Leg', '180', 'High Out']);
+    expect(cells()).toEqual(['1', '77.32', '90.87', '30/3585.71%', '4', '105']);
+    const sorted = table.querySelector('thead th.sorted')!;
+    expect(sorted.textContent).toBe('▼平均');
+    expect(sorted.getAttribute('aria-sort')).toBe('descending');
+    // Numbers and their headers share one edge (right); the player's name stays on the left.
+    for (const th of [...table.querySelectorAll('thead th')].slice(2)) expect(th.className).toContain('num');
+    for (const td of table.querySelectorAll('tbody td')) expect(td.className).toContain('num');
+    expect(table.querySelector('thead th.name-col')?.className).not.toContain('num');
+  });
+
+  it('a sort outside the five adds its own column next to the name (Break: 11/15 73.33%)', async () => {
+    const { heads, cells } = await open();
+    fireEvent.click(screen.getByRole('radio', { name: 'Break' }));
+    expect(heads()).toEqual(['Break順位', '選手', 'Break', '平均', 'First 9', 'Leg', '180', 'High Out']);
+    expect(cells()[1]).toBe('11/1573.33%');
+    fireEvent.click(screen.getByRole('radio', { name: 'Leg率' }));
+    expect(heads()).toHaveLength(7);
+  });
+
+  it("全て表示: n01's player table column for column, printed as n01 prints it", async () => {
+    const { table, heads, cells } = await open();
+    fireEvent.click(screen.getByRole('checkbox', { name: /全て表示/u }));
+    expect(table.className).toContain('wide');
+    expect(heads()).toEqual([
+      '平均順位', '選手', 'ID', 'MatchesPlayed', 'SetsPlayed', 'SetsWon', 'LegsPlayed', 'LegsDiff', 'LegsWon', '100+', '140+', '170+', "180's", 'HighFinish', '100+Finishes',
+      'BestLeg', 'WorstLeg', '勝率(Sets)', '勝率(Legs)', '3 Darts平均', '1 Dart平均', 'First 9平均', 'Keep', 'Break', 'SecondLegs', 'BreakLegs', 'TotalScore', 'TotalDarts', 'グループ',
+    ]);
+    expect(cells()).toEqual(['1', '02-0051', '5', '15', '15', '35', '25', '30', '41', '17', '0', '4', '105', '1', '14', '23', '100.00%', '85.71%', '77.32', '25.77', '90.87', '95.00%', '73.33%', '15', '11', '14279', '554', expect.any(String)]);
+  });
+
+  it('a header sorts by its column, best first; pressed again, the other way round with the ranks kept', async () => {
+    const season = parseSeasonDocument(tournamentDoc(), TDID);
+    const data: SeasonData = { season, fixtures: parseFixtures(fixtures()), games: [], cards: buildCards(season, parseFixtures(fixtures()), []), standings: [], standingsError: null, unreadableGames: 0, truncated: false };
+    // Keep: A 80%, B 50%, C none (never threw second). Worst Leg (fewer darts = better): A 30, B 21, C 0 = none.
+    const players = [
+      { oid: 'a', tpid: 'AAAA', oname: 'A', score: 900, darts: 30, leg: 7, winLeg: 5, a_b: 2, w_b: 1, worst: 30, ton00: 3 },
+      { oid: 'b', tpid: 'AAAA', oname: 'B', score: 600, darts: 30, leg: 6, winLeg: 3, a_b: 4, w_b: 2, worst: 21, ton00: 9 },
+      { oid: 'c', tpid: 'BBBB', oname: 'C', score: 300, darts: 30, leg: 3, winLeg: 0, a_b: 0, w_b: 0, worst: 0, ton00: 1 },
+    ];
+    const { api } = apiOf((operation) => {
+      if (operation === 'tournament/stats') return { result: 0, stats: Object.fromEntries(players.map((p) => [p.oid, p])) };
+      if (operation === 'team/player/list') return { result: 0, list: [] };
+      return list([]);
+    });
+    render(<StatsTab data={data} registered={[]} api={api} onTeam={() => undefined} onPlayer={() => undefined} />);
+    await flush();
+    await flush();
+    fireEvent.click(screen.getByRole('checkbox', { name: /全て表示/u }));
+    const table = screen.getByTestId('stats-table');
+    const order = () => [...table.querySelectorAll('tbody tr')].map((tr) => `${tr.querySelector('td')?.textContent}:${tr.querySelector('th')?.textContent?.slice(0, 1)}`);
+    const header = (name: RegExp) => within(table).getByRole('button', { name });
+    // Keep: (5 − 1) / (7 − 2) = 80% beats (3 − 2) / (6 − 4) = 50%; C has no Keep → unranked at the end.
+    fireEvent.click(header(/^Keep/u));
+    expect(order()).toEqual(['1:A', '2:B', '—:C']);
+    expect(header(/^Keep/u).closest('th')?.getAttribute('aria-sort')).toBe('descending');
+    expect(screen.getByTestId('rank-head').textContent).toContain('Keep');
+    fireEvent.click(header(/^Keep/u));
+    expect(order()).toEqual(['2:B', '1:A', '—:C']);
+    expect(header(/^Keep/u).closest('th')?.getAttribute('aria-sort')).toBe('ascending');
+    // Worst Leg: fewer darts first; 0 = no won leg = none.
+    fireEvent.click(header(/^Worst\s?Leg/u));
+    expect(order()).toEqual(['1:B', '2:A', '—:C']);
+    expect(header(/^Worst\s?Leg/u).closest('th')?.getAttribute('aria-sort')).toBe('ascending');
+    // A chip still sorts, and the chip of a header's sort shows as chosen.
+    fireEvent.click(header(/^100\+$/u));
+    expect(order()).toEqual(['1:B', '2:A', '3:C']);
+    fireEvent.click(screen.getByRole('radio', { name: '平均' }));
+    expect(order()).toEqual(['1:A', '2:B', '3:C']);
+    expect(screen.getByRole('radio', { name: '平均' }).getAttribute('aria-checked')).toBe('true');
+    // Back to the main five: the column sorted in 全て表示 stays in view, next to the name.
+    fireEvent.click(header(/^Keep/u));
+    fireEvent.click(screen.getByRole('checkbox', { name: /全て表示/u }));
+    const heads = [...screen.getByTestId('stats-table').querySelectorAll('thead th')].map((th) => th.textContent?.replace(/[▲▼]/gu, ''));
+    expect(heads).toEqual(['Keep順位', '選手', 'Keep', '平均', 'First 9', 'Leg', '180', 'High Out']);
+    expect(screen.getByTestId('stats-table').querySelector('tbody tr td.sorted')?.textContent).toBe('80.00%');
+    // ID and グループ are text: not sortable.
+    expect(within(screen.getByTestId('stats-table')).queryByRole('button', { name: /^ID$/u })).toBeNull();
+  });
+
+  it('全て表示: Cricket columns only with Cricket games, Dynamic 平均 only when the season turns it on', async () => {
+    const { heads } = await open({ hc: 1, cLeg: 2, cDarts: 60, cMarks: 50, cM9: 1, cM8: 0, cM7: 2, cM6: 3 });
+    fireEvent.click(screen.getByRole('checkbox', { name: /全て表示/u }));
+    expect(heads()).toEqual(expect.arrayContaining(['9Mark', '8Mark', '7Mark', '6Mark', 'MPR']));
+    expect(heads()).not.toContain('Dynamic平均');
   });
 });
 

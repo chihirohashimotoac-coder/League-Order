@@ -20,6 +20,7 @@ import type { PlayerLevel } from './LiveSheet';
 import { usePlayerStats } from './useMatchContext';
 import type { MatchesApiFactory } from '../environment';
 import { ListCoverage, listIncomplete } from './ListCoverage';
+import { n01Avg3 } from '../../analytics/n01Figures';
 
 /**
  * LIVE (ライブ). The first screen answers, without scrolling: which cards are on and their score
@@ -515,7 +516,7 @@ function FocusCard({
     const hits = stats.kind === 'ready' && stats.unit === 'member' ? stats.value.filter((row) => row.teamId === teamId && row.name.trim() === name.trim()) : [];
     const hit = hits.length === 1 ? hits[0] : null;
     const line = hit?.line ?? null;
-    return { oid: hit?.oid ?? null, name, teamId, average: line && line.score !== null && line.darts ? (line.score / line.darts) * 3 : null, legs: line?.leg ?? null, legsWon: line?.winLeg ?? null };
+    return { oid: hit?.oid ?? null, name, teamId, average: line ? n01Avg3(line) : null, legs: line?.leg ?? null, legsWon: line?.winLeg ?? null };
   };
   const levels: [PlayerLevel[], PlayerLevel[]] | undefined =
     live && stats.kind === 'ready' ? [live.sides[0].members.map((name) => levelOf(live.sides[0].teamId, name)), live.sides[1].members.map((name) => levelOf(live.sides[1].teamId, name))] : undefined;

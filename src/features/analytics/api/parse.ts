@@ -102,6 +102,23 @@ export function parseStatLine(row: Rec): StatLine {
     ton80: num(row.ton80),
     highOut: positive(num(row.highOut)),
     bestLeg: positive(num(row.best)),
+    n01: {
+      worstLeg: num(row.worst),
+      highOutCount: num(row.highOutCount),
+      manualAvg: num(row.a),
+      manualAvgCount: num(row.acnt),
+      has01: (num(row.ho) ?? 0) > 0,
+      hasCricket: (num(row.hc) ?? 0) > 0,
+      cricketLegs: num(row.cLeg),
+      cricketDarts: num(row.cDarts),
+      cricketMarks: num(row.cMarks),
+      manualMpr: num(row.ca),
+      manualMprCount: num(row.cacnt),
+      mark9: num(row.cM9),
+      mark8: num(row.cM8),
+      mark7: num(row.cM7),
+      mark6: num(row.cM6),
+    },
   };
 }
 

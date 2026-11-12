@@ -10,7 +10,8 @@ import type { GameRow } from '../parse';
 import type { MatchesApiFactory } from '../environment';
 import type { PlayerLine, StatsSource } from './useMatchContext';
 import { formatClock, formatRate, useFollowed, usePlayerStats } from './useMatchContext';
-import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch, useShownCount } from './rankingList';
+import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './rankingList';
+import { n01Avg3 } from '../../analytics/n01Figures';
 import { CopyLink } from './CopyLink';
 import { MatchPane } from './MatchSheet';
 import { ListCoverage, listIncomplete } from './ListCoverage';
@@ -431,10 +432,9 @@ function PlayerRanking({
   picked: PickedPlayer | null;
   onPick: (next: PickedPlayer | null) => void;
 }): React.JSX.Element {
-  const [shown, setShown] = useShownCount(query);
   if (state.kind === 'loading') return <p className="muted small-text">成績を読み込み中…</p>;
   if (state.kind === 'error') return <p className="small-text" role="alert">取得エラー: {state.message}</p>;
-  const avg = (row: PlayerLine): number | null => (row.line.score !== null && row.line.darts ? (row.line.score / row.line.darts) * 3 : null);
+  const avg = (row: PlayerLine): number | null => n01Avg3(row.line);
   const nameOf = (row: PlayerLine): string => (row.name !== '(名前なし)' ? row.name : entries.get(row.oid) ?? row.oid);
   const sorted = [...state.value].filter((row) => avg(row) !== null).sort((a, b) => avg(b)! - avg(a)!);
   if (sorted.length === 0) {
@@ -456,21 +456,29 @@ function PlayerRanking({
           <table className="rank-table small-text">
             <thead>
               <tr>
-                <th scope="col" className="rank-head" data-testid="rank-head">
+                <th scope="col" className="rank-head num" data-testid="rank-head">
                   01 平均
                   <span className="th-sub">順位</span>
                 </th>
                 <th scope="col">{teamGames ? '選手' : 'エントリー'}</th>
-                <th scope="col">01 平均</th>
-                <th scope="col">180</th>
-                <th scope="col">High Out</th>
-                <th scope="col">Leg</th>
+                <th scope="col" className="num">
+                  01 平均
+                </th>
+                <th scope="col" className="num">
+                  180
+                </th>
+                <th scope="col" className="num">
+                  High Out
+                </th>
+                <th scope="col" className="num">
+                  Leg
+                </th>
               </tr>
             </thead>
             <tbody>
-              {matched.slice(0, shown).map(({ rank, item: row }) => (
+              {matched.map(({ rank, item: row }) => (
                 <tr key={row.oid} className={picked?.oid === row.oid ? 'me' : ''} aria-current={picked?.oid === row.oid ? 'true' : undefined}>
-                  <td>{rank}</td>
+                  <td className="num">{rank}</td>
                   <th scope="row">
                     <button type="button" className="linklike" aria-pressed={picked?.oid === row.oid} onClick={() => onPick(picked?.oid === row.oid ? null : { oid: row.oid, name: nameOf(row), unit, rank })}>
                       {nameOf(row)}
@@ -489,7 +497,7 @@ function PlayerRanking({
           </table>
         </div>
       ) : null}
-      <RankingFooter shown={shown} matched={matched.length} total={sorted.length} query={query} onMore={setShown} noun={teamGames ? '選手' : 'エントリー'} />
+      <RankingFooter matched={matched.length} total={sorted.length} query={query} noun={teamGames ? '選手' : 'エントリー'} />
       <p className="muted small-text">
         n01 公式の集計 ({teamGames ? '選手単位 player_stats_list' : 'エントリー単位 stats_list'})。左端は 01 平均で並べた順位です (大会の最終順位とは別)。名前を選ぶと、その{teamGames ? '選手' : 'エントリー'}の試合を表示します。
       </p>

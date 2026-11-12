@@ -34,6 +34,35 @@ export interface StatLine {
   /** 0 and absent both mean "no record" → null. */
   highOut: number | null;
   bestLeg: number | null;
+  /**
+   * The rest of n01's stats row, read only to show n01's own stats table (スタッツの「全て表示」).
+   * Optional: lines built elsewhere (tests, pooled periods) simply do not carry them.
+   */
+  n01?: N01StatExtras;
+}
+
+/** Fields of an n01 stats row beyond the pooled counters above (raw, `null` = not reported). */
+export interface N01StatExtras {
+  /** `worst`: the most darts a won leg took. */
+  worstLeg: number | null;
+  /** `highOutCount`: checkouts of 100 or more. */
+  highOutCount: number | null;
+  /** `a` / `acnt`: averages entered by hand (submitted results) that n01 blends into the 3-dart average. */
+  manualAvg: number | null;
+  manualAvgCount: number | null;
+  /** `ho` / `hc`: the row has 01 / Cricket games (n01 shows the 01 or Cricket columns by them). */
+  has01: boolean;
+  hasCricket: boolean;
+  /** Cricket: `cLeg`, `cDarts`, `cMarks`, hand-entered MPR `ca` / `cacnt`, and the 9-6 mark rounds. */
+  cricketLegs: number | null;
+  cricketDarts: number | null;
+  cricketMarks: number | null;
+  manualMpr: number | null;
+  manualMprCount: number | null;
+  mark9: number | null;
+  mark8: number | null;
+  mark7: number | null;
+  mark6: number | null;
 }
 
 export const STAT_FIELDS = [
@@ -56,6 +85,9 @@ export const STAT_FIELDS = [
   'highOut',
   'bestLeg',
 ] as const satisfies readonly (keyof StatLine)[];
+
+/** The pooled counters of a {@link StatLine} (everything but the n01-only extras). */
+export type StatCounter = (typeof STAT_FIELDS)[number];
 
 export interface TeamStatsRow {
   /** `tpid` (the key of `stats_list`). */
