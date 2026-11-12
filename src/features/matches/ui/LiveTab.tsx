@@ -15,6 +15,7 @@ import { formatClock, seasonStatsSource, useFollowed, useTodayBoard } from './us
 import { GameView } from './GameView';
 import { CardTrail, shortSlot } from './CardTrail';
 import { LiveSheet } from './LiveSheet';
+import { liveStatusText } from './MatchSheet';
 import type { PlayerLevel } from './LiveSheet';
 import { usePlayerStats } from './useMatchContext';
 import type { MatchesApiFactory } from '../environment';
@@ -597,7 +598,15 @@ function FocusCard({
 
       {live && !live.gameEnded ? (
         <div hidden={!showsLive}>
-          <LiveSheet key={live.mid} api={api} live={live} title={liveLabel ?? undefined} levels={levels} onPlayer={onPlayer} />
+          <LiveSheet
+            key={live.mid}
+            api={api}
+            live={live}
+            title={liveLabel ?? undefined}
+            levels={levels}
+            onPlayer={onPlayer}
+            status={{ ...liveStatusText(status, card.finished), updated: new Date(live.updateTime).toLocaleTimeString('ja-JP') }}
+          />
         </div>
       ) : null}
 
@@ -634,9 +643,9 @@ function FocusCard({
           <span className="muted small-text">推移を見る</span>
         </summary>
         <p className="muted small-text">
-          今季の種別勝率から計算 (このカードを除く{seasonGames < 20 ? '・データ少なめ' : ''})。
+          このシーズンの種別勝率から計算 (このカードを除く{seasonGames < 20 ? '・データ少なめ' : ''})。
         </p>
-        <CardTrail steps={trail} names={names} labelOf={(schid) => slotLabel(data.season, schid)} basis="今季の種別ごとの勝率 (このカードを除く) から計算した参考値です。" />
+        <CardTrail steps={trail} names={names} labelOf={(schid) => slotLabel(data.season, schid)} basis="このシーズンの種別ごとの勝率 (このカードを除く) から計算した参考値です。" />
       </details>
 
       {upcoming.length > 0 ? (
@@ -655,7 +664,7 @@ function FocusCard({
             })}
           </ol>
           <p className="muted small-text">
-            オーダーは n01 に提出された内容。{anyAverage ? '( ) 内は今季の平均 (n01 公式)。' : ''}時刻はこの対戦の終了ゲームの平均から計算した目安です。
+            オーダーは n01 に提出された内容。{anyAverage ? '( ) 内はこのシーズンの平均 (n01 公式)。' : ''}時刻はこの対戦の終了ゲームの平均から計算した目安です。
           </p>
         </div>
       ) : null}

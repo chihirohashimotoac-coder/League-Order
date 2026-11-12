@@ -13,6 +13,7 @@ import type { MainScope, OthersPart } from './scopeParts';
 import { defaultServices, usePeriodLoad } from './usePeriodLoad';
 import type { AnalyticsServices } from './usePeriodLoad';
 import { useGamesLoad, usePlayerDetail } from './useRoleData';
+import { pushWatchLink, requestWatchTab } from '../../matches/watchLink';
 import type { DetailState, GamesState } from './useRoleData';
 
 /**
@@ -85,12 +86,20 @@ export default function AnalyticsPage({
   }
 
   const baseId = mode === 'specified' ? specified || currentId : currentId;
+  // The league and the season chosen here are carried over: 観戦 opens on their スタッツ.
+  const openWatchStats = (): void => {
+    requestWatchTab('stats');
+    pushWatchLink({ league: binding.leagueId, ...(baseId ? { season: baseId } : {}) });
+    onNavigate('watch');
+  };
   const load = state.load && projection ? { ...state.load, seasons: projection.seasons } : state.load;
   const loading = state.status === 'loading';
   const roleView: RoleViewProps = { scope, adoption: projection?.adoption ?? [], games, detail };
 
   return (
     <div className="analytics" data-testid="analytics-page">
+      {/* One toolbar: on a large screen the three switches share a row instead of three full-width rows. */}
+      <div className="analytics-toolbar" data-testid="analytics-toolbar">
       <Segmented
         label="分析の対象"
         value={view}
@@ -112,7 +121,8 @@ export default function AnalyticsPage({
         currentTournamentId={currentId}
       />
       <ScopeBar main={mainScope} part={othersPart} onMain={setMainScope} onPart={setOthersPart} />
-      <LoadBanner load={state.load} loading={loading} />
+      </div>
+      <LoadBanner load={state.load} loading={loading} onRetry={() => setReload((n) => n + 1)} onWatch={openWatchStats} />
       {state.load && projection && state.load.seasons.length > 0 ? <AnalysisSummary load={state.load} projection={projection} scope={scope} games={games} /> : null}
       {load && load.seasons.length > 0 ? (
         <div className={loading ? 'analytics-body stale' : 'analytics-body'} aria-busy={loading}>

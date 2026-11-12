@@ -112,3 +112,11 @@ describe('highlights (見どころ)', () => {
     expect(ranked[3].detail).toBe('14 本 (501 の最短)');
   });
 });
+
+describe('highlights name the player of a singles game, not the team', () => {
+  it('credits a visit without a recorded thrower to the side’s player', () => {
+    const game = { schid: 's1', slotLabel: 'シングルス1', flip: true, names: ['Home', 'Away'] as [string, string], members: [['宮本 直紀'], ['相手 選手']] as [string[], string[]] };
+    const found = gameHighlights([comeback], game);
+    expect(found.find((h) => h.kind === 'comeback')!.who).toBe('宮本 直紀');
+  });
+});

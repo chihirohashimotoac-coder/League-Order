@@ -97,6 +97,8 @@ export function ShareSheet({
   const [editMatch, setEditMatch] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The image across the whole width of the sheet, to read every line before sending it.
+  const [zoom, setZoom] = useState(false);
 
   // Capability detection happens once: on a desktop browser without the Web Share API
   // the standard-share button is hidden entirely rather than failing on tap (要件 §1).
@@ -218,8 +220,25 @@ export function ShareSheet({
 
   const finalizeLabel = lifecycle === 'DRAFT' ? 'オーダーを確定' : '再確定';
 
+  const firstEntry = activeSchedule?.entries[0] ?? null;
   const actions = (
     <div className="share-actions">
+      {tab === 'player' && activeSchedule ? (
+        // What is about to be sent, right above the button that sends it.
+        <p className="share-target" data-testid="share-target">
+          <span className="kicker">送る内容</span>
+          <strong>{activeSchedule.name}</strong>
+          <span>
+            {firstEntry ? (
+              <>
+                最初の出場 <strong>{firstEntry.no}</strong> {firstEntry.gameName} ・ 計 {activeSchedule.entries.length} ゲーム
+              </>
+            ) : (
+              '出場なし'
+            )}
+          </span>
+        </p>
+      ) : null}
       {capabilities.webShare ? (
         <button type="button" className="btn primary" disabled={busy} onClick={handleStandardShare}>
           <Icon name="share" />
@@ -339,7 +358,11 @@ export function ShareSheet({
                   ゲーム数が多いため {images.length} 枚に分割しました (文字は縮小していません)。
                 </p>
               ) : null}
-              <div className="share-stage">
+              <button type="button" className="btn small share-zoom" aria-pressed={zoom} onClick={() => setZoom(!zoom)} data-testid="share-zoom">
+                <Icon name="image" size={16} />
+                {zoom ? '縮小して全体を表示' : '拡大して内容を確認'}
+              </button>
+              <div className={`share-stage${zoom ? ' is-zoomed' : ''}`} tabIndex={zoom ? 0 : undefined} role={zoom ? 'region' : undefined} aria-label={zoom ? '共有画像 (拡大・スクロールで確認)' : undefined}>
                 <div className="share-previews">
                   {images.map((image) => (
                     <figure key={image.page}>
@@ -407,9 +430,7 @@ export function ShareSheet({
 
       {tab === 'player' ? (
         <>
-          <p className="tiny muted" style={{ marginTop: 0 }}>
-            各メンバーが自分の出場ゲームだけを確認できます。
-          </p>
+          <div className="share-player">
           <div className="player-chips" role="group" aria-label="プレイヤーの選択">
             {schedules.map((schedule) => (
               <button
@@ -426,7 +447,7 @@ export function ShareSheet({
           </div>
 
           {activeSchedule ? (
-            <div className="player-schedule">
+            <div className="player-schedule" data-testid="player-schedule">
               <span className="kicker">PLAYER ・ {activeSchedule.entries.length} GAMES</span>
               <h3>{activeSchedule.name}</h3>
               {activeSchedule.entries.length === 0 ? (
@@ -450,6 +471,10 @@ export function ShareSheet({
               )}
             </div>
           ) : null}
+          </div>
+          <p className="tiny muted" style={{ marginTop: 0 }}>
+            各メンバーが自分の出場ゲームだけを確認できます。
+          </p>
 
           <button
             type="button"

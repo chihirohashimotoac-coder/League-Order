@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MatchesApi } from '../api';
 import type { LiveState, LiveThrow, ThrowLeg } from '../parse';
 import { withLiveLeg } from '../parse';
@@ -13,9 +13,10 @@ import { useFollowLatest } from './useFollowLatest';
 
 /**
  * The live game the way a darts scoreboard shows it — the layout spectators know from n01's
- * viewer: legs in the header, the points left large right under it (the first thing a spectator
- * looks for, so it needs no scrolling), the score sheet of the leg (Scored / To Go per visit,
- * darts in the middle), the game's figures below.
+ * viewer: each player's name right above their own points left (large, the first thing a
+ * spectator looks for, so it needs no scrolling) with the legs won between the two, whether the
+ * score is being refreshed and when it last changed directly under it, then the score sheet of
+ * the leg (Scored / To Go per visit, darts in the middle) and the game's figures.
  *
  * Then what only League Order adds, in two visibly separate blocks:
  * - 実績 (what happened): the thrower's standard route, the race chart, finishing chances, recent
@@ -60,12 +61,20 @@ function legDarts(entry: ThrowLeg, winner: 0 | 1): number | null {
   return total > 0 ? total : null;
 }
 
+export interface LiveSheetStatus {
+  text: string;
+  tone: 'ok' | 'paused' | 'error' | 'done';
+  /** n01's time of the last change, as shown; `null` while none is known. */
+  updated: string | null;
+}
+
 export function LiveSheet({
   api,
   live,
   title,
   levels,
   onPlayer,
+  status,
 }: {
   api: MatchesApi;
   live: LiveState;
@@ -75,6 +84,8 @@ export function LiveSheet({
   levels?: [PlayerLevel[], PlayerLevel[]];
   /** Opens a player's card (league cards). */
   onPlayer?: (player: { oid: string; name: string; teamId: string | null }) => void;
+  /** Whether the score is being refreshed, and n01's time of the last change: shown under the score. */
+  status?: LiveSheetStatus;
 }): React.JSX.Element {
   const cricket = live.matchType === 'cricket';
   const leg = live.leg;
@@ -99,6 +110,19 @@ export function LiveSheet({
     follow.resume();
   };
   const ended = all.filter((entry) => entry.ended && entry.index !== legIndex);
+  // The row of legs scrolls sideways once it is long: the leg in progress is brought fully into
+  // view when the sheet opens and whenever a new leg starts — unless the viewer is reading an
+  // earlier leg, whose place in the row is then left alone.
+  const legTabs = useRef<HTMLDivElement | null>(null);
+  const tabCount = legIndex === null ? 0 : legIndex + 1;
+  useLayoutEffect(() => {
+    const row = legTabs.current;
+    if (!row || pickedLeg !== null) return;
+    const liveTab = row.querySelector<HTMLElement>('.leg-tab.is-live');
+    if (!liveTab) return;
+    const end = liveTab.offsetLeft + liveTab.offsetWidth + 10;
+    if (end > row.scrollLeft + row.clientWidth || liveTab.offsetLeft < row.scrollLeft) row.scrollLeft = Math.max(0, end - row.clientWidth);
+  }, [tabCount, pickedLeg, ended.length]);
   const hasLevels = !!levels && levels.some((side) => side.some((entry) => entry.average !== null || entry.legs !== null));
 
   // --- League Order's own figures ---------------------------------------------------------
@@ -139,34 +163,38 @@ export function LiveSheet({
           )}
           {live.gameEnded ? <span className="ns-live done">終了</span> : <span className="sr-only">Live</span>}
         </div>
-        <div className="ns-names">
-          <span>
-            {leg?.first === 0 ? '* ' : ''}
-            {names[0]}
-          </span>
-          <strong aria-label={`Leg ${live.legs[0]} 対 ${live.legs[1]}`}>
-            {live.legs[0]} - {live.legs[1]}
-          </strong>
-          <span>
-            {leg?.first === 1 ? '* ' : ''}
-            {names[1]}
-          </span>
-        </div>
       </header>
 
       <div className="ns-body">
         <div className="ns-board">
           {past ? <p className="ns-left-note small-text">進行中の Leg {legIndex !== null ? legIndex + 1 : ''} の{cricket ? '点数' : '残り点数'}</p> : null}
-          <div className="ns-left" aria-label={cricket ? '点数' : '残り点数'}>
+          {/* Each player's name sits right above their own points left; the legs won between the two. */}
+          <div className="ns-left" role="group" aria-label={cricket ? '点数' : '残り点数'}>
             {([0, 1] as const).map((side) => (
-              <div key={side} className={`ns-big${thrower === side ? ' on' : ''}`} data-testid={thrower === side ? 'next-thrower' : undefined}>
-                {cricket ? (leg?.points?.[side] ?? 0) : (leg?.left?.[side] ?? live.startScore ?? '—')}
-                {thrower === side && leg?.member ? <span className="ns-member">{leg.member}</span> : null}
+              <div key={side} className={`ns-col side-${side}`}>
+                <span className="ns-name" data-testid="ns-name">
+                  {leg?.first === side ? '* ' : ''}
+                  {names[side]}
+                </span>
+                <div className={`ns-big${thrower === side ? ' on' : ''}`} data-testid={thrower === side ? 'next-thrower' : undefined}>
+                  {cricket ? (leg?.points?.[side] ?? 0) : (leg?.left?.[side] ?? live.startScore ?? '—')}
+                  {thrower === side && leg?.member ? <span className="ns-member">{leg.member}</span> : null}
+                </div>
               </div>
             ))}
+            <strong className="ns-legs" aria-label={`Leg ${live.legs[0]} 対 ${live.legs[1]}`}>
+              {live.legs[0]} - {live.legs[1]}
+            </strong>
           </div>
+          {status ? (
+            <p className={`ns-status tone-${status.tone}`} role="status" data-testid="score-status">
+              <span className="ns-status-dot" aria-hidden="true" />
+              <span>{status.text}</span>
+              <span className="ns-status-time">{status.updated ? `n01 更新 ${status.updated}` : '更新時刻 未取得'}</span>
+            </p>
+          ) : null}
           {legIndex !== null && (ended.length > 0 || legIndex > 0) ? (
-            <div className="ns-legtabs" role="group" aria-label="Leg を選ぶ" data-testid="leg-tabs">
+            <div className="ns-legtabs" role="group" aria-label="Leg を選ぶ" data-testid="leg-tabs" ref={legTabs}>
               {Array.from({ length: legIndex + 1 }, (_, index) => {
                 const entry = all.find((held) => held.index === index);
                 const isLive = index === legIndex;
@@ -278,7 +306,7 @@ export function LiveSheet({
                   ))}
                 </ul>
               ))}
-              <p className="muted small-text">今季の成績 (n01 公式){onPlayer ? '。名前をタップで選手カード' : ''}</p>
+              <p className="muted small-text">このシーズンの成績 (n01 公式){onPlayer ? '。名前をタップで選手カード' : ''}</p>
             </div>
           ) : null}
 

@@ -93,7 +93,8 @@ export function PlayerCard({
               {data.season.teams.get(teamId) ?? teamId}
             </button>
           ) : null}
-          {teamId ? ' ・ ' : ''}今季 {games.length} 試合
+          {teamId ? ' ・ ' : ''}
+          {data.season.title} {games.length} 試合
         </p>
         <button
           type="button"

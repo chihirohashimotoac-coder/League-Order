@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { Card } from '../../../components/ui';
 import type { Player, Team } from '../../../domain/types';
 import { normalizeName } from '../../../domain/n01/names';
@@ -91,7 +91,16 @@ export function PlayerAnalytics({
       });
   }, [base, players, byKey]);
 
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelectedKey] = useState<string | null>(null);
+  const detailRef = useRef<HTMLDivElement | null>(null);
+  // A phone shows the detail under the roster: picking a player brings their name and figures
+  // into view (a large screen has them beside the roster already).
+  const setSelected = (key: string): void => {
+    setSelectedKey(key);
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function' || !window.matchMedia('(max-width: 899px)').matches) return;
+    const behavior: ScrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    requestAnimationFrame(() => detailRef.current?.scrollIntoView({ block: 'start', behavior }));
+  };
   const selectedKey = selected && byKey.has(selected) ? selected : (roster.find((r) => r.period)?.personKey ?? null);
   const person = selectedKey ? (byKey.get(selectedKey) ?? null) : null;
 
@@ -130,8 +139,7 @@ export function PlayerAnalytics({
 
   return (
     <div className="analytics-columns">
-      <div className="analytics-col">
-        <Card title="チームメンバー" kicker="ROSTER" action={onOpenMembers ? <button type="button" className="btn small" onClick={onOpenMembers}>メンバー管理</button> : undefined}>
+        <Card title="チームメンバー" kicker="ROSTER" className="analytics-roster-card" action={onOpenMembers ? <button type="button" className="btn small" onClick={onOpenMembers}>メンバー管理</button> : undefined}>
           {roster.length === 0 ? <p className="small-text muted">メンバーが登録されていません。</p> : null}
           <ul className="list analytics-roster">
             {roster.map(({ player, personKey, reason, period }) => (
@@ -157,42 +165,7 @@ export function PlayerAnalytics({
           </ul>
         </Card>
 
-        <Card title="ランキング" kicker="RANKING" className="analytics-rank">
-          <Segmented label="比較する母集団" value={activeScope} onChange={setScopeKind} options={available.map((k) => ({ value: k, label: SCOPE_LABEL[k] }))} />
-          <div className="field">
-            <label htmlFor={metricSelectId}>
-              <span>指標</span>
-            </label>
-            <select id={metricSelectId} value={metric} onChange={(event) => setMetric(event.target.value as RankMetric)}>
-              {available_.rank.map((m) => (
-                <option key={m} value={m}>
-                  {METRIC_LABEL[m]}
-                </option>
-              ))}
-            </select>
-          </div>
-          {population.scoped.includesOtherDivisions ? (
-            <p className="small-text muted" data-testid="other-division-note">
-              他のディビジョンでの成績を含みます（純粋な同一ディビジョン比較ではありません）。
-            </p>
-          ) : null}
-          {activeScope === 'league' && load.request.mode !== 'current' ? <p className="small-text muted">期間内にディビジョンや試合形式が異なる成績を含む場合があります。</p> : null}
-          {available_.notes.map((note) => (
-            <p key={note} className="small-text muted" data-testid="scope-rank-note">
-              {note}
-            </p>
-          ))}
-          <RankingTable
-            ranking={ranking}
-            metric={metric}
-            highlight={selectedKey ?? undefined}
-            teamNameOf={activeScope === 'team' ? undefined : teamNameOf}
-            caption={`${SCOPE_LABEL[activeScope]}の${METRIC_LABEL[metric]}ランキング`}
-          />
-        </Card>
-      </div>
-
-      <div className="analytics-col">
+      <div className="analytics-detail" ref={detailRef} data-testid="analytics-detail">
         {!person ? (
           <Card title="プレイヤー詳細" kicker="PLAYER">
             <p className="small-text">成績を確認できる選手を選んでください。選手が見つからない場合、n01 と連携した選手かどうか、期間を確認してください。</p>
@@ -376,6 +349,40 @@ export function PlayerAnalytics({
           </>
         )}
       </div>
+
+        <Card title="ランキング" kicker="RANKING" className="analytics-rank">
+          <Segmented label="比較する母集団" value={activeScope} onChange={setScopeKind} options={available.map((k) => ({ value: k, label: SCOPE_LABEL[k] }))} />
+          <div className="field">
+            <label htmlFor={metricSelectId}>
+              <span>指標</span>
+            </label>
+            <select id={metricSelectId} value={metric} onChange={(event) => setMetric(event.target.value as RankMetric)}>
+              {available_.rank.map((m) => (
+                <option key={m} value={m}>
+                  {METRIC_LABEL[m]}
+                </option>
+              ))}
+            </select>
+          </div>
+          {population.scoped.includesOtherDivisions ? (
+            <p className="small-text muted" data-testid="other-division-note">
+              他のディビジョンでの成績を含みます（純粋な同一ディビジョン比較ではありません）。
+            </p>
+          ) : null}
+          {activeScope === 'league' && load.request.mode !== 'current' ? <p className="small-text muted">期間内にディビジョンや試合形式が異なる成績を含む場合があります。</p> : null}
+          {available_.notes.map((note) => (
+            <p key={note} className="small-text muted" data-testid="scope-rank-note">
+              {note}
+            </p>
+          ))}
+          <RankingTable
+            ranking={ranking}
+            metric={metric}
+            highlight={selectedKey ?? undefined}
+            teamNameOf={activeScope === 'team' ? undefined : teamNameOf}
+            caption={`${SCOPE_LABEL[activeScope]}の${METRIC_LABEL[metric]}ランキング`}
+          />
+        </Card>
     </div>
   );
 }

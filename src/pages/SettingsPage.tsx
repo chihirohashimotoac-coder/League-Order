@@ -59,29 +59,39 @@ export function SettingsPage(): React.JSX.Element {
 
   return (
     <>
-      <Card title="保存とバックアップ" kicker="DATA">
-        <p className="small-text muted" style={{ marginTop: 0 }}>
-          保存先: {store.backendKind === 'indexeddb' ? 'IndexedDB' : store.backendKind === 'localstorage' ? 'localStorage' : 'メモリ (非永続)'}
-        </p>
-        <div className="row wrap" style={{ gap: 8 }}>
-          <button
-            type="button"
-            className="btn small"
-            onClick={() => {
-              const stamp = new Date().toISOString().slice(0, 10);
-              downloadText(serialiseBackup(store.snapshot()), `darts-order-backup-${stamp}.json`);
-              toast.show('JSON をエクスポートしました', 'ok');
-            }}
-          >
-            JSON エクスポート
-          </button>
-          <button type="button" className="btn small" onClick={() => fileInput.current?.click()}>
-            JSON インポート
-          </button>
-          <button type="button" className="btn small danger" onClick={() => setConfirmReset(true)}>
-            全データ削除
-          </button>
+      <Card title="バックアップと移行" kicker="DATA" className="backup-card">
+        <div className="backup-grid">
+          <div className="backup-actions">
+            <section aria-labelledby="backup-export-title">
+              <h3 className="section-mini" id="backup-export-title">書き出し (JSON)</h3>
+              <p className="small-text">この端末にある<strong>全チーム分</strong>のデータを 1 つの JSON ファイルに保存します。後任の方や別の端末へは、このファイルを渡してください。</p>
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => {
+                  const stamp = new Date().toISOString().slice(0, 10);
+                  downloadText(serialiseBackup(store.snapshot()), `darts-order-backup-${stamp}.json`);
+                  toast.show('JSON をエクスポートしました', 'ok');
+                }}
+              >
+                JSON エクスポート
+              </button>
+            </section>
+            <section aria-labelledby="backup-import-title">
+              <h3 className="section-mini" id="backup-import-title">復元 (JSON)</h3>
+              <p className="small-text">
+                ファイルの内容で<strong>この端末のデータをすべて置き換えます</strong> (追加ではありません)。ファイルを選ぶと、置き換える前に件数を確認でき、キャンセルできます。
+              </p>
+              <button type="button" className="btn small" onClick={() => fileInput.current?.click()}>
+                JSON インポート
+              </button>
+            </section>
+          </div>
+          <BackupContents title="この端末のデータ (書き出しの対象)" snapshot={store.snapshot()} />
         </div>
+        <p className="small-text muted" style={{ marginBottom: 0 }}>
+          保存先: {store.backendKind === 'indexeddb' ? 'IndexedDB (このブラウザ内)' : store.backendKind === 'localstorage' ? 'localStorage (このブラウザ内)' : 'メモリ (非永続・タブを閉じると消えます)'}
+        </p>
         <input
           ref={fileInput}
           type="file"
@@ -282,14 +292,29 @@ export function SettingsPage(): React.JSX.Element {
         </p>
       </Card>
 
+      <Card title="全データの削除" kicker="DANGER" className="danger-card">
+        <p className="small-text">
+          この端末のチーム・メンバー・フォーマット・ペア設定・履歴をすべて削除し、最初の画面に戻ります。取り消せません。引き継ぐ場合は、先に上の「JSON エクスポート」で書き出してください。
+        </p>
+        <button type="button" className="btn small danger" onClick={() => setConfirmReset(true)}>
+          全データ削除
+        </button>
+      </Card>
+
       {pendingImport ? (
         <ConfirmDialog
           title="JSON をインポート"
-          message={`既存データをすべて置き換えます。チーム ${pendingImport.snapshot.teams.length} 件 / メンバー ${pendingImport.snapshot.players.length} 名 / フォーマット ${pendingImport.snapshot.formats.length} 件。${
+          message={`この端末のデータをすべて、ファイルの内容に置き換えます (追加ではありません)。チーム ${pendingImport.snapshot.teams.length} 件 / メンバー ${pendingImport.snapshot.players.length} 名 / フォーマット ${pendingImport.snapshot.formats.length} 件。${
             pendingImport.warnings.length > 0 ? ` 注意: ${pendingImport.warnings[0]}` : ''
           }`}
           confirmLabel="置き換える"
           destructive
+          children={
+            <div className="restore-compare" data-testid="restore-compare">
+              <BackupContents title="いまの端末のデータ (消えます)" snapshot={store.snapshot()} />
+              <BackupContents title="ファイルの内容 (置き換え後)" snapshot={pendingImport.snapshot} />
+            </div>
+          }
           onCancel={() => setPendingImport(null)}
           onConfirm={() => {
             void store.replaceEverything(pendingImport.snapshot).then(() => {
@@ -328,5 +353,37 @@ export function SettingsPage(): React.JSX.Element {
         />
       ) : null}
     </>
+  );
+}
+
+type BackupSnapshot = Parameters<ReturnType<typeof useAppStore>['replaceEverything']>[0];
+
+/** What a backup holds, in counts: the data on this device, or the data in a chosen file. */
+function BackupContents({ title, snapshot }: { title: string; snapshot: BackupSnapshot }): React.JSX.Element {
+  const rows: [string, number, string][] = [
+    ['チーム', snapshot.teams.length, '件'],
+    ['メンバー (助っ人を除く)', snapshot.players.filter((player) => !player.guest).length, '名'],
+    ['フォーマット', snapshot.formats.length, '件'],
+    ['ペア設定', snapshot.pairs.length, '件'],
+    ['保存・確定したオーダー', snapshot.orders.length, '件'],
+  ];
+  return (
+    <table className="backup-contents small-text" data-testid="backup-contents">
+      <caption>{title}</caption>
+      <tbody>
+        {rows.map(([label, count, unit]) => (
+          <tr key={label}>
+            <th scope="row">{label}</th>
+            <td className="num">
+              {count} {unit}
+            </td>
+          </tr>
+        ))}
+        <tr>
+          <th scope="row">チーム名</th>
+          <td>{snapshot.teams.map((team) => team.name).join('、') || '—'}</td>
+        </tr>
+      </tbody>
+    </table>
   );
 }

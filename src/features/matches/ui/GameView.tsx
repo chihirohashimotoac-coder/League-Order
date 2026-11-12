@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { onTabListKeyDown } from '../../../components/ui';
 import type { MatchesApi } from '../api';
 import type { LiveLeg, ThrowLeg } from '../parse';
 import { withLiveLeg } from '../parse';
@@ -11,6 +12,9 @@ import { LegsStatusLine } from './LegsStatusLine';
 
 /**
  * One game, the way n01's match Details and score sheet show it — and side by side.
+ *
+ * Order on the page: the leg chips and the chosen leg's score sheet first (what a reader opens a
+ * game for), then the comparison table. On a wide container the two sit side by side.
  *
  * - The comparison table is computed from the throws (`gameStats`), in card order.
  * - Leg chips: winner, darts, who threw first, bull-decided legs marked.
@@ -95,6 +99,33 @@ export function GameView({
   return (
     <div className="game-view" data-testid="game-view">
       <div className="gv-body">
+        <div className="gv-legs">
+          {all.length > 0 ? (
+            <div className="chip-row leg-chips" role="tablist" aria-label="Leg" onKeyDown={onTabListKeyDown} data-testid="leg-chips">
+              {all.map((entry) => {
+                const winner = entry.winner === 0 || entry.winner === 1 ? (flip ? 1 - entry.winner : entry.winner) : null;
+                return (
+                  <button
+                    key={entry.index}
+                    type="button"
+                    role="tab"
+                    className="chip"
+                    aria-selected={entry.index === shown}
+                    aria-pressed={entry.index === shown}
+                    tabIndex={entry.index === shown ? 0 : -1}
+                    onClick={() => setChosen(entry.index)}
+                  >
+                    L{entry.index + 1} {winner === null ? '…' : winner === 0 ? '◀' : '▶'}
+                    {entry.bull ? ' (ブル)' : ''}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="muted small-text">まだ投げた記録がありません。</p>
+          )}
+          {leg ? <ScoreSheet leg={leg} cricket={cricket} names={names} at={at} mark={focus && focus.leg === leg.index ? { side: focus.n01Side, round: focus.round } : null} /> : null}
+        </div>
         <div className="gv-figures">
           {!history.complete ? <LegsStatusLine history={history} /> : null}
           {history.complete ? (
@@ -128,32 +159,6 @@ export function GameView({
           ) : null}
           {!cricket && history.complete ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
         </div>
-        <div className="gv-legs">
-          {all.length > 0 ? (
-            <div className="chip-row" role="tablist" aria-label="Leg">
-              {all.map((entry) => {
-                const winner = entry.winner === 0 || entry.winner === 1 ? (flip ? 1 - entry.winner : entry.winner) : null;
-                return (
-                  <button
-                    key={entry.index}
-                    type="button"
-                    role="tab"
-                    className="chip"
-                    aria-selected={entry.index === shown}
-                    aria-pressed={entry.index === shown}
-                    onClick={() => setChosen(entry.index)}
-                  >
-                    L{entry.index + 1} {winner === null ? '…' : winner === 0 ? '◀' : '▶'}
-                    {entry.bull ? ' (ブル)' : ''}
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="muted small-text">まだ投げた記録がありません。</p>
-          )}
-          {leg ? <ScoreSheet leg={leg} cricket={cricket} names={names} at={at} mark={focus && focus.leg === leg.index ? { side: focus.n01Side, round: focus.round } : null} /> : null}
-        </div>
       </div>
     </div>
   );
@@ -176,14 +181,15 @@ function ScoreSheet({
   const order: [0 | 1, 0 | 1] = [at(0), at(1)];
   const label = `Leg ${leg.index + 1} のスコアシート`;
   return (
-    <div className="ns-grid-wrap">
-      {!cricket ? <RaceChart leg={leg} startScore={null} order={order} names={names} /> : null}
+    <div className="ns-grid-wrap" data-testid="leg-sheet">
+      <h4 className="gv-sheet-title">Leg {leg.index + 1} のスコア表</h4>
       {cricket ? <CricketGrid leg={leg} order={order} names={names} label={label} mark={mark} /> : <ZeroOneGrid leg={leg} order={order} names={names} label={label} mark={mark} />}
       {cricket && leg.marks && leg.numbers ? (
         <p className="small-text muted">
           {leg.numbers.map((number, index) => `${number === 25 ? 'BULL' : number}: ${leg.marks![order[0]][index]}-${leg.marks![order[1]][index]}`).join(' ・ ')}
         </p>
       ) : null}
+      {!cricket ? <RaceChart leg={leg} startScore={null} order={order} names={names} /> : null}
     </div>
   );
 }

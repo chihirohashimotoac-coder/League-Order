@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
+import { SPLIT_QUERY, useMediaQuery } from '../components/useMediaQuery';
 import type {
   FormatId,
-  GameKind,
-  LeagueStatus,
   MatchInfo,
   OptimizerSettings,
   OrderInput,
@@ -10,7 +9,7 @@ import type {
   Player,
   PresetKey,
 } from '../domain/types';
-import { GAME_KIND_LABELS, LEAGUE_STATUS_LABELS, PRESET_KEYS, PRESET_LABELS, formatDiscipline } from '../domain/types';
+import { PRESET_KEYS, PRESET_LABELS, formatDiscipline } from '../domain/types';
 import { leagueStatusOf, needsLeagueStatus } from '../domain/orders/leagueRules';
 import { resolveOrderRules, structureCounts, withAnswers } from '../domain/orders/ruleResolution';
 import type { AskableKind } from '../domain/orders/ruleResolution';
@@ -18,17 +17,14 @@ import { RuleConditionsCard, RuleQuestionSheet } from '../components/RuleConditi
 import { LeagueRulesSummary } from '../components/LeagueRules';
 import { scopeForPreset, weightsForPreset } from '../domain/orders/presets';
 import { formatStructureIssues, totalSlots } from '../domain/games/format';
-import {
-  createParticipantConfig,
-  maxAppearancesFor,
-  minAppearancesFor,
-} from '../domain/orders/participants';
+import { createParticipantConfig } from '../domain/orders/participants';
 import { newGuest } from '../domain/players/newPlayer';
 import { createId } from '../utils/id';
 import { PlayerEditor } from '../components/PlayerEditor';
 import { StrengthBasisPanel } from '../components/StrengthBasisPanel';
 import { useAppStore } from '../state/appStore';
 import { MatchInfoFields } from '../components/MatchInfoFields';
+import { LeagueStatusTag, ParticipantDetail, describeRestrictions } from '../components/ParticipantConditions';
 import {
   Card,
   EmptyState,
@@ -38,7 +34,6 @@ import {
   Sheet,
   Stepper,
   DisciplineBadge,
-  formatRating,
   formatStrengthLine,
   useToast,
   RadioCards,
@@ -112,6 +107,8 @@ export function SetupPage({
   const store = useAppStore();
   const toast = useToast();
   const [detailFor, setDetailFor] = useState<Player | null>(null);
+  // A large screen: the chosen participant's conditions sit beside the list (no sheet over it).
+  const wide = useMediaQuery(SPLIT_QUERY);
   const [showPolicy, setShowPolicy] = useState(false);
   const [guestDraft, setGuestDraft] = useState<Player | null>(null);
   // `generate`: the questions were opened by the generate button, so confirming generates.
@@ -325,6 +322,8 @@ export function SetupPage({
         </div>
       ) : null}
 
+      <div className={`setup-layout${wide ? ' is-split' : ''}`} data-testid="setup-layout">
+      <div className="setup-main">
       <SectionHeader index={1} kicker="FORMAT" title="フォーマット" />
       <Card>
         <Field label="使用するフォーマット">
@@ -476,6 +475,8 @@ export function SetupPage({
                   className="btn small"
                   onClick={() => setDetailFor(player)}
                   disabled={!config.include}
+                  aria-pressed={wide ? detailFor?.id === player.id : undefined}
+                  aria-label={`${player.name} の出場条件`}
                 >
                   条件
                 </button>
@@ -498,6 +499,43 @@ export function SetupPage({
         <Icon name="plus" size={16} strokeWidth={2.6} />
         今回だけ助っ人を追加
       </button>
+      </div>
+
+      <div className="setup-side">
+      {wide ? (
+        detailFor && configById.get(detailFor.id)?.include ? (
+          <ParticipantDetail
+            key={detailFor.id}
+            inline
+            player={detailFor}
+            config={configById.get(detailFor.id) ?? createParticipantConfig(detailFor.id)}
+            games={games}
+            defaultMaxConsecutive={draft.settings.defaultMaxConsecutive}
+            statusRequired={statusRequired}
+            onChange={(change) => updateConfig(detailFor.id, change)}
+            onClose={() => setDetailFor(null)}
+          />
+        ) : (
+          <section className="card participant-panel is-empty" data-testid="participant-panel-empty">
+            <span className="kicker">出場条件</span>
+            <p className="small-text">
+              参加者の「条件」を選ぶと、ここで遅刻・早退 (出場可能範囲)、出場できないゲーム、出場回数を設定できます。参加者一覧を見ながら調整できます。
+            </p>
+            <ul className="plain small-text condition-summary">
+              {everyone
+                .filter((player) => configById.get(player.id)?.include)
+                .map((player) => {
+                  const notes = describeRestrictions(configById.get(player.id)!, games);
+                  return notes.length > 0 ? (
+                    <li key={player.id}>
+                      <strong>{player.name}</strong> {notes.join(' ・ ')}
+                    </li>
+                  ) : null;
+                })}
+            </ul>
+          </section>
+        )
+      ) : null}
 
       <SectionHeader index={3} kicker="STRATEGY" title="方針" />
       {n01Team && (hasOpponent || draft.preset === 'OPPONENT_OPTIMIZED') ? (
@@ -580,6 +618,8 @@ export function SetupPage({
         </span>
         <Icon name="chevronRight" size={18} className="chevron" />
       </button>
+      </div>
+      </div>
 
       <div className="action-bar">
         <button
@@ -633,7 +673,7 @@ export function SetupPage({
         })()
       ) : null}
 
-      {detailFor
+      {detailFor && !wide
         ? (() => {
             const config = configById.get(detailFor.id) ?? createParticipantConfig(detailFor.id);
             return (
@@ -723,247 +763,3 @@ export function SetupPage({
   );
 }
 
-function describeRestrictions(
-  config: ParticipantConfig,
-  games: readonly { id: string; name: string; order: number }[],
-): string[] {
-  const notes: string[] = [];
-  if (!config.include) return ['不参加'];
-  if (config.excludedGameIds.length > 0) {
-    const names = config.excludedGameIds
-      .map((id) => {
-        const game = games.find((entry) => entry.id === id);
-        return game ? `G${game.order}` : id;
-      })
-      .join(', ');
-    notes.push(`不可: ${names}`);
-  }
-  if (config.excludedKinds.length > 0) {
-    notes.push(`不可: ${config.excludedKinds.map((kind) => GAME_KIND_LABELS[kind]).join(', ')}`);
-  }
-  if (config.window) {
-    notes.push(`範囲 G${config.window.fromOrder ?? 1}〜${config.window.toOrder ?? '最終'}`);
-  }
-  if (config.minAppearances !== undefined) notes.push(`最小${config.minAppearances}`);
-  if (config.maxAppearances !== undefined) notes.push(`最大${config.maxAppearances}`);
-  if (config.maxConsecutive !== undefined) notes.push(`連続≤${config.maxConsecutive}`);
-  if (config.ratingOverride !== undefined) {
-    notes.push(`今回 ${formatRating(config.ratingOverride)}`);
-  }
-  return notes;
-}
-
-/** The league status of a participant under a helper rule, always in words. */
-function LeagueStatusTag({ status }: { status: LeagueStatus | null }): React.JSX.Element {
-  return status === null ? (
-    <span className="n01-tag status-tag unset" data-testid="league-status-tag">
-      大会資格 未設定
-    </span>
-  ) : (
-    <span className={`n01-tag status-tag ${status === 'HELPER' ? 'helper' : 'regular'}`} data-testid="league-status-tag">
-      大会: {LEAGUE_STATUS_LABELS[status]}
-    </span>
-  );
-}
-
-function ParticipantDetail({
-  player,
-  config,
-  games,
-  defaultMaxConsecutive,
-  statusRequired,
-  onChange,
-  onClose,
-}: {
-  player: Player;
-  config: ParticipantConfig;
-  games: readonly { id: string; name: string; order: number }[];
-  defaultMaxConsecutive: number;
-  /** The format has a helper rule, so this order needs the player's league status. */
-  statusRequired: boolean;
-  onChange: (change: Partial<ParticipantConfig>) => void;
-  onClose: () => void;
-}): React.JSX.Element {
-  const gameCount = games.length;
-  const kinds: GameKind[] = ['SINGLES', 'DOUBLES', 'TRIOS', 'G501', 'CRICKET', 'GALLON', 'TEAM'];
-  const min = minAppearancesFor(config);
-  const max = maxAppearancesFor(config, games as never);
-  const status = leagueStatusOf(config);
-
-  return (
-    <Sheet title={`${player.name} の出場条件`} onClose={onClose}>
-      {statusRequired || status !== null ? (
-        <div className="sheet-section" data-testid="league-status-picker">
-          <RadioCards<LeagueStatus | ''>
-            label="大会資格 (リーグ規則・このオーダーのみ)"
-            hint={
-              status === null
-                ? '未設定です。助っ人の人数上限を確認するため、どちらかを選んでください (未設定のまま正規登録とはみなしません)。'
-                : '助っ人の人数上限の確認に使います。「今回だけの助っ人」として追加したかどうかとは別に選べます。大会側の登録確認ではありません。'
-            }
-            columns={2}
-            value={status ?? ''}
-            options={[
-              { key: 'REGULAR', label: LEAGUE_STATUS_LABELS.REGULAR, hint: 'チームの登録選手' },
-              { key: 'HELPER', label: LEAGUE_STATUS_LABELS.HELPER, hint: '人数上限の対象' },
-            ]}
-            onChange={(next) => onChange({ leagueStatus: next === '' ? undefined : next })}
-          />
-        </div>
-      ) : null}
-
-      <div className="sheet-section">
-        <span className="kicker">絶対条件 ・ 出場できないゲーム</span>
-        <div className="chip-row">
-          {games.map((game) => (
-            <button
-              type="button"
-              key={game.id}
-              className={`chip${config.excludedGameIds.includes(game.id) ? ' danger-on' : ''}`}
-              aria-pressed={config.excludedGameIds.includes(game.id)}
-              onClick={() =>
-                onChange({
-                  excludedGameIds: config.excludedGameIds.includes(game.id)
-                    ? config.excludedGameIds.filter((id) => id !== game.id)
-                    : [...config.excludedGameIds, game.id],
-                })
-              }
-            >
-              {game.order}. {game.name}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="sheet-section">
-        <span className="kicker">絶対条件 ・ 出場できない種別</span>
-        <div className="chip-row">
-          {kinds.map((kind) => (
-            <button
-              type="button"
-              key={kind}
-              className={`chip${config.excludedKinds.includes(kind) ? ' danger-on' : ''}`}
-              aria-pressed={config.excludedKinds.includes(kind)}
-              onClick={() =>
-                onChange({
-                  excludedKinds: config.excludedKinds.includes(kind)
-                    ? config.excludedKinds.filter((entry) => entry !== kind)
-                    : [...config.excludedKinds, kind],
-                })
-              }
-            >
-              {GAME_KIND_LABELS[kind]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="sheet-section">
-        <span className="kicker">出場可能範囲 (遅刻・早退)</span>
-        <div className="chip-row" style={{ marginBottom: 10 }}>
-          <button type="button" className="chip" onClick={() => onChange({ window: undefined })}>
-            制限なし
-          </button>
-          <button
-            type="button"
-            className="chip"
-            onClick={() => onChange({ window: { toOrder: Math.ceil(gameCount / 2) } })}
-          >
-            前半のみ
-          </button>
-          <button
-            type="button"
-            className="chip"
-            onClick={() => onChange({ window: { fromOrder: Math.floor(gameCount / 2) + 1 } })}
-          >
-            後半のみ
-          </button>
-        </div>
-        <div className="row between" style={{ marginBottom: 8 }}>
-          <span className="small-text secondary">最初に出られる Game</span>
-          <Stepper
-            label="最初に出られるゲーム"
-            value={config.window?.fromOrder ?? 1}
-            min={1}
-            max={gameCount}
-            onChange={(next) =>
-              onChange({ window: { ...config.window, fromOrder: next === 1 ? undefined : next } })
-            }
-          />
-        </div>
-        <div className="row between">
-          <span className="small-text secondary">最後に出られる Game</span>
-          <Stepper
-            label="最後に出られるゲーム"
-            value={config.window?.toOrder ?? gameCount}
-            min={1}
-            max={gameCount}
-            onChange={(next) =>
-              onChange({
-                window: { ...config.window, toOrder: next === gameCount ? undefined : next },
-              })
-            }
-          />
-        </div>
-      </div>
-
-      <div className="sheet-section">
-        <span className="kicker">出場回数</span>
-        <div className="row between" style={{ marginBottom: 8 }}>
-          <span className="small-text secondary">最小 (0 = 指定なし)</span>
-          <Stepper
-            label="最小出場回数"
-            value={min}
-            min={0}
-            max={gameCount}
-            onChange={(next) => onChange({ minAppearances: next === 0 ? undefined : next })}
-          />
-        </div>
-        <div className="row between" style={{ marginBottom: 8 }}>
-          <span className="small-text secondary">最大</span>
-          <Stepper
-            label="最大出場回数"
-            value={max}
-            min={0}
-            max={gameCount}
-            onChange={(next) => onChange({ maxAppearances: next >= gameCount ? undefined : next })}
-          />
-        </div>
-        <div className="row between">
-          <span className="small-text secondary">最大連続出場 (既定 {defaultMaxConsecutive})</span>
-          <Stepper
-            label="最大連続出場"
-            value={config.maxConsecutive ?? defaultMaxConsecutive}
-            min={1}
-            max={gameCount}
-            onChange={(next) =>
-              onChange({ maxConsecutive: next === defaultMaxConsecutive ? undefined : next })
-            }
-          />
-        </div>
-      </div>
-
-      <Field
-        label="今回だけの Rating 上書き (任意)"
-        hint="空欄で選手登録の Rating を使用します。"
-      >
-        <input
-          type="number"
-          step="0.01"
-          inputMode="decimal"
-          value={config.ratingOverride === undefined || config.ratingOverride === null ? '' : config.ratingOverride}
-          onChange={(event) => {
-            const text = event.target.value.trim();
-            if (text === '') {
-              onChange({ ratingOverride: undefined });
-              return;
-            }
-            const parsed = Number(text);
-            if (Number.isFinite(parsed)) onChange({ ratingOverride: parsed });
-          }}
-          placeholder={player.rating === null ? '未入力 (不明)' : String(player.rating)}
-        />
-      </Field>
-    </Sheet>
-  );
-}
