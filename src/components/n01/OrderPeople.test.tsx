@@ -392,3 +392,52 @@ describe('助っ人 and the season', () => {
   }, 120_000);
 });
 
+
+describe('参加者と当日の条件 in the next-match flow (audit 2026-11-12)', () => {
+  it('clears everyone, ticks five, sets one player to the second half only, and the order keeps that window', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+
+    const flow = await openAttendance(user);
+    const attendance = within(flow).getByTestId('flow-attendance');
+    await user.click(within(attendance).getByRole('button', { name: 'すべて解除' }));
+    expect(attendance).toHaveTextContent('本日参加 0 / 7');
+    expect(within(attendance).getByRole('button', { name: 'このメンバーで作成' })).toBeDisabled();
+    await user.click(within(attendance).getByRole('button', { name: '全員を選択' }));
+    expect(attendance).toHaveTextContent('本日参加 7 / 7');
+    await user.click(within(attendance).getByRole('button', { name: 'すべて解除' }));
+
+    const boxes = within(attendance).getAllByRole('checkbox');
+    for (const box of boxes.slice(0, 5)) await user.click(box);
+    expect(attendance).toHaveTextContent('本日参加 5 / 7');
+    const late = boxes[0].closest('label')!.querySelector('.grow')!.childNodes[0].textContent!.trim();
+
+    // The late player's conditions, before anything is generated.
+    await user.click(within(attendance).getByRole('button', { name: `${late} の出場条件` }));
+    const sheet = await screen.findByRole('dialog', { name: `${late} の出場条件` });
+    await user.click(within(sheet).getByRole('button', { name: '後半のみ' }));
+    await user.click(within(sheet).getByRole('button', { name: '閉じる' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: `${late} の出場条件` })).toBeNull());
+    const summary = within(attendance).getAllByTestId('attendance-conditions')[0];
+    expect(summary).toHaveTextContent(/範囲 G\d+〜最終/u);
+    const from = Number(/範囲 G(\d+)/u.exec(summary.textContent ?? '')![1]);
+
+    await user.click(within(attendance).getByRole('button', { name: 'このメンバーで作成' }));
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
+    // Never in a game before the window; nobody who stayed home is fielded.
+    const games = [...document.querySelectorAll<HTMLElement>('.order-game')];
+    expect(games.length).toBeGreaterThanOrEqual(from);
+    games.forEach((game, index) => {
+      const names = [...game.querySelectorAll<HTMLSelectElement>('select')].map((select) => select.selectedOptions[0]?.textContent ?? '');
+      if (index + 1 < from) expect(names.some((name) => name.includes(late))).toBe(false);
+    });
+    const absent = boxes.slice(5).map((box) => box.closest('label')!.querySelector('.grow')!.childNodes[0].textContent!.trim());
+    for (const name of absent) expect(fieldedNames().some((fielded) => fielded.includes(name))).toBe(false);
+
+    // SETUP shows the same condition on that player.
+    await user.click(screen.getByRole('button', { name: '戻る' }));
+    await screen.findByRole('heading', { name: 'オーダー設定' });
+    expect(document.body).toHaveTextContent(`範囲 G${from}〜最終`);
+  }, 90_000);
+});

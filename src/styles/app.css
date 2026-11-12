@@ -9236,3 +9236,7 @@ ul.plain {
     max-width: 640px;
   }
 }
+/* One card today: its tile keeps a tile's width instead of stretching across the page. */
+.live-hub > .board:not(:has(> li + li)) {
+  grid-auto-columns: minmax(240px, 420px);
+}

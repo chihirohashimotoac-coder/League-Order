@@ -143,6 +143,42 @@ test.describe('PLAYER ANALYTICS', () => {
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 60_000 });
   });
 
+  test('a failure offers 再取得 and 観戦でスタッツを見る next to it; the latter opens the same league’s stats', async ({ page }) => {
+    const { n01, extras } = await start(page);
+    await createKalavinka(page);
+    await openAnalytics(page);
+    await expect(page.getByTestId('metric-3DA')).toBeVisible();
+    extras.failExtras = true;
+    n01.offline = true;
+    await page.getByTestId('analytics-toolbar').getByRole('button', { name: '再取得' }).click();
+    const banner = page.getByTestId('analytics-banner-stale').or(page.getByTestId('analytics-banner-error'));
+    await expect(banner).toBeVisible();
+    await expect(banner.getByTestId('analytics-retry')).toBeVisible();
+    n01.offline = false;
+    extras.failExtras = false;
+    await banner.getByTestId('analytics-to-watch').click();
+    await expect(page.getByRole('tab', { name: 'スタッツ' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('stats-tab')).toBeVisible({ timeout: 30_000 });
+  });
+
+  test('phone: picking a player brings their name and figures into view; Tab follows roster → detail → ranking', async ({ page, isMobile }) => {
+    test.skip(!isMobile, 'the phone layout');
+    await start(page);
+    await createKalavinka(page);
+    await openAnalytics(page);
+    await expect(page.getByTestId('metric-3DA')).toBeVisible();
+    const rows = page.locator('.analytics-roster .list-row:not([disabled])');
+    await rows.nth(1).click();
+    const detail = page.getByTestId('analytics-detail');
+    await expect.poll(async () => (await detail.boundingBox())!.y).toBeLessThan(200);
+    const order = await page.evaluate(() => {
+      const of = (selector: string): number => [...document.querySelectorAll('*')].indexOf(document.querySelector(selector)!);
+      return [of('.analytics-roster-card'), of('[data-testid="analytics-detail"]'), of('.analytics-rank')];
+    });
+    expect(order[0]).toBeLessThan(order[1]);
+    expect(order[1]).toBeLessThan(order[2]);
+  });
+
   test('accessibility (WCAG 2.1 AA) and layout', async ({ page }, info) => {
     await start(page);
     await createKalavinka(page);
