@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MatchesApi } from '../api';
 import type { AnalyticsOperation, AnalyticsTransport } from '../../analytics/api/readApi';
 import { RequestGovernor } from '../governor';
@@ -368,7 +368,7 @@ describe('league スタッツ: the columns', () => {
     await flush();
     await flush();
     const table = screen.getByTestId('stats-table');
-    const heads = () => [...table.querySelectorAll('thead th')].map((th) => th.textContent);
+    const heads = () => [...table.querySelectorAll('thead th')].map((th) => th.textContent?.replace(/[▲▼]/gu, ''));
     const cells = () => [...table.querySelectorAll('tbody tr:first-child td')].map((td) => td.textContent);
     return { table, heads, cells };
   }
@@ -378,7 +378,7 @@ describe('league スタッツ: the columns', () => {
     expect(heads()).toEqual(['平均順位', '選手', '平均', 'First 9', 'Leg', '180', 'High Out']);
     expect(cells()).toEqual(['1', '77.32', '90.87', '30/3585.71%', '4', '105']);
     const sorted = table.querySelector('thead th.sorted')!;
-    expect(sorted.textContent).toBe('平均');
+    expect(sorted.textContent).toBe('▼平均');
     expect(sorted.getAttribute('aria-sort')).toBe('descending');
     // Numbers and their headers share one edge (right); the player's name stays on the left.
     for (const th of [...table.querySelectorAll('thead th')].slice(2)) expect(th.className).toContain('num');
@@ -404,6 +404,55 @@ describe('league スタッツ: the columns', () => {
       'BestLeg', 'WorstLeg', '勝率(Sets)', '勝率(Legs)', '3 Darts平均', '1 Dart平均', 'First 9平均', 'Keep', 'Break', 'SecondLegs', 'BreakLegs', 'TotalScore', 'TotalDarts', 'グループ',
     ]);
     expect(cells()).toEqual(['1', '02-0051', '5', '15', '15', '35', '25', '30', '41', '17', '0', '4', '105', '1', '14', '23', '100.00%', '85.71%', '77.32', '25.77', '90.87', '95.00%', '73.33%', '15', '11', '14279', '554', expect.any(String)]);
+  });
+
+  it('a header sorts by its column, best first; pressed again, the other way round with the ranks kept', async () => {
+    const season = parseSeasonDocument(tournamentDoc(), TDID);
+    const data: SeasonData = { season, fixtures: parseFixtures(fixtures()), games: [], cards: buildCards(season, parseFixtures(fixtures()), []), standings: [], standingsError: null, unreadableGames: 0, truncated: false };
+    // Keep: A 80%, B 50%, C none (never threw second). Worst Leg (fewer darts = better): A 30, B 21, C 0 = none.
+    const players = [
+      { oid: 'a', tpid: 'AAAA', oname: 'A', score: 900, darts: 30, leg: 7, winLeg: 5, a_b: 2, w_b: 1, worst: 30, ton00: 3 },
+      { oid: 'b', tpid: 'AAAA', oname: 'B', score: 600, darts: 30, leg: 6, winLeg: 3, a_b: 4, w_b: 2, worst: 21, ton00: 9 },
+      { oid: 'c', tpid: 'BBBB', oname: 'C', score: 300, darts: 30, leg: 3, winLeg: 0, a_b: 0, w_b: 0, worst: 0, ton00: 1 },
+    ];
+    const { api } = apiOf((operation) => {
+      if (operation === 'tournament/stats') return { result: 0, stats: Object.fromEntries(players.map((p) => [p.oid, p])) };
+      if (operation === 'team/player/list') return { result: 0, list: [] };
+      return list([]);
+    });
+    render(<StatsTab data={data} registered={[]} api={api} onTeam={() => undefined} onPlayer={() => undefined} />);
+    await flush();
+    await flush();
+    fireEvent.click(screen.getByRole('checkbox', { name: /全て表示/u }));
+    const table = screen.getByTestId('stats-table');
+    const order = () => [...table.querySelectorAll('tbody tr')].map((tr) => `${tr.querySelector('td')?.textContent}:${tr.querySelector('th')?.textContent?.slice(0, 1)}`);
+    const header = (name: RegExp) => within(table).getByRole('button', { name });
+    // Keep: (5 − 1) / (7 − 2) = 80% beats (3 − 2) / (6 − 4) = 50%; C has no Keep → unranked at the end.
+    fireEvent.click(header(/^Keep/u));
+    expect(order()).toEqual(['1:A', '2:B', '—:C']);
+    expect(header(/^Keep/u).closest('th')?.getAttribute('aria-sort')).toBe('descending');
+    expect(screen.getByTestId('rank-head').textContent).toContain('Keep');
+    fireEvent.click(header(/^Keep/u));
+    expect(order()).toEqual(['2:B', '1:A', '—:C']);
+    expect(header(/^Keep/u).closest('th')?.getAttribute('aria-sort')).toBe('ascending');
+    // Worst Leg: fewer darts first; 0 = no won leg = none.
+    fireEvent.click(header(/^Worst\s?Leg/u));
+    expect(order()).toEqual(['1:B', '2:A', '—:C']);
+    expect(header(/^Worst\s?Leg/u).closest('th')?.getAttribute('aria-sort')).toBe('ascending');
+    // A chip still sorts, and the chip of a header's sort shows as chosen.
+    fireEvent.click(header(/^100\+$/u));
+    expect(order()).toEqual(['1:B', '2:A', '3:C']);
+    fireEvent.click(screen.getByRole('radio', { name: '平均' }));
+    expect(order()).toEqual(['1:A', '2:B', '3:C']);
+    expect(screen.getByRole('radio', { name: '平均' }).getAttribute('aria-checked')).toBe('true');
+    // Back to the main five: the column sorted in 全て表示 stays in view, next to the name.
+    fireEvent.click(header(/^Keep/u));
+    fireEvent.click(screen.getByRole('checkbox', { name: /全て表示/u }));
+    const heads = [...screen.getByTestId('stats-table').querySelectorAll('thead th')].map((th) => th.textContent?.replace(/[▲▼]/gu, ''));
+    expect(heads).toEqual(['Keep順位', '選手', 'Keep', '平均', 'First 9', 'Leg', '180', 'High Out']);
+    expect(screen.getByTestId('stats-table').querySelector('tbody tr td.sorted')?.textContent).toBe('80.00%');
+    // ID and グループ are text: not sortable.
+    expect(within(screen.getByTestId('stats-table')).queryByRole('button', { name: /^ID$/u })).toBeNull();
   });
 
   it('全て表示: Cricket columns only with Cricket games, Dynamic 平均 only when the season turns it on', async () => {

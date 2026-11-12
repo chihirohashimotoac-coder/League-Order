@@ -20,11 +20,13 @@ import type { PlayerLine } from './useMatchContext';
  * n01's own stats page, so the same row never shows two different numbers here and on n01.
  *
  * - The default view: 平均 · First 9 · Leg · 180 · High Out, plus the sort's own column when it is
- *   none of those (140+ / Best Leg / Break) — first, next to the name, so a phone shows it too.
+ *   none of those (140+ / Best Leg / Break, or a column sorted in 全て表示) — first, next to the
+ *   name, so a phone shows it too.
  * - 全て表示: n01's player table column for column (the table scrolls sideways), printed the way
  *   n01 prints it (0 / 0.00 / 0.00%).
  */
 
+/** The sorts of the chips above the table (any numeric column can also be sorted by its header). */
 export type SortKey = 'avg' | 'f9' | 'legRate' | 'ton80' | 'ton40' | 'highOut' | 'bestLeg' | 'break';
 
 export const SORTS: [SortKey, string][] = [
@@ -38,34 +40,82 @@ export const SORTS: [SortKey, string][] = [
   ['break', 'Break'],
 ];
 
-/** The figure a row is ranked by; `null` = none (the row is listed unranked at the end). */
-export function sortValue(line: PlayerLine['line'], key: SortKey): number | null {
-  switch (key) {
-    case 'avg':
-      return n01Avg3(line);
-    case 'f9':
-      return n01First9(line);
-    case 'legRate':
-      return n01WinRateLeg(line);
-    case 'ton80':
-      return line.ton80;
-    case 'ton40':
-      return line.ton40;
-    case 'highOut':
-      return line.highOut;
-    case 'bestLeg':
-      return line.bestLeg;
-    case 'break':
-      return n01Break(line);
-  }
+/** A chip's sort or a header's: the id of a {@link SORT_DEFS} entry. */
+export type SortId = string;
+
+interface SortDef {
+  /** Over the rank column, and the header of the column added next to the name. */
+  label: string;
+  /** The figure a row is ranked by; `null` = none (the row is listed unranked at the end). */
+  value: (line: PlayerLine['line']) => number | null;
+  /** Fewer is better (Best / Worst Leg: darts). */
+  ascending?: boolean;
+  /** How the column added next to the name prints it. */
+  kind: 'count' | 'avg' | 'rate';
+}
+
+const positiveOrNull = (value: number | null | undefined): number | null => (value !== null && value !== undefined && value > 0 ? value : null);
+
+export const SORT_DEFS: Record<SortId, SortDef> = {
+  avg: { label: '平均', value: n01Avg3, kind: 'avg' },
+  f9: { label: 'First 9', value: n01First9, kind: 'avg' },
+  legRate: { label: 'Leg率', value: n01WinRateLeg, kind: 'rate' },
+  ton80: { label: '180', value: (line) => line.ton80, kind: 'count' },
+  ton40: { label: '140+', value: (line) => line.ton40, kind: 'count' },
+  highOut: { label: 'High Out', value: (line) => line.highOut, kind: 'count' },
+  bestLeg: { label: 'Best Leg', value: (line) => line.bestLeg, ascending: true, kind: 'count' },
+  break: { label: 'Break', value: n01Break, kind: 'rate' },
+  match: { label: 'Matches', value: (line) => line.match, kind: 'count' },
+  winMatch: { label: 'Matches Won', value: (line) => line.winMatch, kind: 'count' },
+  set: { label: 'Sets', value: (line) => line.set, kind: 'count' },
+  winSet: { label: 'Sets Won', value: (line) => line.winSet, kind: 'count' },
+  leg: { label: 'Legs', value: (line) => line.leg, kind: 'count' },
+  legDiff: { label: 'Legs Diff', value: n01LegDiff, kind: 'count' },
+  winLeg: { label: 'Legs Won', value: (line) => line.winLeg, kind: 'count' },
+  ton00: { label: '100+', value: (line) => line.ton00, kind: 'count' },
+  ton70: { label: '170+', value: (line) => line.ton70, kind: 'count' },
+  highOutCount: { label: '100+ Finishes', value: (line) => line.n01?.highOutCount ?? null, kind: 'count' },
+  worstLeg: { label: 'Worst Leg', value: (line) => positiveOrNull(line.n01?.worstLeg), ascending: true, kind: 'count' },
+  mark9: { label: '9 Mark', value: (line) => line.n01?.mark9 ?? null, kind: 'count' },
+  mark8: { label: '8 Mark', value: (line) => line.n01?.mark8 ?? null, kind: 'count' },
+  mark7: { label: '7 Mark', value: (line) => line.n01?.mark7 ?? null, kind: 'count' },
+  mark6: { label: '6 Mark', value: (line) => line.n01?.mark6 ?? null, kind: 'count' },
+  winRateMatch: { label: '勝率 (Match)', value: n01WinRateMatch, kind: 'rate' },
+  winRateSet: { label: '勝率 (Sets)', value: n01WinRateSet, kind: 'rate' },
+  avg1: { label: '1 Dart 平均', value: n01Avg1, kind: 'avg' },
+  dynamicAvg: { label: 'Dynamic 平均', value: n01DynamicAvg, kind: 'avg' },
+  mpr: { label: 'MPR', value: n01Mpr, kind: 'avg' },
+  keep: { label: 'Keep', value: n01Keep, kind: 'rate' },
+  secondLegs: { label: 'Second Legs', value: (line) => line.breakLegs, kind: 'count' },
+  breakLegs: { label: 'Break Legs', value: (line) => line.breakWins, kind: 'count' },
+  score: { label: 'Total Score', value: (line) => line.score, kind: 'count' },
+  darts: { label: 'Total Darts', value: (line) => line.darts, kind: 'count' },
+};
+
+/** An id the table knows; anything else (an old saved view) falls back to 平均. */
+export function knownSort(id: SortId): SortId {
+  return Object.hasOwn(SORT_DEFS, id) ? id : 'avg';
+}
+
+/** The figure a row is ranked by under a sort; `null` = none (listed unranked at the end). */
+export function sortValue(line: PlayerLine['line'], id: SortId): number | null {
+  return SORT_DEFS[knownSort(id)].value(line);
+}
+
+export function sortAscending(id: SortId): boolean {
+  return SORT_DEFS[knownSort(id)].ascending ?? false;
+}
+
+export function sortLabel(id: SortId): string {
+  return SORT_DEFS[knownSort(id)].label;
 }
 
 export interface StatsColumn {
   key: string;
   /** Header text; `\n` breaks the line as n01's headers do. */
   label: string;
-  /** The sort this column shows, so it is marked while that sort is chosen. */
-  sort?: SortKey;
+  /** The sort its header sets (and that marks it while chosen); none = not sortable (text). */
+  sort?: SortId;
   cell: (row: PlayerLine) => React.ReactNode;
 }
 
@@ -82,7 +132,9 @@ function ofWithRate(won: number | null, of: number | null, rate: number | null):
   );
 }
 
-export function defaultColumns(sort: SortKey): StatsColumn[] {
+const DEFAULT_SORTS: readonly SortId[] = ['avg', 'f9', 'legRate', 'ton80', 'highOut'];
+
+export function defaultColumns(sort: SortId): StatsColumn[] {
   const columns: StatsColumn[] = [
     { key: 'avg', label: '平均', sort: 'avg', cell: (row) => dash(n01Avg3(row.line), 2) },
     { key: 'f9', label: 'First 9', sort: 'f9', cell: (row) => dash(n01First9(row.line), 2) },
@@ -90,9 +142,18 @@ export function defaultColumns(sort: SortKey): StatsColumn[] {
     { key: 'ton80', label: '180', sort: 'ton80', cell: (row) => dash(row.line.ton80) },
     { key: 'highOut', label: 'High Out', sort: 'highOut', cell: (row) => dash(row.line.highOut) },
   ];
-  if (sort === 'ton40') columns.unshift({ key: 'ton40', label: '140+', sort: 'ton40', cell: (row) => dash(row.line.ton40) });
-  if (sort === 'bestLeg') columns.unshift({ key: 'bestLeg', label: 'Best Leg', sort: 'bestLeg', cell: (row) => dash(row.line.bestLeg) });
-  if (sort === 'break') columns.unshift({ key: 'break', label: 'Break', sort: 'break', cell: (row) => ofWithRate(row.line.breakWins, row.line.breakLegs, n01Break(row.line)) });
+  const id = knownSort(sort);
+  if (!DEFAULT_SORTS.includes(id)) {
+    const def = SORT_DEFS[id];
+    const cell =
+      id === 'break'
+        ? (row: PlayerLine) => ofWithRate(row.line.breakWins, row.line.breakLegs, n01Break(row.line))
+        : (row: PlayerLine) => {
+            const v = def.value(row.line);
+            return v === null ? '—' : def.kind === 'count' ? String(v) : def.kind === 'avg' ? v.toFixed(2) : n01Text(v, 'rate');
+          };
+    columns.unshift({ key: `sorted-${id}`, label: def.label, sort: id, cell });
+  }
   return columns;
 }
 
@@ -119,39 +180,39 @@ export function allColumns(rows: readonly PlayerLine[], options: AllColumnsOptio
   const member = options.unit === 'member';
   const columns: (StatsColumn | false)[] = [
     member && { key: 'id', label: 'ID', cell: (row) => row.opid ?? '' },
-    matchExists && { key: 'match', label: 'Matches\nPlayed', cell: count((row) => row.line.match) },
-    matchExists && !member && { key: 'winMatch', label: 'Matches\nWon', cell: count((row) => row.line.winMatch) },
-    setExists && { key: 'set', label: 'Sets\nPlayed', cell: count((row) => row.line.set) },
-    setExists && { key: 'winSet', label: 'Sets\nWon', cell: count((row) => row.line.winSet) },
-    { key: 'leg', label: 'Legs\nPlayed', cell: count((row) => row.line.leg) },
-    { key: 'legDiff', label: 'Legs\nDiff', cell: count((row) => n01LegDiff(row.line)) },
-    { key: 'winLeg', label: 'Legs\nWon', cell: count((row) => row.line.winLeg) },
-    show01 && { key: 'ton00', label: '100+', cell: count((row) => row.line.ton00) },
+    matchExists && { key: 'match', label: 'Matches\nPlayed', sort: 'match', cell: count((row) => row.line.match) },
+    matchExists && !member && { key: 'winMatch', label: 'Matches\nWon', sort: 'winMatch', cell: count((row) => row.line.winMatch) },
+    setExists && { key: 'set', label: 'Sets\nPlayed', sort: 'set', cell: count((row) => row.line.set) },
+    setExists && { key: 'winSet', label: 'Sets\nWon', sort: 'winSet', cell: count((row) => row.line.winSet) },
+    { key: 'leg', label: 'Legs\nPlayed', sort: 'leg', cell: count((row) => row.line.leg) },
+    { key: 'legDiff', label: 'Legs\nDiff', sort: 'legDiff', cell: count((row) => n01LegDiff(row.line)) },
+    { key: 'winLeg', label: 'Legs\nWon', sort: 'winLeg', cell: count((row) => row.line.winLeg) },
+    show01 && { key: 'ton00', label: '100+', sort: 'ton00', cell: count((row) => row.line.ton00) },
     show01 && { key: 'ton40', label: '140+', sort: 'ton40', cell: count((row) => row.line.ton40) },
-    show01 && { key: 'ton70', label: '170+', cell: count((row) => positive(row.line.ton70)) },
+    show01 && { key: 'ton70', label: '170+', sort: 'ton70', cell: count((row) => positive(row.line.ton70)) },
     show01 && { key: 'ton80', label: "180's", sort: 'ton80', cell: count((row) => row.line.ton80) },
     show01 && { key: 'highOut', label: 'High\nFinish', sort: 'highOut', cell: count((row) => positive(row.line.highOut)) },
-    show01 && { key: 'highOutCount', label: '100+\nFinishes', cell: count((row) => positive(row.line.n01?.highOutCount)) },
+    show01 && { key: 'highOutCount', label: '100+\nFinishes', sort: 'highOutCount', cell: count((row) => positive(row.line.n01?.highOutCount)) },
     show01 && { key: 'bestLeg', label: 'Best\nLeg', sort: 'bestLeg', cell: count((row) => positive(row.line.bestLeg)) },
-    show01 && { key: 'worstLeg', label: 'Worst\nLeg', cell: count((row) => positive(row.line.n01?.worstLeg)) },
-    hasCricket && { key: 'mark9', label: '9\nMark', cell: count((row) => row.line.n01?.mark9) },
-    hasCricket && { key: 'mark8', label: '8\nMark', cell: count((row) => row.line.n01?.mark8) },
-    hasCricket && { key: 'mark7', label: '7\nMark', cell: count((row) => row.line.n01?.mark7) },
-    hasCricket && { key: 'mark6', label: '6\nMark', cell: count((row) => row.line.n01?.mark6) },
-    matchExists && !member && { key: 'winRateMatch', label: '勝率\n(Match)', cell: rate((row) => n01WinRateMatch(row.line)) },
-    setExists && { key: 'winRateSet', label: '勝率\n(Sets)', cell: rate((row) => n01WinRateSet(row.line)) },
+    show01 && { key: 'worstLeg', label: 'Worst\nLeg', sort: 'worstLeg', cell: count((row) => positive(row.line.n01?.worstLeg)) },
+    hasCricket && { key: 'mark9', label: '9\nMark', sort: 'mark9', cell: count((row) => row.line.n01?.mark9) },
+    hasCricket && { key: 'mark8', label: '8\nMark', sort: 'mark8', cell: count((row) => row.line.n01?.mark8) },
+    hasCricket && { key: 'mark7', label: '7\nMark', sort: 'mark7', cell: count((row) => row.line.n01?.mark7) },
+    hasCricket && { key: 'mark6', label: '6\nMark', sort: 'mark6', cell: count((row) => row.line.n01?.mark6) },
+    matchExists && !member && { key: 'winRateMatch', label: '勝率\n(Match)', sort: 'winRateMatch', cell: rate((row) => n01WinRateMatch(row.line)) },
+    setExists && { key: 'winRateSet', label: '勝率\n(Sets)', sort: 'winRateSet', cell: rate((row) => n01WinRateSet(row.line)) },
     { key: 'winRateLeg', label: '勝率\n(Legs)', sort: 'legRate', cell: rate((row) => n01WinRateLeg(row.line)) },
     show01 && { key: 'avg3', label: '3 Darts\n平均', sort: 'avg', cell: avg((row) => n01Avg3(row.line)) },
-    show01 && { key: 'avg1', label: '1 Dart\n平均', cell: avg((row) => n01Avg1(row.line)) },
-    show01 && options.dynamicAvg && { key: 'dynamicAvg', label: 'Dynamic\n平均', cell: avg((row) => n01DynamicAvg(row.line)) },
+    show01 && { key: 'avg1', label: '1 Dart\n平均', sort: 'avg1', cell: avg((row) => n01Avg1(row.line)) },
+    show01 && options.dynamicAvg && { key: 'dynamicAvg', label: 'Dynamic\n平均', sort: 'dynamicAvg', cell: avg((row) => n01DynamicAvg(row.line)) },
     show01 && { key: 'f9', label: 'First 9\n平均', sort: 'f9', cell: avg((row) => n01First9(row.line)) },
-    hasCricket && { key: 'mpr', label: 'MPR', cell: avg((row) => n01Mpr(row.line)) },
-    { key: 'keep', label: 'Keep', cell: rate((row) => n01Keep(row.line)) },
+    hasCricket && { key: 'mpr', label: 'MPR', sort: 'mpr', cell: avg((row) => n01Mpr(row.line)) },
+    { key: 'keep', label: 'Keep', sort: 'keep', cell: rate((row) => n01Keep(row.line)) },
     { key: 'break', label: 'Break', sort: 'break', cell: rate((row) => n01Break(row.line)) },
-    { key: 'secondLegs', label: 'Second\nLegs', cell: count((row) => row.line.breakLegs) },
-    { key: 'breakLegs', label: 'Break\nLegs', cell: count((row) => row.line.breakWins) },
-    { key: 'score', label: 'Total\nScore', cell: count((row) => row.line.score) },
-    { key: 'darts', label: 'Total\nDarts', cell: count((row) => row.line.darts) },
+    { key: 'secondLegs', label: 'Second\nLegs', sort: 'secondLegs', cell: count((row) => row.line.breakLegs) },
+    { key: 'breakLegs', label: 'Break\nLegs', sort: 'breakLegs', cell: count((row) => row.line.breakWins) },
+    { key: 'score', label: 'Total\nScore', sort: 'score', cell: count((row) => row.line.score) },
+    { key: 'darts', label: 'Total\nDarts', sort: 'darts', cell: count((row) => row.line.darts) },
     { key: 'group', label: 'グループ', cell: options.divisionTitle },
   ];
   return columns.filter((column): column is StatsColumn => column !== false);
