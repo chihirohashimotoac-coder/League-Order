@@ -136,3 +136,29 @@ test('standings on a 390 px phone: rank, team, points and the movement without s
   expect(await wrap.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   await expect(table).toContainText('n01 公式');
 });
+
+test('backup: scope and full replacement are stated before a file is chosen; a restore can be cancelled', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルで試す' }).click();
+  await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
+  await page.locator('.tab-bar').getByRole('button', { name: 'その他' }).click();
+  await page.getByRole('button', { name: /設定 \/ バックアップ/ }).click();
+  await expect(page.getByText('全チーム分')).toBeVisible();
+  await expect(page.getByText('この端末のデータをすべて置き換えます')).toBeVisible();
+  await expect(page.getByTestId('backup-contents')).toContainText('サンプルチーム');
+  // 全データ削除 is in its own card, not next to the backup buttons.
+  const backup = page.locator('.backup-card');
+  await expect(backup.getByRole('button', { name: '全データ削除' })).toHaveCount(0);
+  await expect(page.locator('.danger-card').getByRole('button', { name: '全データ削除' })).toBeVisible();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'JSON エクスポート' }).click();
+  const path = await (await download).path();
+  await page.setInputFiles('input[type="file"]', path!);
+  const dialog = page.getByRole('dialog', { name: 'JSON をインポート' });
+  await expect(dialog.getByTestId('restore-compare')).toContainText('ファイルの内容');
+  await dialog.getByRole('button', { name: 'キャンセル' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText('インポートしました')).toHaveCount(0);
+  await expect(page.getByTestId('backup-contents')).toContainText('サンプルチーム');
+});
