@@ -261,6 +261,8 @@ export interface PlayerLine {
   teamId: string | null;
   divisionIndex: number | null;
   line: PlayerStatsRow['line'];
+  /** n01's player ID (`opid`) of a team member; absent for an individual event's entries. */
+  opid?: string | null;
 }
 
 /**
@@ -302,6 +304,7 @@ export function usePlayerStats(api: MatchesApi | null, tournamentId: string | nu
               teamId: row.teamId ?? names.get(row.oid)?.teamId ?? null,
               divisionIndex: row.divisionIndex,
               line: row.line,
+              opid: row.opid,
             })),
           };
         })

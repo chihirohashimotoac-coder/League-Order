@@ -347,10 +347,70 @@ describe('F12: every player of a ranking can be reached', () => {
     // Best Leg: players with no won leg stay, unranked at the end.
     fireEvent.click(screen.getByRole('radio', { name: 'Best Leg' }));
     expect(rows()).toHaveLength(136);
-    const last = rows()[135].querySelectorAll('td');
-    expect(last[0].textContent).toBe('—');
-    expect(last[1].textContent).toBe('—');
+    const last = rows()[135];
+    expect(last.querySelector('td')?.textContent).toBe('—');
+    expect(last.querySelector('td.sorted')?.textContent).toBe('—');
     expect(rows()[136 - noBest - 1].querySelector('td')?.textContent).toBe(String(136 - noBest));
+  });
+});
+
+describe('league スタッツ: the columns', () => {
+  async function open(extra: Record<string, unknown> = {}) {
+    const season = parseSeasonDocument(tournamentDoc(), TDID);
+    const data: SeasonData = { season, fixtures: parseFixtures(fixtures()), games: [], cards: buildCards(season, parseFixtures(fixtures()), []), standings: [], standingsError: null, unreadableGames: 0, truncated: false };
+    const row = { oid: 'awzo', tpid: 'AAAA', opid: '02-0051', oname: '馬場 善久', score: 14279, darts: 554, winLeg: 30, leg: 35, a_b: 15, w_b: 11, winMatch: 0, match: 5, winSet: 15, set: 15, ton00: 41, ton40: 17, ton70: 0, ton80: 4, highOut: 105, highOutCount: 1, best: 14, worst: 23, f9Score: 7633, f9Darts: 252, r_g: 1, ho: 1, hc: 0, ...extra };
+    const { api } = apiOf((operation) => {
+      if (operation === 'tournament/stats') return { result: 0, stats: { awzo: row } };
+      if (operation === 'team/player/list') return { result: 0, list: [] };
+      return list([]);
+    });
+    render(<StatsTab data={data} registered={[]} api={api} onTeam={() => undefined} onPlayer={() => undefined} />);
+    await flush();
+    await flush();
+    const table = screen.getByTestId('stats-table');
+    const heads = () => [...table.querySelectorAll('thead th')].map((th) => th.textContent);
+    const cells = () => [...table.querySelectorAll('tbody tr:first-child td')].map((td) => td.textContent);
+    return { table, heads, cells };
+  }
+
+  it('by default: 平均 · First 9 · Leg · 180 · High Out, once each, with the sorted one marked', async () => {
+    const { table, heads, cells } = await open();
+    expect(heads()).toEqual(['平均順位', '選手', '平均', 'First 9', 'Leg', '180', 'High Out']);
+    expect(cells()).toEqual(['1', '77.32', '90.87', '30/3585.71%', '4', '105']);
+    const sorted = table.querySelector('thead th.sorted')!;
+    expect(sorted.textContent).toBe('平均');
+    expect(sorted.getAttribute('aria-sort')).toBe('descending');
+    // Numbers and their headers share one edge (right); the player's name stays on the left.
+    for (const th of [...table.querySelectorAll('thead th')].slice(2)) expect(th.className).toContain('num');
+    for (const td of table.querySelectorAll('tbody td')) expect(td.className).toContain('num');
+    expect(table.querySelector('thead th.name-col')?.className).not.toContain('num');
+  });
+
+  it('a sort outside the five adds its own column next to the name (Break: 11/15 73.33%)', async () => {
+    const { heads, cells } = await open();
+    fireEvent.click(screen.getByRole('radio', { name: 'Break' }));
+    expect(heads()).toEqual(['Break順位', '選手', 'Break', '平均', 'First 9', 'Leg', '180', 'High Out']);
+    expect(cells()[1]).toBe('11/1573.33%');
+    fireEvent.click(screen.getByRole('radio', { name: 'Leg率' }));
+    expect(heads()).toHaveLength(7);
+  });
+
+  it("全て表示: n01's player table column for column, printed as n01 prints it", async () => {
+    const { table, heads, cells } = await open();
+    fireEvent.click(screen.getByRole('checkbox', { name: /全て表示/u }));
+    expect(table.className).toContain('wide');
+    expect(heads()).toEqual([
+      '平均順位', '選手', 'ID', 'MatchesPlayed', 'SetsPlayed', 'SetsWon', 'LegsPlayed', 'LegsDiff', 'LegsWon', '100+', '140+', '170+', "180's", 'HighFinish', '100+Finishes',
+      'BestLeg', 'WorstLeg', '勝率(Sets)', '勝率(Legs)', '3 Darts平均', '1 Dart平均', 'First 9平均', 'Keep', 'Break', 'SecondLegs', 'BreakLegs', 'TotalScore', 'TotalDarts', 'グループ',
+    ]);
+    expect(cells()).toEqual(['1', '02-0051', '5', '15', '15', '35', '25', '30', '41', '17', '0', '4', '105', '1', '14', '23', '100.00%', '85.71%', '77.32', '25.77', '90.87', '95.00%', '73.33%', '15', '11', '14279', '554', expect.any(String)]);
+  });
+
+  it('全て表示: Cricket columns only with Cricket games, Dynamic 平均 only when the season turns it on', async () => {
+    const { heads } = await open({ hc: 1, cLeg: 2, cDarts: 60, cMarks: 50, cM9: 1, cM8: 0, cM7: 2, cM6: 3 });
+    fireEvent.click(screen.getByRole('checkbox', { name: /全て表示/u }));
+    expect(heads()).toEqual(expect.arrayContaining(['9Mark', '8Mark', '7Mark', '6Mark', 'MPR']));
+    expect(heads()).not.toContain('Dynamic平均');
   });
 });
 

@@ -2,7 +2,7 @@ import type { Composition } from './gameKind';
 import { classifyGames, linesFromGames, tallyGames } from './roleGames';
 import type { ClassifiedGame, GameScope, GameTally, PerPlayerScores, SeasonGames } from './roleGames';
 import type { PlayerSeason, SeasonData, TeamSeason } from './seasonData';
-import type { StatLine } from './types';
+import type { StatCounter, StatLine } from './types';
 
 /**
  * Seasons as the chosen game kind sees them (P0 合算 + P2 役割別).
@@ -109,8 +109,9 @@ function effectiveComposition(season: SeasonData, classified: readonly Classifie
 
 function emptied(line: StatLine | null): StatLine | null {
   if (!line) return null;
-  const out = { ...line };
-  for (const key of Object.keys(out) as (keyof StatLine)[]) out[key] = null;
+  const out: StatLine = { ...line };
+  delete out.n01;
+  for (const key of Object.keys(out) as StatCounter[]) out[key] = null;
   return out;
 }
 

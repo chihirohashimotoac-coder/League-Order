@@ -7278,8 +7278,37 @@ ul.plain {
   text-align: left;
 }
 
-.rank-table td.num {
+.rank-table td.num,
+.rank-table th.num {
   text-align: right;
+}
+
+/* スタッツ: the column the ranking is sorted by, and n01's two-line headers. */
+.stats-table th.sorted,
+.stats-table td.sorted {
+  background: var(--color-accent-tint);
+  font-weight: 700;
+}
+.stats-table .th-line {
+  display: block;
+}
+.stats-table thead th {
+  vertical-align: bottom;
+}
+/* Numbers never break; what does not fit scrolls sideways inside the table's box (全て表示
+   always does), with the names kept in view. */
+.stats-table th.num,
+.stats-table td.num,
+.stats-table.wide th,
+.stats-table.wide td {
+  white-space: nowrap;
+}
+.stats-table .name-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 6.5em;
+  background: var(--color-bg);
 }
 
 .rank-table th .linklike {

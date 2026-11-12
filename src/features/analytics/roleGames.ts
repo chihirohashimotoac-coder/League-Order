@@ -3,7 +3,7 @@ import { gameFamily, gameRole, slotFamily, slotFor } from './gameKind';
 import type { FamilyVerdict, GameRole } from './gameKind';
 import type { SeasonData } from './seasonData';
 import type { VerifiedContribution } from './reconstruct';
-import type { StatLine } from './types';
+import type { StatCounter, StatLine } from './types';
 
 /**
  * A season's played games (`match/list`) → classified games → per-game-kind counters
@@ -188,7 +188,7 @@ function credit(acc: Acc, side: RawGameSide, opponent: RawGameSide, known: Verif
 function finish(acc: Acc): StatLine {
   // A figure over only some of the games would be a different population: all or nothing.
   const out = { ...acc.line };
-  for (const [group, keys] of Object.entries(GROUPS) as [keyof typeof GROUPS, readonly (keyof StatLine)[]][]) {
+  for (const [group, keys] of Object.entries(GROUPS) as [keyof typeof GROUPS, readonly StatCounter[]][]) {
     if (acc.gaps[group] > 0) for (const k of keys) out[k] = null;
   }
   if (acc.gaps.highOut > 0) out.highOut = null;

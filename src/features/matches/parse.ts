@@ -90,6 +90,8 @@ export interface SeasonDocument {
   results: Map<string, Map<string, CardResultSide>>;
   pointRule: PointRule;
   updateTime: number | null;
+  /** `dynamic_avg`: n01's stats page then shows a Dynamic 平均 column. */
+  dynamicAvg?: boolean;
 }
 
 function slotsOf(schedule: unknown): SeasonSlot[] {
@@ -197,6 +199,7 @@ export function parseSeasonDocument(raw: unknown, tournamentId: string): SeasonD
     status: num(t.status),
     url: typeof body.url === 'string' && body.url.startsWith('https://n01darts.com/') ? body.url : null,
     teamGames: isTeamEvent(t),
+    dynamicAvg: num(t.dynamic_avg) === 1,
     teams,
     divisions,
     slots,

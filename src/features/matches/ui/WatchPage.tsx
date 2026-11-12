@@ -14,9 +14,11 @@ import type { MatchesApiFactory } from '../environment';
 import { shortTitles } from '../titles';
 import type { WatchLink } from '../watchLink';
 import { closeWatchLink, pushWatchLink, replaceWatchLink, takeRequestedWatchTab, useWatchLink } from '../watchLink';
-import type { PlayerLine, SeasonData } from './useMatchContext';
+import type { SeasonData } from './useMatchContext';
 import { formatClock, formatRate, seasonStatsSource, usePlayerStats, useRegisteredTeamMap, useSeasonData, useSeasons } from './useMatchContext';
 import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './rankingList';
+import { ColumnLabel, SORTS, allColumns, defaultColumns, sortValue } from './statsColumns';
+import type { SortKey } from './statsColumns';
 import { LeaguePicker } from './LeaguePicker';
 import { LiveTab } from './LiveTab';
 import type { PlayerRef } from './LiveTab';
@@ -58,9 +60,11 @@ export interface StatsView {
   sort: SortKey;
   division: number | 'all';
   qualified: boolean;
+  /** 全て表示: every figure of n01's stats table, not only the main five. */
+  allColumns: boolean;
 }
 // Every player n01 lists is shown by default; the minimum legs is a filter the viewer turns on.
-const STATS_VIEW: StatsView = { query: '', sort: 'avg', division: 'all', qualified: false };
+const STATS_VIEW: StatsView = { query: '', sort: 'avg', division: 'all', qualified: false, allColumns: false };
 
 export default function WatchPage({ initialTab, onNavigate }: { initialTab: WatchTab; onNavigate?: (page: Page) => void }): React.JSX.Element {
   const store = useAppStore();
@@ -590,41 +594,6 @@ function DivisionStandings({
 // スタッツ: n01's own player figures, ranked
 // ---------------------------------------------------------------------------
 
-type SortKey = 'avg' | 'f9' | 'legRate' | 'ton80' | 'ton40' | 'highOut' | 'bestLeg' | 'break';
-
-const SORTS: [SortKey, string][] = [
-  ['avg', '平均'],
-  ['f9', 'First 9'],
-  ['legRate', 'Leg率'],
-  ['ton80', '180'],
-  ['ton40', '140+'],
-  ['highOut', 'High Out'],
-  ['bestLeg', 'Best Leg'],
-  ['break', 'Break'],
-];
-
-function value(line: PlayerLine['line'], key: SortKey): number | null {
-  const ratio = (n: number | null, d: number | null, scale = 1): number | null => (n !== null && d ? (n / d) * scale : null);
-  switch (key) {
-    case 'avg':
-      return ratio(line.score, line.darts, 3);
-    case 'f9':
-      return ratio(line.f9Score, line.f9Darts, 3);
-    case 'legRate':
-      return ratio(line.winLeg, line.leg, 100);
-    case 'ton80':
-      return line.ton80;
-    case 'ton40':
-      return line.ton40;
-    case 'highOut':
-      return line.highOut;
-    case 'bestLeg':
-      return line.bestLeg;
-    case 'break':
-      return ratio(line.breakWins, line.breakLegs, 100);
-  }
-}
-
 export function StatsTab({
   data,
   registered,
@@ -649,10 +618,12 @@ export function StatsTab({
   const current = view ?? local;
   const change = (patch: Partial<StatsView>): void => (onView ?? setLocal)({ ...current, ...patch });
   const { sort, division, qualified, query } = current;
+  const wide = current.allColumns ?? false;
   const setSort = (next: SortKey): void => change({ sort: next });
   const setDivision = (next: number | 'all'): void => change({ division: next });
   const setQualified = (next: boolean): void => change({ qualified: next });
   const setQuery = (next: string): void => change({ query: next });
+  const setWide = (next: boolean): void => change({ allColumns: next });
   if (stats.kind === 'loading') return <p className="muted small-text">選手成績を読み込み中…</p>;
   if (stats.kind === 'error') return <p className="small-text" role="alert">取得エラー: {stats.message}</p>;
   const maxLegs = Math.max(0, ...stats.value.map((row) => row.line.leg ?? 0));
@@ -663,7 +634,7 @@ export function StatsTab({
   const filtered = stats.value
     .filter((row) => division === 'all' || row.divisionIndex === division || data.season.divisions[division as number]?.teamIds.includes(row.teamId ?? ''))
     .filter((row) => !qualified || (row.line.leg ?? 0) >= minLegs)
-    .map((row) => ({ row, v: value(row.line, sort), avg: value(row.line, 'avg') ?? -1 }));
+    .map((row) => ({ row, v: sortValue(row.line, sort), avg: sortValue(row.line, 'avg') ?? -1 }));
   const hasFigure = (v: number | null): v is number => v !== null && (sort !== 'bestLeg' || v > 0);
   const sorted = filtered.filter((entry) => hasFigure(entry.v)).sort((a, b) => (sort === 'bestLeg' ? a.v! - b.v! : b.v! - a.v!));
   const unranked = filtered.filter((entry) => !hasFigure(entry.v)).sort((a, b) => b.avg - a.avg);
@@ -672,6 +643,18 @@ export function StatsTab({
     ...unranked.filter((entry) => matchesQuery(entry.row.name, query)).map((item) => ({ rank: null, item })),
   ];
   const empty = stats.value.length === 0;
+  const unit = stats.unit ?? 'member';
+  const columns = wide
+    ? allColumns(stats.value, {
+        unit,
+        dynamicAvg: data.season.dynamicAvg ?? false,
+        divisionTitle: (row) => {
+          const index = row.divisionIndex ?? data.season.divisions.find((entry) => entry.teamIds.includes(row.teamId ?? ''))?.index ?? null;
+          return index === null ? '' : (data.season.divisions.find((entry) => entry.index === index)?.title ?? '');
+        },
+      })
+    : defaultColumns(sort);
+  const sortLabel = SORTS.find(([key]) => key === sort)![1];
   return (
     <div className="stats-tab" data-testid="stats-tab">
       <RankingSearch value={query} onChange={setQuery} label={stats.unit === 'entry' ? '名前で検索' : '選手名で検索'} />
@@ -694,28 +677,35 @@ export function StatsTab({
         <label className="small-text">
           <input type="checkbox" checked={qualified} onChange={(event) => setQualified(event.target.checked)} /> 規定 Leg 数以上 ({minLegs} Leg)
         </label>
+        <label className="small-text">
+          <input type="checkbox" checked={wide} onChange={(event) => setWide(event.target.checked)} /> 全て表示 (n01 の全項目)
+        </label>
       </div>
       {empty ? <p className="small-text muted">このシーズンの選手別成績はまだありません。</p> : null}
       {matched.length > 0 ? (
         <div className="table-scroll">
-          <table className="rank-table small-text">
+          <table className={`rank-table stats-table small-text${wide ? ' wide' : ''}`} data-testid="stats-table">
             <thead>
               <tr>
-                <th scope="col" className="rank-head" data-testid="rank-head">
-                  {SORTS.find(([key]) => key === sort)![1]}
+                <th scope="col" className="rank-head num" data-testid="rank-head">
+                  {sortLabel}
                   <span className="th-sub">順位</span>
                 </th>
-                <th scope="col">{stats.unit === 'entry' ? 'エントリー' : '選手'}</th>
-                <th scope="col">{SORTS.find(([key]) => key === sort)![1]}</th>
-                <th scope="col">平均</th>
-                <th scope="col">Leg</th>
+                <th scope="col" className="name-col">
+                  {stats.unit === 'entry' ? 'エントリー' : '選手'}
+                </th>
+                {columns.map((column) => (
+                  <th key={column.key} scope="col" className={`num${column.sort === sort ? ' sorted' : ''}`} aria-sort={column.sort === sort ? (sort === 'bestLeg' ? 'ascending' : 'descending') : undefined}>
+                    <ColumnLabel label={column.label} />
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {matched.map(({ rank, item: { row, v } }) => (
+              {matched.map(({ rank, item: { row } }) => (
                 <tr key={row.oid} className={row.teamId && registered.includes(row.teamId) ? 'own' : ''}>
-                  <td>{rank ?? '—'}</td>
-                  <th scope="row">
+                  <td className="num">{rank ?? '—'}</td>
+                  <th scope="row" className="name-col">
                     {stats.unit === 'entry' ? (
                       // An individual season: the row is an entry — its sheet is the entry's results.
                       <button type="button" className="linklike" onClick={() => onTeam(row.oid)}>
@@ -734,11 +724,11 @@ export function StatsTab({
                       </>
                     )}
                   </th>
-                  <td className="num">{rank === null || v === null ? '—' : sort === 'legRate' || sort === 'break' ? `${v.toFixed(1)}%` : sort === 'avg' || sort === 'f9' ? v.toFixed(2) : v}</td>
-                  <td className="num">{formatRate(value(row.line, 'avg'))}</td>
-                  <td className="num">
-                    {row.line.winLeg ?? '—'}/{row.line.leg ?? '—'}
-                  </td>
+                  {columns.map((column) => (
+                    <td key={column.key} className={`num${column.sort === sort ? ' sorted' : ''}`}>
+                      {column.cell(row)}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -747,7 +737,7 @@ export function StatsTab({
       ) : null}
       {!empty ? <RankingFooter matched={matched.length} total={filtered.length} of={stats.value.length} query={query} noun={stats.unit === 'entry' ? 'エントリー' : '選手'} /> : null}
       <p className="muted small-text">
-        n01 公式のシーズン集計 (tournament/stats)。左端は選んだ指標 ({SORTS.find(([key]) => key === sort)![1]}) で並べた順位です (リーグの公式順位とは別)。その指標の記録がない選手は「—」で末尾に並びます。Break は後攻 Leg の取得率。
+        n01 公式のシーズン集計 (tournament/stats)。左端は選んだ指標 ({sortLabel}) で並べた順位です (リーグの公式順位とは別)。その指標の記録がない選手は「—」で末尾に並びます。数値は n01 のスタッツ画面と同じ計算です。Break は後攻 Leg の取得率。n01 の「Checkout 予測」は n01 独自の推定のため、ここには載せていません。
       </p>
     </div>
   );
