@@ -106,7 +106,19 @@ export function PeriodBar({
  * compact {@link AnalysisSummary} says how many seasons were used and folds the reasons away,
  * so warnings never push the figures off a small screen.
  */
-export function LoadBanner({ load, loading }: { load: PeriodLoad | null; loading: boolean }): React.JSX.Element | null {
+export function LoadBanner({
+  load,
+  loading,
+  onRetry,
+  onWatch,
+}: {
+  load: PeriodLoad | null;
+  loading: boolean;
+  /** Read n01 again. Offered next to every failure. */
+  onRetry?: () => void;
+  /** Open 観戦 → スタッツ (n01's own season figures, no analysis needed). */
+  onWatch?: () => void;
+}): React.JSX.Element | null {
   if (loading && !load) {
     return (
       <div className="notice info" role="status" data-testid="analytics-loading">
@@ -119,10 +131,33 @@ export function LoadBanner({ load, loading }: { load: PeriodLoad | null; loading
   const state = describeLoad(load);
   if (state.kind === 'ready' || state.kind === 'partial') return null;
   const tone = state.kind === 'error' ? 'danger' : state.kind === 'empty' ? 'info' : 'warn';
+  const failed = state.kind !== 'empty' || load.failures.length > 0;
   return (
-    <div className={`notice ${tone}`} role="status" data-testid={`analytics-banner-${state.kind}`}>
+    <div className={`notice ${tone} analytics-banner`} role={state.kind === 'error' ? 'alert' : 'status'} data-testid={`analytics-banner-${state.kind}`}>
       <Icon name="alert" size={18} />
-      <span className="small-text">{state.message}</span>
+      <span className="grow small-text">
+        {state.message}
+        {load.fetchedAt && (state.kind === 'stale' || state.kind === 'offline-cache') ? (
+          <span className="block muted" data-testid="analytics-stale-time">
+            表示中のデータ: {formatDateTime(load.fetchedAt.oldest)} の取得 (最新ではありません)
+          </span>
+        ) : null}
+      </span>
+      {failed && (onRetry || onWatch) ? (
+        <span className="row wrap banner-actions" style={{ gap: 6 }}>
+          {onRetry ? (
+            <button type="button" className="btn small" onClick={onRetry} disabled={loading} data-testid="analytics-retry">
+              <Icon name="refresh" size={16} />
+              再取得
+            </button>
+          ) : null}
+          {onWatch ? (
+            <button type="button" className="btn small" onClick={onWatch} data-testid="analytics-to-watch">
+              観戦でスタッツを見る
+            </button>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   );
 }

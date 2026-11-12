@@ -16,6 +16,7 @@ import { describeThrowOrder, throwSlotLabel } from '../domain/orders/throwOrderT
 import { UnderdogPanel } from '../components/n01/UnderdogPanel';
 import { GAME_KIND_LABELS } from '../domain/types';
 import { describeStrengthWeights, formatPpr } from '../domain/players/strength';
+import { diffCandidates } from '../domain/orders/candidateDiff';
 import { sortedGames } from '../domain/games/format';
 import {
   diffVersionWithCurrent,
@@ -209,6 +210,13 @@ export function ResultPage({
                 candidates={state.candidates}
                 selected={state.edited || state.showingUnderdog ? -1 : state.selectedCandidate}
                 onSelect={(index) => dispatch({ type: 'selectCandidate', index })}
+                showPredictions={showPredictions}
+              />
+              <CandidateDifferences
+                candidates={state.candidates}
+                selected={state.edited || state.showingUnderdog ? -1 : state.selectedCandidate}
+                games={ordered}
+                nameById={nameById}
                 showPredictions={showPredictions}
               />
               <p className="tiny muted score-note" data-testid="score-note">
@@ -656,6 +664,80 @@ function CandidateGrid({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * 候補の違い: what the shown candidate changes against each other candidate — the games whose
+ * line-up differs and the appearance counts that differ, from the candidates' own data. Opened on
+ * its own when two candidates show the same estimated win rate, since the numbers alone cannot
+ * tell them apart then.
+ */
+function CandidateDifferences({
+  candidates,
+  selected,
+  games,
+  nameById,
+  showPredictions,
+}: {
+  candidates: OrderSolution[];
+  selected: number;
+  games: GameSlotDef[];
+  nameById: Map<string, string>;
+  showPredictions: boolean;
+}): React.JSX.Element | null {
+  const baseIndex = selected >= 0 ? selected : 0;
+  const base = candidates[baseIndex];
+  if (!base) return null;
+  const letter = (index: number): string => String.fromCharCode(65 + index);
+  const names = (ids: readonly string[]): string => ids.map((id) => nameById.get(id) ?? '—').join(' / ') || '—';
+  const win = (candidate: OrderSolution): string | null => (showPredictions && candidate.prediction ? formatProbability(candidate.prediction.win) : null);
+  const sameShown = candidates.some((other, index) => index !== baseIndex && win(other) !== null && win(other) === win(base));
+  return (
+    <details className="candidate-diff" open={sameShown} data-testid="candidate-diff">
+      <summary>
+        候補 {letter(baseIndex)} と他の候補の違い{selected < 0 ? ' (手動編集前の候補 A を基準)' : ''}
+        {sameShown ? <span className="tag">推定勝率が同じ表示の候補あり</span> : null}
+      </summary>
+      {candidates.map((other, index) => {
+        if (index === baseIndex) return null;
+        const diff = diffCandidates(base, other, games);
+        return (
+          <section key={index} className="candidate-diff-block" aria-label={`候補 ${letter(baseIndex)} → 候補 ${letter(index)}`}>
+            <h4>
+              候補 {letter(baseIndex)} → 候補 {letter(index)}
+              {win(base) !== null && win(other) !== null ? (
+                <span className="muted small-text">
+                  {' '}
+                  (推定勝率 {win(base)} → {win(other)})
+                </span>
+              ) : null}
+            </h4>
+            {diff.games.length === 0 ? (
+              <p className="small-text muted">選手の配置は同じです (投順のみ異なる場合があります)。</p>
+            ) : (
+              <ul className="plain small-text" data-testid="candidate-diff-games">
+                {diff.games.map((change) => (
+                  <li key={change.gameId}>
+                    <strong>
+                      G{change.order} {change.name}
+                    </strong>
+                    : {names(change.from)} → <strong>{names(change.to)}</strong>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {diff.counts.length > 0 ? (
+              <p className="small-text" data-testid="candidate-diff-counts">
+                出場回数: {diff.counts.map((change) => `${nameById.get(change.playerId) ?? '—'} ${change.from}→${change.to}`).join(' ・ ')}
+              </p>
+            ) : (
+              <p className="small-text muted">出場回数は全員同じです。</p>
+            )}
+          </section>
+        );
+      })}
+    </details>
   );
 }
 

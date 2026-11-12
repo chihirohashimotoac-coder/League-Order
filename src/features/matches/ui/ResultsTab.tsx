@@ -260,7 +260,6 @@ function MatchCenter({
   useEffect(() => {
     if (linkedOnOpen.current) reveal(linkedOnOpen.current);
     // Once, when the card opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const score = cardScore(card);
   const panel = (entry: CardGame): React.JSX.Element => (

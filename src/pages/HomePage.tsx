@@ -186,7 +186,9 @@ export function HomePage({
                 </span>
                 <span>
                   <span className="title">日程・結果</span>
-                  <span className="meta">結果・順位・スタッツ</span>
+                  <span className="meta">
+                    <span className="nowrap">結果・順位</span>・<span className="nowrap">スタッツ</span>
+                  </span>
                 </span>
               </button>
               <button type="button" className="quick-tile" onClick={() => onNavigate('analytics')} data-testid="home-analytics">

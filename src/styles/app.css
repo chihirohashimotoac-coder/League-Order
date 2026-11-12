@@ -8889,3 +8889,321 @@ ul.plain {
   flex-direction: column;
   gap: 2px;
 }
+
+/* --- 分析: roster → detail → ranking, the same order on screen, in the DOM and for Tab -------- */
+.analytics-detail {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  align-content: start;
+  scroll-margin-top: calc(72px + var(--safe-top));
+}
+@media (min-width: 900px) {
+  .analytics-columns:has(> .analytics-detail) {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    grid-template-rows: auto 1fr;
+    align-items: start;
+  }
+  .analytics-columns > .analytics-roster-card {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .analytics-columns > .analytics-detail {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .analytics-columns > .analytics-rank {
+    grid-column: 1;
+    grid-row: 2;
+  }
+}
+.analytics-toolbar {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+@media (min-width: 1000px) {
+  /* The switches are as wide as their labels and share a row; the status sits at its end. */
+  .analytics-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface-1);
+  }
+  .analytics-toolbar .segmented {
+    flex: 0 0 auto;
+  }
+  .analytics-toolbar .segmented button {
+    flex: 0 0 auto;
+    padding-inline: 14px;
+    white-space: nowrap;
+  }
+  .analytics-toolbar .analytics-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    flex: 1 1 auto;
+  }
+  .analytics-toolbar .analytics-filters .field {
+    margin: 0;
+    min-width: 200px;
+  }
+  .analytics-toolbar .analytics-status {
+    margin-left: auto;
+  }
+  .analytics-toolbar .analytics-scope {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+}
+.analytics-banner .block {
+  display: block;
+}
+.banner-actions {
+  flex: none;
+}
+
+/* --- オーダー設定: participants beside the chosen participant's conditions (large screens) --- */
+.setup-main,
+.setup-side {
+  min-width: 0;
+}
+/* Below the split the page keeps its phone width: a form stretched to 1180 px reads worse. */
+.app-main.wide .setup-layout:not(.is-split) {
+  max-width: 736px;
+  margin: 0 auto;
+}
+.setup-layout.is-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
+  gap: 0 24px;
+  align-items: start;
+}
+.setup-layout.is-split .setup-side {
+  position: sticky;
+  top: calc(72px + var(--safe-top));
+  max-height: calc(100dvh - 96px - var(--nav-height));
+  overflow-y: auto;
+  padding: 2px 4px 12px 2px;
+}
+.setup-layout.is-split .preset-grid {
+  grid-template-columns: 1fr 1fr;
+}
+.participant-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: var(--space-4);
+  padding: 14px;
+  border: 1px solid var(--color-accent);
+}
+.participant-panel.is-empty {
+  border-color: var(--color-border);
+}
+.participant-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.participant-panel-head h3 {
+  margin: 2px 0 0;
+  font-size: 17px;
+}
+.participant-panel .sheet-section {
+  margin: 0;
+}
+.condition-summary li + li {
+  margin-top: 4px;
+}
+.p-cond .btn[aria-pressed='true'] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+/* --- 次戦オーダー: attendance with each player's conditions --------------------------------- */
+.attendance-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+.attendance li {
+  flex-wrap: wrap;
+}
+.attendance li > label {
+  flex: 1 1 60%;
+  min-width: 0;
+}
+.attendance-cond {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px 8px 44px;
+}
+.attendance-cond .has-conditions {
+  color: var(--color-accent-text);
+  font-weight: 700;
+}
+
+/* --- 共有: who and what is sent, next to the send button ------------------------------------- */
+.share-target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-tint);
+  font-size: 14px;
+}
+.share-target > strong:first-of-type {
+  font-size: 16px;
+}
+.share-target strong {
+  font-variant-numeric: tabular-nums;
+}
+.share-player .player-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.share-player .player-chips .chip {
+  flex: none;
+}
+@media (min-width: 700px) {
+  /* The sheet is wide enough: the players on the left, the chosen one's games beside them. */
+  .share-player {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.2fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .share-player .player-chips {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    overflow: visible;
+    align-items: stretch;
+  }
+  .share-player .player-chips .chip {
+    justify-content: space-between;
+  }
+}
+.share-zoom {
+  margin-bottom: 8px;
+}
+.share-stage.is-zoomed {
+  max-height: 70vh;
+  overflow: auto;
+}
+.share-stage.is-zoomed .share-previews {
+  width: max-content;
+}
+.share-stage.is-zoomed .share-previews figure {
+  width: auto;
+  max-width: none;
+}
+.share-stage.is-zoomed .share-preview {
+  width: auto;
+  max-width: none;
+}
+
+/* --- 候補の違い -------------------------------------------------------------------------------- */
+.candidate-diff {
+  margin: 0 0 var(--space-3);
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+.candidate-diff > summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.candidate-diff-block h4 {
+  margin: 10px 0 4px;
+  font-size: 14px;
+}
+.candidate-diff-block ul li + li {
+  margin-top: 2px;
+}
+
+/* --- ホーム: a label breaks between words, never before its last character ------------------- */
+.nowrap {
+  white-space: nowrap;
+}
+.watch-grid .quick-tile .meta {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* --- 設定: backup and restore beside what they cover; deleting kept apart ---------------------- */
+.backup-grid {
+  display: grid;
+  gap: 14px;
+}
+.backup-actions {
+  display: grid;
+  gap: 12px;
+}
+.backup-actions section p {
+  margin: 4px 0 8px;
+}
+@media (min-width: 640px) {
+  .backup-grid {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.backup-contents {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.backup-contents caption {
+  text-align: left;
+  font-weight: 700;
+  padding-bottom: 4px;
+}
+.backup-contents th,
+.backup-contents td {
+  padding: 4px 6px;
+  border-top: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+.backup-contents td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+.restore-compare {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+}
+@media (min-width: 560px) {
+  .restore-compare {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.danger-card {
+  margin-top: var(--space-5, 28px);
+  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+}

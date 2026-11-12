@@ -124,3 +124,14 @@ export function closeWatchLink(fallback: WatchLink | null): void {
   if (depth() > 0) window.history.back();
   else replaceWatchLink(fallback);
 }
+
+/** A tab another screen asks 観戦 to open on (分析 → スタッツ). Read once by the next 観戦 screen. */
+let requestedTab: 'live' | 'results' | 'standings' | 'stats' | null = null;
+export function requestWatchTab(tab: 'live' | 'results' | 'standings' | 'stats'): void {
+  requestedTab = tab;
+}
+export function takeRequestedWatchTab(): 'live' | 'results' | 'standings' | 'stats' | null {
+  const tab = requestedTab;
+  requestedTab = null;
+  return tab;
+}

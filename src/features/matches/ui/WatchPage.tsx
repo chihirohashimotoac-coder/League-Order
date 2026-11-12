@@ -13,7 +13,7 @@ import { useMatchesApiFactory } from '../environment';
 import type { MatchesApiFactory } from '../environment';
 import { shortTitles } from '../titles';
 import type { WatchLink } from '../watchLink';
-import { closeWatchLink, pushWatchLink, replaceWatchLink, useWatchLink } from '../watchLink';
+import { closeWatchLink, pushWatchLink, replaceWatchLink, takeRequestedWatchTab, useWatchLink } from '../watchLink';
 import type { PlayerLine, SeasonData } from './useMatchContext';
 import { formatClock, formatRate, seasonStatsSource, usePlayerStats, useRegisteredTeamMap, useSeasonData, useSeasons } from './useMatchContext';
 import { RankingFooter, RankingSearch, rankThenSearch, useShownCount } from './rankingList';
@@ -43,12 +43,6 @@ export type WatchTab = 'live' | 'results' | 'standings' | 'stats';
 let rememberedTab: WatchTab = 'live';
 export function lastWatchTab(): WatchTab {
   return rememberedTab;
-}
-
-/** A tab another screen asks 観戦 to open on (分析 → スタッツ). Used by the next mount only. */
-let requestedTab: WatchTab | null = null;
-export function requestWatchTab(tab: WatchTab): void {
-  requestedTab = tab;
 }
 
 const TABS: [WatchTab, string][] = [
@@ -99,10 +93,10 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   const current = seasons.kind === 'ready' ? (seasons.value.find((entry) => entry.status === 30) ?? seasons.value[0])?.tournamentId ?? null : null;
   const tdid = league ? (tournamentId ?? current) : null;
   const data = useSeasonData(tdid ? api : null, tdid);
-  const [tab, setTabState] = useState<WatchTab>(() => (link?.card ? 'results' : (requestedTab ?? initialTab)));
-  useEffect(() => {
-    requestedTab = null;
-  }, []);
+  const [tab, setTabState] = useState<WatchTab>(() => {
+    const requested = takeRequestedWatchTab();
+    return link?.card ? 'results' : (requested ?? initialTab);
+  });
   useEffect(() => {
     rememberedTab = tab;
   }, [tab]);

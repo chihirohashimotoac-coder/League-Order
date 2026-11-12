@@ -524,6 +524,7 @@ export function ConfirmDialog({
   destructive = false,
   onConfirm,
   onCancel,
+  children,
 }: {
   title: string;
   message: string;
@@ -531,6 +532,8 @@ export function ConfirmDialog({
   destructive?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  /** What the decision is about, shown under the message (a table of what changes). */
+  children?: ReactNode;
 }): React.JSX.Element {
   return (
     <Sheet
@@ -553,6 +556,7 @@ export function ConfirmDialog({
       }
     >
       <p className="body-text">{message}</p>
+      {children}
     </Sheet>
   );
 }

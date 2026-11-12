@@ -17,6 +17,10 @@ import { useN01FreshSync, useN01LinkResolution, type FreshSyncResult } from '../
 import { createId } from '../../utils/id';
 import { finalizeMember, isGuest, newGuest, newMember } from '../../domain/players/newPlayer';
 import { PlayerEditor } from '../PlayerEditor';
+import { ParticipantDetail, describeRestrictions } from '../ParticipantConditions';
+import { createParticipantConfig } from '../../domain/orders/participants';
+import { needsLeagueStatus } from '../../domain/orders/leagueRules';
+import { resolveOrderRules } from '../../domain/orders/ruleResolution';
 import { PendingLinks } from './PendingLinks';
 import { Sheet, useToast } from '../ui';
 import { Icon } from '../icons';
@@ -323,6 +327,13 @@ function Attendance({
   const count = everyone.filter((player) => isHere(player.id)).length;
   const age = intel ? freshness(intel.generatedAt, env.now()) : null;
   const [editor, setEditor] = useState<{ kind: 'guest' | 'member'; player: Player } | null>(null);
+  // Day-of conditions (遅刻・早退 …): what was set last time, with today's changes on top. They go
+  // into the order exactly like the conditions set on ORDER SETUP, and are checked the same way.
+  const kept = currentParticipants ?? lastOrder?.input.participants ?? [];
+  const [conditions, setConditions] = useState<Map<string, ParticipantConfig>>(() => new Map());
+  const [conditionFor, setConditionFor] = useState<Player | null>(null);
+  const configOf = (id: string): ParticipantConfig => conditions.get(id) ?? kept.find((config) => config.playerId === id) ?? createParticipantConfig(id);
+  const setAll = (here: boolean): void => onChoices(new Map(everyone.map((player) => [player.id, here])));
 
   const generate = (): void => {
     if (!format) return;
@@ -335,7 +346,7 @@ function Attendance({
       settings: store.settings,
       intel,
       attending: new Set(everyone.filter((player) => isHere(player.id)).map((player) => player.id)),
-      previous: currentParticipants ?? lastOrder?.input.participants,
+      previous: everyone.map((player) => configOf(player.id)),
     });
     onGenerate(order);
   };
@@ -367,9 +378,19 @@ function Attendance({
           <Icon name="alert" size={16} /> {age.label} ({intel ? formatSyncTime(intel.generatedAt) : ''}) のデータを使用しています。最新ではありません。
         </p>
       ) : null}
-      <p className="attendance-title">
-        本日参加 <span className="badge">{count} / {everyone.length}</span>
-      </p>
+      <div className="attendance-head">
+        <p className="attendance-title">
+          本日参加 <span className="badge">{count} / {everyone.length}</span>
+        </p>
+        <span className="row" style={{ gap: 6 }}>
+          <button type="button" className="btn small" onClick={() => setAll(true)} disabled={count === everyone.length}>
+            全員を選択
+          </button>
+          <button type="button" className="btn small" onClick={() => setAll(false)} disabled={count === 0}>
+            すべて解除
+          </button>
+        </span>
+      </div>
       <ul className="attendance" aria-label="本日の参加者">
         {everyone.map((player) => (
           <li key={player.id}>
@@ -382,6 +403,16 @@ function Attendance({
               </span>
               <span className="small-text secondary">{formatStrengthLine(withEffectivePpr(player))}</span>
             </label>
+            {isHere(player.id) ? (
+              <span className="attendance-cond">
+                <span className={`small-text${describeRestrictions(configOf(player.id), format?.games ?? []).length ? ' has-conditions' : ' secondary'}`} data-testid="attendance-conditions">
+                  {describeRestrictions(configOf(player.id), format?.games ?? []).join(' ・ ') || '条件なし'}
+                </span>
+                <button type="button" className="btn small" onClick={() => setConditionFor(player)} disabled={!format} aria-label={`${player.name} の出場条件`}>
+                  条件
+                </button>
+              </span>
+            ) : null}
             {isGuest(player) ? (
               <button
                 type="button"
@@ -412,6 +443,18 @@ function Attendance({
           このメンバーで作成
         </button>
       </div>
+
+      {conditionFor && format ? (
+        <ParticipantDetail
+          player={conditionFor}
+          config={configOf(conditionFor.id)}
+          games={format.games}
+          defaultMaxConsecutive={store.settings.optimizer.defaultMaxConsecutive}
+          statusRequired={needsLeagueStatus(resolveOrderRules(format, store.settings.ruleAnswers).rules)}
+          onChange={(change) => setConditions((held) => new Map(held).set(conditionFor.id, { ...configOf(conditionFor.id), ...change }))}
+          onClose={() => setConditionFor(null)}
+        />
+      ) : null}
 
       {editor ? (
         <PlayerEditor

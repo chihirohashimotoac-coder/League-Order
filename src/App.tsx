@@ -667,7 +667,7 @@ export function App(): React.JSX.Element {
 
   const hasActionBar =
     page === 'setup' || page === 'result' || page === 'players' || page === 'formats';
-  const wide = page === 'home' || page === 'result' || page === 'analytics' || page === 'matches' || page === 'live' || page === 'watch';
+  const wide = page === 'home' || page === 'setup' || page === 'result' || page === 'analytics' || page === 'matches' || page === 'live' || page === 'watch';
   const backTarget = BACK_TARGETS[page];
   const activeTab = TAB_FOR_PAGE[page] ?? page;
   const teamName = store.activeTeam?.name ?? 'チーム未設定';
