@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { clickGenerate } from './ruleQuestions';
-import { tab } from './nav';
+import { tab, conditionsPanel } from './nav';
 
 /**
  * League rules (リーグ規則・必須条件) end to end, in a real browser on the production build
@@ -76,8 +76,8 @@ test('rules → generate → hand-made breach refuses finalize → undo → v1 k
 
   // One roster member is today's helper, the others regulars.
   await page.locator('.participant').filter({ hasText: '遠藤' }).getByRole('button', { name: '条件' }).click();
-  await page.getByRole('dialog').getByRole('radio', { name: /^助っ人/ }).check();
-  await page.getByRole('dialog').getByRole('button', { name: '閉じる' }).click();
+  await conditionsPanel(page, /遠藤/).getByRole('radio', { name: /^助っ人/ }).check();
+  await conditionsPanel(page, /遠藤/).getByRole('button', { name: '閉じる' }).click();
   await notice.getByRole('button', { name: '名簿メンバーを正規登録にする' }).click();
   await expect(notice).toBeHidden();
   await expect(page.locator('.participant').filter({ hasText: '遠藤' }).getByTestId('league-status-tag')).toHaveText('大会: 助っ人');

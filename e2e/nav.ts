@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /** Screens reached through その他 since v1.5.0 (the bottom bar is ホーム／観戦／分析／オーダー／その他). */
 const UNDER_MORE = ['メンバー', 'フォーマット', 'ペア相性', '履歴', '設定 / バックアップ'];
@@ -16,4 +16,12 @@ export function tab(page: Page, name: string): { click: () => Promise<void> } {
       await page.getByTestId('more-page').getByRole('button', { name: new RegExp(`^${name.replace(/[/]/g, '\\/')}`) }).click();
     },
   };
+}
+
+/**
+ * A participant's conditions (出場条件): a sheet on a phone, the panel beside the participant list
+ * on a large screen. Either is named 「<name> の出場条件」.
+ */
+export function conditionsPanel(page: Page, name: string | RegExp): Locator {
+  return page.getByRole('dialog', { name }).or(page.getByRole('region', { name }));
 }

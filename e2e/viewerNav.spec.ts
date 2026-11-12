@@ -71,7 +71,7 @@ test.describe('watching without a team: the same bottom bar', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.keyboard.press('Escape');
     await more.getByRole('button', { name: /設定 \/ バックアップ/ }).click();
-    await expect(page.getByText('保存とバックアップ')).toBeVisible();
+    await expect(page.getByText('バックアップと移行')).toBeVisible();
     await expect(tab(page, 'その他')).toHaveAttribute('aria-current', 'page');
     await page.getByRole('button', { name: '戻る' }).click();
     await expect(page.getByTestId('more-page')).toBeVisible();

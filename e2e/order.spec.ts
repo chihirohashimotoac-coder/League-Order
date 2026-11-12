@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { clickGenerate } from './ruleQuestions';
-import { tab } from './nav';
+import { tab, conditionsPanel } from './nav';
 
 /**
  * End-to-end coverage of the captain's actual workflow in a real browser.
@@ -328,7 +328,7 @@ test.describe('participant rows (§18, §57)', () => {
 
     // The conditions button opens its sheet without toggling the row.
     await row.getByRole('button', { name: '条件' }).click();
-    await expect(page.getByRole('dialog', { name: /土井/ })).toBeVisible();
+    await expect(conditionsPanel(page, /土井/)).toBeVisible();
     await page.getByRole('button', { name: '閉じる' }).click();
     await expect(checkbox).toBeChecked();
   });

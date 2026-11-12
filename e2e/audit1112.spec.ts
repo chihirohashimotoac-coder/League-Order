@@ -91,11 +91,11 @@ test('a card link opens the same card after a reload; back returns to the list a
   await expect(page.getByTestId('match-detail')).toBeVisible();
   expect(page.url()).toContain('#/watch?');
   expect(page.url()).toContain(`c=${key}`);
-  const title = await page.getByTestId('match-detail').locator('.focus-head').innerText();
+  const teams = await page.getByTestId('match-detail').locator('.focus-head button').allInnerTexts();
 
   await page.reload();
   await expect(page.getByTestId('match-detail')).toBeVisible();
-  await expect(page.getByTestId('match-detail').locator('.focus-head')).toHaveText(title);
+  for (const team of teams) await expect(page.getByTestId('match-detail').locator('.focus-head')).toContainText(team);
 
   // Opened from a link: 一覧に戻る leads to the season's list (not out of the app).
   await page.getByRole('button', { name: /一覧に戻る/ }).click();
@@ -111,8 +111,15 @@ test('a card link opens the same card after a reload; back returns to the list a
 });
 
 test('a link to a card that does not exist says so and leads to the list', async ({ page }) => {
-  await serveNight(page);
-  await page.goto('/#/watch?l=lg_l3hI_3397&c=9_none');
+  await openNight(page);
+  await page.getByRole('tab', { name: '日程・結果' }).click();
+  await page.getByRole('radio', { name: 'すべて' }).click();
+  await page.getByTestId('match-card').first().click();
+  // The same season, a card id that is not in it.
+  const url = new URL(page.url());
+  url.hash = url.hash.replace(/c=[^&]+/u, 'c=9_none');
+  await page.goto(url.toString());
+  await page.reload();
   await expect(page.getByTestId('watch-page')).toBeVisible();
   await expect(page.getByTestId('card-not-found')).toBeVisible({ timeout: 30_000 });
   await page.getByTestId('card-not-found').getByRole('button', { name: '一覧を表示' }).click();

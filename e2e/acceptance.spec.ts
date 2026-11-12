@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { answerUnrestricted, clickGenerate } from './ruleQuestions';
-import { tab } from './nav';
+import { tab, conditionsPanel } from './nav';
 
 /**
  * Final acceptance coverage: the operational guarantees a captain depends on at a venue.
@@ -446,7 +446,7 @@ test.describe('realistic league flow (追加要件 §19-§21)', () => {
       .filter({ has: page.getByLabel('遠藤 を参加者に含める') })
       .getByRole('button', { name: '条件' })
       .click();
-    const detail = page.getByRole('dialog', { name: /遠藤/ });
+    const detail = conditionsPanel(page, /遠藤/);
     await expect(detail).toBeVisible();
     await detail.getByRole('button', { name: 'Trios', exact: true }).click();
     await page.getByRole('button', { name: '閉じる' }).click();
