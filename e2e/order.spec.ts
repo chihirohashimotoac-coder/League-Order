@@ -173,7 +173,7 @@ test.describe('order generation workflow', () => {
     await row.getByRole('button', { name: '条件' }).click();
     await page.getByRole('button', { name: '後半のみ' }).click();
     await page.getByRole('button', { name: '閉じる' }).click();
-    await expect(page.getByText(/範囲 G4/)).toBeVisible();
+    await expect(page.locator('.participants').getByText(/範囲 G4/)).toBeVisible();
 
     await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
