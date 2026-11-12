@@ -35,8 +35,12 @@ async function addRules(page: Page): Promise<void> {
 }
 
 async function noSideways(page: Page, label: string): Promise<void> {
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow, `${label}: horizontal overflow`).toBeLessThanOrEqual(0);
+  // Measured once the layout has settled after a viewport change (a fixed bar and the candidate
+  // cards were seen 2 px wide for a moment right after the resize, on main as well); an overflow
+  // that stays still fails.
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), { message: `${label}: horizontal overflow`, timeout: 5000 })
+    .toBeLessThanOrEqual(0);
 }
 
 async function audit(page: Page, label: string): Promise<void> {
