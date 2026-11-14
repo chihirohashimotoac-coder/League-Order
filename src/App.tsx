@@ -38,7 +38,7 @@ import { HomePage, type WorkingOrderSummary } from './pages/HomePage';
 import { PlayersPage } from './pages/PlayersPage';
 import { PairsPage } from './pages/PairsPage';
 import { FormatsPage } from './pages/FormatsPage';
-import { SetupPage, type SetupDraft } from './pages/SetupPage';
+import { SetupPage, activeIntel, hasNextOpponent, type SetupDraft } from './pages/SetupPage';
 import { ResultPage } from './pages/ResultPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -805,6 +805,7 @@ export function App(): React.JSX.Element {
               onCommitSeason={handleCommitSeason}
               onWithdrawSeason={handleWithdrawSeason}
               onOpenSetup={openSetupFromResult}
+              opponentPresetAvailable={hasNextOpponent(activeIntel(store))}
             />
           ) : (
             <EmptyState

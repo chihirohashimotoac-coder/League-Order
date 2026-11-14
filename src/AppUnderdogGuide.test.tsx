@@ -10,6 +10,7 @@ import { generateOrder } from './optimizer/generateOrder';
 import { PRESETS } from './domain/orders/presets';
 import type { GenerateResult, OrderInput } from './domain/types';
 import type { OpponentContext } from './domain/prediction/opponentContext';
+import type * as SetupPageModule from './pages/SetupPage';
 
 vi.mock('./pwa', () => ({ onUpdateAvailable: () => () => undefined, initServiceWorker: () => undefined }));
 
@@ -27,6 +28,16 @@ interface PendingRequest {
 }
 
 const runner = vi.hoisted(() => ({ pending: [] as PendingRequest[] }));
+/**
+ * Whether SETUP can offer 対戦相手最適化. The harness teams are manual (no n01 analysis), so the
+ * analysis check App passes to the result screen is set here; SETUP's own list is not affected.
+ */
+const availability = vi.hoisted(() => ({ value: true }));
+
+vi.mock('./pages/SetupPage', async (original) => ({
+  ...(await original<typeof SetupPageModule>()),
+  hasNextOpponent: () => availability.value,
+}));
 
 vi.mock('./optimizer/runner', () => ({
   createRunner: () => ({
@@ -46,6 +57,7 @@ beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
   resetBackendCache();
   runner.pending.length = 0;
+  availability.value = true;
 });
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -134,6 +146,19 @@ describe('the underdog note in the app', () => {
     expect(checkedPreset()).toBe(presetBefore);
     await flush();
     expect(runner.pending.length).toBe(1);
+  });
+
+  it('no analysis for the next match: no note to a preset SETUP cannot offer', async () => {
+    availability.value = false;
+    await seed();
+    const user = userEvent.setup();
+    renderApp();
+    await screen.findByRole('heading', { name: 'チームA', level: 1 });
+    await openSetup(user);
+    answer(await generateFromSetup(user), 'WIN_FIRST');
+    await screen.findByRole('heading', { name: 'オーダー結果' });
+    expect(await screen.findByTestId('estimated-match-win')).toBeInTheDocument();
+    expect(note()).toBeNull();
   });
 
   it('a failed attempt keeps the kept order\'s own reason; a result without a status clears it', async () => {

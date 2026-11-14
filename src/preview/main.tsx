@@ -44,6 +44,8 @@ function ScenarioView({ input }: { input: OrderInput }): React.JSX.Element {
       onSaveDraft={() => undefined}
       onCommitSeason={() => undefined}
       onWithdrawSeason={() => undefined}
+      // The scenarios carry their opponent data; the preview has no SETUP (no button is shown).
+      opponentPresetAvailable
     />
   );
 }

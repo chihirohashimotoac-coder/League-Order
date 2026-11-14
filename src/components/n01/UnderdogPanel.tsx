@@ -116,6 +116,8 @@ export type UnderdogGuidance =
 export function underdogGuidance(
   state: Pick<OrderSessionState, 'input' | 'candidates' | 'selectedCandidate' | 'current' | 'edited' | 'showingUnderdog' | 'underdog' | 'underdogStatus' | 'underdogBasis'>,
   showPredictions: boolean,
+  /** Whether オーダー設定 can offer 対戦相手最適化 now (opponent data for the next match). */
+  opponentPresetAvailable = false,
 ): UnderdogGuidance | null {
   if (!showPredictions || state.edited || state.showingUnderdog || !state.current) return null;
   const selected = state.candidates[state.selectedCandidate];
@@ -125,7 +127,9 @@ export function underdogGuidance(
     solution.prediction !== undefined && displayedPercent(solution.prediction.win) <= UNDERDOG_MAX_WIN_PERCENT;
 
   const opponentRun = state.input.preset === 'OPPONENT_OPTIMIZED' || state.candidates.some((candidate) => candidate.meta.presetKey === 'OPPONENT_OPTIMIZED');
-  if (!opponentRun) return qualifies(selected) ? { kind: 'other-preset', candidate: selected } : null;
+  // Pointing to 対戦相手最適化 only helps when SETUP can offer it: a saved order's opponent
+  // snapshot alone does not make the preset selectable there.
+  if (!opponentRun) return opponentPresetAvailable && qualifies(selected) ? { kind: 'other-preset', candidate: selected } : null;
 
   const standardIndex = state.candidates.findIndex((candidate) => candidate.meta.presetKey === 'OPPONENT_OPTIMIZED' && !candidate.meta.underdog);
   const standard = state.candidates[standardIndex];

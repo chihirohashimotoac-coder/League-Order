@@ -104,12 +104,18 @@ describe('underdogGuidance (docs/UNDERDOG_PLAN.md §4.1)', () => {
   it('uses the engine\'s 20% bound: 20% shown (0.204) is included, 21% shown (0.205) is not', () => {
     expect(underdogGuidance(state('OPPONENT_OPTIMIZED', [candidate('OPPONENT_OPTIMIZED', 0.204)], { status: LOW }), true)?.kind).toBe('skipped');
     expect(underdogGuidance(state('OPPONENT_OPTIMIZED', [candidate('OPPONENT_OPTIMIZED', 0.205)], { status: LOW }), true)).toBeNull();
-    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.204)]), true)?.kind).toBe('other-preset');
-    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.205)]), true)).toBeNull();
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.204)]), true, true)?.kind).toBe('other-preset');
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.205)]), true, true)).toBeNull();
+  });
+
+  it('points to 対戦相手最適化 only when オーダー設定 can offer it', () => {
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.1)]), true, false)).toBeNull();
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.1)]), true)).toBeNull();
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.1)]), true, true)?.kind).toBe('other-preset');
   });
 
   it('adds nothing without opponent data (no estimate)', () => {
-    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', null)]), true)).toBeNull();
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', null)]), true, true)).toBeNull();
     expect(underdogGuidance(state('OPPONENT_OPTIMIZED', [candidate('OPPONENT_OPTIMIZED', null)], { status: { eligible: false, reason: 'no-opponent' } }), true)).toBeNull();
   });
 
@@ -138,6 +144,6 @@ describe('underdogGuidance (docs/UNDERDOG_PLAN.md §4.1)', () => {
     expect(underdogGuidance(state('OPPONENT_OPTIMIZED', one, { status: LOW, showingUnderdog: true }), true)).toBeNull();
     expect(underdogGuidance(state('OPPONENT_OPTIMIZED', one, { underdog: suggestion('atLeastOne', 0.1, 0.1), status: { eligible: true } }), true)).toBeNull();
     expect(underdogGuidance(state('OPPONENT_OPTIMIZED', one, { status: LOW }), false)).toBeNull();
-    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.1)], { edited: true }), true)).toBeNull();
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.1)], { edited: true }), true, true)).toBeNull();
   });
 });

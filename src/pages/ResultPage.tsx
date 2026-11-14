@@ -84,6 +84,7 @@ export function ResultPage({
   onCommitSeason,
   onWithdrawSeason,
   onOpenSetup,
+  opponentPresetAvailable = false,
 }: {
   session: UndoableState;
   dispatch: (action: UndoableAction) => void;
@@ -106,6 +107,8 @@ export function ResultPage({
   onWithdrawSeason: () => void;
   /** Opens オーダー設定 with this order's conditions, without generating anything. */
   onOpenSetup?: () => void;
+  /** Whether オーダー設定 can offer 対戦相手最適化 now (docs/UNDERDOG_PLAN.md §4.1). */
+  opponentPresetAvailable?: boolean;
 }): React.JSX.Element {
   const [shareOpen, setShareOpen] = useState(false);
   const [confirmSeason, setConfirmSeason] = useState(false);
@@ -165,7 +168,7 @@ export function ResultPage({
   const offerUnderdog =
     showPredictions && state.underdog !== null && (state.showingUnderdog || (!state.edited && state.selectedCandidate === standardIndex));
   // Why no plan is on screen, or where to see one (docs/UNDERDOG_PLAN.md §4.1).
-  const underdogHint = underdogGuidance(state, showPredictions);
+  const underdogHint = underdogGuidance(state, showPredictions, opponentPresetAvailable);
   const baselineByGame = new Map(baseline?.assignments.map((entry) => [entry.gameId, entry.playerIds]));
   // The rules are checked live against the line-up on screen as well, so an order opened from
   // history (no edit yet) that breaks its rules cannot be finalized from here either.

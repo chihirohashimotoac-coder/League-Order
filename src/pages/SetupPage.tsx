@@ -22,7 +22,7 @@ import { newGuest } from '../domain/players/newPlayer';
 import { createId } from '../utils/id';
 import { PlayerEditor } from '../components/PlayerEditor';
 import { StrengthBasisPanel } from '../components/StrengthBasisPanel';
-import { useAppStore } from '../state/appStore';
+import { useAppStore, type AppStore } from '../state/appStore';
 import { MatchInfoFields } from '../components/MatchInfoFields';
 import { LeagueStatusTag, ParticipantDetail, describeRestrictions } from '../components/ParticipantConditions';
 import {
@@ -81,6 +81,20 @@ const PRESET_CARDS: Record<PresetKey, { icon: IconName; summary: string }> = {
   CUSTOM: { icon: 'sliders', summary: '設定画面の重みを使用' },
 };
 
+/** The active n01 team's latest analysis (opponent data for the next match), or null. */
+export function activeIntel(store: Pick<AppStore, 'activeTeam' | 'n01CacheFor'>): N01MatchIntelligenceSnapshot | null {
+  return store.activeTeam?.n01
+    ? (store.n01CacheFor(store.activeTeam.id).find(
+        (record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel',
+      ) ?? null)
+    : null;
+}
+
+/** True when SETUP offers 対戦相手最適化 from the analysis (an opponent and a next match). */
+export function hasNextOpponent(intel: N01MatchIntelligenceSnapshot | null): boolean {
+  return !!intel?.opponent && !!intel.nextMatch;
+}
+
 export function SetupPage({
   draft,
   onDraftChange,
@@ -134,11 +148,7 @@ export function SetupPage({
   // Opponent data for the next match (n01 teams only). The context is built against the
   // format chosen here and travels inside the order, so the saved order can always be
   // re-evaluated exactly as it was generated.
-  const intel = store.activeTeam?.n01
-    ? (store.n01CacheFor(store.activeTeam.id).find(
-        (record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel',
-      ) ?? null)
-    : null;
+  const intel = activeIntel(store);
   // n01-linked players carry their PPR from n01 — this season's, or the estimate over the
   // seasons the last analysis returned — or the manual fallback: the order input snapshots
   // that value and where it came from, so a saved order keeps the PPR it was made with.
@@ -162,7 +172,7 @@ export function SetupPage({
   const n01Team = !!store.activeTeam?.n01;
   // No opponent at all → the preset is not offered. An opponent whose data cannot be
   // used here → offered, labelled 対戦データ不足, and generated as 勝利優先.
-  const hasOpponent = !!intel?.opponent && !!intel.nextMatch;
+  const hasOpponent = hasNextOpponent(intel);
   const visiblePresets = PRESET_KEYS.filter(
     (key) => key !== 'OPPONENT_OPTIMIZED' || hasOpponent || draft.preset === 'OPPONENT_OPTIMIZED',
   );

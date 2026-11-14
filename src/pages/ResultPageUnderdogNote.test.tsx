@@ -62,7 +62,17 @@ function sessionFor(input: OrderInput, status?: UnderdogStatus | null): Undoable
   });
 }
 
-function Harness({ initial, onState, onOpenSetup }: { initial: UndoableState; onState?: (state: UndoableState) => void; onOpenSetup?: () => void }): React.JSX.Element {
+function Harness({
+  initial,
+  onState,
+  onOpenSetup,
+  opponentPresetAvailable = true,
+}: {
+  initial: UndoableState;
+  onState?: (state: UndoableState) => void;
+  onOpenSetup?: () => void;
+  opponentPresetAvailable?: boolean;
+}): React.JSX.Element {
   const [session, dispatch] = useReducer(undoableReducer, initial);
   onState?.(session);
   return (
@@ -84,11 +94,15 @@ function Harness({ initial, onState, onOpenSetup }: { initial: UndoableState; on
       onCommitSeason={() => undefined}
       onWithdrawSeason={() => undefined}
       onOpenSetup={onOpenSetup}
+      opponentPresetAvailable={opponentPresetAvailable}
     />
   );
 }
 
-function renderSession(initial: UndoableState, options: { onState?: (state: UndoableState) => void; onOpenSetup?: () => void } = {}) {
+function renderSession(
+  initial: UndoableState,
+  options: { onState?: (state: UndoableState) => void; onOpenSetup?: () => void; opponentPresetAvailable?: boolean } = {},
+) {
   return render(
     <ToastProvider>
       <AppStoreProvider>
@@ -117,6 +131,12 @@ describe('勝利優先 at 2% (fixture F): where to check the underdog plan', () 
     expect(onOpenSetup).toHaveBeenCalledTimes(1);
     // Nothing in the order changed: no generation, no preset chosen.
     expect(latest).toBe(before);
+  });
+
+  it('is not added when オーダー設定 cannot offer 対戦相手最適化 (no analysis for the next match)', () => {
+    renderSession(sessionFor(scenario('underdog-win-first')), { onOpenSetup: () => undefined, opponentPresetAvailable: false });
+    expect(screen.getByTestId('estimated-match-win').textContent).toBe('2%');
+    expect(note()).toBeNull();
   });
 
   it('is not added for a hand-edited line-up, and comes back on undo', async () => {
