@@ -128,10 +128,11 @@ export interface AppStore extends AppData {
    * Applies a finalized version's appearances to the season totals, idempotently.
    * Re-running it for the same version changes nothing; running it for a newer version
    * applies only the difference (see `domain/orders/seasonLedger.ts`).
+   * Resolves once it is stored (one transaction); the screen changes only then.
    */
-  commitSeason(order: SavedOrder, version: OrderVersion): SeasonCommitResult;
-  /** Withdraws an order's season contribution entirely. */
-  withdrawSeason(orderId: OrderId): SeasonCommitResult;
+  commitSeason(order: SavedOrder, version: OrderVersion): Promise<SeasonCommitResult>;
+  /** Withdraws an order's season contribution entirely; resolves once it is stored. */
+  withdrawSeason(orderId: OrderId): Promise<SeasonCommitResult>;
   replaceEverything(snapshot: Snapshot): Promise<void>;
   /** First run: installs the sample team (labelled as demo data). */
   loadSample(): Promise<void>;
@@ -203,6 +204,12 @@ const STORAGE_NOTICES: Partial<Record<BackendKind, string>> = {
 const WRITE_FAILURE_NOTICE =
   '保存に失敗しました。表示中の内容はこのタブでは有効ですが、保存されていません。JSON エクスポートで控えを取ってください。';
 
+/** A season commit or withdrawal that could not be stored: nothing was changed. */
+const SEASON_WRITE_FAILED = '保存に失敗したため、シーズン累計は変更していません。もう一度お試しください。';
+
+/** A second tap while the same order's commit or withdrawal is still being stored. */
+const SEASON_BUSY: SeasonCommitResult = { ok: false, changed: 0, noop: true, clamped: [], message: 'シーズン累計を保存中です。完了までお待ちください。' };
+
 export function AppStoreProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [data, setData] = useState<AppData>(EMPTY);
   const [ready, setReady] = useState(false);
@@ -211,6 +218,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
   const [writeFailed, setWriteFailed] = useState(false);
   const [sessionSyncs, setSessionSyncs] = useState<Record<TeamId, number>>({});
   const repositoryRef = useRef<Repository | null>(null);
+  /** Orders whose season commit or withdrawal is being stored (one at a time per order). */
+  const seasonBusy = useRef(new Set<OrderId>());
   const toast = useToast();
 
   useEffect(() => {
@@ -503,7 +512,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
         );
       },
 
-      commitSeason: (order, version) => {
+      /*
+       * A season commit and its withdrawal store first, in one transaction, and update the
+       * screen afterwards (like the operations further below). They rewrite the season
+       * totals that every later order is generated from, and the captain confirmed each in
+       * a dialog: shown as done while the three writes were still in flight, a reload in
+       * that window kept the raised totals without their ledger entry — the next commit
+       * then added the same appearances a second time, and nothing was left to withdraw.
+       */
+      commitSeason: async (order, version) => {
+        if (seasonBusy.current.has(order.id)) return SEASON_BUSY;
         const existing = seasonCommitFor(order.id);
         const plan = planSeasonCommit(
           order.id,
@@ -516,19 +534,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
         const commit = plan.commit!;
         const updatedOrder: SavedOrder = { ...order, seasonApplied: true, updatedAt: Date.now() };
 
-        write(
-          (current) => ({
-            ...current,
-            players: plan.updatedPlayers.reduce((acc, player) => upsert(acc, player), current.players),
-            orders: upsert(current.orders, updatedOrder),
-            seasonCommits: upsert(current.seasonCommits, commit),
-          }),
-          async (repository) => {
-            await repository.savePlayers(plan.updatedPlayers);
-            await repository.saveOrder(updatedOrder);
-            await repository.saveSeasonCommit(commit);
-          },
-        );
+        seasonBusy.current.add(order.id);
+        try {
+          await repositoryRef.current?.applySeasonCommit({ players: plan.updatedPlayers, order: updatedOrder, commit });
+        } catch {
+          setWriteFailed(true);
+          return { ok: false, changed: 0, noop: true, clamped: [], message: SEASON_WRITE_FAILED };
+        } finally {
+          seasonBusy.current.delete(order.id);
+        }
+        setData((current) => ({
+          ...current,
+          players: plan.updatedPlayers.reduce((acc, player) => upsert(acc, player), current.players),
+          orders: upsert(current.orders, updatedOrder),
+          seasonCommits: upsert(current.seasonCommits, commit),
+        }));
 
         return {
           ok: true,
@@ -541,7 +561,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
         };
       },
 
-      withdrawSeason: (orderId) => {
+      withdrawSeason: async (orderId) => {
+        if (seasonBusy.current.has(orderId)) return SEASON_BUSY;
         const existing = seasonCommitFor(orderId);
         if (!existing) {
           return { ok: false, changed: 0, noop: true, clamped: [], message: 'まだ反映されていません' };
@@ -550,19 +571,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }): React.J
         const order = data.orders.find((entry) => entry.id === orderId);
         const updatedOrder = order ? { ...order, seasonApplied: false, updatedAt: Date.now() } : null;
 
-        write(
-          (current) => ({
-            ...current,
-            players: plan.updatedPlayers.reduce((acc, player) => upsert(acc, player), current.players),
-            orders: updatedOrder ? upsert(current.orders, updatedOrder) : current.orders,
-            seasonCommits: current.seasonCommits.filter((commit) => commit.id !== orderId),
-          }),
-          async (repository) => {
-            await repository.savePlayers(plan.updatedPlayers);
-            if (updatedOrder) await repository.saveOrder(updatedOrder);
-            await repository.deleteSeasonCommit(orderId);
-          },
-        );
+        seasonBusy.current.add(orderId);
+        try {
+          await repositoryRef.current?.applySeasonWithdrawal({ players: plan.updatedPlayers, order: updatedOrder, orderId });
+        } catch {
+          setWriteFailed(true);
+          return { ok: false, changed: 0, noop: true, clamped: [], message: SEASON_WRITE_FAILED };
+        } finally {
+          seasonBusy.current.delete(orderId);
+        }
+        setData((current) => ({
+          ...current,
+          players: plan.updatedPlayers.reduce((acc, player) => upsert(acc, player), current.players),
+          orders: updatedOrder ? upsert(current.orders, updatedOrder) : current.orders,
+          seasonCommits: current.seasonCommits.filter((commit) => commit.id !== orderId),
+        }));
 
         return {
           ok: true,

@@ -546,7 +546,7 @@ export function App(): React.JSX.Element {
     toast.show(`v${version.version} として確定しました`, 'ok');
   }, [session, lifecycle, persist, match, toast]);
 
-  const handleCommitSeason = useCallback(() => {
+  const handleCommitSeason = useCallback(async () => {
     if (!record) return;
     const version = latestVersion(record.versions);
     if (!version) return;
@@ -556,16 +556,16 @@ export function App(): React.JSX.Element {
       toast.show(`シーズン累計へ反映できません: ${issue.message}`, 'error');
       return;
     }
-    const result = store.commitSeason(record, version);
+    const result = await store.commitSeason(record, version);
     toast.show(result.message, result.ok ? 'ok' : 'error');
     if (result.clamped.length > 0) {
       toast.show(`${result.clamped.length} 名の累計が 0 未満になるため 0 に丸めました`, 'error');
     }
   }, [record, store, toast]);
 
-  const handleWithdrawSeason = useCallback(() => {
+  const handleWithdrawSeason = useCallback(async () => {
     if (!record) return;
-    const result = store.withdrawSeason(record.id);
+    const result = await store.withdrawSeason(record.id);
     toast.show(result.message, result.ok ? 'ok' : 'error');
   }, [record, store, toast]);
 

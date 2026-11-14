@@ -274,3 +274,51 @@ describe('deleting a season-committed order (追加要件 §9–§12)', () => {
     expect(totalCounted).toBe(totalCommitted);
   });
 });
+
+describe('a season commit is stored as one unit (追加要件 §21)', () => {
+  let fixture: Awaited<ReturnType<typeof seededWithOrder>>;
+
+  beforeEach(async () => {
+    fixture = await seededWithOrder();
+  });
+
+  it('stores the raised totals, the reflected order and the ledger entry together', async () => {
+    const plan = planSeasonCommit(fixture.order.id, fixture.order.teamId, fixture.version, null, fixture.snapshot.players, 2_000);
+    const order = { ...fixture.order, seasonApplied: true };
+    await fixture.repository.applySeasonCommit({ players: plan.updatedPlayers, order, commit: plan.commit! });
+
+    const loaded = await fixture.repository.loadAll();
+    expect(loaded.orders[0].seasonApplied).toBe(true);
+    expect(loaded.seasonCommits.map((entry) => entry.id)).toEqual([fixture.order.id]);
+    expect(totalsOf(loaded.players)).toEqual(Object.fromEntries(fixture.snapshot.players.map((player) => [player.id, 2])));
+  });
+
+  it('a commit that cannot be stored leaves nothing behind: no totals raised without their ledger entry', async () => {
+    const plan = planSeasonCommit(fixture.order.id, fixture.order.teamId, fixture.version, null, fixture.snapshot.players, 2_000);
+    // A ledger entry without a key makes IndexedDB abort the transaction.
+    const broken = { ...plan.commit!, id: undefined } as unknown as SeasonCommit;
+    await expect(
+      fixture.repository.applySeasonCommit({ players: plan.updatedPlayers, order: { ...fixture.order, seasonApplied: true }, commit: broken }),
+    ).rejects.toBeTruthy();
+
+    const loaded = await fixture.repository.loadAll();
+    expect(loaded.seasonCommits).toHaveLength(0);
+    expect(loaded.orders[0].seasonApplied).toBe(false);
+    expect(totalsOf(loaded.players)).toEqual(totalsOf(fixture.snapshot.players));
+  });
+
+  it('a withdrawal rolls back the totals, clears the flag and removes the ledger entry together', async () => {
+    const plan = planSeasonCommit(fixture.order.id, fixture.order.teamId, fixture.version, null, fixture.snapshot.players, 2_000);
+    const order = { ...fixture.order, seasonApplied: true };
+    await fixture.repository.applySeasonCommit({ players: plan.updatedPlayers, order, commit: plan.commit! });
+
+    const withdrawal = planSeasonWithdrawal(plan.commit!, plan.updatedPlayers);
+    await fixture.repository.applySeasonWithdrawal({ players: withdrawal.updatedPlayers, order: { ...order, seasonApplied: false }, orderId: order.id });
+
+    const loaded = await fixture.repository.loadAll();
+    expect(loaded.seasonCommits).toHaveLength(0);
+    expect(loaded.orders[0].seasonApplied).toBe(false);
+    expect(totalsOf(loaded.players)).toEqual(totalsOf(fixture.snapshot.players));
+    expect(await fixture.repository.deleteOrder(order.id)).toBe('deleted');
+  });
+});

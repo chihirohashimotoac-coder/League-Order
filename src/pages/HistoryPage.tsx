@@ -256,8 +256,8 @@ export function HistoryPage({
           confirmLabel="取り消す"
           destructive
           onCancel={() => setConfirmWithdraw(null)}
-          onConfirm={() => {
-            const result = store.withdrawSeason(confirmWithdraw.id);
+          onConfirm={async () => {
+            const result = await store.withdrawSeason(confirmWithdraw.id);
             toast.show(result.message, result.ok ? 'ok' : 'error');
             setConfirmWithdraw(null);
           }}
