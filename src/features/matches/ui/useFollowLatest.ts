@@ -21,7 +21,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
  *
  * Only this element's `scrollTop` is set: the page and any outer sheet never move (no
  * `scrollIntoView`). No timer and no polling: it reacts to the box's own scroll events, to the
- * updates it is given and to the box's size.
+ * updates it is given, to the box's size and to resizes of the window.
  */
 export interface FollowLatest<T extends HTMLElement> {
   ref: React.RefObject<T | null>;
@@ -83,23 +83,40 @@ export function useFollowLatest<T extends HTMLElement>(options: {
   // The viewer's own scrolling decides; a resize keeps a following box at the bottom. A scroll
   // event that comes with a change of the box's size (the browser clamping or anchoring the
   // position as the window is resized) is the resize, not the viewer: it never stops following.
+  // The same holds for a scroll that arrives with a resize of the window even when the box's
+  // size looks unchanged: the window can be resized and resized back between two frames (the
+  // box grown, its position clamped, the box shrunk again), and the clamped position's scroll
+  // event then arrives with the window's resize event, at the old size — not the viewer either.
   useEffect(() => {
     const element = ref.current;
     if (!enabled || !element) return;
     const sizeOf = (): string => `${element.clientWidth}x${element.clientHeight}`;
     let size = sizeOf();
+    // Set by a resize of the window until the end of the next frame (resize events run before
+    // scroll events in a frame; one more frame of margin for a scroll event dispatched late).
+    let windowResized = false;
+    let frame = 0;
+    const onWindowResize = (): void => {
+      windowResized = true;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => {
+          windowResized = false;
+        });
+      });
+    };
     const onScroll = (): void => {
       const now = sizeOf();
-      if (now !== size) {
-        size = now;
-        if (followingRef.current) {
-          toLatest();
-          return;
-        }
+      const resized = now !== size || windowResized;
+      size = now;
+      if (resized && followingRef.current) {
+        toLatest();
+        return;
       }
       setFollowing(atBottom(element));
     };
     element.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onWindowResize);
     let observer: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(() => {
@@ -110,6 +127,8 @@ export function useFollowLatest<T extends HTMLElement>(options: {
     }
     return () => {
       element.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onWindowResize);
+      cancelAnimationFrame(frame);
       observer?.disconnect();
     };
   }, [enabled, game, setFollowing, toLatest]);
