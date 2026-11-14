@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { OrderSolution, UnderdogSuggestion } from '../../domain/types';
-import { UnderdogPanel, underdogGainText, underdogLossText } from './UnderdogPanel';
+import type { OrderInput, OrderSolution, PresetKey, UnderdogStatus, UnderdogSuggestion } from '../../domain/types';
+import { UnderdogPanel, underdogGainText, underdogGuidance, underdogLossText } from './UnderdogPanel';
 
 /**
  * The panel's wording for both plans (docs/UNDERDOG_PLAN.md §4). The E[W] plan is rarely chosen
@@ -67,5 +67,77 @@ describe('UnderdogPanel', () => {
     expect(screen.getByText('格上対策案を表示中')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: '標準案に戻す' }));
     expect(onRestore).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+function candidate(presetKey: PresetKey, win: number | null, underdog = false): OrderSolution {
+  return {
+    meta: { presetKey, label: presetKey, ...(underdog ? { underdog: { objective: 'atLeastOne' } } : {}) },
+    ...(win === null ? {} : { prediction: { win, confidence: 'MEDIUM', games: [] } }),
+  } as unknown as OrderSolution;
+}
+
+function state(
+  preset: PresetKey,
+  candidates: OrderSolution[],
+  extra: { selected?: number; underdog?: UnderdogSuggestion | null; status?: UnderdogStatus | null; edited?: boolean; showingUnderdog?: boolean } = {},
+) {
+  const selected = extra.selected ?? 0;
+  return {
+    input: { preset } as OrderInput,
+    candidates,
+    selectedCandidate: selected,
+    current: candidates[selected] ?? null,
+    edited: extra.edited ?? false,
+    showingUnderdog: extra.showingUnderdog ?? false,
+    underdog: extra.underdog ?? null,
+    underdogStatus: extra.status ?? null,
+    underdogBasis: null,
+  };
+}
+
+const LOW: UnderdogStatus = { eligible: false, reason: 'low-confidence' };
+
+describe('underdogGuidance (docs/UNDERDOG_PLAN.md §4.1)', () => {
+  it('uses the engine\'s 20% bound: 20% shown (0.204) is included, 21% shown (0.205) is not', () => {
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', [candidate('OPPONENT_OPTIMIZED', 0.204)], { status: LOW }), true)?.kind).toBe('skipped');
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', [candidate('OPPONENT_OPTIMIZED', 0.205)], { status: LOW }), true)).toBeNull();
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.204)]), true)?.kind).toBe('other-preset');
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.205)]), true)).toBeNull();
+  });
+
+  it('adds nothing without opponent data (no estimate)', () => {
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', null)]), true)).toBeNull();
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', [candidate('OPPONENT_OPTIMIZED', null)], { status: { eligible: false, reason: 'no-opponent' } }), true)).toBeNull();
+  });
+
+  it('names only the reasons the engine returned, and none it did not', () => {
+    for (const reason of ['low-confidence', 'no-improvement', 'not-stronger', 'not-run'] as const) {
+      expect(underdogGuidance(state('OPPONENT_OPTIMIZED', [candidate('OPPONENT_OPTIMIZED', 0.1)], { status: { eligible: false, reason } }), true)).toMatchObject({ kind: 'skipped', reason });
+    }
+    // No status: a saved order or older data — nothing is inferred.
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', [candidate('OPPONENT_OPTIMIZED', 0.1)]), true)).toBeNull();
+    // A saved order that is the applied underdog plan is not "another preset".
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', [candidate('OPPONENT_OPTIMIZED', 0.1, true)]), true)).toBeNull();
+  });
+
+  it('on a comparison candidate, reads the standard plan\'s win and points back only when a plan exists', () => {
+    const candidates = [candidate('OPPONENT_OPTIMIZED', 0.18), candidate('BALANCED', 0.25)];
+    const plan = suggestion('atLeastOne', 0.18, 0.17);
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', candidates, { selected: 1, underdog: plan, status: { eligible: true } }), true)).toMatchObject({ kind: 'standard-has-plan', standardIndex: 0 });
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', candidates, { selected: 1, status: LOW }), true)).toBeNull();
+    const above = [candidate('OPPONENT_OPTIMIZED', 0.22), candidate('BALANCED', 0.1)];
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', above, { selected: 1, underdog: plan }), true)).toBeNull();
+  });
+
+  it('nothing while editing, while the plan is shown, with the plan\'s own panel, or with estimates hidden', () => {
+    const one = [candidate('OPPONENT_OPTIMIZED', 0.1)];
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', one, { status: LOW, edited: true }), true)).toBeNull();
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', one, { status: LOW, showingUnderdog: true }), true)).toBeNull();
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', one, { underdog: suggestion('atLeastOne', 0.1, 0.1), status: { eligible: true } }), true)).toBeNull();
+    expect(underdogGuidance(state('OPPONENT_OPTIMIZED', one, { status: LOW }), false)).toBeNull();
+    expect(underdogGuidance(state('WIN_FIRST', [candidate('WIN_FIRST', 0.1)], { edited: true }), true)).toBeNull();
   });
 });

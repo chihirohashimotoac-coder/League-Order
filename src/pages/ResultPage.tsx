@@ -13,7 +13,7 @@ import type {
   ThrowOrderRecord,
 } from '../domain/types';
 import { describeThrowOrder, throwSlotLabel } from '../domain/orders/throwOrderText';
-import { UnderdogPanel } from '../components/n01/UnderdogPanel';
+import { UnderdogNote, UnderdogPanel, underdogGuidance } from '../components/n01/UnderdogPanel';
 import { GAME_KIND_LABELS } from '../domain/types';
 import { describeStrengthWeights, formatPpr } from '../domain/players/strength';
 import { diffCandidates } from '../domain/orders/candidateDiff';
@@ -83,6 +83,7 @@ export function ResultPage({
   onSaveDraft,
   onCommitSeason,
   onWithdrawSeason,
+  onOpenSetup,
 }: {
   session: UndoableState;
   dispatch: (action: UndoableAction) => void;
@@ -103,6 +104,8 @@ export function ResultPage({
   onSaveDraft: () => void;
   onCommitSeason: () => void;
   onWithdrawSeason: () => void;
+  /** Opens オーダー設定 with this order's conditions, without generating anything. */
+  onOpenSetup?: () => void;
 }): React.JSX.Element {
   const [shareOpen, setShareOpen] = useState(false);
   const [confirmSeason, setConfirmSeason] = useState(false);
@@ -161,6 +164,8 @@ export function ResultPage({
   const standardIndex = state.candidates.findIndex((candidate) => candidate.meta.presetKey === 'OPPONENT_OPTIMIZED');
   const offerUnderdog =
     showPredictions && state.underdog !== null && (state.showingUnderdog || (!state.edited && state.selectedCandidate === standardIndex));
+  // Why no plan is on screen, or where to see one (docs/UNDERDOG_PLAN.md §4.1).
+  const underdogHint = underdogGuidance(state, showPredictions);
   const baselineByGame = new Map(baseline?.assignments.map((entry) => [entry.gameId, entry.playerIds]));
   // The rules are checked live against the line-up on screen as well, so an order opened from
   // history (no edit yet) that breaks its rules cannot be finalized from here either.
@@ -237,6 +242,14 @@ export function ResultPage({
               nameById={nameById}
               onApply={() => dispatch({ type: 'applyUnderdog' })}
               onRestore={() => dispatch({ type: 'restoreStandard' })}
+            />
+          ) : null}
+
+          {underdogHint ? (
+            <UnderdogNote
+              guidance={underdogHint}
+              onShowStandard={(index) => dispatch({ type: 'selectCandidate', index })}
+              onOpenSetup={onOpenSetup}
             />
           ) : null}
 

@@ -36,6 +36,37 @@ describe('order session: generation and candidate selection', () => {
   });
 });
 
+describe('order session: the underdog status of a generation (docs/UNDERDOG_PLAN.md §4.1)', () => {
+  const LOW = { eligible: false, reason: 'low-confidence' } as const;
+
+  it('is kept with the candidates it came with, through candidate switches, edits and undo / redo', () => {
+    const base = startedSession();
+    const candidates = base.present.candidates;
+    let state = undoableReducer(base, { type: 'generated', candidates, underdogStatus: LOW });
+    expect(state.present.underdogStatus).toEqual(LOW);
+    if (candidates.length > 1) {
+      state = undoableReducer(state, { type: 'selectCandidate', index: 1 });
+      expect(state.present.underdogStatus).toEqual(LOW);
+    }
+    const game = state.present.current!.assignments[0];
+    state = undoableReducer(state, { type: 'assignPlayer', gameId: game.gameId, slotIndex: 0, playerId: null });
+    expect(state.present.edited).toBe(true);
+    expect(state.present.underdogStatus).toEqual(LOW);
+
+    // A later result without a status does not inherit this one; undo brings it back with its order.
+    const regenerated = undoableReducer(state, { type: 'generated', candidates });
+    expect(regenerated.present.underdogStatus).toBeNull();
+    const undone = undoableReducer(regenerated, { type: 'undo' });
+    expect(undone.present.underdogStatus).toEqual(LOW);
+    expect(undoableReducer(undone, { type: 'redo' }).present.underdogStatus).toBeNull();
+  });
+
+  it('starts empty, and a restored order (no status) has none', () => {
+    expect(createUndoable(orderInput(sampleRoster(), sampleFormatGames())).present.underdogStatus).toBeNull();
+    expect(startedSession().present.underdogStatus).toBeNull();
+  });
+});
+
 describe('order session: manual editing (spec §15)', () => {
   it('re-evaluates the tallies immediately after a change', () => {
     const state = startedSession();

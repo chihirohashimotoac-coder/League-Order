@@ -23,7 +23,7 @@ function ScenarioView({ input }: { input: OrderInput }): React.JSX.Element {
   const result = useMemo(() => generateOrder(input, { timeLimitMs: 4000 }), [input]);
   const [session, dispatch] = useReducer(
     undoableReducer,
-    result.ok ? undoableReducer(createUndoable(input), { type: 'generated', candidates: result.candidates, underdog: result.underdog ?? null }) : createUndoable(input),
+    result.ok ? undoableReducer(createUndoable(input), { type: 'generated', candidates: result.candidates, underdog: result.underdog ?? null, underdogStatus: result.underdogStatus ?? null }) : createUndoable(input),
   );
   if (!result.ok) return <p className="notice danger">このシナリオではオーダーを生成できませんでした。</p>;
   return (
