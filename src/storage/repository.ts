@@ -212,6 +212,33 @@ export class Repository {
     return 'deleted';
   }
 
+  /**
+   * Stores a season commit in one batch: the players' new totals, the order marked as
+   * reflected and the ledger entry. On IndexedDB this is a single transaction, so the
+   * totals are never raised without the ledger entry that records them — a half-stored
+   * commit would be added a second time by the next commit, and could not be withdrawn.
+   */
+  applySeasonCommit(change: { players: readonly Player[]; order: SavedOrder; commit: SeasonCommit }): Promise<void> {
+    return this.backend.writeBatch([
+      { store: 'players', put: change.players },
+      { store: 'orders', put: [change.order] },
+      { store: 'seasonCommits', put: [change.commit] },
+    ]);
+  }
+
+  /**
+   * Withdraws a season commit in one batch: the players' totals rolled back, the order
+   * marked as not reflected (when it still exists) and the ledger entry removed — never
+   * one without the others.
+   */
+  applySeasonWithdrawal(change: { players: readonly Player[]; order: SavedOrder | null; orderId: string }): Promise<void> {
+    return this.backend.writeBatch([
+      { store: 'players', put: change.players },
+      { store: 'orders', put: change.order ? [change.order] : [] },
+      { store: 'seasonCommits', remove: [change.orderId] },
+    ]);
+  }
+
   saveSeasonCommit(commit: SeasonCommit): Promise<void> {
     return this.backend.put('seasonCommits', commit);
   }
