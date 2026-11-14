@@ -33,6 +33,56 @@ describe('storage backend', () => {
   });
 });
 
+describe('IndexedDB writes resolve only once committed', () => {
+  /**
+   * Records, for every readwrite transaction opened while `run` is awaited, whether it had
+   * committed by the time `run`'s promise resolved. A request's `success` comes before its
+   * transaction commits: a write that resolved there let a reload lose it.
+   */
+  async function committedWhenResolved(run: () => Promise<void>): Promise<boolean[]> {
+    const original = IDBDatabase.prototype.transaction;
+    const committed: { done: boolean }[] = [];
+    IDBDatabase.prototype.transaction = function transaction(this: IDBDatabase, ...args: Parameters<IDBDatabase['transaction']>) {
+      const created = original.apply(this, args);
+      if (args[1] === 'readwrite') {
+        const entry = { done: false };
+        committed.push(entry);
+        created.addEventListener('complete', () => {
+          entry.done = true;
+        });
+      }
+      return created;
+    } as IDBDatabase['transaction'];
+    try {
+      await run();
+      return committed.map((entry) => entry.done);
+    } finally {
+      IDBDatabase.prototype.transaction = original;
+    }
+  }
+
+  beforeEach(async () => {
+    resetBackendCache();
+    await (await openBackend()).clearAll();
+  });
+
+  it('put, putMany, remove and clear wait for the commit', async () => {
+    const backend = await openBackend();
+    expect(await committedWhenResolved(() => backend.put('teams', { id: 't1', name: 'A', createdAt: 1 }))).toEqual([true]);
+    expect(await committedWhenResolved(() => backend.putMany('teams', [{ id: 't2', name: 'B', createdAt: 2 }]))).toEqual([true]);
+    expect(await committedWhenResolved(() => backend.remove('teams', 't1'))).toEqual([true]);
+    expect(await committedWhenResolved(() => backend.clear('teams'))).toEqual([true]);
+  });
+
+  it('a putMany that cannot store one record stores none of them', async () => {
+    const backend = await openBackend();
+    // A record without a key makes `put` throw: the records queued before it must not land.
+    const records = [{ id: 'p1', name: 'A', createdAt: 1 }, { name: 'no id', createdAt: 2 }] as unknown as { id: string }[];
+    await expect(backend.putMany('teams', records)).rejects.toBeTruthy();
+    expect(await backend.getAll('teams')).toEqual([]);
+  });
+});
+
 describe('Repository', () => {
   let repository: Repository;
 

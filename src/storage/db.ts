@@ -96,6 +96,31 @@ class IndexedDbBackend implements StorageBackend {
     return this.db.transaction(store, mode).objectStore(store);
   }
 
+  /**
+   * Runs writes in one readwrite transaction and resolves once it has **committed**.
+   *
+   * A request's `success` comes before its transaction commits: resolving there let the
+   * app move on (a reload, a closed tab) while the write could still be lost. A request
+   * that throws synchronously (a record it cannot key) aborts the whole transaction, so
+   * the writes queued before it never land on their own.
+   */
+  private async write(stores: StoreName | readonly StoreName[], apply: (transaction: IDBTransaction) => void): Promise<void> {
+    const transaction = this.db.transaction(stores as StoreName | StoreName[], 'readwrite');
+    const done = new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB write failed'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB write aborted'));
+    });
+    try {
+      apply(transaction);
+    } catch (error) {
+      transaction.abort();
+      await done.catch(() => undefined);
+      throw error;
+    }
+    await done;
+  }
+
   async getAll<T extends Identified>(store: StoreName): Promise<T[]> {
     return promisify(this.tx(store, 'readonly').getAll() as IDBRequest<T[]>);
   }
@@ -104,28 +129,30 @@ class IndexedDbBackend implements StorageBackend {
     return promisify(this.tx(store, 'readonly').get(id) as IDBRequest<T | undefined>);
   }
 
-  async put<T extends Identified>(store: StoreName, value: T): Promise<void> {
-    await promisify(this.tx(store, 'readwrite').put(value));
+  put<T extends Identified>(store: StoreName, value: T): Promise<void> {
+    return this.write(store, (transaction) => {
+      transaction.objectStore(store).put(value);
+    });
   }
 
   async putMany<T extends Identified>(store: StoreName, values: readonly T[]): Promise<void> {
     if (values.length === 0) return;
-    const transaction = this.db.transaction(store, 'readwrite');
-    const target = transaction.objectStore(store);
-    for (const value of values) target.put(value);
-    await new Promise<void>((resolve, reject) => {
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB write failed'));
-      transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB write aborted'));
+    await this.write(store, (transaction) => {
+      const target = transaction.objectStore(store);
+      for (const value of values) target.put(value);
     });
   }
 
-  async remove(store: StoreName, id: string): Promise<void> {
-    await promisify(this.tx(store, 'readwrite').delete(id));
+  remove(store: StoreName, id: string): Promise<void> {
+    return this.write(store, (transaction) => {
+      transaction.objectStore(store).delete(id);
+    });
   }
 
-  async clear(store: StoreName): Promise<void> {
-    await promisify(this.tx(store, 'readwrite').clear());
+  clear(store: StoreName): Promise<void> {
+    return this.write(store, (transaction) => {
+      transaction.objectStore(store).clear();
+    });
   }
 
   async clearAll(): Promise<void> {
@@ -135,26 +162,13 @@ class IndexedDbBackend implements StorageBackend {
   async writeBatch(operations: readonly BatchOperation[]): Promise<void> {
     const stores = [...new Set(operations.map((operation) => operation.store))];
     if (stores.length === 0) return;
-    const transaction = this.db.transaction(stores, 'readwrite');
-    const done = new Promise<void>((resolve, reject) => {
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB write failed'));
-      transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB write aborted'));
-    });
-    try {
+    await this.write(stores, (transaction) => {
       for (const operation of operations) {
         const target = transaction.objectStore(operation.store);
         for (const id of operation.remove ?? []) target.delete(id);
         for (const value of operation.put ?? []) target.put(value);
       }
-    } catch (error) {
-      // `put` throws synchronously for a record it cannot key. The writes queued before it
-      // would otherwise still commit, so the whole transaction is aborted explicitly.
-      transaction.abort();
-      await done.catch(() => undefined);
-      throw error;
-    }
-    await done;
+    });
   }
 }
 
