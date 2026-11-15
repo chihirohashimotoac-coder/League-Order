@@ -443,10 +443,11 @@ function statusOf(games: 'idle' | 'loading' | 'done', exposure: { games: number;
     const why = retry ? '一部のLeg明細を取得できなかったため' : 'n01公式の通算値と一致した季がないため';
     return { kind: 'unavailable', text: `${why}、個人の3DA・First 9は表示していません`, retry };
   }
-  const partial = coverage.scoreVerified < coverage.seasons || exposure.unknownSeasons > 0 || retry;
-  return partial
-    ? { kind: 'partial', text: `一部集計：ダブルス出場${coverage.seasons}季中${coverage.scoreVerified}季で公式値と一致（残りは表示に含めていません）`, retry }
-    : { kind: 'done', text: `取得済み：ダブルス出場${coverage.seasons}季すべてで公式値と一致` };
+  if (coverage.scoreVerified < coverage.seasons || exposure.unknownSeasons > 0) {
+    return { kind: 'partial', text: `一部集計：ダブルス出場${coverage.seasons}季中${coverage.scoreVerified}季で公式値と一致（残りは表示に含めていません）`, retry };
+  }
+  if (retry) return { kind: 'partial', text: `3DAはダブルス出場${coverage.seasons}季すべてで公式値と一致。一部のLeg明細を取得できませんでした（First 9・個人スタート率の採否は内訳を参照）`, retry };
+  return { kind: 'done', text: `取得済み：ダブルス出場${coverage.seasons}季すべてで公式値と一致` };
 }
 
 /** The 3DA / First 9 card note of the doubles view (`undefined` = the generic note). */
@@ -460,5 +461,5 @@ function doublesCardNote(metric: 'ppr' | 'first9', hasValue: boolean, status: Do
   const coverage = doublesCoverage(result);
   const verified = metric === 'ppr' ? coverage.scoreVerified : coverage.f9Verified;
   const base = 'Leg明細から復元（公式値と一致した季のみ）';
-  return verified < coverage.seasons || status.kind === 'partial' ? `一部集計：ダブルス出場${coverage.seasons}季中${verified}季。${base}` : base;
+  return verified < coverage.seasons ? `一部集計：ダブルス出場${coverage.seasons}季中${verified}季。${base}` : base;
 }
