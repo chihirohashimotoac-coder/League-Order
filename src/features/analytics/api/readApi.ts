@@ -6,8 +6,8 @@ import { N01SchemaError } from '../../../integrations/n01/validation';
 import type { N01LeagueTournaments, N01RosterPlayer, N01Tournament } from '../../../integrations/n01/types';
 import type { OfficialStandingGroup, PlayerStatsRow, TeamStatsRow } from '../types';
 import type { SlotEvidence } from '../gameKind';
-import { AnalyticsSchemaError, parseGameDetail, parseGameList, parsePlayerStats, parseSlotEvidence, parseStandings, parseTeamStats } from './parse';
-import type { RawGame, RawGameDetail } from './parse';
+import { AnalyticsSchemaError, parseGameDetail, parseGameList, parseHighIns, parsePlayerStats, parseSlotEvidence, parseStandings, parseTeamStats } from './parse';
+import type { HighInRecord, RawGame, RawGameDetail } from './parse';
 
 /**
  * Analytics read adapter. It is its own client — the sync's `N01Client`, its operation list
@@ -163,6 +163,11 @@ export class AnalyticsApi {
 
   playerStats(tournamentId: string): Promise<PlayerStatsRow[]> {
     return this.parsed('tournament/stats', { tdid: tournamentId, kind: 'player_stats_list' }, parsePlayerStats);
+  }
+
+  /** n01's high-in records of a season: evidence of which slots are played double-in (see `startRule.ts`). */
+  highIns(tournamentId: string): Promise<HighInRecord[]> {
+    return this.parsed('tournament/stats', { tdid: tournamentId, kind: 'player_high_in' }, parseHighIns);
   }
 
   standings(tournamentId: string): Promise<OfficialStandingGroup[]> {

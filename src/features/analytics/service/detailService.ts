@@ -7,6 +7,11 @@ import type { GameReconstruction, PlayerContributions, SeasonCheck } from '../re
 import { classifyGames } from '../roleGames';
 import type { ClassifiedGame, SeasonGames } from '../roleGames';
 import type { SeasonData } from '../seasonData';
+import type { HighInRecord } from '../api/parse';
+import { isStartTally } from '../startRate';
+import type { SeasonStart, StartGameExclusion } from '../startRate';
+import { gameStartRule, highInEvidence, seasonRule } from '../startRule';
+import type { HighInEvidence } from '../startRule';
 import type { GamesContext } from './gamesLoader';
 
 /**
@@ -29,6 +34,7 @@ import type { GamesContext } from './gamesLoader';
  */
 
 export const detailKey = (tournamentId: string): string => `detail:${tournamentId}`;
+export const highInKey = (tournamentId: string): string => `highin:${tournamentId}`;
 /** `match/get` requests one reconstruction may send (≈ 2–3 seasons of one player). */
 export const DETAIL_MAX_REQUESTS = 60;
 /** A cached game is re-read for a disagreement with n01 only when read at least this long ago. */
@@ -51,6 +57,11 @@ export interface PlayerDetailResult {
   stale: { tournamentId: string; title: string; games: number }[];
   failures: string[];
   requestsSent: number;
+  /**
+   * 個人スタート率 per season of the period the player appears in (doubles 01, double-in slots
+   * only; see `startRate.ts` / `startRule.ts`). Pooled by `periodStart`.
+   */
+  starts: SeasonStart[];
 }
 
 /** Cached reconstructions of one season, with the time each game was read. */
@@ -72,6 +83,121 @@ async function readCached(ctx: GamesContext, tournamentId: string): Promise<Held
 
 const toRebuilt = (held: Held): Map<string, GameReconstruction> => new Map([...held].map(([id, entry]) => [id, entry.r]));
 
+/** A cached reconstruction made before start attempts were counted (not "0 attempts": not counted). */
+const lacksStart = (entry: { r: GameReconstruction } | undefined): boolean => !!entry && entry.r.ok && entry.r.start !== null && !isStartTally(entry.r.start);
+
+/**
+ * The season's high-in records (one request, cached like the season), or `null` when they
+ * cannot be read: the slots are then "unknown", never assumed double-in.
+ */
+async function loadHighIns(ctx: GamesContext, season: SeasonData): Promise<{ records: HighInRecord[] | null; budget: boolean; failure?: string }> {
+  // Only a cross-check: a failure here never removes a verdict, a 3DA or a First 9.
+  const key = highInKey(season.tournamentId);
+  const cached = await ctx.cache.get<HighInRecord[]>(key);
+  if (cached && ctx.cache.isFresh(cached) && !ctx.forceRefresh) return { records: cached.value, budget: false };
+  if (ctx.signal?.aborted) return { records: cached?.value ?? null, budget: true };
+  try {
+    const records = await ctx.api.highIns(season.tournamentId);
+    await ctx.cache.put(key, records, season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason);
+    return { records, budget: false };
+  } catch (error) {
+    return { records: cached?.value ?? null, budget: error instanceof RequestBudgetError, failure: cached ? undefined : describeN01Error(error) };
+  }
+}
+
+function sideOf(game: ClassifiedGame, oid: string): 0 | 1 | null {
+  if (game.sides[0].players.some((p) => p.oid === oid)) return 0;
+  if (game.sides[1].players.some((p) => p.oid === oid)) return 1;
+  return null;
+}
+
+/**
+ * One player's start attempts over their doubles 01 games of one season. A game counts only when
+ * its slot is confirmed double-in, the season's attribution passed n01's checksum (the same
+ * verdict that admits the player's 3DA), its legs were rebuilt, and n01's own high-in records of
+ * its legs, where there are any, name the same starter and points. Anything else is left out,
+ * with the reason — never counted as a failure.
+ */
+export function seasonStartOf(input: {
+  season: SeasonData;
+  oid: string;
+  mine: readonly ClassifiedGame[];
+  rebuilt: ReadonlyMap<string, GameReconstruction>;
+  attributionVerified: boolean;
+  evidence: HighInEvidence | null;
+  highIns: readonly HighInRecord[] | null;
+  /** Why the high-in records are missing, when they were wanted (shown as a note only). */
+  highInNote?: string;
+}): SeasonStart {
+  const { season, oid } = input;
+  const doubles = input.mine.filter((g) => g.family.family === '01' && g.role === 'doubles');
+  const out: SeasonStart = { tournamentId: season.tournamentId, title: season.title, doublesGames: doubles.length, counted: 0, attempts: 0, successes: 0, legs: 0, excludedLegs: {}, excludedGames: {}, ruleNotes: [], highInAgreements: 0 };
+  const leave = (why: StartGameExclusion): void => void (out.excludedGames[why] = (out.excludedGames[why] ?? 0) + 1);
+  if (input.highInNote && doubles.length > 0) out.ruleNotes.push(input.highInNote);
+  for (const game of doubles) {
+    const verdict = gameStartRule(season, game, input.evidence);
+    if (verdict.rule !== 'double-in') {
+      if (verdict.rule === 'straight-in') leave('straight-in');
+      else {
+        leave('rule-unknown');
+        if (!out.ruleNotes.includes(verdict.reason)) out.ruleNotes.push(verdict.reason);
+      }
+      continue;
+    }
+    const rebuilt = input.rebuilt.get(game.gameId);
+    if (!rebuilt) {
+      leave('not-fetched');
+      continue;
+    }
+    if (!rebuilt.ok || rebuilt.start === null) {
+      leave('unreadable');
+      continue;
+    }
+    if (!isStartTally(rebuilt.start)) {
+      leave('needs-refetch');
+      continue;
+    }
+    if (!input.attributionVerified) {
+      leave('order-unverified');
+      continue;
+    }
+    const tally = rebuilt.start;
+    const mySide = sideOf(game, oid);
+    const mine = tally.perPlayer[oid];
+    if (mySide === null || !mine) {
+      leave('unreadable');
+      continue;
+    }
+    // n01's high-in records of this game's legs (same slot, same leg time, a player of the game).
+    let conflict = false;
+    let agreements = 0;
+    for (const record of input.highIns ?? []) {
+      // A record without usable points or time says nothing about who started: not compared.
+      if (record.schid !== game.schid || record.time === null || !record.oid || record.highIn === null || record.highIn <= 0) continue;
+      const recordSide = sideOf(game, record.oid);
+      if (recordSide === null) continue;
+      if (!tally.legTimes.includes(record.time)) continue;
+      const hit = tally.hits.find((h) => h.time === record.time && sideOf(game, h.oid) === recordSide);
+      if (hit && hit.oid === record.oid && hit.score === record.highIn) agreements += 1;
+      else conflict = true;
+    }
+    if (conflict) {
+      leave('order-conflict');
+      continue;
+    }
+    out.highInAgreements += agreements;
+    out.counted += 1;
+    out.attempts += mine.attempts;
+    out.successes += mine.successes;
+    out.legs += tally.sides[mySide].legs;
+    for (const [reason, n] of Object.entries(tally.sides[mySide].excluded)) {
+      const key = reason as keyof SeasonStart['excludedLegs'];
+      out.excludedLegs[key] = (out.excludedLegs[key] ?? 0) + (n ?? 0);
+    }
+  }
+  return out;
+}
+
 function personGames(classified: readonly ClassifiedGame[], oid: string): ClassifiedGame[] {
   return classified.filter((g) => g.family.family === '01' && g.sides.some((s) => s.players.some((p) => p.oid === oid)));
 }
@@ -80,7 +206,7 @@ export async function reconstructPerson(
   ctx: GamesContext,
   input: { seasons: readonly SeasonData[]; games: ReadonlyMap<string, SeasonGames>; personKey: string; concurrency?: number },
 ): Promise<PlayerDetailResult> {
-  const result: PlayerDetailResult = { personKey: input.personKey, checks: [], contributions: new Map(), bestLegs: new Map(), bestLegHeld: { all: false, starts: [], reasons: [] }, notAttempted: [], stale: [], failures: [], requestsSent: 0 };
+  const result: PlayerDetailResult = { personKey: input.personKey, checks: [], contributions: new Map(), bestLegs: new Map(), bestLegHeld: { all: false, starts: [], reasons: [] }, notAttempted: [], stale: [], failures: [], requestsSent: 0, starts: [] };
   const held = new Set<number>();
   const holdAll = (reason: string): void => {
     result.bestLegHeld.all = true;
@@ -92,18 +218,34 @@ export async function reconstructPerson(
     const me = season.players.find((p) => p.personKey === input.personKey);
     if (!me) continue;
     const raw = input.games.get(season.tournamentId);
+    const unexamined = (doublesGames: number | null, seasonReason: string): SeasonStart => ({ tournamentId: season.tournamentId, title: season.title, doublesGames, counted: 0, attempts: 0, successes: 0, legs: 0, excludedLegs: {}, excludedGames: {}, ruleNotes: [], highInAgreements: 0, seasonReason });
     if (!raw?.complete) {
       result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'incomplete', games: 0, reconstructed: 0, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: 'ゲーム一覧を取得できていません' });
       holdAll(`${season.title}: ゲーム一覧を取得できていません`);
-      continue;
-    }
-    if (stopped) {
-      result.notAttempted.push({ tournamentId: season.tournamentId, title: season.title });
-      holdAll(`${season.title}: 通信の上限のため未確認`);
+      result.starts.push(unexamined(null, 'ゲーム一覧を取得できていません'));
       continue;
     }
     const classified = classifyGames(season, raw.games);
     const mine = personGames(classified, me.oid);
+    const doublesCount = mine.filter((g) => g.role === 'doubles').length;
+    if (stopped) {
+      result.notAttempted.push({ tournamentId: season.tournamentId, title: season.title });
+      holdAll(`${season.title}: 通信の上限のため未確認`);
+      if (doublesCount > 0) result.starts.push(unexamined(doublesCount, '通信の上限または中断のため未取得'));
+      continue;
+    }
+    // The slots' in-rule evidence (one request per season, only where a doubles game of the
+    // player could count): read before the legs, so only games that can count are refetched.
+    let highIns: HighInRecord[] | null = null;
+    let highInNote: string | undefined;
+    if (doublesCount > 0 && 'rule' in seasonRule(season)) {
+      const loaded = await loadHighIns(ctx, season);
+      highIns = loaded.records;
+      // Not a failure of the read: the start attempts still count, without the cross-check.
+      if (loaded.failure) highInNote = `${season.title}: n01のハイイン記録を取得できず、Legごとの照合はしていません（${loaded.failure}）`;
+      if (loaded.budget) stopped = true;
+    }
+    const evidence = highIns ? highInEvidence(highIns) : null;
     const stored = await readCached(ctx, season.tournamentId);
     const ttl = season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
     const now = ctx.now();
@@ -111,6 +253,9 @@ export async function reconstructPerson(
       const entry = stored.get(id);
       return !entry || ctx.forceRefresh === true || now - entry.at >= ttl;
     };
+    // Cached before start attempts were counted, in a slot where they count: read again for that
+    // only (its 3DA figures stay as they are if the read fails).
+    const startOnly = new Set(mine.filter((g) => !due(g.gameId) && lacksStart(stored.get(g.gameId)) && gameStartRule(season, g, evidence).rule === 'double-in').map((g) => g.gameId));
     const readAgain = new Set<string>();
     let failedAgain = 0;
     let added = 0;
@@ -132,13 +277,13 @@ export async function reconstructPerson(
             added += 1;
             return;
           }
-          if (stored.has(id)) failedAgain += 1;
+          if (stored.has(id) && !startOnly.has(id)) failedAgain += 1;
           if (outcome.reason instanceof RequestBudgetError) stopped = true;
           else result.failures.push(`${season.title}: ${describeN01Error(outcome.reason)}`);
         });
       }
     };
-    await fetchGames(mine.filter((g) => due(g.gameId)));
+    await fetchGames(mine.filter((g) => due(g.gameId) || startOnly.has(g.gameId)));
     let rebuilt = toRebuilt(stored);
 
     // Read again, once, what the cache may hold from before a correction: every cached game when
@@ -184,10 +329,12 @@ export async function reconstructPerson(
 
     if (composition === 'unknown') {
       result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'mismatch', games: mine.length, reconstructed: mine.filter((g) => rebuilt.get(g.gameId)?.ok).length, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: '種別不明のゲーム枠を含むため、n01公式値と照合できません' });
+      if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: false, evidence, highIns, highInNote }));
       continue;
     }
     const check = checkPlayerSeason(season.tournamentId, me.oid, me.line, classified, rebuilt, composition === 'pure01');
     result.checks.push(check);
+    if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: check.verified.score, evidence, highIns, highInNote }));
     addVerified(result.contributions, check, classified, rebuilt);
   }
   // Only confirmed start scores are published; a partial minimum could be worse than the real one.
@@ -196,4 +343,41 @@ export async function reconstructPerson(
   result.bestLegHeld.starts = [...held].sort((a, b) => a - b);
   result.requestsSent = ctx.api.requestCount;
   return result;
+}
+
+/**
+ * The player's doubles 01 games in the loaded game lists — known before any `match/get`, so a
+ * player without doubles is never fetched for. `unknownSeasons`: seasons of the player whose
+ * game list is missing or incomplete.
+ */
+export function doublesExposure(seasons: readonly SeasonData[], games: ReadonlyMap<string, SeasonGames> | null, personKey: string): { games: number; unknownSeasons: number } {
+  let count = 0;
+  let unknownSeasons = 0;
+  for (const season of seasons) {
+    const me = season.players.find((p) => p.personKey === personKey);
+    if (!me) continue;
+    const raw = games?.get(season.tournamentId);
+    if (!raw?.complete) {
+      unknownSeasons += 1;
+      continue;
+    }
+    count += personGames(classifyGames(season, raw.games), me.oid).filter((g) => g.role === 'doubles').length;
+  }
+  return { games: count, unknownSeasons };
+}
+
+/** Seasons with doubles games of the player, and how many of them passed n01's checksum (3DA / First 9). */
+export function doublesCoverage(result: PlayerDetailResult): { seasons: number; scoreVerified: number; f9Verified: number } {
+  const seasons = result.starts.filter((s) => s.doublesGames === null || s.doublesGames > 0);
+  const checkOf = (id: string) => result.checks.find((c) => c.tournamentId === id);
+  return {
+    seasons: seasons.length,
+    scoreVerified: seasons.filter((s) => checkOf(s.tournamentId)?.verified.score).length,
+    f9Verified: seasons.filter((s) => checkOf(s.tournamentId)?.verified.f9).length,
+  };
+}
+
+/** A run that should be offered again: something was not read (network, budget, cancel) — not a mismatch. */
+export function needsRetry(result: PlayerDetailResult): boolean {
+  return result.failures.length > 0 || result.notAttempted.length > 0 || result.stale.length > 0 || result.checks.some((c) => c.state === 'incomplete' && c.games > 0) || result.starts.some((s) => (s.excludedGames['not-fetched'] ?? 0) > 0 || (s.excludedGames['needs-refetch'] ?? 0) > 0);
 }

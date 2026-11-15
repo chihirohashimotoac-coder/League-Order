@@ -195,7 +195,7 @@ export async function loadPeriod(options: PeriodServiceOptions): Promise<PeriodL
       if (filled() >= wanted) return;
       if (result.source === 'stale-cache') usedStale = true;
       meta.push(toMeta(summary, result));
-      loaded.push(buildSeasonData(result.input));
+      loaded.push({ ...buildSeasonData(result.input), startedAt: summary.startedAt });
       window.push({ tournamentId: summary.tournamentId, title: summary.title, state: 'loaded' });
     });
     await yieldToBrowser();

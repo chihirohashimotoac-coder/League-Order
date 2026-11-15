@@ -116,6 +116,16 @@ export async function serveAnalyticsExtras(page: Page): Promise<AnalyticsServerC
     const isStatsList = operation === 'tournament/stats' && kind === 'stats_list';
     const isPlayerList = operation === 'tournament/stats' && kind === 'player_stats_list';
     const isSeasonGames = operation === 'match/list' && url.searchParams.get('tmid__regex') === '_lg_';
+    if (operation === 'tournament/stats' && kind === 'player_high_in') {
+      // The fixture keeps no high-in records: every doubles slot is then "in-rule unknown".
+      control.log.push(`${operation}?${url.searchParams.toString()}`);
+      if (control.failExtras) {
+        await route.abort('internetdisconnected');
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: 0, kind: 'player_high_in', stats: [] }), headers });
+      return;
+    }
     if (isSeasonGames || operation === 'match/get') {
       control.log.push(`${operation}?${url.searchParams.toString()}`);
       if (control.failExtras) {

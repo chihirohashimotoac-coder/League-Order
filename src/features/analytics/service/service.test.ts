@@ -158,6 +158,10 @@ describe('loadPeriod', () => {
     const req = { mode: 'last12', currentTournamentId: 's5' } as const;
     const first = await loadPeriod({ ...base, api, cache, request: req });
     expect(first.seasons.map((s) => s.tournamentId)).toEqual(['s5', 's4', 's2', 's1']);
+    // Each season carries its start from the league list (the double-in rule's scope needs it).
+    const starts = first.seasons.map((s) => s.startedAt);
+    expect(starts.every((t) => typeof t === 'number')).toBe(true);
+    expect([...starts].sort((a, b) => b! - a!)).toEqual(starts);
     // Only 4 regular seasons exist: "直近12季" is shown as partial, never as 12 seasons.
     expect(first.wanted).toBe(12);
     expect(periodLabelAllowed(first)).toBe('partial');

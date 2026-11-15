@@ -4,7 +4,10 @@ import { contributingSeasons, METRIC_GROUP_LABEL } from '../projection';
 import type { MetricGroup, Projection, SeasonAdoption } from '../projection';
 import { SCOPE_LABEL } from '../roleGames';
 import type { GameScope } from '../roleGames';
+import { DETAIL_MAX_REQUESTS } from '../service/detailService';
 import type { PlayerDetailResult } from '../service/detailService';
+import { formatStart, START_GAME_EXCLUSION_LABEL, START_LEG_EXCLUSION_LABEL } from '../startRate';
+import type { PeriodStart } from '../startRate';
 import type { SeasonCheckState } from '../reconstruct';
 import type { PeriodLoad } from '../service/periodService';
 import { periodLabelAllowed } from '../service/periodService';
@@ -211,7 +214,14 @@ export function ReconstructionPanel({
         <Icon name="refresh" size={16} />
         {running ? 'Leg明細を取得中…' : result ? '再度復元する' : 'Leg明細から個人成績を復元'}
       </button>
-      {result ? (
+      {result ? <ReconstructionResultList result={result} titleOf={titleOf} /> : null}
+    </div>
+  );
+}
+
+/** What a reconstruction compared and accepted, season by season. */
+function ReconstructionResultList({ result, titleOf }: { result: PlayerDetailResult; titleOf: (tournamentId: string) => string }): React.JSX.Element {
+  return (
         <ul className="plain-list small-text" data-testid="reconstruction-result">
           {result.checks.map((check) => (
             <li key={check.tournamentId}>
@@ -245,7 +255,124 @@ export function ReconstructionPanel({
             </li>
           ) : null}
         </ul>
+  );
+}
+
+/** The doubles view's status of the automatic leg read. */
+export type DoublesDetailStatus =
+  | { kind: 'waiting'; text: string }
+  | { kind: 'running'; text: string }
+  | { kind: 'none'; text: string }
+  | { kind: 'unavailable'; text: string; retry: boolean }
+  | { kind: 'partial'; text: string; retry: boolean }
+  | { kind: 'done'; text: string };
+
+/**
+ * Per-player figures of the doubles view, read automatically when a player is shown (the leg
+ * details of that player only). A retry is offered only when something could not be read.
+ */
+export function DoublesDetailPanel({
+  personName,
+  status,
+  result,
+  start,
+  onRetry,
+  titleOf,
+}: {
+  personName: string;
+  status: DoublesDetailStatus;
+  result: PlayerDetailResult | undefined;
+  start: PeriodStart | null;
+  onRetry: () => void;
+  titleOf: (tournamentId: string) => string;
+}): React.JSX.Element {
+  const retry = (status.kind === 'unavailable' || status.kind === 'partial') && status.retry;
+  return (
+    <div className="reconstruction" data-testid="reconstruction" data-state={status.kind}>
+      <p className="small-text">
+        n01の記録はペア単位の得点です。{personName}さん個人の3DA・First 9・個人スタート率は、Leg明細を自動で取得し、登録投順から復元してn01公式の通算値と一致した季だけ表示します（推測で補いません）。
+      </p>
+      <p className="small-text" data-testid="reconstruction-status" role="status">
+        {status.kind === 'running' || status.kind === 'waiting' ? <Icon name="refresh" size={14} /> : null} {status.text}
+      </p>
+      {retry ? (
+        <button type="button" className="btn small" onClick={onRetry} data-testid="reconstruct-retry">
+          <Icon name="refresh" size={16} />
+          取得できなかった明細を再試行
+        </button>
+      ) : null}
+      {start && start.state !== 'no-games' ? <StartBreakdown start={start} /> : null}
+      {result ? (
+        <details className="analytics-details" data-testid="reconstruction-details">
+          <summary>照合の内訳（シーズンごと）</summary>
+          <ReconstructionResultList result={result} titleOf={titleOf} />
+          <p className="small-text muted">n01への通信 {result.requestsSent} 回（1回の取得の上限 {DETAIL_MAX_REQUESTS} 回。保存済みの明細は通信しません）</p>
+        </details>
       ) : null}
     </div>
+  );
+}
+
+const START_STATE_NOTE: Record<PeriodStart['state'], string> = {
+  value: '',
+  'no-trials': '分母0',
+  'no-games': '対象なし',
+  'rule-unknown': 'ルール不明',
+  unavailable: '算出不可',
+};
+
+/** 個人スタート率 as a metric card: the rate with its successes / attempts, or why there is none. */
+export function StartRateCard({ start, pendingText }: { start: PeriodStart | null; pendingText: string | null }): React.JSX.Element {
+  const shown = start ? formatStart(start) : { value: '—', sample: '' };
+  const note = !start ? (pendingText ?? 'Leg明細の取得後に表示します') : start.state === 'value' ? (start.partial ? '一部集計（内訳は下の「個人スタート率の内訳」）' : 'Leg明細から算出（n01の公式値ではありません）') : (start.reason ?? '');
+  const badge = !start || start.state !== 'value' ? (start ? START_STATE_NOTE[start.state] : '取得待ち') : start.partial ? '一部集計' : 'Leg明細から算出';
+  return (
+    <div className="metric-card" data-testid="metric-個人スタート率">
+      <span className="k">個人スタート率</span>
+      <span className="v">{shown.value}</span>
+      <span className="s">{shown.sample || '—'}</span>
+      {note ? <span className="n">{note}</span> : null}
+      <span className={`badge${start?.state === 'value' && start.partial ? ' warn' : ''}`}>{badge}</span>
+    </div>
+  );
+}
+
+function StartBreakdown({ start }: { start: PeriodStart }): React.JSX.Element {
+  const games = Object.entries(start.excludedGames).filter(([, n]) => (n ?? 0) > 0) as [keyof typeof START_GAME_EXCLUSION_LABEL, number][];
+  const legs = Object.entries(start.excludedLegs).filter(([, n]) => (n ?? 0) > 0) as [keyof typeof START_LEG_EXCLUSION_LABEL, number][];
+  return (
+    <details className="analytics-details" data-testid="start-breakdown">
+      <summary>個人スタート率の内訳{start.partial ? '（一部集計）' : ''}</summary>
+      <ul className="plain-list small-text">
+        <li>
+          定義：ペアが未スタートの状態で本人が投げたスローのうち、ペアをスタートさせたスローの割合（1スロー＝1試行）。ダブルインと確認できたダブルス01の終了済みLegのみ。Leg明細から算出した値で、n01の公式値ではありません。
+        </li>
+        <li data-testid="start-adopted">
+          採用：ダブルス01 {start.doublesGames}ゲーム中 {start.counted}ゲーム ・ 成功 {start.successes} / 試行 {start.attempts}スロー
+        </li>
+        {games.map(([why, n]) => (
+          <li key={why}>
+            対象外：{START_GAME_EXCLUSION_LABEL[why]} {n}ゲーム
+          </li>
+        ))}
+        {legs.map(([why, n]) => (
+          <li key={why}>
+            対象外：{START_LEG_EXCLUSION_LABEL[why]} {n}Leg
+          </li>
+        ))}
+        {start.seasonsMissing.map((m) => (
+          <li key={m.title}>
+            未取得：{m.title}（{m.reason}）
+          </li>
+        ))}
+        {start.ruleNotes.slice(0, 3).map((note) => (
+          <li key={note} className="muted">
+            {note}
+          </li>
+        ))}
+        {start.highInAgreements > 0 ? <li>n01のハイイン記録と開始者・点数が一致したスタート：{start.highInAgreements}件</li> : null}
+        <li className="muted">投げた選手は n01 の登録投順（各Legで1人目から交互）で決めています。記録されずに投順を入れ替えた場合は判別できません。</li>
+      </ul>
+    </details>
   );
 }
