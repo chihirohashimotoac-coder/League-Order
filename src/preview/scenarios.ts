@@ -226,6 +226,21 @@ export function previewScenarios(): PreviewScenario[] {
       input: underdogScenario(),
     },
     {
+      id: 'underdog-win-first',
+      title: 'F. D と同じ相手を勝利優先で生成',
+      summary: 'D と同じデータを「勝利優先」で生成。推定 Match 勝率が 20% 以下のため、格上対策は「対戦相手最適化」で確認できると案内します (アプリ本体では、案内からオーダー設定を開けます)。',
+      input: { ...underdogScenario(), preset: 'WIN_FIRST', weights: { ...PRESETS.WIN_FIRST.weights } },
+    },
+    {
+      id: 'underdog-low-order',
+      title: 'G. D の相手オーダー傾向だけ 低',
+      summary: 'D と同じデータで、相手のオーダー傾向の信頼度だけを 低 にしたもの。推定 Match 勝率の信頼度は 中 のまま、格上対策案は相手データの信頼度不足で見送られ、その理由を表示します。',
+      input: (() => {
+        const base = underdogScenario();
+        return { ...base, opponent: { ...base.opponent!, orderConfidence: 'LOW' as const } };
+      })(),
+    },
+    {
       id: 'ace',
       title: 'E. Singles: 相手エース枠の受け方',
       summary: '相手エース枠に自軍エースを必ず当てる固定ルールはありません。Match 全体の推定勝率で配置し、エースを当てた場合との比較を表示します。',

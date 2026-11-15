@@ -4041,6 +4041,11 @@ input[type='range'] {
   border-left-color: var(--color-updated);
 }
 
+/* Why no plan is shown, or where to see one (§4.1): the same frame, without the accent. */
+.underdog-panel.quiet {
+  border-left-color: var(--color-border-strong);
+}
+
 .underdog-head {
   display: flex;
   flex-wrap: wrap;

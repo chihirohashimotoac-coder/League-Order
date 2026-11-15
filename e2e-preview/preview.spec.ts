@@ -97,6 +97,42 @@ test('D: the underdog plan is one tap away, never applied on its own, and one ta
   expect(await page.locator('.order-game select').evaluateAll((s) => s.map((x) => (x as HTMLSelectElement).value))).toEqual(standard);
 });
 
+test('D: on a comparison candidate, the note points back to the standard plan through the candidate switch', async ({ page }) => {
+  await open(page, /^D\./u);
+  await page.getByRole('button', { name: /^候補 [A-D]: バランス/u }).click();
+  await expect(page.getByTestId('underdog-panel')).toHaveCount(0);
+  const note = page.getByTestId('underdog-note');
+  await expect(note).toHaveAttribute('data-kind', 'standard-has-plan');
+  await expect(note).toContainText('標準案 (推定 Match 勝率 2%) を表示すると、格上対策案を試せます');
+  await audit(page, 'preview D (comparison candidate)');
+  await note.getByRole('button', { name: '標準案を表示' }).click();
+  await expect(page.getByTestId('underdog-panel')).toContainText('標準案の推定 Match 勝率 2%');
+  await expect(note).toHaveCount(0);
+});
+
+test('F: the same data as 勝利優先 at 2% says the underdog plan is checked with 対戦相手最適化', async ({ page }) => {
+  await open(page, /^F\./u);
+  await expect(page.getByTestId('estimated-match-win')).toHaveText('2%');
+  await expect(page.getByTestId('underdog-panel')).toHaveCount(0);
+  const note = page.getByTestId('underdog-note');
+  await expect(note).toHaveAttribute('data-kind', 'other-preset');
+  await expect(note).toContainText('格上対策は「対戦相手最適化」で確認できます');
+  await expect(note).not.toContainText(/確実|必勝/u);
+  await audit(page, 'preview F');
+});
+
+test('G: only the opponent order model LOW — the reason says so, apart from the 信頼度 中 of the win', async ({ page }) => {
+  await open(page, /^G\./u);
+  await expect(page.getByTestId('opponent-panel')).toContainText('信頼度 中');
+  await expect(page.getByTestId('estimated-match-win')).toHaveText('2%');
+  await expect(page.getByTestId('underdog-panel')).toHaveCount(0);
+  const note = page.getByTestId('underdog-note');
+  await expect(note).toHaveAttribute('data-kind', 'skipped');
+  await expect(note).toContainText('相手データの信頼度が低いため、出していません (相手のオーダー傾向 低・相手ゲーム 中)');
+  await expect(note).toContainText('上の「信頼度 中」は推定 Match 勝率の信頼度で、判定に使う相手データとは材料が異なります');
+  await audit(page, 'preview G');
+});
+
 test('E: Singles — no fixed ace-vs-ace rule; the comparison is shown', async ({ page }) => {
   await open(page, /^E\./u);
   const ace = page.getByTestId('opponent-ace');
@@ -109,7 +145,7 @@ for (const width of [360, 390]) {
   test(`every scenario fits ${width}px without sideways scroll`, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile', 'widths are set explicitly; one project is enough');
     await page.setViewportSize({ width, height: 800 });
-    for (const title of [/^A\./u, /^B\./u, /^C\./u, /^D\./u, /^E\./u]) {
+    for (const title of [/^A\./u, /^B\./u, /^C\./u, /^D\./u, /^E\./u, /^F\./u, /^G\./u]) {
       await open(page, title);
       await noSidewaysScroll(page, `${title.source} at ${width}px`);
     }

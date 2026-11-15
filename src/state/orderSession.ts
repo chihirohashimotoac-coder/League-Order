@@ -8,8 +8,10 @@ import type {
   PlayerId,
   PresetKey,
   ScoreWeights,
+  UnderdogStatus,
   UnderdogSuggestion,
 } from '../domain/types';
+import type { OpponentContext } from '../domain/prediction/opponentContext';
 import { evaluateManualOrder } from '../optimizer/generateOrder';
 import type { HardViolation } from '../optimizer/constraints/validate';
 
@@ -43,6 +45,18 @@ export interface OrderSessionState {
   underdog: UnderdogSuggestion | null;
   /** True while the underdog plan (or an edit of it) is the order on screen. */
   showingUnderdog: boolean;
+  /**
+   * Why the generation that produced `candidates` did or did not offer an underdog plan, as the
+   * engine returned it (docs/UNDERDOG_PLAN.md §1), or `null` when it returned none (another
+   * preset, a saved order, older data). Never inferred and never persisted.
+   */
+  underdogStatus: UnderdogStatus | null;
+  /**
+   * The opponent-data confidence that generation was judged on, kept with its status: the input
+   * can move on (a re-generation's input is set one undo step before its result), the reason
+   * shown for these candidates must not.
+   */
+  underdogBasis: Pick<OpponentContext, 'confidence' | 'orderConfidence'> | null;
 }
 
 export interface UndoableState {
@@ -55,7 +69,7 @@ export interface UndoableState {
 export const UNDO_DEPTH = 30;
 
 export type OrderSessionAction =
-  | { type: 'generated'; candidates: OrderSolution[]; underdog?: UnderdogSuggestion | null }
+  | { type: 'generated'; candidates: OrderSolution[]; underdog?: UnderdogSuggestion | null; underdogStatus?: UnderdogStatus | null }
   | { type: 'selectCandidate'; index: number }
   | { type: 'applyUnderdog' }
   | { type: 'restoreStandard' }
@@ -96,6 +110,8 @@ export function createSession(input: OrderInput): OrderSessionState {
     edited: false,
     underdog: null,
     showingUnderdog: false,
+    underdogStatus: null,
+    underdogBasis: null,
   };
 }
 
@@ -161,6 +177,13 @@ export function sessionReducer(
         edited: false,
         underdog: action.underdog ?? null,
         showingUnderdog: false,
+        // Belongs to this generation only: a result without one never inherits the previous one.
+        underdogStatus: action.underdogStatus ?? null,
+        // `input` is the generation's own here (App sets it right before the result).
+        underdogBasis:
+          action.underdogStatus && state.input.opponent
+            ? { confidence: state.input.opponent.confidence, orderConfidence: state.input.opponent.orderConfidence }
+            : null,
       };
     }
 

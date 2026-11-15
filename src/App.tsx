@@ -38,7 +38,7 @@ import { HomePage, type WorkingOrderSummary } from './pages/HomePage';
 import { PlayersPage } from './pages/PlayersPage';
 import { PairsPage } from './pages/PairsPage';
 import { FormatsPage } from './pages/FormatsPage';
-import { SetupPage, type SetupDraft } from './pages/SetupPage';
+import { SetupPage, activeIntel, hasNextOpponent, type SetupDraft } from './pages/SetupPage';
 import { ResultPage } from './pages/ResultPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -243,7 +243,13 @@ export function App(): React.JSX.Element {
             const base = current && current.present.current ? current : createUndoable(input);
             const withInput = undoableReducer(base, { type: 'setInput', input });
             // An underdog plan travels with the result but is only offered, never shown first.
-            return undoableReducer(withInput, { type: 'generated', candidates: result.candidates, underdog: result.underdog ?? null });
+            // Its status travels with the same candidates; a result without one clears the last one.
+            return undoableReducer(withInput, {
+              type: 'generated',
+              candidates: result.candidates,
+              underdog: result.underdog ?? null,
+              underdogStatus: result.underdogStatus ?? null,
+            });
           });
           setDiagnostics([]);
           setPage('result');
@@ -392,6 +398,21 @@ export function App(): React.JSX.Element {
     void run(session.present.input);
   }, [run, session]);
 
+  /** SETUP's conditions for an order's input (its format, participants, guests, preset, settings). */
+  const draftFor = useCallback(
+    (input: OrderInput): SetupDraft => ({
+      formatId: store.teamFormats.some((format) => format.id === input.formatId)
+        ? input.formatId
+        : (store.teamFormats[0]?.id ?? ''),
+      // The order's own guests come back with it, from its snapshot of players.
+      participants: syncParticipants(input.participants, store.teamPlayers, guestsOf(input.players)),
+      guests: guestsOf(input.players),
+      preset: input.preset,
+      settings: input.settings,
+    }),
+    [store.teamFormats, store.teamPlayers],
+  );
+
   const openSavedOrder = useCallback(
     (order: SavedOrder) => {
       // A generation still running belongs to whatever was open before.
@@ -410,22 +431,26 @@ export function App(): React.JSX.Element {
       setRecord(order.match ? order : { ...order, match: baseline });
       // SETUP edits this order from now on: restore the conditions it was generated
       // with, so going back and re-generating revises *this* order's line-up.
-      setDraft({
-        formatId: store.teamFormats.some((format) => format.id === order.input.formatId)
-          ? order.input.formatId
-          : (store.teamFormats[0]?.id ?? ''),
-        // The order's own guests come back with it, from its snapshot of players.
-        participants: syncParticipants(order.input.participants, store.teamPlayers, guestsOf(order.input.players)),
-        guests: guestsOf(order.input.players),
-        preset: order.input.preset,
-        settings: order.input.settings,
-      });
+      setDraft(draftFor(order.input));
       setDiagnostics([]);
       setPage('result');
       toast.show('履歴から読み込みました', 'ok');
     },
-    [toast, store.teamFormats, store.teamPlayers, match, invalidateGeneration],
+    [toast, match, invalidateGeneration, draftFor],
   );
+
+  /**
+   * RESULT → SETUP from the underdog note (docs/UNDERDOG_PLAN.md §4.1): SETUP opens with the
+   * conditions of the order on screen — format, participants and their conditions, guests,
+   * preset — and the match header as it is. Nothing is generated and no preset is chosen here:
+   * the captain picks 対戦相手最適化 and generates on SETUP as usual.
+   */
+  const openSetupFromResult = useCallback(() => {
+    const input = session?.present.input;
+    if (!input) return;
+    setDraft(draftFor(input));
+    setPage('setup');
+  }, [session, draftFor]);
 
   const games = useMemo(() => {
     if (session?.present.input.games.length) return session.present.input.games;
@@ -779,6 +804,8 @@ export function App(): React.JSX.Element {
               onSaveDraft={handleSaveDraft}
               onCommitSeason={handleCommitSeason}
               onWithdrawSeason={handleWithdrawSeason}
+              onOpenSetup={openSetupFromResult}
+              opponentPresetAvailable={hasNextOpponent(activeIntel(store))}
             />
           ) : (
             <EmptyState
