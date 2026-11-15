@@ -11,6 +11,8 @@ import {
 import { generateOrder } from '../optimizer/generateOrder';
 import { orderInput, sampleFormatGames, sampleRoster } from '../test/factories';
 import { validateHardConstraints } from '../optimizer/constraints/validate';
+import type { OpponentContext } from '../domain/prediction/opponentContext';
+import type { OrderInput, OrderSolution } from '../domain/types';
 
 function startedSession(): UndoableState {
   const input = orderInput(sampleRoster(), sampleFormatGames());
@@ -244,6 +246,70 @@ describe('order session: undo (spec §16)', () => {
     expect(regenerated.present.current!.assignments[0].playerIds).toEqual(['p5']);
     const undone = undoableReducer(regenerated, { type: 'undo' });
     expect(undone.present.current!.assignments).toEqual(first);
+  });
+
+  it('undoes a re-generation from other conditions in one step: input and result together', () => {
+    // The opponent here only carries the confidence the reducer keeps as the underdog basis.
+    const opponent = (level: 'MEDIUM' | 'LOW'): OpponentContext =>
+      ({ confidence: level, orderConfidence: level }) as OpponentContext;
+    const base = orderInput(sampleRoster(), sampleFormatGames());
+    const inputA: OrderInput = { ...base, opponent: opponent('MEDIUM') };
+    const inputB: OrderInput = {
+      ...base,
+      participants: base.participants.map((config, index) => (index === 0 ? { ...config, include: false } : config)),
+      opponent: opponent('LOW'),
+    };
+    const result = generateOrder(inputA);
+    if (!result.ok) throw new Error('fixture should be satisfiable');
+    const candidatesA = result.candidates;
+    const candidatesB: OrderSolution[] = [
+      { ...candidatesA[0], assignments: candidatesA[0].assignments.map((a) => ({ ...a, playerIds: ['p5'] })) },
+    ];
+    const statusA = { eligible: true } as const;
+    const statusB = { eligible: false, reason: 'low-confidence' } as const;
+
+    // The first generation (with its input) stays outside the history, as before.
+    const first = undoableReducer(createUndoable(base), {
+      type: 'generated',
+      input: inputA,
+      candidates: candidatesA,
+      underdogStatus: statusA,
+    });
+    expect(first.present.input).toBe(inputA);
+    expect(canUndo(first)).toBe(false);
+
+    const second = undoableReducer(first, {
+      type: 'generated',
+      input: inputB,
+      candidates: candidatesB,
+      underdogStatus: statusB,
+    });
+    expect(second.present.input).toBe(inputB);
+    expect(second.present.underdogBasis).toEqual({ confidence: 'LOW', orderConfidence: 'LOW' });
+    expect(second.past).toHaveLength(1);
+
+    const undone = undoableReducer(second, { type: 'undo' });
+    expect(undone.present.input).toBe(inputA);
+    expect(undone.present.candidates).toBe(candidatesA);
+    expect(undone.present.current).toBe(candidatesA[0]);
+    expect(undone.present.underdogStatus).toEqual(statusA);
+    expect(undone.present.underdogBasis).toEqual({ confidence: 'MEDIUM', orderConfidence: 'MEDIUM' });
+    // One undo reaches the previous generation; there is no half-way state left to undo into.
+    expect(canUndo(undone)).toBe(false);
+
+    const redone = undoableReducer(undone, { type: 'redo' });
+    expect(redone.present.input).toBe(inputB);
+    expect(redone.present.candidates).toBe(candidatesB);
+    expect(redone.present.underdogStatus).toEqual(statusB);
+    expect(redone.present.underdogBasis).toEqual({ confidence: 'LOW', orderConfidence: 'LOW' });
+    expect(canRedo(redone)).toBe(false);
+  });
+
+  it('keeps the current input for a generation that names none (a restored order)', () => {
+    const state = startedSession();
+    const input = state.present.input;
+    const next = undoableReducer(state, { type: 'generated', candidates: state.present.candidates });
+    expect(next.present.input).toBe(input);
   });
 
   it('supports redo and invalidates it on a new edit', () => {
