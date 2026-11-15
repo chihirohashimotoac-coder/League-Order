@@ -172,7 +172,8 @@ export function seasonStartOf(input: {
     let conflict = false;
     let agreements = 0;
     for (const record of input.highIns ?? []) {
-      if (record.schid !== game.schid || record.time === null || !record.oid) continue;
+      // A record without usable points or time says nothing about who started: not compared.
+      if (record.schid !== game.schid || record.time === null || !record.oid || record.highIn === null || record.highIn <= 0) continue;
       const recordSide = sideOf(game, record.oid);
       if (recordSide === null) continue;
       if (!tally.legTimes.includes(record.time)) continue;

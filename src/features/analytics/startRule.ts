@@ -88,16 +88,21 @@ export function seasonRule(season: Pick<SeasonData, 'leagueId' | 'startedAt'>, r
 
 /** n01's high-in records of a season, per slot (`null`: not read). */
 export interface HighInEvidence {
-  bySlot: Map<string, { count: number; max: number; impossible: number }>;
+  /**
+   * `impossible`: points no double-in start can make (above 170) — a contradiction.
+   * `unreadable`: a record without usable points (missing, 0 or below) — nothing to compare.
+   */
+  bySlot: Map<string, { count: number; max: number; impossible: number; unreadable: number }>;
 }
 
 export function highInEvidence(records: readonly HighInRecord[]): HighInEvidence {
-  const bySlot = new Map<string, { count: number; max: number; impossible: number }>();
+  const bySlot = new Map<string, { count: number; max: number; impossible: number; unreadable: number }>();
   for (const r of records) {
     if (!r.schid) continue;
-    const entry = bySlot.get(r.schid) ?? { count: 0, max: 0, impossible: 0 };
+    const entry = bySlot.get(r.schid) ?? { count: 0, max: 0, impossible: 0, unreadable: 0 };
     entry.count += 1;
-    if (r.highIn === null || r.highIn <= 0 || r.highIn > DOUBLE_IN_MAX) entry.impossible += 1;
+    if (r.highIn === null || r.highIn <= 0) entry.unreadable += 1;
+    else if (r.highIn > DOUBLE_IN_MAX) entry.impossible += 1;
     else entry.max = Math.max(entry.max, r.highIn);
     bySlot.set(r.schid, entry);
   }
@@ -126,6 +131,7 @@ export function gameStartRule(
   if (records && records.impossible > 0) {
     return { rule: 'unknown', reason: `「${label}」にダブルインでは出ない点数のハイイン記録が${records.impossible}件あり、この枠のイン規則を確認できません` };
   }
-  const evidence = !highIns ? 'この季のハイイン記録は取得できず、枠の照合はしていません' : records ? `この季の「${label}」のハイイン記録 ${records.count}件（最高 ${records.max}点）と矛盾なし` : `この季の「${label}」にハイイン記録はまだありません`;
+  const unreadable = records && records.unreadable > 0 ? `（点数を読めない記録 ${records.unreadable}件は照合に使っていません）` : '';
+  const evidence = !highIns ? 'この季のハイイン記録は取得できず、枠の照合はしていません' : records ? `この季の「${label}」のハイイン記録 ${records.count}件（最高 ${records.max}点）と矛盾なし${unreadable}` : `この季の「${label}」にハイイン記録はまだありません`;
   return { rule: 'double-in', basis: `${covered.rule.name}: ${covered.rule.source}。${evidence}` };
 }

@@ -123,6 +123,9 @@ describe('the in-rule verdict never widens (intentional data on the measured slo
     expect(gameStartRule(season, doubles, highInEvidence(sameSlot)).rule).toBe('unknown');
     const otherSlot: HighInRecord[] = [...HIGH_IN_TDO_2026_3RD, { schid: 'kwgs', oid: null, highIn: 180, time: null }, { schid: 'rqq9', oid: null, highIn: 120, time: null }];
     expect(gameStartRule(season, doubles, highInEvidence(otherSlot)).rule).toBe('double-in');
+    // A record without points is nothing to compare, not a contradiction (Codex audit).
+    const missing: HighInRecord[] = [...HIGH_IN_TDO_2026_3RD, { schid: '5ywh', oid: null, highIn: null, time: null }, { schid: '5ywh', oid: null, highIn: 0, time: null }];
+    expect(gameStartRule(season, doubles, highInEvidence(missing))).toMatchObject({ rule: 'double-in', basis: expect.stringContaining('点数を読めない記録 2件') });
     // 170 (D-BULL T20 T20) is still a double-in start.
     expect(gameStartRule(season, doubles, highInEvidence([...HIGH_IN_TDO_2026_3RD, { schid: '5ywh', oid: null, highIn: 170, time: null }])).rule).toBe('double-in');
   });

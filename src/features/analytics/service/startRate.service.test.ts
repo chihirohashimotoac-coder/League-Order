@@ -102,6 +102,14 @@ describe('個人スタート率 through the reconstruction service', () => {
     expect(result.contributions).toEqual(withRecords.contributions);
   });
 
+  it('high-in rows without points (same slot, same leg time) neither exclude the slot nor count as a mismatch (Codex audit)', async () => {
+    const T = 1_724_326_000_000;
+    const timed = details().map((d) => (d.gameId === 'VU6AjbQE_1724326953016' ? { ...d, legs: d.legs.map((leg, i) => (i === 0 ? { ...leg, time: T } : leg)) } : d));
+    const records: HighInRecord[] = [...HIGH_IN_ATDO_2024_2ND, { schid: 'rdsi', oid: 'g1vr', highIn: null, time: T }, { schid: 'rdsi', oid: null, highIn: null, time: null }];
+    const result = await reconstructPerson(ctxOf(new FakeN01(wired(timed), records)), { seasons: [atdoSeason()], games: seasonGames, personKey: keyOf('63Cz') });
+    expect(result.starts[0]).toMatchObject({ counted: 3, attempts: 13, successes: 5, excludedGames: {} });
+  });
+
   it('no high-in record yet in the season (its first weeks): the covered slot counts all the same', async () => {
     const result = await reconstructPerson(ctxOf(new FakeN01(wired(), [])), { seasons: [atdoSeason()], games: seasonGames, personKey: keyOf('63Cz') });
     expect(result.starts[0]).toMatchObject({ counted: 3, attempts: 13, successes: 5 });
