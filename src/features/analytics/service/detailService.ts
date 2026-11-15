@@ -8,7 +8,7 @@ import { classifyGames } from '../roleGames';
 import type { ClassifiedGame, SeasonGames } from '../roleGames';
 import type { SeasonData } from '../seasonData';
 import type { StatLine } from '../types';
-import type { HighInRecord } from '../api/parse';
+import type { HighInRecord, RawGameDetail } from '../api/parse';
 import { isStartTally } from '../startRate';
 import type { SeasonStart, StartGameExclusion } from '../startRate';
 import { gameStartRule, highInEvidence, seasonRule } from '../startRule';
@@ -387,6 +387,14 @@ function matchesRow(game: ClassifiedGame, rebuilt: GameReconstruction): boolean 
   });
 }
 
+/** The legs list the same players, in the same throwing order, on each side as the list's row. */
+function sameOrder(game: ClassifiedGame, detail: RawGameDetail): boolean {
+  return game.sides.every((side, i) => {
+    const theirs = detail.sides[i]?.players ?? [];
+    return theirs.length === side.players.length && side.players.every((p, k) => p.oid === theirs[k]?.oid);
+  });
+}
+
 /** Stands for "read, but not for the row the list shows": such legs are always read again. */
 const UNMATCHED = 'unmatched';
 
@@ -524,7 +532,8 @@ export async function reconstructPerson(
           const id = batch[index].gameId;
           if (outcome.status === 'fulfilled') {
             const r = safeReconstruct(outcome.value);
-            stored.set(id, { r, at: ctx.now(), fp: matchesRow(batch[index], r) ? rowPrint.get(id) : UNMATCHED });
+            // Recorded as the legs of this row only when they show it: same players and order, same totals.
+            stored.set(id, { r, at: ctx.now(), fp: matchesRow(batch[index], r) && sameOrder(batch[index], outcome.value) ? rowPrint.get(id) : UNMATCHED });
             readAgain.add(id);
             batchAdded += 1;
             fetched += 1;
@@ -544,13 +553,19 @@ export async function reconstructPerson(
       }
     };
     await fetchGames(mine.filter((g) => due(g.gameId) || startOnly.has(g.gameId)));
-    // Legs that do not describe the game as listed now are left out (the game counts as not rebuilt).
+    // Only legs read for the row the list shows now are used (the game counts as not rebuilt
+    // otherwise): their row fingerprint must be this row's — a stored entry of an older row that
+    // could not be read again is never used, however its totals look. Entries stored before rows
+    // were recorded count only in a season whose list did not change, and their totals must match.
+    const validFor = (g: ClassifiedGame): boolean => {
+      const entry = stored.get(g.gameId);
+      if (!entry) return false;
+      if (entry.fp !== undefined ? entry.fp !== rowPrint.get(g.gameId) : listChanged) return false;
+      return matchesRow(g, entry.r);
+    };
     const usable = (): Map<string, GameReconstruction> => {
       const all = toRebuilt(stored);
-      for (const g of mine) {
-        const r = all.get(g.gameId);
-        if (r && !matchesRow(g, r)) all.delete(g.gameId);
-      }
+      for (const g of mine) if (all.has(g.gameId) && !validFor(g)) all.delete(g.gameId);
       return all;
     };
     let rebuilt = usable();
@@ -565,7 +580,10 @@ export async function reconstructPerson(
       // Only games read at least MISMATCH_REREAD_MS ago: a season that disagrees for another
       // reason (a limit of the reconstruction) must not re-read everything on every run.
       const old = (g: ClassifiedGame): boolean => now - stored.get(g.gameId)!.at >= MISMATCH_REREAD_MS;
-      const suspect = first?.state === 'mismatch' ? cachedOnly.filter(old) : cachedOnly.filter((g) => !stored.get(g.gameId)!.r.ok && old(g));
+      // In a season whose list changed, legs recorded for the current row are valid: a disagreement
+      // there is n01's totals catching up (or the changed games), not a reason to read them all again.
+      const pinned = (g: ClassifiedGame): boolean => listChanged && stored.get(g.gameId)!.fp === rowPrint.get(g.gameId);
+      const suspect = first?.state === 'mismatch' ? cachedOnly.filter((g) => old(g) && !pinned(g)) : cachedOnly.filter((g) => !stored.get(g.gameId)!.r.ok && old(g) && !pinned(g));
       if (suspect.length > 0) {
         await fetchGames(suspect);
         rebuilt = usable();
@@ -591,17 +609,27 @@ export async function reconstructPerson(
         result.bestLegHeld.reasons.push(reason);
       }
     }
-    for (const [start, darts] of bestLegsByStart(me.oid, mine, rebuilt)) result.bestLegs.set(start, Math.min(result.bestLegs.get(start) ?? Infinity, darts));
+    // Kept until the season's check: a season whose list changed publishes its Best Leg only once
+    // it matches n01's totals again.
+    const seasonBest = bestLegsByStart(me.oid, mine, rebuilt);
+    const publishBest = (verified: boolean): void => {
+      if (listChanged && !verified) {
+        holdAll(`${season.title}: ゲーム一覧が更新され、n01公式値との照合が済んでいないため保留`);
+        return;
+      }
+      for (const [start, darts] of seasonBest) result.bestLegs.set(start, Math.min(result.bestLegs.get(start) ?? Infinity, darts));
+    };
 
     if (composition === 'unknown') {
+      publishBest(false);
       result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'mismatch', games: mine.length, reconstructed: mine.filter((g) => rebuilt.get(g.gameId)?.ok).length, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: '種別不明のゲーム枠を含むため、n01公式値と照合できません' });
       if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: false, evidence, highIns, highInNote }));
       continue;
     }
-    const unmatched = mine.filter((g) => stored.has(g.gameId) && stored.get(g.gameId)!.r.ok && !rebuilt.has(g.gameId)).length;
+    const unmatched = mine.filter((g) => stored.has(g.gameId) && stored.get(g.gameId)!.r.ok && !rebuilt.has(g.gameId) && stored.get(g.gameId)!.fp !== rowPrint.get(g.gameId)).length;
     const check = checkPlayerSeason(season.tournamentId, me.oid, official, classified, rebuilt, composition === 'pure01');
     if (unmatched > 0) {
-      check.reason = `${check.reason ? `${check.reason}。` : ''}Leg明細の合計がゲーム一覧の得点と一致しないゲームが${unmatched}件あります（n01の反映待ちの可能性。「再試行」で取り直します）`;
+      check.reason = `${check.reason ? `${check.reason}。` : ''}Leg明細がゲーム一覧の内容（得点・投数・投順）と一致しないゲームが${unmatched}件あります（n01の反映待ちの可能性。「再試行」で取り直します）`;
       if (!(result.awaitingOfficial ?? []).includes(season.tournamentId)) (result.awaitingOfficial ??= []).push(season.tournamentId);
     }
     if (listChanged && !check.verified.score && check.state !== 'incomplete' && !(result.awaitingOfficial ?? []).includes(season.tournamentId)) {
@@ -610,6 +638,7 @@ export async function reconstructPerson(
       (result.awaitingOfficial ??= []).push(season.tournamentId);
     }
     result.checks.push(check);
+    publishBest(check.verified.score && !(result.awaitingOfficial ?? []).includes(season.tournamentId));
     if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: check.verified.score, evidence, highIns, highInNote }));
     addVerified(result.contributions, check, classified, rebuilt);
     for (const g of mine) if (result.contributions.has(g.gameId)) result.gameSeason[g.gameId] = season.tournamentId;

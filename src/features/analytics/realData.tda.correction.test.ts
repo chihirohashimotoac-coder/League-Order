@@ -47,9 +47,12 @@ class World implements AnalyticsTransport {
   }
 }
 
-const ctxOf = (world: World, cache: AnalyticsCache, extra: { forceRefresh?: boolean } = {}) => ({ api: new AnalyticsApi({ transport: world, maxRequests: 60 }), cache, isOnline: () => true, now: () => Date.now(), sleep: async () => undefined, ...extra });
+/** Added to the clock (the legs' read times are compared with it). */
+let skew = 0;
+const ctxOf = (world: World, cache: AnalyticsCache, extra: { forceRefresh?: boolean } = {}) => ({ api: new AnalyticsApi({ transport: world, maxRequests: 60 }), cache, isOnline: () => true, now: () => Date.now() + skew, sleep: async () => undefined, ...extra });
 
 async function start() {
+  skew = 0;
   const world = new World();
   const cache = new AnalyticsCache({ memoryOnly: true });
   const period = await loadPeriod({ api: new AnalyticsApi({ transport: world }), cache, leagueId: SNAP.league.lgid, request: { mode: 'current', currentTournamentId: TDA_TDID } });
@@ -86,6 +89,7 @@ describe('a corrected game (300 → 301) is checked only with legs and totals re
     s.world.list = true;
     const v2 = await s.listed(true);
     expect(v2.get(TDA_TDID)!.changedFrom).toBeDefined();
+    skew = 11 * 60 * 1000; // the other legs were read more than 10 minutes ago (still within their TTL)
     const n = s.world.calls.length;
     const r = await read(s, v2, s.first);
     // n01's totals once, the corrected game's legs once — no other game's legs.
@@ -111,6 +115,9 @@ describe('a corrected game (300 → 301) is checked only with legs and totals re
     expect(s.world.since(n).filter((c) => c.startsWith('match/get'))).toEqual([`match/get?${FIX.mid}`]); // read again: its old legs did not match the row
     expect(legsOnly.checks[0].verified.score).toBe(false);
     expect(legsOnly.checks[0].reason).toContain('反映されていない可能性');
+    // Best Leg too waits for the check (Codex audit).
+    expect(legsOnly.bestLegs.size).toBe(0);
+    expect(legsOnly.bestLegHeld.reasons.join()).toContain('照合が済んでいない');
     s.world.totals = true;
     n = s.world.calls.length;
     const done = await read(s, v2, legsOnly, true);
@@ -118,6 +125,7 @@ describe('a corrected game (300 → 301) is checked only with legs and totals re
     expect(s.world.since(n).filter((c) => c.includes('player_stats_list'))).toHaveLength(1);
     expect(done.checks[0].verified).toMatchObject({ score: true, f9: true });
     expect(done.awaitingOfficial ?? []).toEqual([]);
+    expect(done.bestLegs.size).toBeGreaterThan(0);
     const view = shown(s.period, v2, done, s.me.personKey);
     expect(view.metrics.first9).toMatchObject({ num: 3 * 4711, den: 207 });
     expect(view.metrics.first9.value!.toFixed(2)).toBe(((3 * 4711) / 207).toFixed(2));
@@ -141,5 +149,37 @@ describe('a corrected game (300 → 301) is checked only with legs and totals re
     expect(r.failures.length).toBeGreaterThan(0);
     for (const players of r.contributions.values()) expect(players.get(TDA_PLAYER)?.f9Score).toBeUndefined();
     expect(shown(s.period, v2, r, s.me.personKey).metrics.first9.value).toBeNull();
+  });
+
+  it('a doubles pair order corrected (same totals): old legs — kept after a failed read, or served again by n01 — are never used (Codex audit)', async () => {
+    const s = await start();
+    const doubles = SNAP.games.find((g) => (g.statsData as { order: { oid: string }[] }[]).some((x) => x.order.length === 2 && x.order.some((p) => p.oid === TDA_PLAYER)))!;
+    const mid = String(doubles.mid);
+    const swapped = SNAP.games.map((g) => (g.mid === mid ? { ...g, statsData: (g.statsData as { order: unknown[] }[]).map((x) => (x.order.length === 2 ? { ...x, order: [...x.order].reverse() } : x)) } : g));
+    const orderWorld = s.world as World & { swap?: boolean; swapDown?: boolean };
+    const original = orderWorld.request.bind(orderWorld);
+    orderWorld.request = async (operation, params) => {
+      if (operation === 'match/list' && orderWorld.swap) {
+        orderWorld.calls.push(`${operation}?${params.skip ?? ''}`);
+        return tdaResponse({ ...SNAP, games: swapped }, operation, params);
+      }
+      if (operation === 'match/get' && params.mid === mid && orderWorld.swapDown) {
+        orderWorld.calls.push(`${operation}?${mid}`);
+        throw new Error('down');
+      }
+      return original(operation, params);
+    };
+    orderWorld.swap = true;
+    const v2 = await s.listed(true);
+    // n01 serves the old order again (legs not updated yet): same totals, but not this row → not used.
+    const servedOld = await read(s, v2, s.first);
+    expect(servedOld.contributions.has(mid)).toBe(false);
+    expect(servedOld.checks[0].verified.score).toBe(false);
+    // The read fails: the old legs kept from before are not used either.
+    orderWorld.swapDown = true;
+    const failed = await read(s, v2, servedOld);
+    expect(failed.contributions.has(mid)).toBe(false);
+    expect(failed.checks[0].verified.score).toBe(false);
+    expect(failed.failures.length).toBeGreaterThan(0);
   });
 });
