@@ -5,6 +5,7 @@ import type { MetricGroup, Projection, SeasonAdoption } from '../projection';
 import { SCOPE_LABEL } from '../roleGames';
 import type { GameScope } from '../roleGames';
 import { DETAIL_MAX_REQUESTS } from '../service/detailService';
+import { GAMES_UNIT_REQUESTS } from '../service/gamesLoader';
 import type { PlayerDetailResult } from '../service/detailService';
 import { formatStart, START_GAME_EXCLUSION_LABEL, START_LEG_EXCLUSION_LABEL } from '../startRate';
 import type { PeriodStart } from '../startRate';
@@ -12,6 +13,8 @@ import type { SeasonCheckState } from '../reconstruct';
 import type { PeriodLoad } from '../service/periodService';
 import { periodLabelAllowed } from '../service/periodService';
 import type { GamesState } from './useRoleData';
+import { hasRetry, STATUS_BADGE } from './detailStatus';
+import type { DetailRole, DetailStatus } from './detailStatus';
 import { PERIOD_LABEL, Segmented } from './parts';
 
 /** Game-kind switch, the compact analysis summary and the leg-reconstruction panel. */
@@ -49,6 +52,8 @@ const GROUPS: MetricGroup[] = ['ppr', 'first9', 'legSet', 'keepBreak', 'records'
 interface GroupSummary {
   group: MetricGroup;
   used: number;
+  /** Seasons where only the players with a verified leg read have it. */
+  players: number;
   excluded: number;
   unavailable: boolean;
   reasons: string[];
@@ -61,11 +66,26 @@ function summarizeGroups(adoption: readonly SeasonAdoption[]): GroupSummary[] {
     return {
       group,
       used: states.filter((s) => s.state === 'official' || s.state === 'recomputed').length,
+      players: states.filter((s) => s.state === 'players').length,
       excluded: states.filter((s) => s.state === 'excluded').length,
       unavailable: states.length > 0 && states.every((s) => s.state === 'unavailable'),
       reasons,
     };
   });
+}
+
+function recollatedText(r: { rows: number; corrected: number; removed: number; added: number }): string {
+  const changes = r.corrected + r.removed + r.added;
+  return changes === 0
+    ? `途中まで取得していた${r.rows}件を照合し、変化なし`
+    : `途中まで取得していた${r.rows}件を照合し、訂正${r.corrected}件・削除${r.removed}件・追加${r.added}件を最新の一覧で取り込み`;
+}
+
+function groupText(g: GroupSummary): string {
+  if (g.players > 0) return `Leg明細を照合できた選手のみ採用（${g.players}季）${g.excluded > 0 ? `・${g.excluded}季対象外` : ''}`;
+  if (g.unavailable) return 'この表示では対象外（ゲーム記録に含まれません）';
+  if (g.excluded === 0) return `採用（${g.used}季）`;
+  return g.used > 0 ? `部分採用（${g.used}季採用・${g.excluded}季対象外）` : `対象外（${g.excluded}季）`;
 }
 
 function slotStateLabel(state: 'loaded' | 'failed' | 'not-fetched'): string {
@@ -77,14 +97,30 @@ function slotStateLabel(state: 'loaded' | 'failed' | 'not-fetched'): string {
  * whether any metric is withheld — one line. Everything else is folded into "集計の内訳" so
  * the figures are never pushed off a phone screen by warnings.
  */
-export function AnalysisSummary({ load, projection, scope, games }: { load: PeriodLoad; projection: Projection; scope: GameScope; games: GamesState }): React.JSX.Element {
+export function AnalysisSummary({
+  load,
+  projection,
+  scope,
+  games,
+  focus = null,
+}: {
+  load: PeriodLoad;
+  projection: Projection;
+  scope: GameScope;
+  games: GamesState;
+  /** The shown player's leg read (player view of シングルス / ダブルス). */
+  focus?: { name: string; status: DetailStatus } | null;
+}): React.JSX.Element {
   const multi = load.request.mode === 'last3' || load.request.mode === 'last12';
   const used = contributingSeasons(projection.adoption);
   const notObtained = load.window.filter((w) => w.state !== 'loaded').length + (multi ? Math.max(0, load.wanted - load.window.length) : 0);
   const gamesMissing = projection.adoption.filter((a) => a.gamesState === 'missing' || a.gamesState === 'partial').length;
+  const gamesLoading = projection.adoption.filter((a) => a.gamesState === 'loading').length;
+  const gamesNeeded = projection.adoption.filter((a) => a.gamesState !== 'not-needed').length;
   const groups = summarizeGroups(projection.adoption);
   const flagged = groups.some((g) => g.excluded > 0 || g.unavailable) || projection.adoption.some((a) => a.playerPpr === 'unavailable' || a.playerPpr === 'partly-verified');
-  const partial = periodLabelAllowed(load) !== 'full' || gamesMissing > 0;
+  const partial = periodLabelAllowed(load) !== 'full' || gamesMissing > 0 || gamesLoading > 0;
+  const retryable = (games.load?.failures ?? []).length > 0 && games.status !== 'loading';
   const missingStandings = load.meta.filter((m) => m.missing.includes('standings')).length;
   const missingRoster = load.meta.filter((m) => m.missing.includes('roster')).length;
   return (
@@ -96,12 +132,36 @@ export function AnalysisSummary({ load, projection, scope, games }: { load: Peri
           {notObtained > 0 ? <span className="badge warn" data-testid="summary-missing">未取得 {notObtained}季</span> : null}
           {gamesMissing > 0 ? <span className="badge warn">ゲーム記録が不完全・未取得 {gamesMissing}季</span> : null}
           {flagged ? <span className="badge" data-testid="summary-flag">対象外・未検証の指標あり</span> : null}
-          {games.status === 'loading' ? <span className="badge">ゲーム記録を取得中…</span> : null}
+          {games.load?.stale && games.load.stale.size > 0 ? (
+            <span className="badge warn" data-testid="summary-stale">
+              保存済みのゲーム記録（最新とは限らない）{games.load.stale.size}季
+            </span>
+          ) : null}
+          {games.status === 'loading' ? (
+            <span className="badge" data-testid="summary-games-loading">
+              ゲーム記録を取得中…（{gamesNeeded - gamesLoading}/{gamesNeeded}季）
+            </span>
+          ) : null}
         </span>
       </p>
       <details className="analytics-details" data-testid="analysis-details">
         <summary>集計の内訳（シーズン・指標ごとの採用状況）</summary>
-        {partial ? <p className="small-text">取得できた範囲のみの集計（部分集計）です。{multi ? `${load.wanted}季すべてを確認できていません。` : ''}</p> : null}
+        {partial ? (
+          <p className="small-text">
+            {gamesLoading > 0 ? `ゲーム記録を取得中です。取得を終えた季から集計に反映します（残り${gamesLoading}季）。` : '取得できた範囲のみの集計（部分集計）です。'}
+            {multi ? `${load.wanted}季すべてを確認できていません。` : ''}
+          </p>
+        ) : null}
+        {focus ? (
+          <section data-testid="focus-summary">
+            <h3 className="mini-title">表示中の選手（{focus.name}）</h3>
+            <p className="small-text">
+              <span className={`badge${focus.status.kind === 'failed' || focus.status.kind === 'partial' ? ' warn' : ''}`}>{STATUS_BADGE[focus.status.kind]}</span> {focus.status.text}
+            </p>
+            <p className="small-text muted">Leg明細から求める指標（{scope === 'doubles' ? '個人の3DA・First 9・個人スタート率' : 'First 9・Keep率・Break率・100+〜180・High Finish'}）は、この選手の分だけ取得・照合しています。下の「リーグ全体」は、チーム・ランキングの集計に使う取得状況です。</p>
+          </section>
+        ) : null}
+        <h3 className="mini-title">リーグ全体の取得状況</h3>
         <div className="analytics-table-wrap">
           <table className="analytics-table compact" data-testid="season-adoption">
             <caption>対象シーズン（新しい順）</caption>
@@ -126,9 +186,18 @@ export function AnalysisSummary({ load, projection, scope, games }: { load: Peri
                     <td>
                       {a ? COMPOSITION_LABEL[a.composition] : '—'}
                       {a && a.gamesState === 'missing' ? <span className="sub">ゲーム記録を取得できません</span> : null}
+                      {games.load?.stale?.has(slot.tournamentId) ? <span className="sub" data-testid="games-stale-reason">保存済みのゲーム記録（期限切れ・最新とは限らない）。オンラインに戻ると自動で取り直します</span> : null}
+                      {games.load?.games.get(slot.tournamentId)?.recollated ? (
+                        <span className="sub" data-testid="games-recollated">{recollatedText(games.load.games.get(slot.tournamentId)!.recollated!)}</span>
+                      ) : null}
+                      {a && a.gamesState === 'loading' ? (
+                        <span className="sub" data-testid="games-loading-reason">
+                          ゲーム記録を取得中{games.load?.progress.get(slot.tournamentId) ? `（${games.load.progress.get(slot.tournamentId)!.rows}件まで）` : ''}
+                        </span>
+                      ) : null}
                       {a && a.gamesState === 'partial' ? (
                         <span className="sub" data-testid="games-partial-reason">
-                          {a.unreadableGames > 0 ? `読めない試合記録 ${a.unreadableGames}件のため部分集計（この季は不使用）` : 'ゲーム一覧が途中まで（この季は不使用）'}
+                          {games.load?.games.get(slot.tournamentId)?.heldReason ?? (a.unreadableGames > 0 ? `読めない試合記録 ${a.unreadableGames}件のため部分集計（この季は不使用）` : 'ゲーム一覧が途中まで（この季は不使用）')}
                         </span>
                       ) : null}
                     </td>
@@ -143,7 +212,7 @@ export function AnalysisSummary({ load, projection, scope, games }: { load: Peri
         <ul className="plain-list small-text" data-testid="metric-adoption">
           {groups.map((g) => (
             <li key={g.group}>
-              <strong>{METRIC_GROUP_LABEL[g.group]}</strong>：{g.unavailable ? 'この表示では対象外' : g.excluded === 0 ? `採用（${g.used}季）` : g.used > 0 ? `部分採用（${g.used}季採用・${g.excluded}季対象外）` : `対象外（${g.excluded}季）`}
+              <strong>{METRIC_GROUP_LABEL[g.group]}</strong>：{groupText(g)}
               {g.reasons.length > 0 ? <span className="meta">{g.reasons.join(' / ')}</span> : null}
             </li>
           ))}
@@ -169,8 +238,15 @@ export function AnalysisSummary({ load, projection, scope, games }: { load: Peri
             ))}
           </ul>
         ) : null}
+        {games.load?.saveFailed ? <p className="small-text" data-testid="games-save-failed">端末に保存できなかったため、ゲーム記録はこの画面を開いている間だけ使います（取得を繰り返すことはありません。画面を閉じた後は取り直します）。</p> : null}
+        {retryable ? (
+          <button type="button" className="btn small" onClick={games.retry} data-testid="games-retry">
+            <Icon name="refresh" size={16} />
+            ゲーム記録を再試行（取得済みの範囲を照合して続きを取得）
+          </button>
+        ) : null}
         <p className="small-text muted">
-          通信: シーズン {load.requestsSent} 回{games.load ? ` ・ ゲーム記録 ${games.load.requestsSent} 回` : ''}
+          通信: シーズン {load.requestsSent} 回{games.load ? ` ・ ゲーム記録 ${games.load.requestsSent} 回（${GAMES_UNIT_REQUESTS}回ごとに区切って続けて取得）` : ''}
           {games.load?.usedStaleCache ? ' ・ 一部は保存済み（期限切れ）のゲーム記録' : ''}
         </p>
       </details>
@@ -258,20 +334,12 @@ function ReconstructionResultList({ result, titleOf }: { result: PlayerDetailRes
   );
 }
 
-/** The doubles view's status of the automatic leg read. */
-export type DoublesDetailStatus =
-  | { kind: 'waiting'; text: string }
-  | { kind: 'running'; text: string }
-  | { kind: 'none'; text: string }
-  | { kind: 'unavailable'; text: string; retry: boolean }
-  | { kind: 'partial'; text: string; retry: boolean }
-  | { kind: 'done'; text: string };
-
 /**
- * Per-player figures of the doubles view, read automatically when a player is shown (the leg
- * details of that player only). A retry is offered only when something could not be read.
+ * Per-player figures of the singles / doubles views, read automatically when a player is shown
+ * (the leg details of that player only). A retry is offered only when something could not be read.
  */
-export function DoublesDetailPanel({
+export function LegDetailPanel({
+  role,
   personName,
   status,
   result,
@@ -279,20 +347,24 @@ export function DoublesDetailPanel({
   onRetry,
   titleOf,
 }: {
+  role: DetailRole;
   personName: string;
-  status: DoublesDetailStatus;
+  status: DetailStatus;
   result: PlayerDetailResult | undefined;
   start: PeriodStart | null;
   onRetry: () => void;
   titleOf: (tournamentId: string) => string;
 }): React.JSX.Element {
-  const retry = (status.kind === 'unavailable' || status.kind === 'partial') && status.retry;
+  const retry = hasRetry(status);
   return (
     <div className="reconstruction" data-testid="reconstruction" data-state={status.kind}>
       <p className="small-text">
-        n01の記録はペア単位の得点です。{personName}さん個人の3DA・First 9・個人スタート率は、Leg明細を自動で取得し、登録投順から復元してn01公式の通算値と一致した季だけ表示します（推測で補いません）。
+        {role === 'doubles'
+          ? `n01の記録はペア単位の得点です。${personName}さん個人の3DA・First 9・個人スタート率は、Leg明細を自動で取得し、登録投順から復元してn01公式の通算値と一致した季だけ表示します（推測で補いません）。`
+          : `First 9・Keep率・Break率はゲーム記録に含まれません。${personName}さんの01の全ゲームのLeg明細を自動で取得し、n01公式の通算値と一致した季だけ表示します（3DA・Leg/Set勝率はゲーム記録から先に表示しています）。`}
       </p>
       <p className="small-text" data-testid="reconstruction-status" role="status">
+        <span className={`badge${status.kind === 'failed' || status.kind === 'partial' ? ' warn' : ''}`} data-testid="reconstruction-badge">{STATUS_BADGE[status.kind]}</span>{' '}
         {status.kind === 'running' || status.kind === 'waiting' ? <Icon name="refresh" size={14} /> : null} {status.text}
       </p>
       {retry ? (
@@ -306,7 +378,8 @@ export function DoublesDetailPanel({
         <details className="analytics-details" data-testid="reconstruction-details">
           <summary>照合の内訳（シーズンごと）</summary>
           <ReconstructionResultList result={result} titleOf={titleOf} />
-          <p className="small-text muted">n01への通信 {result.requestsSent} 回（1回の取得の上限 {DETAIL_MAX_REQUESTS} 回。保存済みの明細は通信しません）</p>
+          {result.saveFailed ? <p className="small-text" data-testid="detail-save-failed">端末に保存できなかったため、取得した明細はこの画面を開いている間だけ使います（同じ明細を取り直すことはありません。画面を閉じた後は取り直します）。</p> : null}
+          <p className="small-text muted">n01への通信 {result.requestsSent} 回（1回の取得単位の上限 {DETAIL_MAX_REQUESTS} 回。超える分は続けて自動で取得し、保存済みの明細は通信しません）</p>
         </details>
       ) : null}
     </div>

@@ -101,9 +101,9 @@ export class AnalyticsApi {
     return `${operation}?${Object.keys(params).sort().map((name) => `${name}=${params[name]}`).join('&')}`;
   }
 
-  private raw(operation: AnalyticsOperation, params: Record<string, string>): Promise<unknown> {
+  private raw(operation: AnalyticsOperation, params: Record<string, string>, reread = false): Promise<unknown> {
     const key = this.key(operation, params);
-    const cached = this.memo.get(key);
+    const cached = reread ? undefined : this.memo.get(key);
     if (cached) return cached;
     const pending = this.send(operation, params);
     pending.catch(() => this.memo.delete(key));
@@ -137,8 +137,8 @@ export class AnalyticsApi {
     }
   }
 
-  private async parsed<T>(operation: AnalyticsOperation, params: Record<string, string>, parse: (raw: unknown) => T): Promise<T> {
-    const raw = await this.raw(operation, params);
+  private async parsed<T>(operation: AnalyticsOperation, params: Record<string, string>, parse: (raw: unknown) => T, reread = false): Promise<T> {
+    const raw = await this.raw(operation, params, reread);
     try {
       return parse(raw);
     } catch (error) {
@@ -183,13 +183,15 @@ export class AnalyticsApi {
   }
 
   /**
-   * One page of the season's league games (`tmid` containing `_lg_`: playoffs and other
-   * event parts are left out), oldest first so paging stays stable while a season runs.
+   * Up to {@link GAME_LIST_PAGE} of the season's league games (`tmid` containing `_lg_`: playoffs
+   * and other event parts are left out) from row `skip` on, oldest first so the list only grows at
+   * its end while a season runs. `reread`: ask n01 again even if this adapter already has the
+   * answer (a list read again from the start after its page boundary moved).
    */
-  gamesPage(tournamentId: string, page: number): Promise<{ games: RawGame[]; rows: number; unreadable: number }> {
+  gamesAt(tournamentId: string, skip: number, reread = false): Promise<{ games: RawGame[]; rows: number; unreadable: number; ids: (string | null)[] }> {
     const params: Record<string, string> = { tdid: tournamentId, tmid__regex: '_lg_', sort: 'startTime', order: 'asc', count: String(GAME_LIST_PAGE) };
-    if (page > 0) params.skip = String(page * GAME_LIST_PAGE);
-    return this.parsed('match/list', params, parseGameList);
+    if (skip > 0) params.skip = String(skip);
+    return this.parsed('match/list', params, parseGameList, reread);
   }
 
   /** One game with its per-leg visits (`match/get`). */

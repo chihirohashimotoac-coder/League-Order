@@ -13,11 +13,11 @@ import { SCOPE_LABEL as GAME_SCOPE_LABEL } from '../roleGames';
 import { scopeMetrics } from '../scopeMetrics';
 import type { RoleViewProps } from './AnalyticsPage';
 import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './parts';
-import { DoublesDetailPanel, ReconstructionPanel, StartRateCard } from './scopeParts';
-import type { DoublesDetailStatus } from './scopeParts';
-import { doublesCoverage, doublesExposure, needsRetry } from '../service/detailService';
-import type { PlayerDetailResult } from '../service/detailService';
+import { LegDetailPanel, ReconstructionPanel, StartRateCard } from './scopeParts';
+import { detailCoverage, doublesCoverage, roleExposure, singlesCoverage } from '../service/detailService';
 import { periodStart } from '../startRate';
+import { detailStatusOf, legCardNote } from './detailStatus';
+import type { DetailRole, DetailStatus } from './detailStatus';
 
 /**
  * PLAYER ANALYTICS (design §4). Reads a loaded period; computes nothing it cannot show the
@@ -29,6 +29,12 @@ const SCOPE_LABEL: Record<ScopeKind, string> = { team: 'チーム内', division:
 const TREND_METRICS: MetricId[] = ['ppr', 'first9', 'legRate'];
 const MAX_COMPARE = 3;
 
+/** The shown player's leg read, as the analysis summary reports it. */
+export interface FocusSummary {
+  name: string;
+  status: DetailStatus;
+}
+
 export function PlayerAnalytics({
   team,
   players,
@@ -36,6 +42,7 @@ export function PlayerAnalytics({
   baseTournamentId,
   onOpenMembers,
   role,
+  onFocusSummary,
 }: {
   team: Team;
   players: Player[];
@@ -43,6 +50,8 @@ export function PlayerAnalytics({
   baseTournamentId: string;
   onOpenMembers?: () => void;
   role?: RoleViewProps;
+  /** The shown player and the state of their leg read, for the page's "集計の内訳". */
+  onFocusSummary?: (summary: FocusSummary | null) => void;
 }): React.JSX.Element {
   const gameScope = role?.scope ?? 'all01';
   const roleView = gameScope !== 'all01';
@@ -115,30 +124,63 @@ export function PlayerAnalytics({
   const compareSelectId = useId();
   const metricSelectId = useId();
 
-  // ダブルス: the shown player's leg details are read automatically (that player only, once per
-  // period; a failed read is offered again, never retried on its own).
+  // シングルス / ダブルス: the shown player's leg details are read automatically (that player
+  // only, once per period, continued part after part; a failed read is offered again, and retried
+  // by itself only when the browser comes back online).
   const doublesView = gameScope === 'doubles';
+  const singlesView = gameScope === 'singles';
+  const detailRole: DetailRole | null = doublesView ? 'doubles' : singlesView ? 'singles' : null;
   const gamesState = role?.games;
   const exposure = useMemo(
-    () => (doublesView && person && gamesState?.status === 'done' ? doublesExposure(load.seasons, gamesState.load?.games ?? null, person.personKey) : null),
-    [doublesView, person, gamesState, load.seasons],
+    () => (detailRole && person && gamesState?.load ? roleExposure(load.seasons, gamesState.load.games, person.personKey, detailRole) : null),
+    [detailRole, person, gamesState?.load, load.seasons],
   );
-  const autoKey = doublesView && person && exposure && exposure.games > 0 ? person.personKey : null;
-  const ensure = role?.detail.ensure;
+  const wantsRead = !!detailRole && !!exposure && exposure.games > 0;
+  const focus = role?.detail.focus;
+  const personKey = person?.personKey ?? null;
   useEffect(() => {
-    // `null` too: leaving the doubles view, or showing a player without doubles, stops a read.
-    ensure?.(autoKey);
-  }, [autoKey, ensure]);
-  const ensureRef = useRef(ensure);
+    // Another view of the same player lets a running part finish; another player stops it.
+    focus?.(personKey, wantsRead);
+  }, [personKey, wantsRead, focus]);
+  const focusRef = useRef({ focus, personKey });
   useEffect(() => {
-    ensureRef.current = ensure;
-  }, [ensure]);
-  // The player view closed (team view, another page): an automatic read stops with it.
-  useEffect(() => () => ensureRef.current?.(null), []);
+    focusRef.current = { focus, personKey };
+  }, [focus, personKey]);
+  // The player view closed (team view): no new part starts; the page closing stops the read.
+  useEffect(() => () => focusRef.current.focus?.(focusRef.current.personKey, false), []);
   const detailResult = person && role ? role.detail.results.get(person.personKey) : undefined;
   const detailRunning = !!person && role?.detail.running === person.personKey;
-  const start = useMemo(() => (doublesView && detailResult ? periodStart(detailResult.starts) : null), [doublesView, detailResult]);
-  const doublesStatus: DoublesDetailStatus | null = doublesView ? statusOf(gamesState?.status ?? 'idle', exposure, detailRunning, detailResult) : null;
+  const detailPartial = !!person && !!role?.detail.partial?.has(person.personKey);
+  // No doubles game in the lists loaded now (some may have been removed since the read): no start rate.
+  const start = useMemo(() => (doublesView && detailResult && exposure && exposure.games > 0 ? periodStart(detailResult.starts) : null), [doublesView, detailResult, exposure]);
+  const detailStatus: DetailStatus | null = detailRole
+    ? detailStatusOf({
+        role: detailRole,
+        gamesLoading: gamesState?.status === 'loading',
+        exposure,
+        running: detailRunning,
+        partial: detailPartial,
+        result: detailResult,
+        outdated: !!detailResult?.coverage && !!person && !!gamesState?.load && detailResult.coverage !== detailCoverage(load.seasons, gamesState.load.games, person.personKey),
+      })
+    : null;
+  const singles = singlesView && detailResult && exposure ? singlesCoverage(detailResult, exposure.seasons) : null;
+  const doubles = doublesView && detailResult ? doublesCoverage(detailResult) : null;
+  const legNote = (m: MetricId, hasValue: boolean): string | undefined => {
+    if (!detailStatus) return undefined;
+    if (doublesView && (m === 'ppr' || m === 'first9')) {
+      const verified = doubles ? (m === 'ppr' ? doubles.scoreVerified : doubles.f9Verified) : 0;
+      return legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, doubles?.seasons ?? 0);
+    }
+    if (singlesView && (m === 'first9' || m === 'keep' || m === 'break')) {
+      const verified = singles ? (m === 'first9' ? singles.f9Verified : singles.breakVerified) : 0;
+      return legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, singles?.seasons ?? 0);
+    }
+    return undefined;
+  };
+  useEffect(() => {
+    onFocusSummary?.(person && detailStatus ? { name: person.name, status: detailStatus } : null);
+  }, [onFocusSummary, person, detailStatus?.kind, detailStatus?.text]);
 
   if (!base) {
     return (
@@ -221,10 +263,10 @@ export function PlayerAnalytics({
                       : undefined;
                   const ranked = available_.rank.includes(m);
                   const st = ranked ? standingOf(rankIn(population.scoped.members, m), person.personKey) : null;
-                  const doublesNote = doublesView && (m === 'ppr' || m === 'first9') ? doublesCardNote(m, ratio.value !== null, doublesStatus, detailResult) : undefined;
+                  const fromLegs = legNote(m, ratio.value !== null);
                   const note =
-                    doublesNote !== undefined
-                      ? doublesNote
+                    fromLegs !== undefined
+                      ? fromLegs
                       : ratio.value !== null
                       ? m === 'legRate' || m === 'setRate'
                         ? multiThrower
@@ -249,7 +291,7 @@ export function PlayerAnalytics({
                     />
                   );
                 })}
-                {doublesView ? <StartRateCard start={start} pendingText={doublesStatus && doublesStatus.kind !== 'done' && doublesStatus.kind !== 'partial' ? doublesStatus.text : null} /> : null}
+                {doublesView ? <StartRateCard start={start} pendingText={detailStatus && detailStatus.kind !== 'done' && detailStatus.kind !== 'partial' ? detailStatus.text : null} /> : null}
               </div>
               <details className="analytics-details" open>
                 <summary>スコア・フィニッシュ記録</summary>
@@ -287,20 +329,21 @@ export function PlayerAnalytics({
               {myStanding?.state === 'reference' ? <p className="small-text muted">この指標はサンプル数が基準({MIN_SAMPLE[metric as MetricId] ?? '—'})未満のため、順位に含めていません。</p> : null}
             </Card>
 
-            {doublesView && role && doublesStatus ? (
+            {detailRole && role && detailStatus ? (
               <Card title="個人別の成績（Leg明細から）" kicker="RECONSTRUCT">
-                <DoublesDetailPanel
+                <LegDetailPanel
+                  role={detailRole}
                   personName={person.name}
-                  status={doublesStatus}
+                  status={detailStatus}
                   result={detailResult}
                   start={start}
-                  onRetry={() => role.detail.run(person.personKey, { fresh: false, auto: true })}
+                  onRetry={() => role.detail.run(person.personKey, { fresh: false, auto: true, recheck: true })}
                   titleOf={(id) => load.seasons.find((s) => s.tournamentId === id)?.title ?? id}
                 />
               </Card>
             ) : null}
 
-            {multiThrower && !doublesView && role ? (
+            {multiThrower && !detailRole && role ? (
               <Card title="個人別の復元" kicker="RECONSTRUCT">
                 <ReconstructionPanel
                   personName={person.name}
@@ -433,40 +476,3 @@ export function PlayerAnalytics({
   );
 }
 
-/** What the doubles view says about the automatic leg read of the shown player. */
-function statusOf(games: 'idle' | 'loading' | 'done', exposure: { games: number; unknownSeasons: number } | null, running: boolean, result: PlayerDetailResult | undefined): DoublesDetailStatus {
-  if (games !== 'done' || !exposure) return { kind: 'waiting', text: 'ゲーム記録を取得中…' };
-  if (exposure.games === 0) {
-    return exposure.unknownSeasons > 0
-      ? { kind: 'unavailable', text: 'ゲーム記録を取得できないため、ダブルスの出場を確認できません（上の「再取得」で取り直せます）', retry: false }
-      : { kind: 'none', text: 'この期間にダブルス01の出場がないため、個人成績の対象はありません' };
-  }
-  if (running) return { kind: 'running', text: 'Leg明細を取得中…（この選手のゲームのみ）' };
-  if (!result) return { kind: 'waiting', text: 'Leg明細の取得を準備中…' };
-  const coverage = doublesCoverage(result);
-  const retry = needsRetry(result);
-  if (result.checks.length === 0 && result.failures.length > 0) return { kind: 'unavailable', text: result.failures[0], retry: true };
-  if (coverage.scoreVerified === 0) {
-    const why = retry ? '一部のLeg明細を取得できなかったため' : 'n01公式の通算値と一致した季がないため';
-    return { kind: 'unavailable', text: `${why}、個人の3DA・First 9は表示していません`, retry };
-  }
-  if (coverage.scoreVerified < coverage.seasons || exposure.unknownSeasons > 0) {
-    return { kind: 'partial', text: `一部集計：ダブルス出場${coverage.seasons}季中${coverage.scoreVerified}季で公式値と一致（残りは表示に含めていません）`, retry };
-  }
-  if (retry) return { kind: 'partial', text: `3DAはダブルス出場${coverage.seasons}季すべてで公式値と一致。一部のLeg明細を取得できませんでした（First 9・個人スタート率の採否は内訳を参照）`, retry };
-  return { kind: 'done', text: `取得済み：ダブルス出場${coverage.seasons}季すべてで公式値と一致` };
-}
-
-/** The 3DA / First 9 card note of the doubles view (`undefined` = the generic note). */
-function doublesCardNote(metric: 'ppr' | 'first9', hasValue: boolean, status: DoublesDetailStatus | null, result: PlayerDetailResult | undefined): string | undefined {
-  if (!status) return undefined;
-  if (!hasValue) {
-    if (status.kind === 'waiting' || status.kind === 'running' || status.kind === 'none' || status.kind === 'unavailable') return status.text;
-    return metric === 'first9' ? 'First 9は公式値と一致した季がないため表示しません' : status.text;
-  }
-  if (!result) return undefined;
-  const coverage = doublesCoverage(result);
-  const verified = metric === 'ppr' ? coverage.scoreVerified : coverage.f9Verified;
-  const base = 'Leg明細から復元（公式値と一致した季のみ）';
-  return verified < coverage.seasons ? `一部集計：ダブルス出場${coverage.seasons}季中${verified}季。${base}` : base;
-}

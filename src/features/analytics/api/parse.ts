@@ -283,18 +283,22 @@ function sideOf(value: unknown): RawGameSide | null {
 }
 
 /** `match/list`: one page. A row without two readable sides is counted, not guessed. */
-export function parseGameList(raw: unknown): { games: RawGame[]; rows: number; unreadable: number } {
+export function parseGameList(raw: unknown): { games: RawGame[]; rows: number; unreadable: number; ids: (string | null)[] } {
   const body = assertOk('match/list', raw);
   const list = firstOf(body, ['list', 'matches', 'match_list']);
   if (!Array.isArray(list)) throw new AnalyticsSchemaError('match/list', '試合一覧 (list) が見つかりません。n01 の応答形式が変わった可能性があります。');
   const games: RawGame[] = [];
+  // Every row's id in list order, readable or not: the page boundary is checked against it.
+  const ids: (string | null)[] = [];
   let unreadable = 0;
   for (const row of list) {
     if (!isRec(row)) {
       unreadable += 1;
+      ids.push(null);
       continue;
     }
     const gameId = str(firstOf(row, ['mid', 'id']));
+    ids.push(gameId);
     const sideRows = firstOf(row, ['statsData', 'stats_data']);
     const sides = Array.isArray(sideRows) && sideRows.length === 2 ? sideRows.map(sideOf) : null;
     if (!gameId || !sides || sides.some((s) => s === null)) {
@@ -312,7 +316,7 @@ export function parseGameList(raw: unknown): { games: RawGame[]; rows: number; u
       sides: sides as [RawGameSide, RawGameSide],
     });
   }
-  return { games, rows: list.length, unreadable };
+  return { games, rows: list.length, unreadable, ids };
 }
 
 /** One visit of a leg as n01 stores it: `score >= 0` points, `score < 0` a checkout with |score| darts. */

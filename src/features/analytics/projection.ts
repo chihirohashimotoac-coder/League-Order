@@ -38,17 +38,20 @@ export const METRIC_GROUP_LABEL: Record<MetricGroup, string> = {
 /**
  * - `official`: n01's season stats, as reported;
  * - `recomputed`: counted from the season's played 01 games;
+ * - `players`: only for the players whose legs were rebuilt and matched n01's totals (the shown
+ *   player's read); teams and the other players have no figure;
  * - `excluded`: this season cannot supply it (reason given);
  * - `unavailable`: this game kind cannot supply it at all (needs leg-by-leg data).
  */
-export type AdoptionState = 'official' | 'recomputed' | 'excluded' | 'unavailable';
+export type AdoptionState = 'official' | 'recomputed' | 'players' | 'excluded' | 'unavailable';
 
 export interface MetricAdoption {
   state: AdoptionState;
   reason?: string;
 }
 
-export type GamesState = 'not-needed' | 'loaded' | 'partial' | 'missing';
+/** `loading`: asked for and still being read (never counted until it is read to the end). */
+export type GamesState = 'not-needed' | 'loaded' | 'partial' | 'missing' | 'loading';
 
 export interface SeasonAdoption {
   tournamentId: string;
@@ -72,6 +75,8 @@ export interface GamesSource {
   games: ReadonlyMap<string, SeasonGames>;
   /** Seasons whose game list was asked for but could not be read. */
   failed: ReadonlySet<string>;
+  /** Seasons whose game list is still being read. */
+  pending?: ReadonlySet<string>;
 }
 
 export interface Projection {
@@ -96,8 +101,9 @@ const ALL_OFFICIAL: Record<MetricGroup, MetricAdoption> = {
 
 const NO_GAMES = 'ゲーム別データを取得できませんでした';
 const PARTIAL_GAMES = 'ゲーム一覧を最後まで取得できなかったため、この季は使いません';
+const LOADING_GAMES = 'ゲーム一覧を取得中（取得を終えると反映します）';
 const unreadableGames = (n: number): string => `読めない試合記録が${n}件あり、欠けたゲームを含めずに集計すると不正確になるため、この季は使いません`;
-const NEEDS_LEGS = 'Leg明細が必要なため、この表示では集計しません';
+const NEEDS_LEGS = 'Leg明細が必要です（ゲーム記録に含まれません）。選手を表示すると、その選手の分だけLeg明細から復元・照合します';
 
 function effectiveComposition(season: SeasonData, classified: readonly ClassifiedGame[] | null): Composition {
   let composition = season.composition.composition;
@@ -151,9 +157,18 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
     const raw = source.games.get(season.tournamentId) ?? null;
     const classified = raw ? classifyGames(season, raw.games) : null;
     const composition = effectiveComposition(season, classified);
-    const gamesState: GamesState = raw ? (raw.complete ? 'loaded' : 'partial') : source.failed.has(season.tournamentId) ? 'missing' : 'not-needed';
+    const gamesState: GamesState =
+      raw && (raw.complete || !source.pending?.has(season.tournamentId))
+        ? raw.complete
+          ? 'loaded'
+          : 'partial'
+        : source.pending?.has(season.tournamentId)
+          ? 'loading'
+          : source.failed.has(season.tournamentId)
+            ? 'missing'
+            : 'not-needed';
     const usable = raw?.complete ? classified : null;
-    const partialReason = raw && raw.dropped.unreadable > 0 ? unreadableGames(raw.dropped.unreadable) : PARTIAL_GAMES;
+    const partialReason = raw?.heldReason ?? (raw && raw.dropped.unreadable > 0 ? unreadableGames(raw.dropped.unreadable) : PARTIAL_GAMES);
     const lines = usable ? linesFromGames(usable, scope, perPlayer) : null;
     const notes: string[] = [];
     if (raw && (raw.dropped.unfinished > 0 || raw.dropped.unreadable > 0)) {
@@ -177,7 +192,7 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
     }
 
     if (scope === 'all01' && composition === 'mixed') {
-      const legSet: MetricAdoption = lines ? { state: 'recomputed', reason: '公式のLeg/SetにはCricketが含まれるため、01のゲームから数え直しました' } : { state: 'excluded', reason: gamesState === 'partial' ? partialReason : NO_GAMES };
+      const legSet: MetricAdoption = lines ? { state: 'recomputed', reason: '公式のLeg/SetにはCricketが含まれるため、01のゲームから数え直しました' } : { state: 'excluded', reason: gamesState === 'partial' ? partialReason : gamesState === 'loading' ? LOADING_GAMES : NO_GAMES };
       // Only rows of a division whose schedule has a Cricket slot are corrected; the season's
       // games must also show no Cricket there (a row's division is the team's).
       const cricketDivisions = new Set(classified?.filter((g) => g.family.family === 'cricket').map((g) => g.division) ?? []);
@@ -207,7 +222,7 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
 
     // `all01` with an unknown slot, or a game-kind view: the 01 game rows are the only source.
     const roleView = scope !== 'all01';
-    const missingReason = gamesState === 'partial' ? partialReason : NO_GAMES;
+    const missingReason = gamesState === 'partial' ? partialReason : gamesState === 'loading' ? LOADING_GAMES : NO_GAMES;
     const multi = scope !== 'singles';
     const anyMulti = multi && lines !== null && [...lines.players.values()].length > 0;
     const verifiedAll = anyMulti && [...lines!.players.values()].every((l) => l.darts !== null);
@@ -220,14 +235,20 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
       ),
     );
     const unknownReason = '種別不明のゲーム枠を含むため、公式の通算値を採用できません';
+    // A figure of the game rows' players that only verified reconstructions supply.
+    const rebuiltPlayers = (fields: readonly StatCounter[]): number => (lines ? [...lines.players.values()].filter((l) => fields.some((f) => l[f] !== null)).length : 0);
+    const legsOnly = (fields: readonly StatCounter[], fallback: MetricAdoption): MetricAdoption => {
+      const n = rebuiltPlayers(fields);
+      return n > 0 ? { state: 'players', reason: `Leg明細を復元し、n01公式の通算値と一致した選手のみ（${n}名）。チーム・その他の選手はゲーム記録に含まれないため対象外` } : fallback;
+    };
     adoption.push({
       ...base,
       metrics: {
         ppr: lines ? { state: 'recomputed', reason: multi ? 'チームの3DAはゲーム記録から。選手個人の3DAはLeg明細から復元・検証できた場合のみ' : undefined } : { state: 'excluded', reason: missingReason },
-        first9: roleView ? { state: 'unavailable', reason: NEEDS_LEGS } : { state: 'excluded', reason: unknownReason },
+        first9: roleView ? legsOnly(['f9Score'], { state: 'unavailable', reason: NEEDS_LEGS }) : { state: 'excluded', reason: unknownReason },
         legSet: lines ? { state: 'recomputed' } : { state: 'excluded', reason: missingReason },
-        keepBreak: roleView ? { state: 'unavailable', reason: NEEDS_LEGS } : { state: 'excluded', reason: unknownReason },
-        records: roleView ? { state: 'unavailable', reason: NEEDS_LEGS } : { state: 'excluded', reason: unknownReason },
+        keepBreak: roleView ? legsOnly(['breakLegs'], { state: 'unavailable', reason: NEEDS_LEGS }) : { state: 'excluded', reason: unknownReason },
+        records: roleView ? legsOnly(['ton00', 'highOut'], { state: 'unavailable', reason: NEEDS_LEGS }) : { state: 'excluded', reason: unknownReason },
         match: roleView ? { state: 'unavailable', reason: '公式のMatch勝敗は試合単位のため、ゲーム種別ごとには分けません' } : { state: 'official' },
       },
       playerPpr: scope === 'singles' ? 'exact' : verifiedAll ? 'exact' : verifiedSome ? 'partly-verified' : 'unavailable',

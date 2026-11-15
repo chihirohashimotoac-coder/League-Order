@@ -46,7 +46,7 @@ async function allGames(api: AnalyticsApi, tdid: string): Promise<{ games: RawGa
   const games = new Map<string, RawGame>();
   let unreadable = 0;
   for (let page = 0; page < 20; page += 1) {
-    const result = await api.gamesPage(tdid, page);
+    const result = await api.gamesAt(tdid, page * GAME_LIST_PAGE);
     unreadable += result.unreadable;
     for (const g of result.games) if (g.finished && isLeagueGame(g.matchId)) games.set(g.gameId, g);
     // Same rule as the app: an unreadable row means the list is not the whole season.

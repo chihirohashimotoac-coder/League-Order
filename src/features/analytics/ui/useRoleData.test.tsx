@@ -7,7 +7,7 @@ import { projectSeasons } from '../projection';
 import { desperadoGames, details, season2024Data, TDID_2024_2ND, wireDetail, wireGame, withDetailSides } from '../realData.roles.fixtures';
 import type { PeriodLoad } from '../service/periodService';
 import { emptyLoad } from '../service/periodService';
-import type { GamesLoad } from '../service/gamesLoader';
+import type { GamesLoad } from '../service/gamesSession';
 import type { AnalyticsServices } from './usePeriodLoad';
 import { usePlayerDetail } from './useRoleData';
 
@@ -29,6 +29,9 @@ const games: GamesLoad = {
   failures: [],
   usedStaleCache: false,
   requestsSent: 0,
+  pending: new Set(),
+  progress: new Map(),
+  units: 1,
 };
 const load: PeriodLoad = emptyLoad({ mode: 'current', currentTournamentId: TDID_2024_2ND }, { seasons: [season], complete: true });
 const correct = Object.fromEntries(details().map((d) => [d.gameId, wireDetail(d)]));
@@ -67,6 +70,7 @@ async function setup() {
     createApi: (signal) => new AnalyticsApi({ transport, signal }),
     createRoleApi: (signal, maxRequests) => new AnalyticsApi({ transport, signal, maxRequests }),
     cache: new AnalyticsCache({ memoryOnly: true }),
+    sleep: async () => undefined,
   };
   const out: { detail: Detail | null } = { detail: null };
   render(<Harness services={services} out={out} />);
