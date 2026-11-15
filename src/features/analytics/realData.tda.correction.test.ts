@@ -201,4 +201,33 @@ describe('a corrected game (300 → 301) is checked only with legs and totals re
       expect(r.bestLegs.size).toBe(0);
     }
   });
+
+  it('legs that n01 served unreadable after the correction are read again later, not kept as valid (PR review)', async () => {
+    const s = await start();
+    s.world.list = true;
+    s.world.totals = true;
+    const v2 = await s.listed(true);
+    // n01 serves the corrected game's legs inconsistent with its own total (they cannot be rebuilt).
+    const broken = JSON.parse(JSON.stringify(FIX.detail)) as { match: { statsData: { allScore: number }[] } };
+    for (const x of broken.match.statsData) x.allScore += 5;
+    const w = s.world;
+    const original = w.request.bind(w);
+    let fixed = false;
+    w.request = async (operation, params) => {
+      if (operation === 'match/get' && params.mid === FIX.mid) {
+        w.calls.push(`${operation}?${FIX.mid}`);
+        return fixed ? FIX.detail : broken;
+      }
+      return original(operation, params);
+    };
+    const first = await read(s, v2, s.first);
+    expect(first.checks[0].verified.f9).toBe(false);
+    // Later (more than 10 minutes), n01 serves them right: they are read again and the season verifies.
+    fixed = true;
+    skew = 11 * 60 * 1000;
+    const n = w.calls.length;
+    const again = await read(s, v2, first, true);
+    expect(w.since(n).filter((c) => c.startsWith('match/get'))).toEqual([`match/get?${FIX.mid}`]);
+    expect(again.checks[0].verified).toMatchObject({ score: true, f9: true });
+  });
 });

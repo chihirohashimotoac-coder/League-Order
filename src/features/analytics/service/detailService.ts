@@ -582,7 +582,8 @@ export async function reconstructPerson(
       const old = (g: ClassifiedGame): boolean => now - stored.get(g.gameId)!.at >= MISMATCH_REREAD_MS;
       // In a season whose list changed, legs recorded for the current row are valid: a disagreement
       // there is n01's totals catching up (or the changed games), not a reason to read them all again.
-      const pinned = (g: ClassifiedGame): boolean => listChanged && stored.get(g.gameId)!.fp === rowPrint.get(g.gameId);
+      // Only legs that were rebuilt: a game whose legs could not be rebuilt is read again as before.
+      const pinned = (g: ClassifiedGame): boolean => listChanged && stored.get(g.gameId)!.r.ok && stored.get(g.gameId)!.fp === rowPrint.get(g.gameId);
       const suspect = first?.state === 'mismatch' ? cachedOnly.filter((g) => old(g) && !pinned(g)) : cachedOnly.filter((g) => !stored.get(g.gameId)!.r.ok && old(g) && !pinned(g));
       if (suspect.length > 0) {
         await fetchGames(suspect);

@@ -203,6 +203,41 @@ describe('game lists of a long period (several budgets)', () => {
     expect(after.stale!.size).toBe(0);
   });
 
+  it('a season taken up again while its worker\'s adapter is still open: its pages are asked of n01 again, never served from that adapter (PR review)', async () => {
+    const fake = new FakeSeasons({ a: list('a', 150), b: list('b', 150) });
+    const { s, finished } = session(fake, { concurrency: 1 });
+    // a's second page fails (its first page was read); while b is read (same worker, same adapter),
+    // n01 corrects a's first game and a is retried.
+    const original = fake.request.bind(fake);
+    let aDown = true;
+    let retried = false;
+    fake.request = async (operation, params) => {
+      if (params.tdid === 'a' && params.skip === '99' && aDown) {
+        fake.calls.push(`${params.tdid}@${params.skip}`);
+        throw new Error('down');
+      }
+      if (params.tdid === 'b' && !retried) {
+        retried = true;
+        aDown = false;
+        fake.seasons.a[0] = { ...fake.seasons.a[0], statsData: [{ ...side('A', 2), allScore: 999 }, side('B', 1)] };
+        s.retry(['a']);
+      }
+      return original(operation, params);
+    };
+    s.want([{ tournamentId: 'a', status: 40 }, { tournamentId: 'b', status: 40 }]);
+    await finished;
+    const done = await new Promise<GamesLoad>((resolve) => {
+      const check = setInterval(() => {
+        const snap = s.snapshot();
+        if (!s.busy && snap.games.get('a')?.complete) {
+          clearInterval(check);
+          resolve(snap);
+        }
+      }, 1);
+    });
+    expect(done.games.get('a')!.games.find((g) => g.gameId === 'a-0')!.sides[0].score).toBe(999);
+  });
+
   it('dispose() stops the load: no request after it', async () => {
     const fake = new FakeSeasons(twelve());
     const { s } = session(fake);

@@ -336,7 +336,9 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
     const consumed = ids.length;
     let page: Awaited<ReturnType<AnalyticsApi['gamesAt']>>;
     try {
-      page = await withRetry(ctx, () => api.gamesAt(tournamentId, consumed === 0 ? 0 : consumed - 1, restarts + changeRestarts > 0));
+      // Always asked of n01: an adapter kept by the session may hold this page from an earlier,
+      // stopped reading of the season (a retry must not mix its old rows in).
+      page = await withRetry(ctx, () => api.gamesAt(tournamentId, consumed === 0 ? 0 : consumed - 1, true));
     } catch (error) {
       if (await nextUnit(error)) {
         // This unit is spent: go on with the next one, from the same row, in memory. The rows read
