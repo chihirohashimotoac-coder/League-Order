@@ -105,15 +105,35 @@ test.describe('PLAYER ANALYTICS', () => {
     expect(extras.log.filter((e) => e.startsWith('match/list')).every((e) => e.includes('tmid__regex=_lg_') && e.includes('count=100'))).toBe(true);
 
     await page.getByRole('button', { name: 'ダブルス', exact: true }).click();
-    await expect(page.getByTestId('metric-3DA')).toContainText('個人別に復元できません');
-    await expect(page.getByTestId('reconstruction')).toBeVisible();
+    // The shown player's leg details are read without pressing anything (the fixture keeps no
+    // leg detail, so n01 answers "not found": the read ends as "取得不可" with a retry).
+    const panel = page.getByTestId('reconstruction');
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute('data-state', /unavailable|partial|none/);
+    await expect(page.getByTestId('reconstruct-run')).toHaveCount(0);
+    await expect(page.getByTestId('metric-個人スタート率')).toBeVisible();
+    const state = await panel.getAttribute('data-state');
+    const gets = (): number => extras.log.filter((e) => e.startsWith('match/get')).length;
+    if (state === 'none') expect(gets()).toBe(0);
+    else {
+      expect(gets()).toBeGreaterThan(0);
+      await expect(page.getByTestId('reconstruct-retry')).toBeVisible();
+      await expect(page.getByTestId('metric-3DA')).not.toContainText('個人別に復元できません');
+    }
     await page.screenshot({ path: `test-results/analytics-doubles-${info.project.name}.png`, fullPage: true });
     // Switching back and forth does not refetch the game rows already loaded.
     const listed = extras.log.filter((e) => e.startsWith('match/list')).length;
+    const detailRequests = gets();
     await page.getByTestId('scope-bar').getByRole('button', { name: 'その他', exact: true }).click();
     await expect(page.getByRole('button', { name: 'チーム戦' })).toBeVisible();
     await page.getByRole('button', { name: '01全体', exact: true }).click();
     expect(extras.log.filter((e) => e.startsWith('match/list')).length).toBe(listed);
+    // …and coming back to ダブルス does not read the same player's legs again (no retry loop either).
+    await page.getByRole('button', { name: 'ダブルス', exact: true }).click();
+    await expect(page.getByTestId('reconstruction')).toHaveAttribute('data-state', state ?? '');
+    await page.waitForTimeout(500);
+    expect(gets()).toBe(detailRequests);
+    await page.getByRole('button', { name: '01全体', exact: true }).click();
 
     // The reasons are folded away until asked for.
     const details = page.getByTestId('analysis-details');

@@ -1,5 +1,7 @@
 import type { RawGameDetail } from './api/parse';
 import type { ClassifiedGame } from './roleGames';
+import { startTallyOf } from './startRate';
+import type { GameStartTally } from './startRate';
 import type { StatLine } from './types';
 
 /**
@@ -42,7 +44,17 @@ export interface Contribution {
 }
 
 export type GameReconstruction =
-  | { gameId: string; ok: true; startScore: number | null; perPlayer: Record<string, Contribution> }
+  | {
+      gameId: string;
+      ok: true;
+      startScore: number | null;
+      perPlayer: Record<string, Contribution>;
+      /**
+       * Start attempts per player (`startRate.ts`). Absent on reconstructions cached before it
+       * existed: "not counted yet", never 0/0. `null` when the legs cannot be read that way.
+       */
+      start?: GameStartTally | null;
+    }
   | { gameId: string; ok: false; reason: string };
 
 function emptyContribution(): Contribution {
@@ -118,7 +130,7 @@ export function reconstructGame(detail: RawGameDetail): GameReconstruction {
       return fail(`Leg明細の合計（${sideTotals[sideIndex].score}点/${sideTotals[sideIndex].darts}投）がゲームの合計（${side.score ?? '—'}点/${side.darts ?? '—'}投）と一致しません`);
     }
   }
-  return { gameId: detail.gameId, ok: true, startScore: detail.startScore, perPlayer };
+  return { gameId: detail.gameId, ok: true, startScore: detail.startScore, perPlayer, start: startTallyOf(detail) };
 }
 
 class ReconstructionError extends Error {}

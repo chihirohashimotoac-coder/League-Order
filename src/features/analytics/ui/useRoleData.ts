@@ -83,6 +83,16 @@ export interface DetailState {
   contributions: PlayerContributions;
 }
 
+export interface DetailControls {
+  /** Runs (or runs again) a player's reconstruction. `fresh: false` re-reads only what is missing or due. */
+  run: (personKey: string, options?: { fresh?: boolean }) => void;
+  /**
+   * Runs it once for a player shown in the doubles view: nothing happens when the player has a
+   * result for this period or is being read. Safe to call on every render.
+   */
+  ensure: (personKey: string) => void;
+}
+
 /**
  * The per-game figures shown: rebuilt from the **latest** result of each player, so a player's
  * figures are exactly what their last reconstruction accepted. Running a player again replaces
@@ -104,36 +114,60 @@ export function contributionsOf(results: ReadonlyMap<string, PlayerDetailResult>
 
 /** A reconstruction that ended in an error: no figures, and the reason (never the old figures). */
 function failedResult(personKey: string, reason: string): PlayerDetailResult {
-  return { personKey, checks: [], contributions: new Map(), bestLegs: new Map(), bestLegHeld: { all: false, starts: [], reasons: [] }, notAttempted: [], stale: [], failures: [reason], requestsSent: 0 };
+  return { personKey, checks: [], contributions: new Map(), bestLegs: new Map(), bestLegHeld: { all: false, starts: [], reasons: [] }, notAttempted: [], stale: [], failures: [reason], requestsSent: 0, starts: [] };
 }
+
+interface HeldState extends DetailState {
+  /** The period these results belong to: results of another period are never shown. */
+  load: PeriodLoad | null;
+}
+
+const emptyFor = (load: PeriodLoad | null): HeldState => ({ load, running: null, results: new Map(), contributions: new Map() });
 
 /**
  * Leg reconstruction per selected player; verified figures accumulate for the open period.
  * Running it again for a player (「再度復元する」), or after the page's refresh, reads that
  * player's games again instead of reusing the cached reconstructions (`forceRefresh`).
+ *
+ * One reconstruction at a time: starting another (a different player picked) cancels the one
+ * running, whose result is then dropped. Results are tagged with their period, so a result
+ * that arrives after the period, league or team changed is never shown.
  */
-export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | null, games: GamesLoad | null, reloadToken = 0): DetailState & { run: (personKey: string) => void } {
-  const [state, setState] = useState<DetailState>({ running: null, results: new Map(), contributions: new Map() });
-  const controller = useRef<AbortController | null>(null);
+export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | null, games: GamesLoad | null, reloadToken = 0): DetailState & DetailControls {
+  const [held, setHeld] = useState<HeldState>(() => emptyFor(load));
+  const controller = useRef<{ abort: AbortController; load: PeriodLoad | null; personKey: string } | null>(null);
   const lastReload = useRef(new Map<string, number>());
+  const state: HeldState = held.load === load ? held : emptyFor(load);
 
   useEffect(() => {
-    controller.current?.abort();
-    setState({ running: null, results: new Map(), contributions: new Map() });
+    // A run started for this very period (by a view that rendered first) is kept.
+    if (controller.current && controller.current.load !== load) {
+      controller.current.abort.abort();
+      controller.current = null;
+    }
+    setHeld((s) => (s.load === load ? s : emptyFor(load)));
   }, [load]);
-  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => () => controller.current?.abort.abort(), []);
 
   const run = useCallback(
-    (personKey: string) => {
+    (personKey: string, options: { fresh?: boolean } = {}) => {
       if (!load || !games) return;
-      controller.current?.abort();
+      controller.current?.abort.abort();
       const c = new AbortController();
-      controller.current = c;
+      controller.current = { abort: c, load, personKey };
       // Fresh reads when this player is reconstructed again, or for the first time after the
       // page's refresh — not on every later run of the period.
-      const again = state.results.has(personKey) || (reloadToken > 0 && lastReload.current.get(personKey) !== reloadToken);
+      const again = (options.fresh ?? state.results.has(personKey)) || (reloadToken > 0 && lastReload.current.get(personKey) !== reloadToken);
       lastReload.current.set(personKey, reloadToken);
-      setState((s) => ({ ...s, running: personKey }));
+      setHeld((s) => ({ ...(s.load === load ? s : emptyFor(load)), running: personKey }));
+      const settle = (result: PlayerDetailResult): void => {
+        if (controller.current?.abort === c) controller.current = null;
+        setHeld((s) => {
+          if (s.load !== load) return s;
+          const results = new Map([...s.results, [personKey, result]]);
+          return { load, running: null, results, contributions: contributionsOf(results) };
+        });
+      };
       void (async () => {
         try {
           const api = services.createRoleApi ? services.createRoleApi(c.signal, DETAIL_MAX_REQUESTS) : new AnalyticsApi({ signal: c.signal, maxRequests: DETAIL_MAX_REQUESTS });
@@ -142,20 +176,25 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
             { seasons: load.seasons, games: games.games, personKey },
           );
           if (c.signal.aborted) return;
-          setState((s) => {
-            const results = new Map([...s.results, [personKey, result]]);
-            return { running: null, results, contributions: contributionsOf(results) };
-          });
+          settle(result);
         } catch (reason) {
           if (c.signal.aborted) return;
-          setState((s) => {
-            const results = new Map([...s.results, [personKey, failedResult(personKey, `復元できませんでした（${describeN01Error(reason)}）。この選手の個人成績は表示していません。`)]]);
-            return { running: null, results, contributions: contributionsOf(results) };
-          });
+          settle(failedResult(personKey, `復元できませんでした（${describeN01Error(reason)}）。この選手の個人成績は表示していません。`));
         }
       })();
     },
     [services, load, games, reloadToken, state.results],
   );
-  return { ...state, run };
+
+  const ensure = useCallback(
+    (personKey: string) => {
+      if (!load || !games || state.results.has(personKey)) return;
+      const inFlight = controller.current;
+      if (inFlight && inFlight.personKey === personKey && inFlight.load === load && !inFlight.abort.signal.aborted) return;
+      run(personKey);
+    },
+    [load, games, state.results, run],
+  );
+
+  return { running: state.running, results: state.results, contributions: state.contributions, run, ensure };
 }

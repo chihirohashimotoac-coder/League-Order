@@ -14,7 +14,7 @@ import { defaultServices, usePeriodLoad } from './usePeriodLoad';
 import type { AnalyticsServices } from './usePeriodLoad';
 import { useGamesLoad, usePlayerDetail } from './useRoleData';
 import { pushWatchLink, requestWatchTab } from '../../matches/watchLink';
-import type { DetailState, GamesState } from './useRoleData';
+import type { DetailControls, DetailState, GamesState } from './useRoleData';
 
 /**
  * データ分析: PLAYER / TEAM analytics behind one shell.
@@ -152,7 +152,7 @@ export interface RoleViewProps {
   scope: GameScope;
   adoption: SeasonAdoption[];
   games: GamesState;
-  detail: DetailState & { run: (personKey: string) => void };
+  detail: DetailState & DetailControls;
 }
 
 export interface TeamViewProps {

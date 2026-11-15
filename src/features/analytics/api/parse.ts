@@ -327,6 +327,13 @@ export interface RawLeg {
   /** Side index of the winner, `null` when not decided. */
   winner: number | null;
   ended: boolean;
+  /**
+   * `middleForDiddle === 1`: the leg was decided by the bull-off, not by a throw (n01 then leaves
+   * its darts and points out of its stats). Absent on many legs, which n01 documents as "not".
+   */
+  middle?: boolean;
+  /** `time`: the leg's last update (ms) — n01's high-in records carry the same value. `null` when absent. */
+  time?: number | null;
   /** Per side, the visits after the starting row. */
   visits: [RawVisit[], RawVisit[]];
 }
@@ -378,6 +385,8 @@ export function parseGameDetail(raw: unknown): RawGameDetail {
       first: first === 0 || first === 1 ? first : null,
       winner: winner === 0 || winner === 1 ? winner : null,
       ended: num(leg.endFlag) === 1,
+      middle: num(leg.middleForDiddle) === 1,
+      time: num(leg.time),
       visits: [a, b],
     });
   }
@@ -391,4 +400,26 @@ export function parseGameDetail(raw: unknown): RawGameDetail {
     legs,
     sides: sides as [RawGameSide, RawGameSide],
   };
+}
+
+/** One row of `tournament/stats?kind=player_high_in` (n01's "high in" records of a season). */
+export interface HighInRecord {
+  schid: string | null;
+  oid: string | null;
+  highIn: number | null;
+  /** The leg's `time` (ms) the record came from. */
+  time: number | null;
+}
+
+/**
+ * `tournament/stats?kind=player_high_in`. Used only as **evidence of a slot's in-rule** (and to
+ * cross-check who started a leg) — never as a count of start attempts or successes.
+ */
+export function parseHighIns(raw: unknown): HighInRecord[] {
+  return statRows('tournament/stats(player_high_in)', raw, ['stats', 'player_high_in', 'list']).map(({ row }) => ({
+    schid: str(row.schid),
+    oid: str(row.oid),
+    highIn: num(row.highIn),
+    time: num(row.time),
+  }));
 }

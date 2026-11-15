@@ -303,7 +303,7 @@ export function wireDetail(d: RawGameDetail): unknown {
     result: 0,
     match: {
       mid: d.gameId, tmid: d.matchId, schid: d.schid, startScore: d.startScore, endMatch: d.finished ? 1 : 0,
-      legData: d.legs.map((leg) => ({ first: leg.first, winner: leg.winner, endFlag: leg.ended ? 1 : 0, playerData: leg.visits.map((v) => [{ score: 0, left: d.startScore }, ...v]) })),
+      legData: d.legs.map((leg) => ({ first: leg.first, winner: leg.winner, endFlag: leg.ended ? 1 : 0, ...(leg.middle ? { middleForDiddle: 1 } : {}), ...(typeof leg.time === 'number' ? { time: leg.time } : {}), playerData: leg.visits.map((v) => [{ score: 0, left: d.startScore }, ...v]) })),
       statsData: d.sides.map((side) => ({ tpid: side.teamId, order: side.players.map((p) => ({ oid: p.oid })), winLegs: side.legsWon, allScore: side.score, allDarts: side.darts })),
     },
   };
