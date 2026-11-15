@@ -59,6 +59,8 @@ export function detailStatusOf(input: {
   running: boolean;
   /** More parts of the read are under way or will follow. */
   partial: boolean;
+  /** The result was checked against game lists that have since been read again with other content. */
+  outdated?: boolean;
   result: PlayerDetailResult | undefined;
 }): DetailStatus {
   const { role, exposure, result } = input;
@@ -74,6 +76,7 @@ export function detailStatusOf(input: {
   }
   if (!result) return input.running ? { kind: 'running', text: 'Leg明細を取得中…（この選手のゲームのみ）' } : { kind: 'waiting', text: 'Leg明細の取得を準備中…' };
   const v = verifiedSeasons(role, result, exposure);
+  if (input.outdated) return { kind: 'running', text: 'ゲーム記録が更新されたため、Leg明細を照合し直しています（取得済みの明細は再利用します）' };
   if (input.running || input.partial) {
     return { kind: 'running', text: `Leg明細を取得中…（${label}出場${v.seasons}季中${v.checked}季を照合済み。照合できた季から表示しています）` };
   }

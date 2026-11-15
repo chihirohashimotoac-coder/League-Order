@@ -13,7 +13,7 @@ import type { GamesLoad } from './service/gamesSession';
 import { loadPeriod } from './service/periodService';
 
 /**
- * TDA 2026年度 中期 (`t_Drq9_9632`), ニシマタ タイヨウ (`wlp9`, team ml3z): the singles view's
+ * TDA 2026年度 中期 (`t_Drq9_9632`), the player `P028` (pseudonymised, team ml3z): the singles view's
  * First 9 / Keep / Break come from his leg details, read without the doubles view. Real n01
  * responses read 2026-11-15 (`realData.tda.json`).
  *
@@ -50,7 +50,7 @@ async function loaded() {
   return { fake, cache, period, games };
 }
 
-describe('TDA 2026 中期 ニシマタ タイヨウ: singles First 9 / Keep / Break from the leg details', () => {
+describe('TDA 2026 中期 P028: singles First 9 / Keep / Break from the leg details', () => {
   it('the fixture rows give 9 singles games, 23 legs, 10,859 / 487 (hand check of the basis)', () => {
     const singles = SNAP.games.filter((g) => (g.statsData as { order: { oid: string }[] }[]).some((s) => s.order.length === 1 && s.order[0].oid === TDA_PLAYER));
     expect(singles).toHaveLength(9);

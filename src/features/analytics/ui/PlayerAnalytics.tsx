@@ -14,7 +14,7 @@ import { scopeMetrics } from '../scopeMetrics';
 import type { RoleViewProps } from './AnalyticsPage';
 import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './parts';
 import { LegDetailPanel, ReconstructionPanel, StartRateCard } from './scopeParts';
-import { doublesCoverage, roleExposure, singlesCoverage } from '../service/detailService';
+import { detailCoverage, doublesCoverage, roleExposure, singlesCoverage } from '../service/detailService';
 import { periodStart } from '../startRate';
 import { detailStatusOf, legCardNote } from './detailStatus';
 import type { DetailRole, DetailStatus } from './detailStatus';
@@ -153,7 +153,15 @@ export function PlayerAnalytics({
   const detailPartial = !!person && !!role?.detail.partial?.has(person.personKey);
   const start = useMemo(() => (doublesView && detailResult ? periodStart(detailResult.starts) : null), [doublesView, detailResult]);
   const detailStatus: DetailStatus | null = detailRole
-    ? detailStatusOf({ role: detailRole, gamesLoading: gamesState?.status === 'loading', exposure, running: detailRunning, partial: detailPartial, result: detailResult })
+    ? detailStatusOf({
+        role: detailRole,
+        gamesLoading: gamesState?.status === 'loading',
+        exposure,
+        running: detailRunning,
+        partial: detailPartial,
+        result: detailResult,
+        outdated: !!detailResult?.coverage && !!person && !!gamesState?.load && detailResult.coverage !== detailCoverage(load.seasons, gamesState.load.games, person.personKey),
+      })
     : null;
   const singles = singlesView && detailResult && exposure ? singlesCoverage(detailResult, exposure.seasons) : null;
   const doubles = doublesView && detailResult ? doublesCoverage(detailResult) : null;

@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { seasonsNeedingGames } from '../projection';
 import type { PlayerContributions } from '../reconstruct';
 import type { GameScope } from '../roleGames';
-import { detailCoverage, reconstructPerson } from '../service/detailService';
+import { currentContributions, detailCoverage, newDetailMemory, reconstructPerson } from '../service/detailService';
+import type { DetailMemory } from '../service/detailService';
 import type { PlayerDetailResult } from '../service/detailService';
 import { emptyGamesLoad, GamesSession } from '../service/gamesSession';
 import type { GamesLoad } from '../service/gamesSession';
+import type { GamesMemory } from '../service/gamesLoader';
 import type { PeriodLoad } from '../service/periodService';
 import { defaultSleep } from '../service/retry';
 import type { Sleep } from '../service/retry';
@@ -46,6 +48,8 @@ export function useGamesLoad(services: AnalyticsServices, load: PeriodLoad | nul
   const reloadAt = useReloadTime(reloadToken);
   const [snap, setSnap] = useState<{ period: PeriodLoad | null; load: GamesLoad; running: boolean }>({ period: null, load: emptyGamesLoad(), running: false });
   const session = useRef<{ period: PeriodLoad; session: GamesSession } | null>(null);
+  // Lists read to the end while the page is open, whatever the period (the storage may refuse them).
+  const listMemory = useRef<GamesMemory>(new Map());
   const neededRef = useRef(needed);
   neededRef.current = needed;
 
@@ -58,14 +62,14 @@ export function useGamesLoad(services: AnalyticsServices, load: PeriodLoad | nul
   useEffect(() => {
     if (!load) return;
     const s = new GamesSession(
-      { createApi: (signal, max) => roleApi(services, signal, max), cache: services.cache, isOnline, now: () => Date.now(), freshAfter: reloadAt || undefined, sleep: services.sleep },
+      { createApi: (signal, max) => roleApi(services, signal, max), cache: services.cache, isOnline, now: () => Date.now(), freshAfter: reloadAt || undefined, sleep: services.sleep, memory: listMemory.current },
       (next, running) => setSnap({ period: load, load: next, running }),
     );
     session.current = { period: load, session: s };
     setSnap({ period: load, load: emptyGamesLoad(), running: false });
     want(s, load, neededRef.current);
     // Back online: the seasons that failed for want of a connection continue from their checkpoints.
-    const online = (): void => s.retry(s.offlineFailures());
+    const online = (): void => s.resumeOnline();
     window.addEventListener('online', online);
     return () => {
       window.removeEventListener('online', online);
@@ -121,10 +125,12 @@ export interface DetailControls {
  * leg) loses its old figures instead of keeping them under a description that says otherwise —
  * and nobody else's change. Each result only holds its own player's ids, so nothing collides.
  */
-export function contributionsOf(results: ReadonlyMap<string, PlayerDetailResult>): PlayerContributions {
+export function contributionsOf(results: ReadonlyMap<string, PlayerDetailResult>, games: GamesLoad | null = null): PlayerContributions {
   const contributions: PlayerContributions = new Map();
   for (const result of results.values()) {
-    for (const [gameId, players] of result.contributions) {
+    // Only figures checked against the game lists loaded now (a list read again with other
+    // content gives none until the player is checked against it).
+    for (const [gameId, players] of currentContributions(result, games?.games ?? null)) {
       const target = contributions.get(gameId) ?? new Map();
       for (const [oid, value] of players) target.set(oid, value);
       contributions.set(gameId, target);
@@ -171,6 +177,10 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
   gamesRef.current = games;
   const state: HeldState = held.load === load ? held : emptyFor(load);
   const sleep: Sleep = services.sleep ?? defaultSleep;
+  // What the open screen's reads got (every player, part and period: a leg is the same game in any
+  // period). Freshness still applies to each entry (its read time, the TTL, the page's refresh).
+  const memory = useRef<{ memory: DetailMemory }>({ memory: newDetailMemory() });
+  const contributions = useMemo(() => contributionsOf(state.results, games), [state.results, games]);
 
   useEffect(() => {
     // A run started for this very period (by a view that rendered first) is kept.
@@ -206,9 +216,12 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
           const pausedSet = new Set(s.paused);
           if (paused) pausedSet.add(personKey);
           else pausedSet.delete(personKey);
-          return { load, running: more && !paused ? personKey : null, results, contributions: contributionsOf(results), partial, paused: pausedSet };
+          return { load, running: more && !paused ? personKey : null, results, contributions: s.contributions, partial, paused: pausedSet };
         });
       };
+      const kept = memory.current.memory;
+      // An automatic read goes on only while a view needs this player's legs.
+      const wantedNow = (): boolean => !controller.current?.auto || (focusRef.current?.personKey === personKey && focusRef.current.read);
       void (async () => {
         let total = 0;
         try {
@@ -216,18 +229,24 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
             const api = roleApi(services, c.signal, DETAIL_MAX_REQUESTS);
             const result = await reconstructPerson(
               { api, cache: services.cache, isOnline, now: () => Date.now(), freshAfter: freshAfter || undefined, signal: c.signal, sleep: services.sleep },
-              { seasons: load.seasons, games: gamesRef.current?.games ?? new Map(), personKey },
+              { seasons: load.seasons, games: gamesRef.current?.games ?? new Map(), personKey, memory: kept },
             );
             if (c.signal.aborted) return;
             total += result.requestsSent;
             result.requestsSent = total;
             // Cut off by its budget after reading something: the next part continues from the cache.
             const more = result.budgetStopped === true && (result.fetched ?? 0) > 0 && unit + 1 < DETAIL_MAX_UNITS;
-            const wanted = !controller.current?.auto || (focusRef.current?.personKey === personKey && focusRef.current.read);
+            const wanted = wantedNow();
             settle(result, more, more && !wanted);
             if (!more || !wanted) break;
             await sleep(DETAIL_UNIT_PAUSE_MS, c.signal);
             if (c.signal.aborted) return;
+            // Checked again right before the next part's first request: the view may have changed
+            // during the pause (01全体, チーム). Paused then, and continued when the legs are needed again.
+            if (!wantedNow()) {
+              setHeld((s) => (s.load === load ? { ...s, running: s.running === personKey ? null : s.running, paused: new Set([...s.paused, personKey]) } : s));
+              break;
+            }
           }
         } catch (reason) {
           if (c.signal.aborted) return;
@@ -284,5 +303,5 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
     return () => window.removeEventListener('online', online);
   }, [state.results, run]);
 
-  return { running: state.running, results: state.results, contributions: state.contributions, partial: state.partial, run, focus, ensure };
+  return { running: state.running, results: state.results, contributions, partial: state.partial, run, focus, ensure };
 }

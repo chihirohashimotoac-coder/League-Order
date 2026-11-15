@@ -98,13 +98,15 @@ describe('game lists of a long period (several budgets)', () => {
     expect(fake.calls).toEqual([]);
   });
 
-  it('after the safety limit of units, the offered retry really continues (Codex audit 2)', async () => {
-    const fake = new FakeSeasons({ a: list('a', 1000) });
+  it('after the safety limit of units, the offered retry really reads again, with a new allowance (Codex audit 2)', async () => {
+    const fake = new FakeSeasons({ a: list('a', 500) });
     const { s, finished } = session(fake, { unitRequests: 2, maxUnits: 2 });
     s.want([{ tournamentId: 'a', status: 40 }]);
     const stopped = await finished;
     expect(stopped.failures).toMatchObject([{ tournamentId: 'a', kind: 'budget' }]);
     expect(fake.calls).toHaveLength(4);
+    // The season is shorter now (games deleted): the retry fits its allowance and reads it all.
+    fake.seasons.a = list('a', 300);
     const done = new Promise<GamesLoad>((resolve) => {
       const check = setInterval(() => {
         const snap = s.snapshot();
@@ -116,9 +118,43 @@ describe('game lists of a long period (several budgets)', () => {
     });
     s.retry();
     const after = await done;
-    expect(after.failures).toMatchObject([{ kind: 'budget' }]); // two more units, then the limit again
-    expect(fake.calls).toHaveLength(8);
-    expect(new Set(fake.calls).size).toBe(8); // continued, nothing read twice
+    expect(after.failures).toEqual([]);
+    expect(after.games.get('a')?.games).toHaveLength(300);
+    expect(fake.calls.slice(4)).toEqual(['a@0', 'a@99', 'a@198', 'a@297']); // read again from the first row
+    expect(after.games.get('a')?.recollated).toMatchObject({ rows: 397, removed: 97 });
+  });
+
+  it('a list shown from an expired saved copy is read again when the browser is back online (audit 2)', async () => {
+    const fake = new FakeSeasons({ a: list('a', 120) });
+    let online = true;
+    let clock = 1_000;
+    const cache = new AnalyticsCache({ memoryOnly: true, now: () => clock });
+    const opts = { cache, isOnline: () => online, now: () => clock };
+    const first = session(fake, opts);
+    first.s.want([{ tournamentId: 'a', status: 30 }]);
+    await first.finished;
+    clock += 7 * 60 * 60 * 1000; // past the running season's 6 hours
+    online = false;
+    fake.seasons.a = list('a', 130);
+    const second = session(fake, opts);
+    second.s.want([{ tournamentId: 'a', status: 30 }]);
+    const shown = await second.finished;
+    expect(shown.games.get('a')?.games).toHaveLength(120);
+    expect([...shown.stale!]).toEqual(['a']);
+    online = true;
+    const refreshed = new Promise<GamesLoad>((resolve) => {
+      const check = setInterval(() => {
+        const snap = second.s.snapshot();
+        if (!second.s.busy && snap.games.get('a')?.games.length === 130) {
+          clearInterval(check);
+          resolve(snap);
+        }
+      }, 1);
+    });
+    second.s.resumeOnline();
+    const after = await refreshed;
+    expect(after.stale!.size).toBe(0);
+    expect(after.games.get('a')!.version).not.toBe(shown.games.get('a')!.version ?? 'none');
   });
 
   it('dispose() stops the load: no request after it', async () => {

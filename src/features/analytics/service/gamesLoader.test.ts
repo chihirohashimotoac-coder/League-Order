@@ -79,21 +79,81 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     }
   });
 
-  it('cut off by the budget: the checkpoint is kept, the next load continues from it (no page read twice)', async () => {
+  it('one reading goes on across units in memory: budgets of 5 requests, 1,665 games, no page read twice', async () => {
     const fake = new FakeList(rows(1665));
-    const cache = memory();
-    const first = await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 5 }), 't', 30);
-    expect(first).toMatchObject({ ok: false, kind: 'budget', progress: { rows: 100 + 99 * 4, pages: 5 } });
-    expect(await cache.get(gamesKey('t'))).toBeNull(); // nothing passes as the season yet
-    const second = await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 100 }), 't', 30);
-    expect(second.ok && second.games.complete).toBe(true);
-    expect(second.ok && second.games.games.length).toBe(1665);
+    const units: AnalyticsApi[] = [];
+    const ctx: GamesContext = {
+      ...ctxOf(fake, memory(), { maxRequests: 5 }),
+      nextApi: async () => {
+        const api = new AnalyticsApi({ transport: fake, maxRequests: 5 });
+        units.push(api);
+        return api;
+      },
+    };
+    const result = await loadSeasonGames(ctx, 't', 30);
+    expect(result.ok && result.games.complete).toBe(true);
+    expect(result.ok && result.games.games.length).toBe(1665);
     expect(fake.calls).toHaveLength(17);
     expect(new Set(fake.calls).size).toBe(17);
+    expect(units).toHaveLength(3);
+  });
+
+  it('the browser refuses every write: the reading still goes on from where it is, never back to row 0 (audit 3)', async () => {
+    const fake = new FakeList(rows(450));
+    const full = new AnalyticsCache({ memoryOnly: true, limits: { maxEntries: 80, maxBytes: 1 } }); // every put → false
+    const ctx: GamesContext = { ...ctxOf(fake, full, { maxRequests: 1 }), nextApi: async () => new AnalyticsApi({ transport: fake, maxRequests: 1 }) };
+    const result = await loadSeasonGames(ctx, 't', 30);
+    expect(fake.calls).toEqual([0, 99, 198, 297, 396]);
+    expect(result.ok && result.games.complete).toBe(true);
+    expect(result.ok && result.saveFailed).toBe(true);
+  });
+
+  it('a reading that stopped: the next one reads the rows again and compares, nothing is reused', async () => {
+    const fake = new FakeList(rows(450));
+    const cache = memory();
+    const first = await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 2 }), 't', 30);
+    expect(first).toMatchObject({ ok: false, kind: 'budget', progress: { rows: 199 } });
+    expect(await cache.get(gamesKey('t'))).toBeNull(); // nothing passes as the season yet
+    const second = await loadSeasonGames(ctxOf(fake, cache), 't', 30);
+    if (!second.ok) throw new Error(second.reason);
+    expect(second.games.complete).toBe(true);
+    expect(second.games.recollated).toEqual({ rows: 199, corrected: 0, removed: 0, added: 0 });
+    expect(fake.calls.slice(2)).toEqual([0, 99, 198, 297, 396]);
     expect(await cache.get(gamesProgressKey('t'))).toBeNull();
   });
 
-  it('a temporary failure is retried (bounded); when it persists the load stops resumable and goes on from there later', async () => {
+  it('① a score corrected under the same id inside the rows already read: the new score is taken, the old one never published (audit 1)', async () => {
+    const fake = new FakeList(rows(250));
+    const cache = memory();
+    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 1 }), 't', 30); // rows 0–99 read
+    const sides = fake.list[40].statsData as Record<string, unknown>[];
+    fake.list[40] = { ...fake.list[40], statsData: [{ ...sides[0], allScore: 480, allDarts: 33 }, sides[1]] };
+    const result = await loadSeasonGames(ctxOf(fake, cache), 't', 30);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.complete).toBe(true);
+    const g = result.games.games.find((x) => x.gameId === 'm40')!;
+    expect([g.sides[0].score, g.sides[0].darts]).toEqual([480, 33]);
+    expect(result.games.recollated).toMatchObject({ corrected: 1, removed: 0, added: 0 });
+  });
+
+  it('② one game deleted and one added inside the rows already read (the boundary row unchanged): the list is the new one (audit 1)', async () => {
+    const fake = new FakeList(rows(250));
+    const cache = memory();
+    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 1 }), 't', 30); // rows 0–99 read
+    fake.list.splice(20, 1); // m20 deleted …
+    fake.list.splice(60, 0, { ...rows(1, 900)[0], mid: 'late' }); // … and a game entered late among them
+    expect(fake.list[99].mid).toBe('m99'); // the boundary row is where it was
+    const result = await loadSeasonGames(ctxOf(fake, cache), 't', 30);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.complete).toBe(true);
+    const ids = result.games.games.map((g) => g.gameId);
+    expect(ids).not.toContain('m20');
+    expect(ids).toContain('late');
+    expect(ids).toHaveLength(250);
+    expect(result.games.recollated).toMatchObject({ corrected: 0, removed: 1, added: 1 });
+  });
+
+  it('a temporary failure is retried (bounded); when it persists the reading stops, and the next one compares what it read', async () => {
     const fake = new FakeList(rows(450));
     fake.fail.set(2, () => new N01Error('network', 'down'));
     const cache = memory();
@@ -110,10 +170,10 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     expect(cut).toMatchObject({ ok: false, kind: 'network', progress: { rows: 199 } });
   });
 
-  it('a game deleted before the boundary between two loads: the old part is not mixed in; the season is read again from its first row', async () => {
+  it('a game deleted before the boundary between two readings: the old part is not mixed in; the season is read again from its first row', async () => {
     const fake = new FakeList(rows(350));
     const cache = memory();
-    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 2 }), 't', 30); // rows 0–198 kept
+    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 2 }), 't', 30); // rows 0–198 seen
     fake.list = fake.list.filter((r) => r.mid !== 'm50');
     const result = await loadSeasonGames(ctxOf(fake, cache), 't', 30);
     if (!result.ok) throw new Error(result.reason);
@@ -121,8 +181,8 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     expect(result.games.games.map((g) => g.gameId)).not.toContain('m50');
     expect(result.games.games).toHaveLength(349);
     expect(new Set(result.games.games.map((g) => g.gameId)).size).toBe(349);
-    // The overlap check failed at skip 198, so the list was read again from 0.
-    expect(fake.calls.slice(2)).toEqual([198, 0, 99, 198, 297]);
+    expect(fake.calls.slice(2)).toEqual([0, 99, 198, 297]);
+    expect(result.games.recollated).toMatchObject({ removed: 1 });
   });
 
   it('a game inserted before the boundary while reading (same start time reordered, late entry) is detected the same way', async () => {
@@ -159,63 +219,43 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     expect(fake.calls.slice(2, 3)).toEqual([0]);
   });
 
-  it('a game unfinished when an earlier load read it, finished since: read again before the season is published (Codex audit)', async () => {
+  it('a game unfinished when an earlier reading saw it, finished since: counted (Codex audit)', async () => {
     const fake = new FakeList(rows(120, 0, [50]));
     const cache = memory();
-    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 1 }), 't', 30); // rows 0–99 kept, m50 unfinished
+    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 1 }), 't', 30); // rows 0–99, m50 unfinished
     fake.list[50] = { ...fake.list[50], endMatch: 1 };
     const result = await loadSeasonGames(ctxOf(fake, cache), 't', 30);
     if (!result.ok) throw new Error(result.reason);
     expect(result.games.complete).toBe(true);
-    expect(result.games.games).toHaveLength(120);
     expect(result.games.games.map((g) => g.gameId)).toContain('m50');
     expect(result.games.dropped.unfinished).toBe(0);
-    // The continuation (skip 99), then the row read again where it was (skip 50).
-    expect(fake.calls.slice(1)).toEqual([99, 50]);
+    expect(result.games.recollated).toMatchObject({ corrected: 1 });
   });
 
-  it('…and if the rows around it moved meanwhile, the old part is dropped and the season read again', async () => {
-    const fake = new FakeList(rows(120, 0, [50]));
+  it('the comparison of a long reading spans units too, and every row is read once in it (Codex audit 2)', async () => {
+    const fake = new FakeList(rows(1000, 0, [5, 105, 905]));
     const cache = memory();
-    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 1 }), 't', 30);
-    fake.list.splice(10, 1); // a game before m50 deleted: every later row moves up by one
-    const result = await loadSeasonGames(ctxOf(fake, cache), 't', 30);
-    if (!result.ok) throw new Error(result.reason);
-    expect(result.games.games.map((g) => g.gameId)).not.toContain('m10');
-    expect(new Set(result.games.games.map((g) => g.gameId)).size).toBe(result.games.games.length);
-    expect(fake.calls).toContain(0);
-  });
-
-  it('reading the unfinished rows again is itself resumable: many of them across small budgets end, each read once (Codex audit 2)', async () => {
-    const unfinished = Array.from({ length: 10 }, (_, k) => 5 + k * 100);
-    const fake = new FakeList(rows(1000, 0, unfinished));
-    const cache = memory();
-    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 10 }), 't', 30); // rows 0–990, ten unfinished
-    let result = await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 3 }), 't', 30);
-    let loads = 1;
-    while (!result.ok && loads < 10) {
-      expect(result.kind).toBe('budget');
-      result = await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 3 }), 't', 30);
-      loads += 1;
-    }
+    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 10 }), 't', 30); // stopped after 991 rows
+    const before = fake.calls.length;
+    const result = await loadSeasonGames({ ...ctxOf(fake, cache, { maxRequests: 3 }), nextApi: async () => new AnalyticsApi({ transport: fake, maxRequests: 3 }) }, 't', 30);
     if (!result.ok) throw new Error(result.reason);
     expect(result.games.complete).toBe(true);
-    expect(result.games.dropped.unfinished).toBe(10);
-    expect(result.games.games).toHaveLength(990);
-    const rechecks = fake.calls.slice(10).filter((skip) => unfinished.includes(skip));
-    expect(rechecks.sort((a, b) => a - b)).toEqual(unfinished);
-    expect(loads).toBeLessThanOrEqual(6);
+    const again = fake.calls.slice(before);
+    expect(again).toHaveLength(11);
+    expect(new Set(again).size).toBe(11);
+    expect(result.games.dropped.unfinished).toBe(3);
   });
 
-  it('a running season\'s checkpoint older than 30 minutes is not continued (its rows may have been corrected)', async () => {
+  it('a running season\'s record older than 30 minutes is not used even for the comparison', async () => {
     let clock = 1_000_000;
     const fake = new FakeList(rows(250));
     const cache = new AnalyticsCache({ memoryOnly: true, now: () => clock });
     const ctx = (max?: number): GamesContext => ({ ...ctxOf(fake, cache, { maxRequests: max }), now: () => clock });
     await loadSeasonGames(ctx(1), 't', 30);
     clock += RUNNING_CHECKPOINT_MS + 1;
-    await loadSeasonGames(ctx(), 't', 30);
+    const result = await loadSeasonGames(ctx(), 't', 30);
     expect(fake.calls).toEqual([0, 0, 99, 198]);
+    expect(result.ok && result.games.recollated).toBeUndefined(); // too old to compare: simply read
   });
 
   it('offline: an older complete list is used; a checkpoint alone is not passed off as the season', async () => {

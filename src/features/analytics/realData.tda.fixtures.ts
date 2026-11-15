@@ -1,9 +1,10 @@
 /**
  * A fixture n01 holding one real TDA season (test-only), for the singles view's automatic leg
  * read: 東京ダーツ協会（TDA） 2026年度 中期リーグ戦 (`t_Drq9_9632`), team ドリズ カム トゥルー
- * (`ml3z`), player ニシマタ タイヨウ (`wlp9`). The data is `realData.tda.json`, read from the
+ * (`ml3z`), one of its players (pseudonymised: `P028`, テスト選手029). The data is `realData.tda.json`, read from the
  * n01 read API on 2026-11-15 (see its `_note`): only ml3z's rows, games and roster are kept, and
- * the leg details of wlp9's 25 games (9 singles, 7 doubles, 9 team games).
+ * the leg details of that player's 25 games (9 singles, 7 doubles, 9 team games). Every player
+ * name and id in it is a consistent test value (see its `_note`).
  *
  * Expected, from those responses (hand-checked in `realData.tda.test.ts`): singles 01 — 9 games,
  * 23 legs, 3DA 66.89 (487 darts), First 9 68.26 (4,710 / 207 darts), Keep 90.9% (10/11), Break
@@ -27,7 +28,9 @@ export interface TdaSnapshot {
 export const TDA_TDID = 't_Drq9_9632';
 export const TDA_LEAGUE = 'lg_Ev9v_7379';
 export const TDA_TEAM = 'ml3z';
-export const TDA_PLAYER = 'wlp9';
+export const TDA_PLAYER = 'P028';
+/** The pseudonymised display name of {@link TDA_PLAYER}. */
+export const TDA_PLAYER_NAME = 'テスト選手029';
 
 /** The answer the fixture n01 gives, or `undefined` (unknown request: answered as not found). */
 export function tdaResponse(snap: TdaSnapshot, operation: string, params: URLSearchParams | Record<string, string>): unknown {

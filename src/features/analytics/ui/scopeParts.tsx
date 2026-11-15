@@ -74,6 +74,13 @@ function summarizeGroups(adoption: readonly SeasonAdoption[]): GroupSummary[] {
   });
 }
 
+function recollatedText(r: { rows: number; corrected: number; removed: number; added: number }): string {
+  const changes = r.corrected + r.removed + r.added;
+  return changes === 0
+    ? `途中まで取得していた${r.rows}件を照合し、変化なし`
+    : `途中まで取得していた${r.rows}件を照合し、訂正${r.corrected}件・削除${r.removed}件・追加${r.added}件を最新の一覧で取り込み`;
+}
+
 function groupText(g: GroupSummary): string {
   if (g.players > 0) return `Leg明細を照合できた選手のみ採用（${g.players}季）${g.excluded > 0 ? `・${g.excluded}季対象外` : ''}`;
   if (g.unavailable) return 'この表示では対象外（ゲーム記録に含まれません）';
@@ -125,6 +132,11 @@ export function AnalysisSummary({
           {notObtained > 0 ? <span className="badge warn" data-testid="summary-missing">未取得 {notObtained}季</span> : null}
           {gamesMissing > 0 ? <span className="badge warn">ゲーム記録が不完全・未取得 {gamesMissing}季</span> : null}
           {flagged ? <span className="badge" data-testid="summary-flag">対象外・未検証の指標あり</span> : null}
+          {games.load?.stale && games.load.stale.size > 0 ? (
+            <span className="badge warn" data-testid="summary-stale">
+              保存済みのゲーム記録（最新とは限らない）{games.load.stale.size}季
+            </span>
+          ) : null}
           {games.status === 'loading' ? (
             <span className="badge" data-testid="summary-games-loading">
               ゲーム記録を取得中…（{gamesNeeded - gamesLoading}/{gamesNeeded}季）
@@ -174,6 +186,10 @@ export function AnalysisSummary({
                     <td>
                       {a ? COMPOSITION_LABEL[a.composition] : '—'}
                       {a && a.gamesState === 'missing' ? <span className="sub">ゲーム記録を取得できません</span> : null}
+                      {games.load?.stale?.has(slot.tournamentId) ? <span className="sub" data-testid="games-stale-reason">保存済みのゲーム記録（期限切れ・最新とは限らない）。オンラインに戻ると自動で取り直します</span> : null}
+                      {games.load?.games.get(slot.tournamentId)?.recollated ? (
+                        <span className="sub" data-testid="games-recollated">{recollatedText(games.load.games.get(slot.tournamentId)!.recollated!)}</span>
+                      ) : null}
                       {a && a.gamesState === 'loading' ? (
                         <span className="sub" data-testid="games-loading-reason">
                           ゲーム記録を取得中{games.load?.progress.get(slot.tournamentId) ? `（${games.load.progress.get(slot.tournamentId)!.rows}件まで）` : ''}
@@ -222,10 +238,11 @@ export function AnalysisSummary({
             ))}
           </ul>
         ) : null}
+        {games.load?.saveFailed ? <p className="small-text" data-testid="games-save-failed">端末に保存できなかったため、ゲーム記録はこの画面を開いている間だけ使います（取得を繰り返すことはありません。画面を閉じた後は取り直します）。</p> : null}
         {retryable ? (
           <button type="button" className="btn small" onClick={games.retry} data-testid="games-retry">
             <Icon name="refresh" size={16} />
-            ゲーム記録を再試行（取得済みの続きから）
+            ゲーム記録を再試行（取得済みの範囲を照合して続きを取得）
           </button>
         ) : null}
         <p className="small-text muted">
@@ -361,6 +378,7 @@ export function LegDetailPanel({
         <details className="analytics-details" data-testid="reconstruction-details">
           <summary>照合の内訳（シーズンごと）</summary>
           <ReconstructionResultList result={result} titleOf={titleOf} />
+          {result.saveFailed ? <p className="small-text" data-testid="detail-save-failed">端末に保存できなかったため、取得した明細はこの画面を開いている間だけ使います（同じ明細を取り直すことはありません。画面を閉じた後は取り直します）。</p> : null}
           <p className="small-text muted">n01への通信 {result.requestsSent} 回（1回の取得単位の上限 {DETAIL_MAX_REQUESTS} 回。超える分は続けて自動で取得し、保存済みの明細は通信しません）</p>
         </details>
       ) : null}

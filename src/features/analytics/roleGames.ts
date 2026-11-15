@@ -59,6 +59,13 @@ export interface SeasonGames {
    * between requests twice, or the list ran past the safety limit). Absent otherwise.
    */
   heldReason?: string;
+  /** Identifies the list's content (`gamesLoader.gamesVersion`): the same season read again after a correction differs. */
+  version?: string;
+  /**
+   * The list was read after an earlier reading of it had stopped: what that reading saw and this
+   * one did not see the same way (same id with other content, gone, inserted among its rows).
+   */
+  recollated?: { rows: number; corrected: number; removed: number; added: number };
 }
 
 export interface ClassifiedGame {

@@ -19,7 +19,7 @@ import { usePlayerDetail } from './ui/useRoleData';
 /**
  * One player's leg details over a period that needs more than one budget (60 requests): three
  * seasons built from the real TDA 2026 中期 season (`tdaCopies`, simulated copies, 25 games of
- * ニシマタ タイヨウ each → 75 `match/get` + 3 high-in lists). Through the real hook: read part
+ * the player P028 each → 75 `match/get` + 3 high-in lists). Through the real hook: read part
  * after part without a button, seasons checked first shown first, every game read once, and the
  * period's figures the three seasons' sums.
  */
@@ -51,14 +51,14 @@ function Harness({ services, load, games, out }: { services: AnalyticsServices; 
   return null;
 }
 
-async function setup() {
+async function setup(opts: { sleep?: AnalyticsServices['sleep']; detailCache?: AnalyticsCache } = {}) {
   const world = new World();
   const cache = new AnalyticsCache({ memoryOnly: true });
   const services: AnalyticsServices = {
     createApi: (signal) => new AnalyticsApi({ transport: world, signal }),
     createRoleApi: (signal, max) => new AnalyticsApi({ transport: world, signal, maxRequests: max }),
-    cache,
-    sleep: async () => undefined,
+    cache: opts.detailCache ?? cache,
+    sleep: opts.sleep ?? (async () => undefined),
   };
   const load = await loadPeriod({ api: new AnalyticsApi({ transport: world }), cache, leagueId: SNAP.league.lgid, request: { mode: 'last3', currentTournamentId: COPIES.ids[0] } });
   const games = await new Promise<GamesLoad>((resolve) => {
@@ -84,7 +84,72 @@ async function setup() {
   return { world, load, games, out, view, personKey, wait, services };
 }
 
+const tick = (): Promise<void> => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+
 describe('leg details beyond one budget (3 seasons × 25 games of one player)', () => {
+  it('the browser refuses every write: the parts still never read a game twice (audit 3)', async () => {
+    const refusing = new AnalyticsCache({ memoryOnly: true, limits: { maxEntries: 80, maxBytes: 1 } });
+    const { world, out, personKey, wait } = await setup({ detailCache: refusing });
+    const before = world.calls.length;
+    await act(async () => out.detail!.focus(personKey, true));
+    await wait();
+    const gets = world.gets(before);
+    expect(gets).toHaveLength(75);
+    expect(new Set(gets).size).toBe(75);
+    const result = out.detail!.results.get(personKey)!;
+    expect(result.saveFailed).toBe(true);
+    expect(result.checks.every((c) => c.verified.score)).toBe(true);
+  });
+
+  it('01全体 shown during the pause between two parts: the next part does not start; back again, it continues (audit 4)', async () => {
+    let release: (() => void) | null = null;
+    const sleep: AnalyticsServices['sleep'] = () => new Promise<void>((resolve) => (release = resolve));
+    const { world, out, personKey, wait } = await setup({ sleep });
+    const before = world.calls.length;
+    await act(async () => out.detail!.focus(personKey, true));
+    for (let i = 0; release === null && i < 2000; i += 1) await tick();
+    expect(release).not.toBeNull(); // the first part is done, the pause before the next one began
+    const firstPart = world.gets(before).length;
+    await act(async () => out.detail!.focus(personKey, false)); // 01全体
+    await act(async () => release!());
+    for (let i = 0; i < 40; i += 1) await tick();
+    expect(world.gets(before)).toHaveLength(firstPart); // no request of the next part
+    expect(out.detail!.running).toBeNull();
+    // Back to シングルス: continued from what was read (instant pauses from now on).
+    const instant = setInterval(() => release?.(), 1);
+    await act(async () => out.detail!.focus(personKey, true));
+    await wait();
+    clearInterval(instant);
+    const gets = world.gets(before);
+    expect(new Set(gets).size).toBe(75);
+    expect(gets).toHaveLength(75);
+  });
+
+  it('a season\'s list read again with other content (same id): its figures leave until checked again; unchanged legs are not read again (audit 2)', async () => {
+    const { world, load, games, out, view, personKey, wait, services } = await setup();
+    await act(async () => out.detail!.focus(personKey, true));
+    await wait();
+    const tid = COPIES.ids[0];
+    const before = [...out.detail!.contributions.keys()].length;
+    // The newest season's list as n01 gives it after a correction: one game of the player gone.
+    const raw = games.games.get(tid)!;
+    const mine = raw.games.find((g) => g.sides.some((side) => side.players.some((p) => p.oid === TDA_PLAYER)))!;
+    const corrected = { ...raw, games: raw.games.filter((g) => g.gameId !== mine.gameId), version: 'corrected' };
+    const next: GamesLoad = { ...games, games: new Map([...games.games, [tid, corrected]]) };
+    const calls = world.calls.length;
+    view.rerender(<Harness services={services} load={load} games={next} out={out} />);
+    // At once: none of that season's figures are shown with the new list.
+    for (const gameId of out.detail!.contributions.keys()) expect(raw.games.find((g) => g.gameId === gameId) === undefined || corrected.games.some((g) => g.gameId === gameId)).toBe(true);
+    expect([...out.detail!.contributions.keys()].length).toBeLessThan(before);
+    await wait();
+    for (let i = 0; i < 20; i += 1) await tick();
+    // Checked again against the new list (it no longer adds up to n01's totals: shown as such), with no leg read again.
+    expect(world.gets(calls)).toEqual([]);
+    const result = out.detail!.results.get(personKey)!;
+    expect(result.versions![tid]).toBe('corrected');
+    expect(result.checks.find((c) => c.tournamentId === tid)!.verified.score).toBe(false);
+  });
+
   it('the period loads as 3 seasons, one person linked across them', async () => {
     const { load, personKey } = await setup();
     expect(load.seasons.map((s) => s.tournamentId)).toEqual(COPIES.ids);

@@ -13,6 +13,7 @@ import type { SeasonStart, StartGameExclusion } from '../startRate';
 import { gameStartRule, highInEvidence, seasonRule } from '../startRule';
 import type { HighInEvidence } from '../startRule';
 import type { GamesContext } from './gamesLoader';
+import { gamesVersion } from './gamesLoader';
 import { isTransient, withRetry } from './retry';
 
 /**
@@ -67,8 +68,14 @@ export interface PlayerDetailResult {
   fetched?: number;
   /** Some failures could pass on their own (connection, timeout, n01 busy): retried when back online. */
   transient?: boolean;
-  /** Seasons whose game list is complete at the time of the run (what the result can cover). */
+  /** Seasons (and the version of their game list) whose list was complete at the time of the run. */
   coverage?: string;
+  /** The game-list version each season was checked against: figures of another version are not shown. */
+  versions?: Record<string, string>;
+  /** The season of each game with figures in {@link contributions}. */
+  gameSeason?: Record<string, string>;
+  /** The browser's storage refused a write: the legs read stay for this screen only. */
+  saveFailed?: boolean;
   /**
    * 個人スタート率 per season of the period the player appears in (doubles 01, double-in slots
    * only; see `startRate.ts` / `startRule.ts`). Pooled by `periodStart`.
@@ -84,13 +91,40 @@ interface CachedDetail {
 
 type Held = Map<string, { r: GameReconstruction; at: number }>;
 
-async function readCached(ctx: GamesContext, tournamentId: string): Promise<Held> {
+/**
+ * What one open screen has read (legs per season, high-in records). Reads consult it before the
+ * browser's storage and add to it, so a part of a long read never asks n01 again for what an
+ * earlier part read — even when the storage refused to keep it.
+ */
+export interface DetailMemory {
+  games: Map<string, Held>;
+  highIns: Map<string, { records: HighInRecord[]; at: number }>;
+}
+
+export const newDetailMemory = (): DetailMemory => ({ games: new Map(), highIns: new Map() });
+
+async function readStored(ctx: GamesContext, tournamentId: string): Promise<Held> {
   const entry = await ctx.cache.get<CachedDetail | Record<string, GameReconstruction>>(detailKey(tournamentId));
   if (!entry) return new Map();
   const value = entry.value as Partial<CachedDetail>;
   if (value && value.v === 2 && value.games) return new Map(Object.entries(value.games));
   // Written before per-game times were kept: each game is as old as the entry.
   return new Map(Object.entries(entry.value as Record<string, GameReconstruction>).map(([id, r]) => [id, { r, at: entry.fetchedAt }]));
+}
+
+/** The season's stored reconstructions merged into the screen's memory (the newer read wins); reads add to it. */
+async function readCached(ctx: GamesContext, tournamentId: string, memory?: DetailMemory): Promise<Held> {
+  const stored = await readStored(ctx, tournamentId);
+  const kept = memory?.games.get(tournamentId);
+  if (!kept) {
+    memory?.games.set(tournamentId, stored);
+    return stored;
+  }
+  for (const [id, entry] of stored) {
+    const mine = kept.get(id);
+    if (!mine || mine.at < entry.at) kept.set(id, entry);
+  }
+  return kept;
 }
 
 const toRebuilt = (held: Held): Map<string, GameReconstruction> => new Map([...held].map(([id, entry]) => [id, entry.r]));
@@ -102,16 +136,20 @@ const lacksStart = (entry: { r: GameReconstruction } | undefined): boolean => !!
  * The season's high-in records (one request, cached like the season), or `null` when they
  * cannot be read: the slots are then "unknown", never assumed double-in.
  */
-async function loadHighIns(ctx: GamesContext, season: SeasonData): Promise<{ records: HighInRecord[] | null; budget: boolean; failure?: string; fetched: boolean }> {
+async function loadHighIns(ctx: GamesContext, season: SeasonData, memory?: DetailMemory): Promise<{ records: HighInRecord[] | null; budget: boolean; failure?: string; fetched: boolean; saveFailed?: boolean }> {
   // Only a cross-check: a failure here never removes a verdict, a 3DA or a First 9.
   const key = highInKey(season.tournamentId);
+  const ttl = season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
+  const kept = memory?.highIns.get(season.tournamentId);
+  if (kept && !ctx.forceRefresh && kept.at >= (ctx.freshAfter ?? 0) && ctx.now() - kept.at < ttl) return { records: kept.records, budget: false, fetched: false };
   const cached = await ctx.cache.get<HighInRecord[]>(key);
   if (cached && ctx.cache.isFresh(cached) && !ctx.forceRefresh && cached.fetchedAt >= (ctx.freshAfter ?? 0)) return { records: cached.value, budget: false, fetched: false };
   if (ctx.signal?.aborted) return { records: cached?.value ?? null, budget: true, fetched: false };
   try {
     const records = await withRetry(ctx, () => ctx.api.highIns(season.tournamentId));
-    await ctx.cache.put(key, records, season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason);
-    return { records, budget: false, fetched: true };
+    memory?.highIns.set(season.tournamentId, { records, at: ctx.now() });
+    const saved = await ctx.cache.put(key, records, ttl);
+    return { records, budget: false, fetched: true, saveFailed: !saved };
   } catch (error) {
     return { records: cached?.value ?? null, budget: error instanceof RequestBudgetError, failure: cached ? undefined : describeN01Error(error), fetched: false };
   }
@@ -215,7 +253,26 @@ export function seasonStartOf(input: {
  * result made with fewer of them is superseded once more lists arrive.
  */
 export function detailCoverage(seasons: readonly SeasonData[], games: ReadonlyMap<string, SeasonGames>, personKey: string): string {
-  return seasons.filter((s) => games.get(s.tournamentId)?.complete && s.players.some((p) => p.personKey === personKey)).map((s) => s.tournamentId).join(',');
+  return seasons
+    .filter((s) => games.get(s.tournamentId)?.complete && s.players.some((p) => p.personKey === personKey))
+    .map((s) => `${s.tournamentId}@${gamesVersion(games.get(s.tournamentId)!)}`)
+    .join(',');
+}
+
+/**
+ * A result's per-game figures that still belong to the loaded game lists: a season whose list
+ * was read again with other content (a correction, a game added) gives none until it is checked
+ * again. Results made before versions were kept give all of theirs.
+ */
+export function currentContributions(result: PlayerDetailResult, games: ReadonlyMap<string, SeasonGames> | null): PlayerContributions {
+  if (!games || !result.versions || !result.gameSeason) return result.contributions;
+  const out: PlayerContributions = new Map();
+  for (const [gameId, players] of result.contributions) {
+    const tid = result.gameSeason[gameId];
+    const raw = tid ? games.get(tid) : undefined;
+    if (tid && raw && result.versions[tid] === gamesVersion(raw)) out.set(gameId, players);
+  }
+  return out;
 }
 
 const classifiedCache = new WeakMap<SeasonGames, { slots: SeasonData['slots']; games: ClassifiedGame[] }>();
@@ -235,7 +292,7 @@ function personGames(classified: readonly ClassifiedGame[], oid: string): Classi
 
 export async function reconstructPerson(
   ctx: GamesContext,
-  input: { seasons: readonly SeasonData[]; games: ReadonlyMap<string, SeasonGames>; personKey: string; concurrency?: number },
+  input: { seasons: readonly SeasonData[]; games: ReadonlyMap<string, SeasonGames>; personKey: string; concurrency?: number; memory?: DetailMemory },
 ): Promise<PlayerDetailResult> {
   const result: PlayerDetailResult = { personKey: input.personKey, checks: [], contributions: new Map(), bestLegs: new Map(), bestLegHeld: { all: false, starts: [], reasons: [] }, notAttempted: [], stale: [], failures: [], requestsSent: 0, starts: [] };
   const held = new Set<number>();
@@ -248,6 +305,8 @@ export async function reconstructPerson(
   let fetched = 0;
   const concurrency = Math.max(1, input.concurrency ?? 3);
   result.coverage = detailCoverage(input.seasons, input.games, input.personKey);
+  result.versions = {};
+  result.gameSeason = {};
   for (const season of input.seasons) {
     const me = season.players.find((p) => p.personKey === input.personKey);
     if (!me) continue;
@@ -273,7 +332,8 @@ export async function reconstructPerson(
     let highIns: HighInRecord[] | null = null;
     let highInNote: string | undefined;
     if (doublesCount > 0 && 'rule' in seasonRule(season)) {
-      const loaded = await loadHighIns(ctx, season);
+      const loaded = await loadHighIns(ctx, season, input.memory);
+      if (loaded.saveFailed) result.saveFailed = true;
       highIns = loaded.records;
       // Not a failure of the read: the start attempts still count, without the cross-check.
       if (loaded.failure) highInNote = `${season.title}: n01のハイイン記録を取得できず、Legごとの照合はしていません（${loaded.failure}）`;
@@ -284,7 +344,8 @@ export async function reconstructPerson(
       }
     }
     const evidence = highIns ? highInEvidence(highIns) : null;
-    const stored = await readCached(ctx, season.tournamentId);
+    const stored = await readCached(ctx, season.tournamentId, input.memory);
+    result.versions[season.tournamentId] = gamesVersion(raw);
     const ttl = season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
     const now = ctx.now();
     const freshAfter = ctx.freshAfter ?? 0;
@@ -327,7 +388,7 @@ export async function reconstructPerson(
           }
         });
         // Kept at once: a load cut off later (budget, the screen left, the tab closed) never reads these again.
-        if (batchAdded > 0) await ctx.cache.put(detailKey(season.tournamentId), { v: 2, games: Object.fromEntries(stored) } satisfies CachedDetail, ttl);
+        if (batchAdded > 0 && !(await ctx.cache.put(detailKey(season.tournamentId), { v: 2, games: Object.fromEntries(stored) } satisfies CachedDetail, ttl))) result.saveFailed = true;
       }
     };
     await fetchGames(mine.filter((g) => due(g.gameId) || startOnly.has(g.gameId)));
@@ -380,6 +441,7 @@ export async function reconstructPerson(
     result.checks.push(check);
     if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: check.verified.score, evidence, highIns, highInNote }));
     addVerified(result.contributions, check, classified, rebuilt);
+    for (const g of mine) if (result.contributions.has(g.gameId)) result.gameSeason[g.gameId] = season.tournamentId;
   }
   // Only confirmed start scores are published; a partial minimum could be worse than the real one.
   if (result.bestLegHeld.all) result.bestLegs.clear();

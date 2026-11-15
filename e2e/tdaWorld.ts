@@ -31,6 +31,10 @@ export interface TdaWorldControl {
   /** `match/list` requests failed so far / to fail (0-based index of the request). */
   failList: Set<number>;
   listCalls: number;
+  /** Marks one of the real games unfinished (`null`: as n01 has it) — the list n01 serves from then on. */
+  setUnfinished: (mid: string | null) => void;
+  /** Holds the answer to the n-th `match/get` (0-based) until `release()` is called. */
+  holdDetail: (n: number) => { reached: Promise<void>; release: () => void };
 }
 
 function filler(n: number): Record<string, unknown>[] {
@@ -48,14 +52,33 @@ function filler(n: number): Record<string, unknown>[] {
 }
 
 export async function serveTdaWorld(page: Page, options: TdaWorldOptions = {}): Promise<TdaWorldControl> {
-  const control: TdaWorldControl = { log: [], unanswered: [], failList: new Set(options.failList ?? []), listCalls: 0 };
+  let unfinished: string | null = null;
+  const holds = new Map<number, { reached: () => void; gate: Promise<void> }>();
+  let detailCalls = 0;
+  const control: TdaWorldControl = {
+    log: [],
+    unanswered: [],
+    failList: new Set(options.failList ?? []),
+    listCalls: 0,
+    setUnfinished: (mid) => {
+      unfinished = mid;
+    },
+    holdDetail: (n) => {
+      let reached!: () => void;
+      let release!: () => void;
+      const hit = new Promise<void>((resolve) => (reached = resolve));
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      holds.set(n, { reached, gate });
+      return { reached: hit, release };
+    },
+  };
   const copies = options.copies ? tdaCopies(SNAP, options.copies) : null;
   const games = [...filler(options.fillerGames ?? 0), ...SNAP.games];
   if (options.unfinishedOf) {
     const base = SNAP.games.find((g) => g.mid === options.unfinishedOf)!;
     games.push({ ...base, mid: `${String(base.mid)}_unfinished`, endMatch: 0, startTime: Number(base.startTime) + 999_999 });
   }
-  const snap: TdaSnapshot = { ...SNAP, games };
+  const snapOf = (): TdaSnapshot => ({ ...SNAP, games: unfinished ? games.map((g) => (g.mid === unfinished ? { ...g, endMatch: 0 } : g)) : games });
   await page.route(`${N01_API_BASE_URL}/**`, async (route) => {
     const url = new URL(route.request().url());
     const operation = url.pathname.replace(/^.*\/api\/v1\//u, '');
@@ -70,7 +93,15 @@ export async function serveTdaWorld(page: Page, options: TdaWorldOptions = {}): 
         return;
       }
     }
-    const body = copies ? tdaMultiResponse(copies, operation, url.searchParams) : tdaResponse(snap, operation, url.searchParams);
+    if (operation === 'match/get') {
+      const hold = holds.get(detailCalls);
+      detailCalls += 1;
+      if (hold) {
+        hold.reached();
+        await hold.gate;
+      }
+    }
+    const body = copies ? tdaMultiResponse(copies, operation, url.searchParams) : tdaResponse(snapOf(), operation, url.searchParams);
     if (body === undefined) {
       control.unanswered.push(entry);
       await route.fulfill({ status: 404, body: '{}', headers });
