@@ -7,7 +7,7 @@ import { desperadoGames, details, season2024Data, TDID_2024_2ND, wireDetail, wit
 import { HIGH_IN_ATDO_2024_2ND, LEAGUE_ATDO, STARTED_AT_ATDO_2024_2ND } from '../realData.startRate.fixtures';
 import type { PeriodLoad } from '../service/periodService';
 import { emptyLoad } from '../service/periodService';
-import type { GamesLoad } from '../service/gamesLoader';
+import type { GamesLoad } from '../service/gamesSession';
 import type { AnalyticsServices } from './usePeriodLoad';
 import { usePlayerDetail } from './useRoleData';
 
@@ -27,6 +27,9 @@ const games: GamesLoad = {
   failures: [],
   usedStaleCache: false,
   requestsSent: 0,
+  pending: new Set(),
+  progress: new Map(),
+  units: 1,
 };
 const periodA: PeriodLoad = emptyLoad({ mode: 'current', currentTournamentId: TDID_2024_2ND }, { seasons: [season], complete: true });
 const periodB: PeriodLoad = { ...periodA };
@@ -69,6 +72,8 @@ function setup() {
     createApi: (signal) => new AnalyticsApi({ transport, signal }),
     createRoleApi: (signal, maxRequests) => new AnalyticsApi({ transport, signal, maxRequests }),
     cache: new AnalyticsCache({ memoryOnly: true }),
+    // Retries wait for nothing here (their bound is what is tested, not the clock).
+    sleep: async () => undefined,
   };
   const out: { detail: Detail | null } = { detail: null };
   const view = render(<Harness services={services} load={periodA} out={out} />);
@@ -148,6 +153,8 @@ describe('automatic read of the shown doubles player (C4)', () => {
     const { out, services, view } = setup();
     await act(async () => out.detail!.ensure(keyOf('63Cz')));
     view.rerender(<Harness services={services} load={periodB} out={out} />);
+    // The new period's view has not shown anyone yet.
+    await act(async () => out.detail!.ensure(null));
     for (let i = 0; i < 60; i += 1) {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 2));

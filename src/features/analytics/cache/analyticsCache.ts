@@ -240,6 +240,15 @@ export class AnalyticsCache {
     await store.delete(entries.slice(0, Math.max(1, Math.ceil(entries.length * fraction))).map((e) => e.key));
   }
 
+  /** Removes one entry (best effort, never throws). */
+  async delete(key: string): Promise<void> {
+    try {
+      await (await this.backend()).delete([key]);
+    } catch {
+      // nothing to remove, or storage unavailable: the entry then expires on its own
+    }
+  }
+
   async keys(): Promise<string[]> {
     try {
       return (await (await this.backend()).all()).map((e) => e.key);

@@ -106,10 +106,10 @@ test.describe('PLAYER ANALYTICS', () => {
 
     await page.getByRole('button', { name: 'ダブルス', exact: true }).click();
     // The shown player's leg details are read without pressing anything (the fixture keeps no
-    // leg detail, so n01 answers "not found": the read ends as "取得不可" with a retry).
+    // leg detail, so n01 answers "not found": the read ends as "取得失敗" with a retry).
     const panel = page.getByTestId('reconstruction');
     await expect(panel).toBeVisible();
-    await expect(panel).toHaveAttribute('data-state', /unavailable|partial|none/);
+    await expect(panel).toHaveAttribute('data-state', /unavailable|failed|partial|none/);
     await expect(page.getByTestId('reconstruct-run')).toHaveCount(0);
     await expect(page.getByTestId('metric-個人スタート率')).toBeVisible();
     const state = await panel.getAttribute('data-state');

@@ -54,6 +54,30 @@ export interface SeasonGames {
   dropped: { unfinished: number; unreadable: number; nonLeague: number };
   /** Every page was read (a cut-off list must not pass as the whole season). */
   complete: boolean;
+  /**
+   * Why an incomplete list was set aside instead of being read on (the page boundary moved
+   * between requests twice, or the list ran past the safety limit). Absent otherwise.
+   */
+  heldReason?: string;
+  /** Identifies the list's content (`gamesLoader.gamesVersion`): the same season read again after a correction differs. */
+  version?: string;
+  /**
+   * The list was read after an earlier reading of it had stopped: what that reading saw and this
+   * one did not see the same way (same id with other content, gone, inserted among its rows).
+   */
+  recollated?: { rows: number; corrected: number; removed: number; added: number };
+  /** When the list was read to the end (ms). */
+  readAt?: number;
+  /**
+   * The reading crossed units, so the rows read before the last switch were read again and
+   * compared: `rows` confirmed with `pages` extra requests, after `restarts` restarts for changes.
+   */
+  verified?: { rows: number; pages: number; restarts: number };
+  /**
+   * The version of this season's list known before (an expired saved list, a list of this screen,
+   * or `recollated`): the list changed, so its checks need fresh official totals and legs.
+   */
+  changedFrom?: string;
 }
 
 export interface ClassifiedGame {

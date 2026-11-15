@@ -53,7 +53,7 @@ class FakeN01 implements AnalyticsTransport {
 }
 
 const atdoSeason = () => ({ ...season2024Data(), leagueId: LEAGUE_ATDO, startedAt: STARTED_AT_ATDO_2024_2ND });
-const ctxOf = (fake: FakeN01, cache = new AnalyticsCache({ memoryOnly: true }), maxRequests?: number): GamesContext => ({ api: new AnalyticsApi({ transport: fake, maxRequests }), cache, isOnline: () => true, now: () => Date.now() });
+const ctxOf = (fake: FakeN01, cache = new AnalyticsCache({ memoryOnly: true }), maxRequests?: number): GamesContext => ({ api: new AnalyticsApi({ transport: fake, maxRequests }), cache, isOnline: () => true, now: () => Date.now(), sleep: async () => undefined });
 const keyOf = (oid: string) => atdoSeason().players.find((p) => p.oid === oid)!.personKey;
 const wired = (list: RawGameDetail[] = details()) => Object.fromEntries(list.map((d) => [d.gameId, wireDetail(d)]));
 
@@ -93,7 +93,8 @@ describe('個人スタート率 through the reconstruction service', () => {
     const withRecords = await reconstructPerson(ctxOf(new FakeN01(wired())), { seasons: [atdoSeason()], games: seasonGames, personKey: keyOf('63Cz') });
     const fake = new FakeN01(wired(), null);
     const result = await reconstructPerson(ctxOf(fake), { seasons: [atdoSeason()], games: seasonGames, personKey: keyOf('63Cz') });
-    expect(fake.highInCalls()).toBe(1);
+    // A connection failure is retried twice (bounded), then the cross-check is skipped.
+    expect(fake.highInCalls()).toBe(3);
     expect(result.starts[0]).toMatchObject({ counted: 3, attempts: 13, successes: 5, excludedGames: {} });
     expect(result.starts[0].ruleNotes.join()).toContain('ハイイン記録を取得できず');
     // Not reported as a failed read (no retry asked for it), and the verified figures are the same.
@@ -127,11 +128,15 @@ describe('個人スタート率 through the reconstruction service', () => {
     }
   });
 
-  it('投順不一致: a pair order that breaks n01\'s checksum leaves the start attempts out too (never failures)', async () => {
+  it('投順不一致: legs whose pair order is not the list\'s are not used; the start attempts are left out too (never failures)', async () => {
     const swapped = details().map((d) => (d.gameId === 'VU6AjbQE_1724326953016' ? { ...d, sides: d.sides.map((s) => ({ ...s, players: [...s.players].reverse() })) as RawGameDetail['sides'] } : d));
     const result = await reconstructPerson(ctxOf(new FakeN01(wired(swapped))), { seasons: [atdoSeason()], games: seasonGames, personKey: keyOf('63Cz') });
-    expect(result.checks[0].state).toBe('mismatch');
-    expect(result.starts[0]).toMatchObject({ counted: 0, attempts: 0, excludedGames: { 'order-unverified': 3 } });
+    // Legs whose pair order is not the list's are not used at all (2026-11-15, Codex audit): the season
+    // cannot be checked, and no start attempt counts — the swapped game is "not fetched", the others
+    // "order unverified". Never failures of the player.
+    expect(result.checks[0].state).toBe('incomplete');
+    expect(result.checks[0].verified.score).toBe(false);
+    expect(result.starts[0]).toMatchObject({ counted: 0, attempts: 0, excludedGames: { 'order-unverified': 2, 'not-fetched': 1 } });
     expect(periodStart(result.starts)).toMatchObject({ state: 'unavailable', value: null });
   });
 
