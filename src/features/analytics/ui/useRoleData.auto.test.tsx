@@ -111,6 +111,39 @@ describe('automatic read of the shown doubles player (C4)', () => {
     expect(n01.calls.slice(before)).not.toContain('match/get?VU6AjbQE_1724326953016');
   });
 
+  it('leaving the doubles view (ensure(null)) stops the read: no result, nothing running, no further requests (Codex audit)', async () => {
+    const { out } = setup();
+    await act(async () => out.detail!.ensure(keyOf('63Cz')));
+    await act(async () => out.detail!.ensure(null));
+    expect(out.detail!.running).toBeNull();
+    const after = n01.calls.length;
+    for (let i = 0; i < 40; i += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      });
+    }
+    expect(out.detail!.results.size).toBe(0);
+    expect(out.detail!.contributions.size).toBe(0);
+    expect(n01.calls.length).toBeLessThanOrEqual(after + 3); // at most the batch already on the wire
+  });
+
+  it('switching to a player already read stops the other player\'s automatic read (Codex audit)', async () => {
+    const { out } = setup();
+    await act(async () => out.detail!.ensure(keyOf('g1vr')));
+    await settle(out);
+    await act(async () => out.detail!.ensure(keyOf('63Cz')));
+    expect(out.detail!.running).toBe(keyOf('63Cz'));
+    await act(async () => out.detail!.ensure(keyOf('g1vr'))); // has a result: no new read, and 和田's stops
+    expect(out.detail!.running).toBeNull();
+    for (let i = 0; i < 60; i += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      });
+    }
+    expect([...out.detail!.results.keys()]).toEqual([keyOf('g1vr')]);
+    for (const players of out.detail!.contributions.values()) expect(players.has('63Cz')).toBe(false);
+  });
+
   it('a period change while a read is under way: its result is never shown in the new period', async () => {
     const { out, services, view } = setup();
     await act(async () => out.detail!.ensure(keyOf('63Cz')));

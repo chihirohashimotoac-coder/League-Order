@@ -91,21 +91,35 @@ describe('game-kind views on screen', () => {
     const ensure = vi.fn();
     const { load, role } = view('others', run, ensure);
     render(<PlayerAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
-    expect(ensure).not.toHaveBeenCalled();
+    expect(ensure.mock.calls.every((c) => c[0] === null)).toBe(true); // released only, never a read
     expect(screen.getByTestId('metric-3DA').textContent).toContain('個人別に復元できません');
     expect(screen.queryByTestId('metric-個人スタート率')).toBeNull();
     screen.getByTestId('reconstruct-run').click();
     expect(run).toHaveBeenCalledWith(s.players.find((p) => p.oid === '63Cz')!.personKey);
   });
 
-  it('singles and 01全体 never start the doubles read', () => {
+  it('singles and 01全体 never start the doubles read (they only release it: ensure(null))', () => {
     for (const scope of ['singles', 'all01'] as const) {
       const ensure = vi.fn();
       const { load, role } = view(scope, vi.fn(), ensure);
       const { unmount } = render(<PlayerAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
-      expect(ensure).not.toHaveBeenCalled();
+      expect(ensure.mock.calls.every((c) => c[0] === null)).toBe(true);
       unmount();
     }
+  });
+
+  it('leaving ダブルス, or closing the player view, releases the automatic read (Codex audit)', () => {
+    const ensure = vi.fn();
+    const doubles = view('doubles', vi.fn(), ensure);
+    const { rerender, unmount } = render(<PlayerAnalytics team={team()} players={players} load={doubles.load} baseTournamentId={TDID_2024_2ND} role={doubles.role} />);
+    expect(ensure).toHaveBeenLastCalledWith(s.players.find((p) => p.oid === '63Cz')!.personKey);
+    const singles = view('singles', vi.fn(), ensure);
+    rerender(<PlayerAnalytics team={team()} players={players} load={singles.load} baseTournamentId={TDID_2024_2ND} role={singles.role} />);
+    expect(ensure).toHaveBeenLastCalledWith(null);
+    rerender(<PlayerAnalytics team={team()} players={players} load={doubles.load} baseTournamentId={TDID_2024_2ND} role={doubles.role} />);
+    ensure.mockClear();
+    unmount();
+    expect(ensure).toHaveBeenCalledWith(null);
   });
 
   it('singles: the player\'s own 3DA from the game rows, ranked', () => {
@@ -242,7 +256,7 @@ describe('doubles: the automatic read on screen (stored 2024 2nd data, league id
     expect(screen.getByTestId('metric-個人スタート率').textContent).toContain('—');
     expect(screen.getByTestId('metric-3DA').textContent).toContain('取得できなかった');
     await user.click(screen.getByTestId('reconstruct-retry'));
-    expect(run).toHaveBeenCalledWith(personKey, { fresh: false });
+    expect(run).toHaveBeenCalledWith(personKey, { fresh: false, auto: true });
   });
 
   it('a player without a doubles game: "対象なし", and nothing is read for them', () => {
@@ -250,7 +264,7 @@ describe('doubles: the automatic read on screen (stored 2024 2nd data, league id
     const { load, role } = view('doubles', vi.fn(), ensure);
     const solo = [{ ...players[0], id: 'p9', name: '阿部', n01: { ...players[0].n01!, currentOid: 'vhqF' } } as Player];
     render(<PlayerAnalytics team={team()} players={solo} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
-    expect(ensure).not.toHaveBeenCalled();
+    expect(ensure.mock.calls.every((c) => c[0] === null)).toBe(true); // released only, never a read
     expect(screen.getByTestId('reconstruction').getAttribute('data-state')).toBe('none');
     expect(screen.getByTestId('metric-3DA').textContent).toContain('ダブルス01の出場がない');
   });

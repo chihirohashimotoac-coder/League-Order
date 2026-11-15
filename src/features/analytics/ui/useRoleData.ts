@@ -84,13 +84,18 @@ export interface DetailState {
 }
 
 export interface DetailControls {
-  /** Runs (or runs again) a player's reconstruction. `fresh: false` re-reads only what is missing or due. */
-  run: (personKey: string, options?: { fresh?: boolean }) => void;
   /**
-   * Runs it once for a player shown in the doubles view: nothing happens when the player has a
-   * result for this period or is being read. Safe to call on every render.
+   * Runs (or runs again) a player's reconstruction. `fresh: false` re-reads only what is missing or
+   * due; `auto: true` marks a read the doubles view owns (cancelled by {@link ensure}).
    */
-  ensure: (personKey: string) => void;
+  run: (personKey: string, options?: { fresh?: boolean; auto?: boolean }) => void;
+  /**
+   * The player the doubles view shows (`null`: none — another view, no doubles game, the screen
+   * left). Reads that player once per period; nothing happens when the player has a result or is
+   * being read. An automatic read of anyone else is cancelled and its result dropped. Safe to call
+   * on every render.
+   */
+  ensure: (personKey: string | null) => void;
 }
 
 /**
@@ -135,7 +140,7 @@ const emptyFor = (load: PeriodLoad | null): HeldState => ({ load, running: null,
  */
 export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | null, games: GamesLoad | null, reloadToken = 0): DetailState & DetailControls {
   const [held, setHeld] = useState<HeldState>(() => emptyFor(load));
-  const controller = useRef<{ abort: AbortController; load: PeriodLoad | null; personKey: string } | null>(null);
+  const controller = useRef<{ abort: AbortController; load: PeriodLoad | null; personKey: string; auto: boolean } | null>(null);
   const lastReload = useRef(new Map<string, number>());
   const state: HeldState = held.load === load ? held : emptyFor(load);
 
@@ -150,11 +155,11 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
   useEffect(() => () => controller.current?.abort.abort(), []);
 
   const run = useCallback(
-    (personKey: string, options: { fresh?: boolean } = {}) => {
+    (personKey: string, options: { fresh?: boolean; auto?: boolean } = {}) => {
       if (!load || !games) return;
       controller.current?.abort.abort();
       const c = new AbortController();
-      controller.current = { abort: c, load, personKey };
+      controller.current = { abort: c, load, personKey, auto: options.auto === true };
       // Fresh reads when this player is reconstructed again, or for the first time after the
       // page's refresh — not on every later run of the period.
       const again = (options.fresh ?? state.results.has(personKey)) || (reloadToken > 0 && lastReload.current.get(personKey) !== reloadToken);
@@ -187,11 +192,18 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
   );
 
   const ensure = useCallback(
-    (personKey: string) => {
-      if (!load || !games || state.results.has(personKey)) return;
+    (personKey: string | null) => {
       const inFlight = controller.current;
-      if (inFlight && inFlight.personKey === personKey && inFlight.load === load && !inFlight.abort.signal.aborted) return;
-      run(personKey);
+      if (inFlight && inFlight.auto && inFlight.personKey !== personKey && !inFlight.abort.signal.aborted) {
+        // The view no longer shows that player: stop reading, and drop what it would have shown.
+        inFlight.abort.abort();
+        controller.current = null;
+        setHeld((s) => (s.running === inFlight.personKey ? { ...s, running: null } : s));
+      }
+      if (personKey === null || !load || !games || state.results.has(personKey)) return;
+      const current = controller.current;
+      if (current && current.personKey === personKey && current.load === load && !current.abort.signal.aborted) return;
+      run(personKey, { auto: true });
     },
     [load, games, state.results, run],
   );

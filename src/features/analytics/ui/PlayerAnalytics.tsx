@@ -126,8 +126,15 @@ export function PlayerAnalytics({
   const autoKey = doublesView && person && exposure && exposure.games > 0 ? person.personKey : null;
   const ensure = role?.detail.ensure;
   useEffect(() => {
-    if (autoKey && ensure) ensure(autoKey);
+    // `null` too: leaving the doubles view, or showing a player without doubles, stops a read.
+    ensure?.(autoKey);
   }, [autoKey, ensure]);
+  const ensureRef = useRef(ensure);
+  useEffect(() => {
+    ensureRef.current = ensure;
+  }, [ensure]);
+  // The player view closed (team view, another page): an automatic read stops with it.
+  useEffect(() => () => ensureRef.current?.(null), []);
   const detailResult = person && role ? role.detail.results.get(person.personKey) : undefined;
   const detailRunning = !!person && role?.detail.running === person.personKey;
   const start = useMemo(() => (doublesView && detailResult ? periodStart(detailResult.starts) : null), [doublesView, detailResult]);
@@ -287,7 +294,7 @@ export function PlayerAnalytics({
                   status={doublesStatus}
                   result={detailResult}
                   start={start}
-                  onRetry={() => role.detail.run(person.personKey, { fresh: false })}
+                  onRetry={() => role.detail.run(person.personKey, { fresh: false, auto: true })}
                   titleOf={(id) => load.seasons.find((s) => s.tournamentId === id)?.title ?? id}
                 />
               </Card>

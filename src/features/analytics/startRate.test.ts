@@ -176,6 +176,14 @@ describe('the period figure (Σ successes / Σ attempts)', () => {
     expect(formatStart(periodStart([season({ attempts: 0 })])).value).toBe('—');
   });
 
+  it('games admitted but every leg unreadable: "算出不可", never a confirmed 分母0 (Codex audit)', () => {
+    const p = periodStart([season({ attempts: 0, legs: 0, excludedLegs: { unreadable: 2 } })]);
+    expect(p).toMatchObject({ state: 'unavailable', value: null, partial: true });
+    expect(p.reason).toContain('判定できるLegがない');
+    // Some legs read with no attempt in them: 分母0, said to cover the readable legs only.
+    expect(periodStart([season({ attempts: 0, legs: 1, excludedLegs: { unreadable: 1 } })])).toMatchObject({ state: 'no-trials', reason: expect.stringContaining('判定できたLegの範囲') });
+  });
+
   it('a figure over part of the games or legs says so (一部集計), and keeps the reasons', () => {
     const p = periodStart([
       season({ attempts: 3, successes: 1, counted: 1, excludedGames: { 'not-fetched': 1 }, excludedLegs: { unfinished: 1 } }),

@@ -194,6 +194,8 @@ export interface PeriodStart {
   /** Some games, legs or seasons of the player were left out. */
   partial: boolean;
   counted: number;
+  /** Legs of the player's side read as attempts, in the counted games. */
+  legs: number;
   doublesGames: number;
   excludedGames: Partial<Record<StartGameExclusion, number>>;
   excludedLegs: Partial<Record<StartLegExclusion, number>>;
@@ -211,11 +213,12 @@ function addInto<K extends string>(into: Partial<Record<K, number>>, from: Parti
 
 /** Σ successes / Σ attempts over the seasons; nothing is estimated for what was left out. */
 export function periodStart(seasons: readonly SeasonStart[]): PeriodStart {
-  const out: PeriodStart = { state: 'unavailable', attempts: 0, successes: 0, value: null, partial: false, counted: 0, doublesGames: 0, excludedGames: {}, excludedLegs: {}, seasonsMissing: [], ruleNotes: [], highInAgreements: 0 };
+  const out: PeriodStart = { state: 'unavailable', attempts: 0, successes: 0, value: null, partial: false, counted: 0, legs: 0, doublesGames: 0, excludedGames: {}, excludedLegs: {}, seasonsMissing: [], ruleNotes: [], highInAgreements: 0 };
   for (const s of seasons) {
     out.attempts += s.attempts;
     out.successes += s.successes;
     out.counted += s.counted;
+    out.legs += s.legs;
     out.doublesGames += s.doublesGames ?? 0;
     out.highInAgreements += s.highInAgreements;
     addInto(out.excludedGames, s.excludedGames);
@@ -237,7 +240,11 @@ export function periodStart(seasons: readonly SeasonStart[]): PeriodStart {
     }
     return { ...out, state: 'unavailable', reason: out.seasonsMissing[0]?.reason ?? '判定できるLeg明細がないため算出しません' };
   }
-  if (out.attempts === 0) return { ...out, state: 'no-trials', reason: 'ペアが未スタートの状態で投げた記録がないため、分母が0です' };
+  // Games were admitted but none of their legs could be read: the attempts are unknown, not 0.
+  if (out.legs === 0) return { ...out, state: 'unavailable', reason: '判定できるLegがないため算出しません（記録の連続性・決着方法を確定できないLegのみ）' };
+  if (out.attempts === 0) {
+    return { ...out, state: 'no-trials', reason: `ペアが未スタートの状態で投げた記録がないため、分母が0です${out.partial ? '（判定できたLegの範囲）' : ''}` };
+  }
   return { ...out, state: 'value', value: out.successes / out.attempts };
 }
 
