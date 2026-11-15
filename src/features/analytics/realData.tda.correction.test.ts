@@ -21,6 +21,7 @@ import type { PeriodLoad } from './service/periodService';
  * then the leg details, then n01's player totals show it, in that order (n01 catching up).
  */
 
+type Rec = Record<string, unknown>;
 const SNAP = TDA_RAW as unknown as TdaSnapshot;
 
 const FIX = tdaCorrection(SNAP);
@@ -181,5 +182,23 @@ describe('a corrected game (300 → 301) is checked only with legs and totals re
     expect(failed.contributions.has(mid)).toBe(false);
     expect(failed.checks[0].verified.score).toBe(false);
     expect(failed.failures.length).toBeGreaterThan(0);
+  });
+
+  it('a row giving only one of its totals (the other missing): that one must still match, in both directions (Codex audit 2)', async () => {
+    for (const [field, other] of [['allScore', 'allDarts'], ['allDarts', 'allScore']] as const) {
+      const s = await start();
+      // The corrected game's row: one total missing, the other one more than the old legs show.
+      const row = SNAP.games.find((g) => g.mid === FIX.mid)!;
+      const side = (row.statsData as { order: { oid: string }[] }[]).findIndex((x) => x.order.length === 1 && x.order[0].oid === TDA_PLAYER);
+      const list = SNAP.games.map((g) => (g.mid === FIX.mid ? { ...g, statsData: (g.statsData as Rec[]).map((x, i) => (i === side ? { ...x, [field]: null, [other]: Number(x[other]) + 1 } : x)) } : g));
+      const w = s.world as World;
+      const original = w.request.bind(w);
+      w.request = async (operation, params) => (operation === 'match/list' ? tdaResponse({ ...SNAP, games: list }, operation, params) : original(operation, params));
+      const v2 = await s.listed(true);
+      const r = await read(s, v2, s.first);
+      expect(r.contributions.has(FIX.mid)).toBe(false);
+      expect(r.checks[0].verified.f9).toBe(false);
+      expect(r.bestLegs.size).toBe(0);
+    }
   });
 });

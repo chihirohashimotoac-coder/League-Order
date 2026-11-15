@@ -374,7 +374,6 @@ function classifiedOf(season: SeasonData, raw: SeasonGames): ClassifiedGame[] {
 function matchesRow(game: ClassifiedGame, rebuilt: GameReconstruction): boolean {
   if (!rebuilt.ok) return true;
   return game.sides.every((side) => {
-    if (side.score === null || side.darts === null) return true;
     let score = 0;
     let darts = 0;
     for (const p of side.players) {
@@ -383,7 +382,8 @@ function matchesRow(game: ClassifiedGame, rebuilt: GameReconstruction): boolean 
       score += c.score;
       darts += c.darts;
     }
-    return score === side.score && darts === side.darts;
+    // Each total the row gives must match on its own; a missing one is not a pass for the other.
+    return (side.score === null || score === side.score) && (side.darts === null || darts === side.darts);
   });
 }
 
