@@ -144,6 +144,33 @@ test('an expired saved list shown offline is read again when back online; the sa
   await expect(page.getByTestId('metric-adoption').locator('li', { hasText: 'First 9' })).toContainText('Leg明細を照合できた選手のみ採用');
 });
 
+test('a game corrected on n01 (simulated: 1 more point on one visit): after the list is read again, the player is checked with the new legs and totals', async ({ page, context }) => {
+  await page.clock.install({ time: new Date('2026-11-15T10:00:00+09:00') });
+  const n01 = await serveTdaWorld(page);
+  await openSingles(page);
+  await expectFigures(page);
+  // Later: n01 corrected the game (list, legs and totals). The saved list has expired; offline, then online.
+  await page.clock.fastForward('07:00:00');
+  await context.setOffline(true);
+  await page.locator('.tab-bar').getByRole('button', { name: 'ホーム', exact: true }).click();
+  await page.locator('.tab-bar').getByRole('button', { name: '分析', exact: true }).click();
+  await page.getByTestId('scope-bar').getByRole('button', { name: 'シングルス', exact: true }).click();
+  await page.locator('.analytics-roster').getByRole('button', { name: new RegExp(PLAYER) }).click();
+  await expect(page.getByTestId('summary-stale')).toBeVisible();
+  n01.setCorrected(true);
+  const stats = n01.log.filter((e) => e.includes('kind=player_stats_list')).length;
+  await context.setOffline(false);
+  // 3DA (10,860 / 487) and First 9 (4,711 / 207) with the corrected point, verified against n01's new totals.
+  await expect(page.getByTestId('metric-3DA')).toContainText(((10860 * 3) / 487).toFixed(2), { timeout: 30_000 });
+  await expect(page.getByTestId('reconstruction')).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
+  await expect(page.getByTestId('metric-First 9')).toContainText(((4711 * 3) / 207).toFixed(2));
+  await expect(page.getByTestId('metric-First 9')).toContainText('Leg明細から復元');
+  expect(n01.log.filter((e) => e.includes('kind=player_stats_list')).length).toBeGreaterThan(stats); // n01's totals read again
+  await page.getByTestId('analysis-details').locator('summary').first().click();
+  await expect(page.getByTestId('focus-summary')).toContainText('取得済み');
+  await expect(page.getByTestId('metric-adoption').locator('li', { hasText: 'First 9' })).toContainText('Leg明細を照合できた選手のみ採用');
+});
+
 test('the browser\'s storage refuses every write: lists and leg details are still read once each (直近3季, 75 legs)', async ({ page }) => {
   await page.addInitScript(() => {
     // Storage failure (the quota, a broken database): every write to the analytics database fails

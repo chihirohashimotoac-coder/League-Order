@@ -76,6 +76,11 @@ export const MAX_SEASON_ROWS = 50_000;
 /** Times a season is read again from its first row after its page boundary moved, before it is set aside. */
 export const MAX_BOUNDARY_RESTARTS = 1;
 /**
+ * Times a season is read again from its first row because the verification of a reading that
+ * crossed units found rows changed, before it is set aside (changes keep coming).
+ */
+export const MAX_CHANGE_RESTARTS = 2;
+/**
  * How long the record of a stopped reading of a running season is kept for the comparison
  * (a finished season: as long as its list). Older records are dropped: the season is simply read.
  */
@@ -83,6 +88,7 @@ export const RUNNING_CHECKPOINT_MS = 30 * 60 * 1000;
 
 export const BOUNDARY_REASON = 'ゲーム一覧の取得中にページの境界で並びが変わりました（試合の更新・削除、または同時刻の並び替え）。古い続きと新しい一覧を混ぜないよう、この季は保留しています（「再試行」で最初から取り直します）';
 const STALE_OFFLINE = 'オフラインのため、保存済み（期限切れ・最新とは限らない）の一覧を表示しています（オンラインに戻ると自動で取り直します）';
+export const CHANGED_REASON = 'ゲーム一覧の取得中に、読み終えた範囲の試合が続けて変更されました（訂正・終了・削除・追加）。古い行と新しい行を混ぜないよう、この季は保留しています（「再試行」で最初から取り直します）';
 const RUNAWAY_REASON = `ゲーム一覧が安全上の上限（${MAX_SEASON_ROWS.toLocaleString('ja-JP')}件）を超えたため、この季は保留しています`;
 
 export interface GamesProgress {
@@ -236,6 +242,11 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
   }
   let api = ctx.api;
   let restarts = 0;
+  let changeRestarts = 0;
+  // Rows read before the reading last moved to a new unit: checked again before publishing.
+  let verifyUpTo = 0;
+  let verifyPages = 0;
+  let verifiedRows = 0;
   let startedAt = ctx.now();
   let ids: (string | null)[] = [];
   let prints: (string | null)[] = [];
@@ -251,13 +262,66 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
     if (!(await ctx.cache.put(wipKey, record, status === N01_STATUS.FINISHED ? ttl : Math.min(ttl, RUNNING_CHECKPOINT_MS)))) saveFailed = true;
   };
   const restart = (): void => {
-    restarts += 1;
     startedAt = ctx.now();
+    verifyUpTo = 0;
     ids = [];
     prints = [];
     games = [];
     dropped = { unfinished: 0, unreadable: 0, nonLeague: 0 };
     seen = new Set();
+  };
+
+  /** A spent unit is replaced by the next one (`true`), or the reading has to stop. */
+  const nextUnit = async (error: unknown): Promise<boolean> => {
+    if (!(error instanceof RequestBudgetError) || ctx.signal?.aborted) return false;
+    const next = await ctx.nextApi?.();
+    if (!next) return false;
+    api = next;
+    return true;
+  };
+  const failed = async (error: unknown): Promise<GamesResult> => {
+    await save();
+    const kind = failureKind(error);
+    if (kind !== 'budget' && kind !== 'aborted' && stale) {
+      // A list read to the end earlier is better than none (shown as saved, not current).
+      return { ok: true, games: stale, source: 'stale-cache', fetchedAt: cached!.fetchedAt, pages, saveFailed, refreshFailure: { kind, reason: `保存済み（期限切れ・最新とは限らない）の一覧を表示しています。最新の取得に失敗しました（${describeN01Error(error)}）` } };
+    }
+    return { ok: false, tournamentId, kind, reason: error instanceof RequestBudgetError ? error.message : describeN01Error(error), progress: progress(), stale, pages, saveFailed };
+  };
+  /**
+   * Reads rows `[0, verifyUpTo)` again and compares id, order and fingerprint (counted content,
+   * finished state) with what was read. One pass, going on across units from where it is (it never
+   * starts itself again); `changed` at the first difference.
+   */
+  const verify = async (): Promise<'same' | 'changed' | GamesResult> => {
+    let v = 0;
+    while (v < verifyUpTo) {
+      if (ctx.signal?.aborted) {
+        await save();
+        return { ok: false, tournamentId, kind: 'aborted', reason: '中断しました。', progress: progress(), stale, pages, saveFailed };
+      }
+      let page: Awaited<ReturnType<AnalyticsApi['gamesAt']>>;
+      try {
+        page = await withRetry(ctx, () => api.gamesAt(tournamentId, v === 0 ? 0 : v - 1, true));
+      } catch (error) {
+        if (await nextUnit(error)) continue;
+        return failed(error);
+      }
+      pages += 1;
+      verifyPages += 1;
+      if (v > 0 && (page.rows === 0 || page.ids[0] !== ids[v - 1])) return 'changed';
+      const rows = v > 0 ? page.ids.slice(1) : page.ids;
+      const byId = new Map(page.games.map((g) => [g.gameId, g]));
+      for (const id of rows) {
+        if (v >= verifyUpTo) break;
+        const game = id === null ? undefined : byId.get(id);
+        if (id !== ids[v] || (game ? fingerprint(game) : null) !== prints[v]) return 'changed';
+        v += 1;
+      }
+      if (v < verifyUpTo && page.rows < GAME_LIST_PAGE) return 'changed';
+    }
+    verifiedRows = v;
+    return 'same';
   };
 
   for (;;) {
@@ -272,23 +336,15 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
     const consumed = ids.length;
     let page: Awaited<ReturnType<AnalyticsApi['gamesAt']>>;
     try {
-      page = await withRetry(ctx, () => api.gamesAt(tournamentId, consumed === 0 ? 0 : consumed - 1, restarts > 0));
+      page = await withRetry(ctx, () => api.gamesAt(tournamentId, consumed === 0 ? 0 : consumed - 1, restarts + changeRestarts > 0));
     } catch (error) {
-      if (error instanceof RequestBudgetError) {
-        // This unit is spent: go on with the next one, from the same row, in memory.
-        const next = ctx.signal?.aborted ? null : await ctx.nextApi?.();
-        if (next) {
-          api = next;
-          continue;
-        }
+      if (await nextUnit(error)) {
+        // This unit is spent: go on with the next one, from the same row, in memory. The rows read
+        // so far may change meanwhile: they are checked again before the list is published.
+        verifyUpTo = ids.length;
+        continue;
       }
-      await save();
-      const kind = failureKind(error);
-      if (kind !== 'budget' && kind !== 'aborted' && stale) {
-        // A list read to the end earlier is better than none (shown as saved, not current).
-        return { ok: true, games: stale, source: 'stale-cache', fetchedAt: cached!.fetchedAt, pages, saveFailed, refreshFailure: { kind, reason: `保存済み（期限切れ・最新とは限らない）の一覧を表示しています。最新の取得に失敗しました（${describeN01Error(error)}）` } };
-      }
-      return { ok: false, tournamentId, kind, reason: error instanceof RequestBudgetError ? error.message : describeN01Error(error), progress: progress(), stale, pages, saveFailed };
+      return failed(error);
     }
     pages += 1;
 
@@ -300,6 +356,7 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
       added.some((id, i) => id !== null && (seen.has(id) || added.indexOf(id) !== i));
     if (moved) {
       if (restarts < MAX_BOUNDARY_RESTARTS) {
+        restarts += 1;
         restart();
         continue;
       }
@@ -325,12 +382,31 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
     }
     onProgress?.(progress());
 
+    if (page.rows < GAME_LIST_PAGE && verifyUpTo > 0) {
+      const outcome = await verify();
+      if (outcome === 'changed') {
+        if (changeRestarts < MAX_CHANGE_RESTARTS) {
+          changeRestarts += 1;
+          restart();
+          continue;
+        }
+        await ctx.cache.delete(wipKey);
+        return { ok: true, games: { tournamentId, games: [], dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, complete: false, heldReason: CHANGED_REASON }, source: 'network', fetchedAt: ctx.now(), pages, saveFailed };
+      }
+      if (outcome !== 'same') return outcome;
+    }
     if (page.rows < GAME_LIST_PAGE) {
       // The last page was reached. A row n01 sent that could not be read is a game we cannot
       // account for: the list is then not the whole season, however short the last page was.
       const complete = dropped.unreadable === 0;
-      const result: SeasonGames = { tournamentId, games, dropped, complete, version: fnv(JSON.stringify([ids, prints])) };
+      const result: SeasonGames = { tournamentId, games, dropped, complete, version: fnv(JSON.stringify([ids, prints])), readAt: ctx.now() };
       if (prior) result.recollated = compare(prior, ids, prints);
+      if (verifyPages > 0 || changeRestarts > 0) result.verified = { rows: verifiedRows, pages: verifyPages, restarts: changeRestarts };
+      // The season's list as it was known before (expired, or kept by this screen): a new version
+      // means its players' checks must use official totals and legs read after the change.
+      const before = kept?.value ?? stale;
+      if (before && gamesVersion(before) !== result.version) result.changedFrom = gamesVersion(before);
+      else if (result.recollated && result.recollated.corrected + result.recollated.removed + result.recollated.added > 0) result.changedFrom = 'recollated';
       // An incomplete list keeps the rows that were read (nothing correct is thrown away), but only
       // briefly, so the next visit retries it; projection never uses it as the season.
       if (complete) ctx.memory?.set(tournamentId, { value: result, at: ctx.now() });

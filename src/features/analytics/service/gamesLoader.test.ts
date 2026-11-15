@@ -3,7 +3,7 @@ import { N01Error } from '../../../integrations/n01/client';
 import { AnalyticsApi } from '../api/readApi';
 import type { AnalyticsTransport } from '../api/readApi';
 import { AnalyticsCache } from '../cache/analyticsCache';
-import { BOUNDARY_REASON, gamesKey, gamesProgressKey, loadSeasonGames, RUNNING_CHECKPOINT_MS } from './gamesLoader';
+import { BOUNDARY_REASON, CHANGED_REASON, gamesKey, gamesProgressKey, loadSeasonGames, MAX_CHANGE_RESTARTS, RUNNING_CHECKPOINT_MS } from './gamesLoader';
 import type { GamesContext } from './gamesLoader';
 
 /**
@@ -93,9 +93,13 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     const result = await loadSeasonGames(ctx, 't', 30);
     expect(result.ok && result.games.complete).toBe(true);
     expect(result.ok && result.games.games.length).toBe(1665);
-    expect(fake.calls).toHaveLength(17);
-    expect(new Set(fake.calls).size).toBe(17);
-    expect(units).toHaveLength(3);
+    // Reading: 17 requests, none twice. Then the check of the 1,486 rows read before the last switch:
+    // 15 requests (修正1), one pass.
+    expect(fake.calls.slice(0, 17)).toHaveLength(new Set(fake.calls.slice(0, 17)).size);
+    expect(fake.calls[16]).toBe(100 + 99 * 15 - 1);
+    expect(fake.calls.slice(17)).toHaveLength(15);
+    expect(result.ok && result.games.verified).toEqual({ rows: 1486, pages: 15, restarts: 0 });
+    expect(units.length).toBeGreaterThanOrEqual(3);
   });
 
   it('the browser refuses every write: the reading still goes on from where it is, never back to row 0 (audit 3)', async () => {
@@ -103,7 +107,8 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     const full = new AnalyticsCache({ memoryOnly: true, limits: { maxEntries: 80, maxBytes: 1 } }); // every put → false
     const ctx: GamesContext = { ...ctxOf(fake, full, { maxRequests: 1 }), nextApi: async () => new AnalyticsApi({ transport: fake, maxRequests: 1 }) };
     const result = await loadSeasonGames(ctx, 't', 30);
-    expect(fake.calls).toEqual([0, 99, 198, 297, 396]);
+    // Reading on from where it is (no position twice), then one check of the rows read before the last switch.
+    expect(fake.calls).toEqual([0, 99, 198, 297, 396, 0, 99, 198, 297]);
     expect(result.ok && result.games.complete).toBe(true);
     expect(result.ok && result.saveFailed).toBe(true);
   });
@@ -241,8 +246,9 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     if (!result.ok) throw new Error(result.reason);
     expect(result.games.complete).toBe(true);
     const again = fake.calls.slice(before);
-    expect(again).toHaveLength(11);
-    expect(new Set(again).size).toBe(11);
+    // 11 requests reading again (none twice), then 9 checking the rows read before the last switch.
+    expect(again.slice(0, 11)).toHaveLength(new Set(again.slice(0, 11)).size);
+    expect(again).toHaveLength(20);
     expect(result.games.dropped.unfinished).toBe(3);
   });
 
@@ -264,5 +270,116 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 1 }), 't', 30);
     const offline = await loadSeasonGames(ctxOf(fake, cache, { online: () => false }), 't', 30);
     expect(offline).toMatchObject({ ok: false, kind: 'offline', progress: { rows: 100 } });
+  });
+});
+
+/**
+ * 修正1: a reading that moves to the next unit by itself (no stop, no user action). The list is
+ * changed by the test exactly when the new unit is handed over, inside the rows already read,
+ * with the boundary row left where it was.
+ */
+describe('match/list: changes while a reading moves on to its next unit', () => {
+  type Mutation = (list: Row[]) => void;
+  /** Units of `per` requests; `mutate` runs when a unit is handed over (once, or every time). */
+  function chained(fake: FakeList, per: number, mutate: Mutation | null, every = false): GamesContext & { switches: () => number } {
+    let switches = 0;
+    const ctx = {
+      ...ctxOf(fake, memory(), { maxRequests: per }),
+      nextApi: async () => {
+        switches += 1;
+        if (mutate && (every || switches === 1)) mutate(fake.list);
+        return new AnalyticsApi({ transport: fake, maxRequests: per });
+      },
+      switches: () => switches,
+    };
+    return ctx;
+  }
+  const scoreOf = (result: Awaited<ReturnType<typeof loadSeasonGames>>, mid: string) => {
+    if (!result.ok) throw new Error(result.reason);
+    const g = result.games.games.find((x) => x.gameId === mid);
+    return g ? [g.sides[0].score, g.sides[0].darts] : null;
+  };
+
+  it('① a score corrected under the same id (300 → 320): the reading is checked, read again, and the new score published', async () => {
+    const fake = new FakeList(rows(250).map((r, i) => (i === 40 ? { ...r, statsData: [{ ...(r.statsData as Row[])[0], allScore: 300 }, (r.statsData as Row[])[1]] } : r)));
+    const result = await loadSeasonGames(
+      chained(fake, 1, (list) => {
+        const sides = list[40].statsData as Row[];
+        list[40] = { ...list[40], statsData: [{ ...sides[0], allScore: 320 }, sides[1]] };
+      }),
+      't',
+      30,
+    );
+    expect(result.ok && result.games.complete).toBe(true);
+    expect(scoreOf(result, 'm40')).toEqual([320, 30]);
+    expect(result.ok && result.games.verified).toMatchObject({ restarts: 1 });
+  });
+
+  it('② a game finished meanwhile: counted after the check (never published as unfinished)', async () => {
+    const fake = new FakeList(rows(250, 0, [30]));
+    const result = await loadSeasonGames(
+      chained(fake, 1, (list) => {
+        list[30] = { ...list[30], endMatch: 1 };
+      }),
+      't',
+      30,
+    );
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.complete).toBe(true);
+    expect(result.games.games.map((g) => g.gameId)).toContain('m30');
+    expect(result.games.dropped.unfinished).toBe(0);
+    expect(result.games.verified).toMatchObject({ restarts: 1 });
+  });
+
+  it('③ one game deleted and one added before the boundary (its row unchanged): the new list, nothing of the old', async () => {
+    const fake = new FakeList(rows(250));
+    const result = await loadSeasonGames(
+      chained(fake, 1, (list) => {
+        list.splice(20, 1);
+        list.splice(60, 0, { ...rows(1, 900)[0], mid: 'late' });
+        expect(list[99].mid).toBe('m99');
+      }),
+      't',
+      30,
+    );
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.complete).toBe(true);
+    const ids = result.games.games.map((g) => g.gameId);
+    expect(ids).not.toContain('m20');
+    expect(ids).toContain('late');
+    expect(ids).toHaveLength(250);
+    expect(new Set(ids).size).toBe(250);
+  });
+
+  it('without any change, the check itself spans units, never starts itself again, and costs the rows read before the last switch', async () => {
+    const fake = new FakeList(rows(450));
+    const ctx = chained(fake, 2, null);
+    const result = await loadSeasonGames(ctx, 't', 30);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.complete).toBe(true);
+    // Reading: 0, 99 | 198, 297 | 396 (end) — the last switch came after 397 rows; checking them: 0, 99 | 198, 297.
+    expect(fake.calls).toEqual([0, 99, 198, 297, 396, 0, 99, 198, 297]);
+    expect(result.games.verified).toEqual({ rows: 397, pages: 4, restarts: 0 });
+    expect(ctx.switches()).toBeGreaterThanOrEqual(3);
+  });
+
+  it('changes that keep coming: set aside with the reason after a bounded number of restarts, never published', async () => {
+    const fake = new FakeList(rows(250));
+    let n = 0;
+    const ctx = chained(
+      fake,
+      1,
+      (list) => {
+        const sides = list[10].statsData as Row[];
+        list[10] = { ...list[10], statsData: [{ ...sides[0], allScore: 400 + (n += 1) }, sides[1]] };
+      },
+      true,
+    );
+    const result = await loadSeasonGames(ctx, 't', 30);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.complete).toBe(false);
+    expect(result.games.heldReason).toBe(CHANGED_REASON);
+    expect(MAX_CHANGE_RESTARTS).toBe(2);
+    expect(fake.calls.length).toBeLessThan(40);
   });
 });

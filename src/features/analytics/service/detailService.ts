@@ -7,13 +7,14 @@ import type { GameReconstruction, PlayerContributions, SeasonCheck } from '../re
 import { classifyGames } from '../roleGames';
 import type { ClassifiedGame, SeasonGames } from '../roleGames';
 import type { SeasonData } from '../seasonData';
+import type { StatLine } from '../types';
 import type { HighInRecord } from '../api/parse';
 import { isStartTally } from '../startRate';
 import type { SeasonStart, StartGameExclusion } from '../startRate';
 import { gameStartRule, highInEvidence, seasonRule } from '../startRule';
 import type { HighInEvidence } from '../startRule';
 import type { GamesContext } from './gamesLoader';
-import { gamesVersion } from './gamesLoader';
+import { fingerprint, gamesVersion } from './gamesLoader';
 import { isTransient, withRetry } from './retry';
 
 /**
@@ -37,6 +38,8 @@ import { isTransient, withRetry } from './retry';
 
 export const detailKey = (tournamentId: string): string => `detail:${tournamentId}`;
 export const highInKey = (tournamentId: string): string => `highin:${tournamentId}`;
+/** n01's player totals of a season, read for one version of its game list. */
+export const officialKey = (tournamentId: string, version: string): string => `official:${tournamentId}@${version}`;
 /** `match/get` requests one reconstruction may send (≈ 2–3 seasons of one player). */
 export const DETAIL_MAX_REQUESTS = 60;
 /** A cached game is re-read for a disagreement with n01 only when read at least this long ago. */
@@ -79,6 +82,11 @@ export interface PlayerDetailResult {
   /** Seasons withheld because their game list was read again with other content (`currentResult`). */
   outdatedSeasons?: string[];
   /**
+   * Seasons whose list changed and whose rebuilt figures do not (yet) match n01's player totals read
+   * after the change — possibly n01 has not counted the change yet: offered again (「再試行」).
+   */
+  awaitingOfficial?: string[];
+  /**
    * 個人スタート率 per season of the period the player appears in (doubles 01, double-in slots
    * only; see `startRate.ts` / `startRule.ts`). Pooled by `periodStart`.
    */
@@ -88,10 +96,11 @@ export interface PlayerDetailResult {
 /** Cached reconstructions of one season, with the time each game was read. */
 interface CachedDetail {
   v: 2;
-  games: Record<string, { r: GameReconstruction; at: number }>;
+  games: Record<string, { r: GameReconstruction; at: number; fp?: string }>;
 }
 
-type Held = Map<string, { r: GameReconstruction; at: number }>;
+/** `fp`: the game's list-row fingerprint when its legs were read (a corrected row makes them due). */
+type Held = Map<string, { r: GameReconstruction; at: number; fp?: string }>;
 
 /**
  * What one open screen has read (legs per season, high-in records). Reads consult it before the
@@ -101,9 +110,43 @@ type Held = Map<string, { r: GameReconstruction; at: number }>;
 export interface DetailMemory {
   games: Map<string, Held>;
   highIns: Map<string, { records: HighInRecord[]; at: number }>;
+  officials: Map<string, { lines: Record<string, StatLine>; at: number }>;
 }
 
-export const newDetailMemory = (): DetailMemory => ({ games: new Map(), highIns: new Map() });
+export const newDetailMemory = (): DetailMemory => ({ games: new Map(), highIns: new Map(), officials: new Map() });
+
+/**
+ * n01's player totals of a season for one version of its game list (`player_stats_list`, one
+ * request, kept per version: the same list never asks again, a changed list asks once). `recheck`
+ * asks n01 again (the retry of a season whose totals did not reflect the change yet).
+ */
+async function loadOfficial(
+  ctx: GamesContext,
+  season: SeasonData,
+  version: string,
+  memory: DetailMemory | undefined,
+  recheck: boolean,
+): Promise<{ lines: Record<string, StatLine> | null; budget: boolean; failure?: string; fetched: boolean; transient?: boolean; saveFailed?: boolean }> {
+  const key = officialKey(season.tournamentId, version);
+  const ttl = season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
+  if (!recheck) {
+    const kept = memory?.officials.get(key);
+    if (kept && kept.at >= (ctx.freshAfter ?? 0) && ctx.now() - kept.at < ttl) return { lines: kept.lines, budget: false, fetched: false };
+    const cached = await ctx.cache.get<Record<string, StatLine>>(key);
+    if (cached && ctx.cache.isFresh(cached) && !ctx.forceRefresh && cached.fetchedAt >= (ctx.freshAfter ?? 0)) return { lines: cached.value, budget: false, fetched: false };
+  }
+  if (ctx.signal?.aborted) return { lines: null, budget: true, fetched: false };
+  try {
+    const rows = await withRetry(ctx, () => ctx.api.playerStats(season.tournamentId));
+    const lines: Record<string, StatLine> = {};
+    for (const row of rows) lines[row.oid] = row.line;
+    memory?.officials.set(key, { lines, at: ctx.now() });
+    const saved = await ctx.cache.put(key, lines, ttl);
+    return { lines, budget: false, fetched: true, saveFailed: !saved };
+  } catch (error) {
+    return { lines: null, budget: error instanceof RequestBudgetError, failure: describeN01Error(error), fetched: false, transient: isTransient(error) };
+  }
+}
 
 async function readStored(ctx: GamesContext, tournamentId: string): Promise<Held> {
   const entry = await ctx.cache.get<CachedDetail | Record<string, GameReconstruction>>(detailKey(tournamentId));
@@ -323,13 +366,47 @@ function classifiedOf(season: SeasonData, raw: SeasonGames): ClassifiedGame[] {
   return games;
 }
 
+/**
+ * The legs describe the game as the list shows it: per side, the rebuilt players' points and darts
+ * add up to the row's totals. Otherwise they belong to another state of the game (n01 not yet
+ * showing a correction in one of the two), and are not used.
+ */
+function matchesRow(game: ClassifiedGame, rebuilt: GameReconstruction): boolean {
+  if (!rebuilt.ok) return true;
+  return game.sides.every((side) => {
+    if (side.score === null || side.darts === null) return true;
+    let score = 0;
+    let darts = 0;
+    for (const p of side.players) {
+      const c = p.oid ? rebuilt.perPlayer[p.oid] : undefined;
+      if (!c) return false;
+      score += c.score;
+      darts += c.darts;
+    }
+    return score === side.score && darts === side.darts;
+  });
+}
+
+/** Stands for "read, but not for the row the list shows": such legs are always read again. */
+const UNMATCHED = 'unmatched';
+
 function personGames(classified: readonly ClassifiedGame[], oid: string): ClassifiedGame[] {
   return classified.filter((g) => g.family.family === '01' && g.sides.some((s) => s.players.some((p) => p.oid === oid)));
 }
 
 export async function reconstructPerson(
   ctx: GamesContext,
-  input: { seasons: readonly SeasonData[]; games: ReadonlyMap<string, SeasonGames>; personKey: string; concurrency?: number; memory?: DetailMemory },
+  input: {
+    seasons: readonly SeasonData[];
+    games: ReadonlyMap<string, SeasonGames>;
+    personKey: string;
+    concurrency?: number;
+    memory?: DetailMemory;
+    /** The list versions the player's previous result was checked against (a season read again since counts as changed). */
+    previousVersions?: Record<string, string>;
+    /** Ask n01 again for the totals of changed seasons (the retry). */
+    recheckOfficial?: boolean;
+  },
 ): Promise<PlayerDetailResult> {
   const result: PlayerDetailResult = { personKey: input.personKey, checks: [], contributions: new Map(), bestLegs: new Map(), bestLegHeld: { all: false, starts: [], reasons: [] }, notAttempted: [], stale: [], failures: [], requestsSent: 0, starts: [] };
   const held = new Set<number>();
@@ -382,14 +459,51 @@ export async function reconstructPerson(
     }
     const evidence = highIns ? highInEvidence(highIns) : null;
     const stored = await readCached(ctx, season.tournamentId, input.memory);
-    result.versions[season.tournamentId] = gamesVersion(raw);
+    const version = gamesVersion(raw);
+    result.versions[season.tournamentId] = version;
+    // The season's list changed since it was known (read again with other content, or another
+    // version than the player's previous check): its check must not use what was read before.
+    const previous = input.previousVersions?.[season.tournamentId];
+    const listChanged = !!raw.changedFrom || (previous !== undefined && previous !== version);
+    const rowPrint = new Map(raw.games.map((g) => [g.gameId, fingerprint(g)]));
     const ttl = season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
     const now = ctx.now();
     const freshAfter = ctx.freshAfter ?? 0;
+    // A game's legs are read again when its list row is not the row they were read for (a score,
+    // a player, the finished state changed). Legs stored before rows were recorded count as such
+    // only in a season whose list changed. Unchanged games keep their valid legs.
     const due = (id: string): boolean => {
       const entry = stored.get(id);
-      return !entry || ctx.forceRefresh === true || entry.at < freshAfter || now - entry.at >= ttl;
+      if (!entry || ctx.forceRefresh === true || entry.at < freshAfter || now - entry.at >= ttl) return true;
+      return entry.fp !== undefined ? entry.fp !== rowPrint.get(id) : listChanged;
     };
+    // n01's totals as they stand after the change (the period's are from before it).
+    let official: StatLine = me.line;
+    if (listChanged) {
+      const loaded = await loadOfficial(ctx, season, version, input.memory, input.recheckOfficial === true);
+      if (loaded.saveFailed) result.saveFailed = true;
+      if (loaded.fetched) fetched += 1;
+      const line = loaded.lines?.[me.oid];
+      if (!loaded.lines || !line) {
+        if (loaded.budget) {
+          stopped = true;
+          budgetStopped = !ctx.signal?.aborted;
+        }
+        const reason = !loaded.lines
+          ? `ゲーム一覧が更新された季のn01公式通算を取得できませんでした${loaded.failure ? `（${loaded.failure}）` : ''}`
+          : 'ゲーム一覧が更新された季のn01公式通算に、この選手の行がありません';
+        if (loaded.budget) result.notAttempted.push({ tournamentId: season.tournamentId, title: season.title });
+        else {
+          result.failures.push(`${season.title}: ${reason}`);
+          if (loaded.transient || loaded.lines) result.transient = true;
+        }
+        result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'incomplete', games: mine.length, reconstructed: 0, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason });
+        holdAll(`${season.title}: ${reason}`);
+        if (doublesCount > 0) result.starts.push(unexamined(doublesCount, reason));
+        continue;
+      }
+      official = line;
+    }
     // Cached before start attempts were counted, in a slot where they count: read again for that
     // only (its 3DA figures stay as they are if the read fails).
     const startOnly = new Set(mine.filter((g) => !due(g.gameId) && lacksStart(stored.get(g.gameId)) && gameStartRule(season, g, evidence).rule === 'double-in').map((g) => g.gameId));
@@ -409,7 +523,8 @@ export async function reconstructPerson(
         outcomes.forEach((outcome, index) => {
           const id = batch[index].gameId;
           if (outcome.status === 'fulfilled') {
-            stored.set(id, { r: safeReconstruct(outcome.value), at: ctx.now() });
+            const r = safeReconstruct(outcome.value);
+            stored.set(id, { r, at: ctx.now(), fp: matchesRow(batch[index], r) ? rowPrint.get(id) : UNMATCHED });
             readAgain.add(id);
             batchAdded += 1;
             fetched += 1;
@@ -429,7 +544,16 @@ export async function reconstructPerson(
       }
     };
     await fetchGames(mine.filter((g) => due(g.gameId) || startOnly.has(g.gameId)));
-    let rebuilt = toRebuilt(stored);
+    // Legs that do not describe the game as listed now are left out (the game counts as not rebuilt).
+    const usable = (): Map<string, GameReconstruction> => {
+      const all = toRebuilt(stored);
+      for (const g of mine) {
+        const r = all.get(g.gameId);
+        if (r && !matchesRow(g, r)) all.delete(g.gameId);
+      }
+      return all;
+    };
+    let rebuilt = usable();
 
     // Read again, once, what the cache may hold from before a correction: every cached game when
     // the rebuilt totals disagree with n01's, otherwise the cached games that could not be rebuilt
@@ -437,14 +561,14 @@ export async function reconstructPerson(
     const composition = season.composition.composition;
     if (!stopped) {
       const cachedOnly = mine.filter((g) => stored.has(g.gameId) && !readAgain.has(g.gameId));
-      const first = composition === 'unknown' ? null : checkPlayerSeason(season.tournamentId, me.oid, me.line, classified, rebuilt, composition === 'pure01');
+      const first = composition === 'unknown' ? null : checkPlayerSeason(season.tournamentId, me.oid, official, classified, rebuilt, composition === 'pure01');
       // Only games read at least MISMATCH_REREAD_MS ago: a season that disagrees for another
       // reason (a limit of the reconstruction) must not re-read everything on every run.
       const old = (g: ClassifiedGame): boolean => now - stored.get(g.gameId)!.at >= MISMATCH_REREAD_MS;
       const suspect = first?.state === 'mismatch' ? cachedOnly.filter(old) : cachedOnly.filter((g) => !stored.get(g.gameId)!.r.ok && old(g));
       if (suspect.length > 0) {
         await fetchGames(suspect);
-        rebuilt = toRebuilt(stored);
+        rebuilt = usable();
       }
     }
     const overdue = mine.filter((g) => stored.has(g.gameId) && !readAgain.has(g.gameId) && (ctx.forceRefresh === true || stored.get(g.gameId)!.at < freshAfter || now - stored.get(g.gameId)!.at >= ttl)).length;
@@ -474,7 +598,17 @@ export async function reconstructPerson(
       if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: false, evidence, highIns, highInNote }));
       continue;
     }
-    const check = checkPlayerSeason(season.tournamentId, me.oid, me.line, classified, rebuilt, composition === 'pure01');
+    const unmatched = mine.filter((g) => stored.has(g.gameId) && stored.get(g.gameId)!.r.ok && !rebuilt.has(g.gameId)).length;
+    const check = checkPlayerSeason(season.tournamentId, me.oid, official, classified, rebuilt, composition === 'pure01');
+    if (unmatched > 0) {
+      check.reason = `${check.reason ? `${check.reason}。` : ''}Leg明細の合計がゲーム一覧の得点と一致しないゲームが${unmatched}件あります（n01の反映待ちの可能性。「再試行」で取り直します）`;
+      if (!(result.awaitingOfficial ?? []).includes(season.tournamentId)) (result.awaitingOfficial ??= []).push(season.tournamentId);
+    }
+    if (listChanged && !check.verified.score && check.state !== 'incomplete' && !(result.awaitingOfficial ?? []).includes(season.tournamentId)) {
+      // n01 may not have counted the change yet: say so, and offer to check again later.
+      check.reason = `${check.reason ?? ''}（一覧の更新がn01の公式通算にまだ反映されていない可能性があります。「再試行」で公式通算を取り直します）`;
+      (result.awaitingOfficial ??= []).push(season.tournamentId);
+    }
     result.checks.push(check);
     if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: check.verified.score, evidence, highIns, highInNote }));
     addVerified(result.contributions, check, classified, rebuilt);
@@ -548,5 +682,5 @@ export function doublesCoverage(result: PlayerDetailResult): { seasons: number; 
 
 /** A run that should be offered again: something was not read (network, budget, cancel) — not a mismatch. */
 export function needsRetry(result: PlayerDetailResult): boolean {
-  return result.budgetStopped === true || result.failures.length > 0 || result.notAttempted.length > 0 || result.stale.length > 0 || result.checks.some((c) => c.state === 'incomplete' && c.games > 0) || result.starts.some((s) => (s.excludedGames['not-fetched'] ?? 0) > 0 || (s.excludedGames['needs-refetch'] ?? 0) > 0);
+  return result.budgetStopped === true || (result.awaitingOfficial?.length ?? 0) > 0 || result.failures.length > 0 || result.notAttempted.length > 0 || result.stale.length > 0 || result.checks.some((c) => c.state === 'incomplete' && c.games > 0) || result.starts.some((s) => (s.excludedGames['not-fetched'] ?? 0) > 0 || (s.excludedGames['needs-refetch'] ?? 0) > 0);
 }

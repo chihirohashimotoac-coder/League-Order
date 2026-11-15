@@ -266,7 +266,7 @@ describe('doubles: the automatic read on screen (stored 2024 2nd data, league id
     expect(screen.getByTestId('metric-個人スタート率').textContent).toContain('—');
     expect(screen.getByTestId('metric-3DA').textContent).toContain('取得できなかった');
     await user.click(screen.getByTestId('reconstruct-retry'));
-    expect(run).toHaveBeenCalledWith(personKey, { fresh: false, auto: true });
+    expect(run).toHaveBeenCalledWith(personKey, { fresh: false, auto: true, recheck: true });
   });
 
   it('a player without a doubles game: "対象なし", and nothing is read for them', () => {

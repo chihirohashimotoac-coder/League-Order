@@ -104,7 +104,7 @@ export interface DetailControls {
    * of using the stored ones (default: when the player already has a result — 「再度復元する」);
    * `auto: true` marks a read a view owns (stopped when another player is shown).
    */
-  run: (personKey: string, options?: { fresh?: boolean; auto?: boolean }) => void;
+  run: (personKey: string, options?: { fresh?: boolean; auto?: boolean; recheck?: boolean }) => void;
   /**
    * The player on screen, and whether the view needs their leg details (`read`: the singles or the
    * doubles view, with a game of that kind). Reads them once per period and continues a read cut
@@ -195,7 +195,7 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
   useEffect(() => () => controller.current?.abort.abort(), []);
 
   const run = useCallback(
-    (personKey: string, options: { fresh?: boolean; auto?: boolean } = {}) => {
+    (personKey: string, options: { fresh?: boolean; auto?: boolean; recheck?: boolean } = {}) => {
       if (!load || !gamesRef.current) return;
       controller.current?.abort.abort();
       const c = new AbortController();
@@ -222,6 +222,9 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
         });
       };
       const kept = memory.current.memory;
+      // The list versions this player was last checked against: a season read again since is checked
+      // with n01's totals and legs read after the change.
+      const previousVersions = state.results.get(personKey)?.versions;
       // An automatic read goes on only while a view needs this player's legs.
       const wantedNow = (): boolean => !controller.current?.auto || (focusRef.current?.personKey === personKey && focusRef.current.read);
       void (async () => {
@@ -231,7 +234,7 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
             const api = roleApi(services, c.signal, DETAIL_MAX_REQUESTS);
             const result = await reconstructPerson(
               { api, cache: services.cache, isOnline, now: () => Date.now(), freshAfter: freshAfter || undefined, signal: c.signal, sleep: services.sleep },
-              { seasons: load.seasons, games: gamesRef.current?.games ?? new Map(), personKey, memory: kept },
+              { seasons: load.seasons, games: gamesRef.current?.games ?? new Map(), personKey, memory: kept, previousVersions, recheckOfficial: options.recheck === true && unit === 0 },
             );
             if (c.signal.aborted) return;
             total += result.requestsSent;

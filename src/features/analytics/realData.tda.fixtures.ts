@@ -107,3 +107,36 @@ export function tdaMultiResponse(copies: ReturnType<typeof tdaCopies>, operation
   const body = tdaResponse(copies.seasons[k], operation, real);
   return body === undefined ? undefined : JSON.parse(JSON.stringify(body).split(TDA_TDID).join(copies.ids[k]));
 }
+
+type Rec = Record<string, unknown>;
+
+/**
+ * A correction of one game (test-only, **simulated**): in the first singles game of
+ * {@link TDA_PLAYER} with a finished leg they lost, their first visit of that leg gets 1 more
+ * point (the following "left" values follow). Returned as n01 would show it once it caught up:
+ * the league list row (+1), the leg details (+1, totals +1) and the player's totals (score +1,
+ * First 9 +1) — each to be served on its own, as n01 may show them at different times.
+ */
+export function tdaCorrection(snap: TdaSnapshot): { mid: string; list: Rec[]; detail: unknown; stats: TdaSnapshot['playerStats'] } {
+  const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+  for (const [mid, body] of Object.entries(snap.details)) {
+    const m = (body as { match: Rec }).match;
+    const sides = m.statsData as { order: { oid: string }[]; allScore: number }[];
+    const side = sides.findIndex((x) => x.order.length === 1 && x.order[0].oid === TDA_PLAYER);
+    if (side < 0) continue;
+    const legs = m.legData as { endFlag: number; winner: number; playerData: { score: number; left: number }[][] }[];
+    const leg = legs.findIndex((l) => l.endFlag === 1 && l.winner !== side && l.playerData[side].length > 2);
+    if (leg < 0) continue;
+    const detail = clone(body) as { match: Rec };
+    const visits = (detail.match.legData as typeof legs)[leg].playerData[side];
+    visits[1].score += 1; // the first visit (row 0 is n01's start row)
+    for (let i = 1; i < visits.length; i += 1) visits[i].left -= 1;
+    (detail.match.statsData as { allScore: number }[])[side].allScore += 1;
+    const list = clone(snap.games).map((g) => (g.mid === mid ? { ...g, statsData: (g.statsData as Rec[]).map((x, i) => (i === side ? { ...x, allScore: Number(x.allScore) + 1 } : x)) } : g));
+    const stats = clone(snap.playerStats);
+    stats[TDA_PLAYER].score = Number(stats[TDA_PLAYER].score) + 1;
+    stats[TDA_PLAYER].f9Score = Number(stats[TDA_PLAYER].f9Score) + 1;
+    return { mid, list, detail, stats };
+  }
+  throw new Error('no leg to correct');
+}

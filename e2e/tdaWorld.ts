@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import { N01_API_BASE_URL } from '../src/integrations/n01/endpoints';
-import { tdaCopies, tdaMultiResponse, tdaResponse, TDA_TDID } from '../src/features/analytics/realData.tda.fixtures';
+import { tdaCopies, tdaCorrection, tdaMultiResponse, tdaResponse, TDA_TDID } from '../src/features/analytics/realData.tda.fixtures';
 import type { TdaSnapshot } from '../src/features/analytics/realData.tda.fixtures';
 
 /**
@@ -33,6 +33,8 @@ export interface TdaWorldControl {
   listCalls: number;
   /** Marks one of the real games unfinished (`null`: as n01 has it) — the list n01 serves from then on. */
   setUnfinished: (mid: string | null) => void;
+  /** Serves the corrected game (`tdaCorrection`) from now on: in the list, the legs and the totals. */
+  setCorrected: (on: boolean) => void;
   /** Holds the answer to the n-th `match/get` (0-based) until `release()` is called. */
   holdDetail: (n: number) => { reached: Promise<void>; release: () => void };
 }
@@ -53,6 +55,8 @@ function filler(n: number): Record<string, unknown>[] {
 
 export async function serveTdaWorld(page: Page, options: TdaWorldOptions = {}): Promise<TdaWorldControl> {
   let unfinished: string | null = null;
+  let corrected = false;
+  const fix = tdaCorrection(SNAP);
   const holds = new Map<number, { reached: () => void; gate: Promise<void> }>();
   let detailCalls = 0;
   const control: TdaWorldControl = {
@@ -62,6 +66,9 @@ export async function serveTdaWorld(page: Page, options: TdaWorldOptions = {}): 
     listCalls: 0,
     setUnfinished: (mid) => {
       unfinished = mid;
+    },
+    setCorrected: (on) => {
+      corrected = on;
     },
     holdDetail: (n) => {
       let reached!: () => void;
@@ -78,7 +85,15 @@ export async function serveTdaWorld(page: Page, options: TdaWorldOptions = {}): 
     const base = SNAP.games.find((g) => g.mid === options.unfinishedOf)!;
     games.push({ ...base, mid: `${String(base.mid)}_unfinished`, endMatch: 0, startTime: Number(base.startTime) + 999_999 });
   }
-  const snapOf = (): TdaSnapshot => ({ ...SNAP, games: unfinished ? games.map((g) => (g.mid === unfinished ? { ...g, endMatch: 0 } : g)) : games });
+  const snapOf = (): TdaSnapshot => {
+    const base = corrected ? games.map((g) => fix.list.find((x) => x.mid === g.mid) ?? g) : games;
+    return {
+      ...SNAP,
+      games: unfinished ? base.map((g) => (g.mid === unfinished ? { ...g, endMatch: 0 } : g)) : base,
+      playerStats: corrected ? fix.stats : SNAP.playerStats,
+      details: corrected ? { ...SNAP.details, [fix.mid]: fix.detail } : SNAP.details,
+    };
+  };
   await page.route(`${N01_API_BASE_URL}/**`, async (route) => {
     const url = new URL(route.request().url());
     const operation = url.pathname.replace(/^.*\/api\/v1\//u, '');

@@ -337,7 +337,7 @@ export function PlayerAnalytics({
                   status={detailStatus}
                   result={detailResult}
                   start={start}
-                  onRetry={() => role.detail.run(person.personKey, { fresh: false, auto: true })}
+                  onRetry={() => role.detail.run(person.personKey, { fresh: false, auto: true, recheck: true })}
                   titleOf={(id) => load.seasons.find((s) => s.tournamentId === id)?.title ?? id}
                 />
               </Card>

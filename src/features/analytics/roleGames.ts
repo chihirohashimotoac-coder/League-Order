@@ -66,6 +66,18 @@ export interface SeasonGames {
    * one did not see the same way (same id with other content, gone, inserted among its rows).
    */
   recollated?: { rows: number; corrected: number; removed: number; added: number };
+  /** When the list was read to the end (ms). */
+  readAt?: number;
+  /**
+   * The reading crossed units, so the rows read before the last switch were read again and
+   * compared: `rows` confirmed with `pages` extra requests, after `restarts` restarts for changes.
+   */
+  verified?: { rows: number; pages: number; restarts: number };
+  /**
+   * The version of this season's list known before (an expired saved list, a list of this screen,
+   * or `recollated`): the list changed, so its checks need fresh official totals and legs.
+   */
+  changedFrom?: string;
 }
 
 export interface ClassifiedGame {

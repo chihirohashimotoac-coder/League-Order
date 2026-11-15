@@ -100,11 +100,11 @@ describe('game lists of a long period (several budgets)', () => {
 
   it('after the safety limit of units, the offered retry really reads again, with a new allowance (Codex audit 2)', async () => {
     const fake = new FakeSeasons({ a: list('a', 500) });
-    const { s, finished } = session(fake, { unitRequests: 2, maxUnits: 2 });
+    const { s, finished } = session(fake, { unitRequests: 2, maxUnits: 3 });
     s.want([{ tournamentId: 'a', status: 40 }]);
     const stopped = await finished;
     expect(stopped.failures).toMatchObject([{ tournamentId: 'a', kind: 'budget' }]);
-    expect(fake.calls).toHaveLength(4);
+    expect(fake.calls).toHaveLength(6); // 500 rows: 6 requests to the end, no allowance left for the check
     // The season is shorter now (games deleted): the retry fits its allowance and reads it all.
     fake.seasons.a = list('a', 300);
     const done = new Promise<GamesLoad>((resolve) => {
@@ -120,8 +120,9 @@ describe('game lists of a long period (several budgets)', () => {
     const after = await done;
     expect(after.failures).toEqual([]);
     expect(after.games.get('a')?.games).toHaveLength(300);
-    expect(fake.calls.slice(4)).toEqual(['a@0', 'a@99', 'a@198', 'a@297']); // read again from the first row
-    expect(after.games.get('a')?.recollated).toMatchObject({ rows: 397, removed: 97 });
+    // Read again from the first row, then the 199 rows read before the switch of units checked.
+    expect(fake.calls.slice(6)).toEqual(['a@0', 'a@99', 'a@198', 'a@297', 'a@0', 'a@99']);
+    expect(after.games.get('a')?.recollated).toMatchObject({ rows: 500, removed: 200 });
   });
 
   it('a list shown from an expired saved copy is read again when the browser is back online (audit 2)', async () => {
