@@ -151,7 +151,8 @@ export function PlayerAnalytics({
   const detailResult = person && role ? role.detail.results.get(person.personKey) : undefined;
   const detailRunning = !!person && role?.detail.running === person.personKey;
   const detailPartial = !!person && !!role?.detail.partial?.has(person.personKey);
-  const start = useMemo(() => (doublesView && detailResult ? periodStart(detailResult.starts) : null), [doublesView, detailResult]);
+  // No doubles game in the lists loaded now (some may have been removed since the read): no start rate.
+  const start = useMemo(() => (doublesView && detailResult && exposure && exposure.games > 0 ? periodStart(detailResult.starts) : null), [doublesView, detailResult, exposure]);
   const detailStatus: DetailStatus | null = detailRole
     ? detailStatusOf({
         role: detailRole,

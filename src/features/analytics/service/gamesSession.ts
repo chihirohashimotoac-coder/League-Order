@@ -169,14 +169,15 @@ export class GamesSession {
       this.autoResumes.set(id, n + 1);
       return true;
     };
-    const failed = this.offlineFailures().filter(take);
-    const stale = [...this.usedStale].filter((id) => !this.queue.includes(id) && !this.progress.has(id) && take(id));
-    for (const id of stale) this.enqueue(id);
-    if (failed.length > 0) this.retry(failed);
-    else if (stale.length > 0) {
-      this.emit();
-      void this.pump();
+    // Each season once per event, whether it failed, is shown from a saved list, or both.
+    const ids = [...new Set([...this.offlineFailures(), ...this.usedStale])].filter((id) => !this.queue.includes(id) && !this.progress.has(id) && take(id));
+    if (ids.length === 0) return;
+    for (const id of ids) {
+      this.failures.delete(id);
+      this.enqueue(id);
     }
+    this.emit();
+    void this.pump();
   }
 
   /** Seasons that failed for a reason the network may have caused (offline, connection). */
@@ -205,8 +206,11 @@ export class GamesSession {
       // A stale list is only replaced by a list read now; a failed refresh keeps showing it.
       this.games.set(id, result.games);
       this.failures.delete(id);
-      if (result.source === 'stale-cache') this.usedStale.add(id);
-      else this.usedStale.delete(id);
+      if (result.source === 'stale-cache') {
+        this.usedStale.add(id);
+        // Shown from a saved list because it could not be read now: say why, and keep the retry.
+        if (result.refreshFailure) this.failures.set(id, { tournamentId: id, reason: result.refreshFailure.reason, kind: result.refreshFailure.kind });
+      } else this.usedStale.delete(id);
       if (!result.games.complete && result.games.heldReason) this.failures.set(id, { tournamentId: id, reason: result.games.heldReason, kind: 'held' });
       return;
     }

@@ -82,6 +82,7 @@ export const MAX_BOUNDARY_RESTARTS = 1;
 export const RUNNING_CHECKPOINT_MS = 30 * 60 * 1000;
 
 export const BOUNDARY_REASON = 'ゲーム一覧の取得中にページの境界で並びが変わりました（試合の更新・削除、または同時刻の並び替え）。古い続きと新しい一覧を混ぜないよう、この季は保留しています（「再試行」で最初から取り直します）';
+const STALE_OFFLINE = 'オフラインのため、保存済み（期限切れ・最新とは限らない）の一覧を表示しています（オンラインに戻ると自動で取り直します）';
 const RUNAWAY_REASON = `ゲーム一覧が安全上の上限（${MAX_SEASON_ROWS.toLocaleString('ja-JP')}件）を超えたため、この季は保留しています`;
 
 export interface GamesProgress {
@@ -94,7 +95,16 @@ export interface GamesProgress {
 export type GamesFailureKind = 'offline' | 'budget' | 'network' | 'schema' | 'aborted';
 
 export type GamesResult =
-  | { ok: true; games: SeasonGames; source: DataSource; fetchedAt: number; pages: number; saveFailed?: boolean }
+  | {
+      ok: true;
+      games: SeasonGames;
+      source: DataSource;
+      fetchedAt: number;
+      pages: number;
+      saveFailed?: boolean;
+      /** A saved (expired) list is returned because the season could not be read now: why. */
+      refreshFailure?: { kind: GamesFailureKind; reason: string };
+    }
   | {
       ok: false;
       tournamentId: string;
@@ -221,7 +231,7 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
       ? stored.value
       : null;
   if (!ctx.isOnline()) {
-    if (stale) return { ok: true, games: stale, source: 'stale-cache', fetchedAt: cached!.fetchedAt, pages: 0 };
+    if (stale) return { ok: true, games: stale, source: 'stale-cache', fetchedAt: cached!.fetchedAt, pages: 0, refreshFailure: { kind: 'offline', reason: STALE_OFFLINE } };
     return { ok: false, tournamentId, kind: 'offline', reason: 'オフラインで、保存済みのゲーム別データもありません。', progress: prior ? { rows: prior.ids.length, pages: prior.pages } : null, stale: null, pages: 0 };
   }
   let api = ctx.api;
@@ -276,7 +286,7 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
       const kind = failureKind(error);
       if (kind !== 'budget' && kind !== 'aborted' && stale) {
         // A list read to the end earlier is better than none (shown as saved, not current).
-        return { ok: true, games: stale, source: 'stale-cache', fetchedAt: cached!.fetchedAt, pages, saveFailed };
+        return { ok: true, games: stale, source: 'stale-cache', fetchedAt: cached!.fetchedAt, pages, saveFailed, refreshFailure: { kind, reason: `保存済み（期限切れ・最新とは限らない）の一覧を表示しています。最新の取得に失敗しました（${describeN01Error(error)}）` } };
       }
       return { ok: false, tournamentId, kind, reason: error instanceof RequestBudgetError ? error.message : describeN01Error(error), progress: progress(), stale, pages, saveFailed };
     }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { seasonsNeedingGames } from '../projection';
 import type { PlayerContributions } from '../reconstruct';
 import type { GameScope } from '../roleGames';
-import { currentContributions, detailCoverage, newDetailMemory, reconstructPerson } from '../service/detailService';
+import { currentContributions, currentResult, detailCoverage, newDetailMemory, reconstructPerson } from '../service/detailService';
 import type { DetailMemory } from '../service/detailService';
 import type { PlayerDetailResult } from '../service/detailService';
 import { emptyGamesLoad, GamesSession } from '../service/gamesSession';
@@ -181,6 +181,8 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
   // period). Freshness still applies to each entry (its read time, the TTL, the page's refresh).
   const memory = useRef<{ memory: DetailMemory }>({ memory: newDetailMemory() });
   const contributions = useMemo(() => contributionsOf(state.results, games), [state.results, games]);
+  // What may be shown: per season, only what was checked against the game list loaded now.
+  const shownResults = useMemo(() => new Map([...state.results].map(([key, result]) => [key, currentResult(result, games?.games ?? null)])), [state.results, games]);
 
   useEffect(() => {
     // A run started for this very period (by a view that rendered first) is kept.
@@ -303,5 +305,5 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
     return () => window.removeEventListener('online', online);
   }, [state.results, run]);
 
-  return { running: state.running, results: state.results, contributions, partial: state.partial, run, focus, ensure };
+  return { running: state.running, results: shownResults, contributions, partial: state.partial, run, focus, ensure };
 }

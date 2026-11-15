@@ -76,6 +76,8 @@ export interface PlayerDetailResult {
   gameSeason?: Record<string, string>;
   /** The browser's storage refused a write: the legs read stay for this screen only. */
   saveFailed?: boolean;
+  /** Seasons withheld because their game list was read again with other content (`currentResult`). */
+  outdatedSeasons?: string[];
   /**
    * 個人スタート率 per season of the period the player appears in (doubles 01, double-in slots
    * only; see `startRate.ts` / `startRule.ts`). Pooled by `periodStart`.
@@ -257,6 +259,41 @@ export function detailCoverage(seasons: readonly SeasonData[], games: ReadonlyMa
     .filter((s) => games.get(s.tournamentId)?.complete && s.players.some((p) => p.personKey === personKey))
     .map((s) => `${s.tournamentId}@${gamesVersion(games.get(s.tournamentId)!)}`)
     .join(',');
+}
+
+export const OUTDATED_REASON = 'ゲーム記録が更新されたため、この季は照合し直しています';
+
+/**
+ * A result as it may be shown with the game lists loaded now: every season whose list was read
+ * again with other content (or is no longer complete) gives nothing — no per-game figures, no
+ * check, no start attempts (the season is "not examined", with the reason), and Best Leg is held —
+ * until the player is checked against the new list. Results made before versions were kept are
+ * returned as they are.
+ */
+export function currentResult(result: PlayerDetailResult, games: ReadonlyMap<string, SeasonGames> | null): PlayerDetailResult {
+  if (!games || !result.versions) return result;
+  const outdated = new Set(
+    Object.entries(result.versions)
+      .filter(([tid, version]) => {
+        const raw = games.get(tid);
+        return !raw?.complete || gamesVersion(raw) !== version;
+      })
+      .map(([tid]) => tid),
+  );
+  if (outdated.size === 0) return result;
+  return {
+    ...result,
+    checks: result.checks.filter((c) => !outdated.has(c.tournamentId)),
+    starts: result.starts.map((s) =>
+      outdated.has(s.tournamentId)
+        ? { tournamentId: s.tournamentId, title: s.title, doublesGames: null, counted: 0, attempts: 0, successes: 0, legs: 0, excludedLegs: {}, excludedGames: {}, ruleNotes: [], highInAgreements: 0, seasonReason: OUTDATED_REASON }
+        : s,
+    ),
+    contributions: currentContributions(result, games),
+    bestLegs: new Map(),
+    bestLegHeld: { all: true, starts: [], reasons: [OUTDATED_REASON, ...result.bestLegHeld.reasons] },
+    outdatedSeasons: [...outdated],
+  };
 }
 
 /**

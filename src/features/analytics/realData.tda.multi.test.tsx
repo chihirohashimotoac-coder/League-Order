@@ -8,7 +8,7 @@ import { projectSeasons } from './projection';
 import { tdaCopies, tdaMultiResponse, TDA_PLAYER } from './realData.tda.fixtures';
 import type { TdaSnapshot } from './realData.tda.fixtures';
 import TDA_RAW from './realData.tda.json';
-import { DETAIL_MAX_REQUESTS } from './service/detailService';
+import { DETAIL_MAX_REQUESTS, OUTDATED_REASON } from './service/detailService';
 import { GamesSession } from './service/gamesSession';
 import type { GamesLoad } from './service/gamesSession';
 import { loadPeriod } from './service/periodService';
@@ -87,6 +87,24 @@ async function setup(opts: { sleep?: AnalyticsServices['sleep']; detailCache?: A
 const tick = (): Promise<void> => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 
 describe('leg details beyond one budget (3 seasons × 25 games of one player)', () => {
+  it('the player\'s doubles games all gone from a list read again: the old start rate is not shown, even without a new read (audit 3)', async () => {
+    const { load, games, out, view, personKey, wait, services } = await setup();
+    await act(async () => out.detail!.focus(personKey, true));
+    await wait();
+    const tid = COPIES.ids[0];
+    expect(out.detail!.results.get(personKey)!.starts.find((x) => x.tournamentId === tid)!.counted).toBeGreaterThan(0);
+    const raw = games.games.get(tid)!;
+    const doubles = (g: (typeof raw.games)[number]): boolean => g.sides.some((side) => side.players.length === 2 && side.players.some((p) => p.oid === TDA_PLAYER));
+    const next: GamesLoad = { ...games, games: new Map([...games.games, [tid, { ...raw, games: raw.games.filter((g) => !doubles(g)), version: 'no-doubles' }]]) };
+    // 01全体 is shown (no read wanted), and the list changes meanwhile.
+    await act(async () => out.detail!.focus(personKey, false));
+    view.rerender(<Harness services={services} load={load} games={next} out={out} />);
+    for (let i = 0; i < 10; i += 1) await tick();
+    const shown = out.detail!.results.get(personKey)!;
+    expect(shown.starts.find((x) => x.tournamentId === tid)).toMatchObject({ counted: 0, attempts: 0, seasonReason: OUTDATED_REASON });
+    expect(shown.checks.some((c) => c.tournamentId === tid)).toBe(false);
+  });
+
   it('the browser refuses every write: the parts still never read a game twice (audit 3)', async () => {
     const refusing = new AnalyticsCache({ memoryOnly: true, limits: { maxEntries: 80, maxBytes: 1 } });
     const { world, out, personKey, wait } = await setup({ detailCache: refusing });
@@ -141,6 +159,12 @@ describe('leg details beyond one budget (3 seasons × 25 games of one player)', 
     // At once: none of that season's figures are shown with the new list.
     for (const gameId of out.detail!.contributions.keys()) expect(raw.games.find((g) => g.gameId === gameId) === undefined || corrected.games.some((g) => g.gameId === gameId)).toBe(true);
     expect([...out.detail!.contributions.keys()].length).toBeLessThan(before);
+    // Nothing else of that season either: no check, no start attempts (not examined, with the reason), Best Leg held.
+    const shown = out.detail!.results.get(personKey)!;
+    expect(shown.checks.some((c) => c.tournamentId === tid)).toBe(false);
+    expect(shown.starts.find((x) => x.tournamentId === tid)).toMatchObject({ doublesGames: null, attempts: 0, seasonReason: OUTDATED_REASON });
+    expect(shown.bestLegs.size).toBe(0);
+    expect(shown.outdatedSeasons).toEqual([tid]);
     await wait();
     for (let i = 0; i < 20; i += 1) await tick();
     // Checked again against the new list (it no longer adds up to n01's totals: shown as such), with no leg read again.

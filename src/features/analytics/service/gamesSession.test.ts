@@ -157,6 +157,51 @@ describe('game lists of a long period (several budgets)', () => {
     expect(after.games.get('a')!.version).not.toBe(shown.games.get('a')!.version ?? 'none');
   });
 
+  it('an expired saved list that cannot be read again: shown, with the reason and a working retry — also after the automatic resumes are used up (audit 3)', async () => {
+    const fake = new FakeSeasons({ a: list('a', 120) });
+    let clock = 1_000;
+    const cache = new AnalyticsCache({ memoryOnly: true, now: () => clock });
+    const first = session(fake, { cache, now: () => clock });
+    first.s.want([{ tournamentId: 'a', status: 30 }]);
+    await first.finished;
+    clock += 7 * 60 * 60 * 1000;
+    fake.down.add('a');
+    fake.seasons.a = list('a', 125);
+    const second = session(fake, { cache, now: () => clock });
+    second.s.want([{ tournamentId: 'a', status: 30 }]);
+    const shown = await second.finished;
+    expect(shown.games.get('a')?.games).toHaveLength(120);
+    expect([...shown.stale!]).toEqual(['a']);
+    expect(shown.failures).toMatchObject([{ tournamentId: 'a', kind: 'network' }]);
+    const settled = (): Promise<GamesLoad> =>
+      new Promise((resolve) => {
+        const check = setInterval(() => {
+          if (!second.s.busy) {
+            clearInterval(check);
+            resolve(second.s.snapshot());
+          }
+        }, 1);
+      });
+    // Three automatic resumes (back online three times), all failing: then no more by itself …
+    for (let i = 0; i < 3; i += 1) {
+      second.s.resumeOnline();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await settled();
+    }
+    const calls = fake.calls.length;
+    second.s.resumeOnline();
+    await settled();
+    expect(fake.calls.length).toBe(calls);
+    // … but the retry offered still works.
+    fake.down.delete('a');
+    second.s.retry();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const after = await settled();
+    expect(after.games.get('a')?.games).toHaveLength(125);
+    expect(after.failures).toEqual([]);
+    expect(after.stale!.size).toBe(0);
+  });
+
   it('dispose() stops the load: no request after it', async () => {
     const fake = new FakeSeasons(twelve());
     const { s } = session(fake);
