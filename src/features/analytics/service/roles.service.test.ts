@@ -4,7 +4,7 @@ import type { AnalyticsTransport } from '../api/readApi';
 import { AnalyticsCache } from '../cache/analyticsCache';
 import { desperadoGames, details, season2024Data, TDID_2024_2ND, wireDetail, wireGame, withDetailSides } from '../realData.roles.fixtures';
 import { reconstructPerson } from './detailService';
-import { loadGames, loadSeasonGames, MAX_GAME_PAGES } from './gamesLoader';
+import { loadSeasonGames, MAX_SEASON_ROWS } from './gamesLoader';
 import type { GamesContext } from './gamesLoader';
 
 /** A fake n01 serving `match/list` pages and `match/get` from fixtures, recording each call. */
@@ -33,7 +33,7 @@ class FakeGames implements AnalyticsTransport {
 }
 
 function ctxOf(fake: FakeGames, opts: { maxRequests?: number; online?: () => boolean; cache?: AnalyticsCache; signal?: AbortSignal } = {}): GamesContext {
-  return { api: new AnalyticsApi({ transport: fake, maxRequests: opts.maxRequests }), cache: opts.cache ?? new AnalyticsCache({ memoryOnly: true }), isOnline: opts.online ?? (() => true), now: () => Date.now(), signal: opts.signal };
+  return { api: new AnalyticsApi({ transport: fake, maxRequests: opts.maxRequests }), cache: opts.cache ?? new AnalyticsCache({ memoryOnly: true }), isOnline: opts.online ?? (() => true), now: () => Date.now(), signal: opts.signal, sleep: async () => undefined };
 }
 
 function synthetic(n: number, extra: Record<string, unknown>[] = []): Record<string, unknown>[] {
@@ -42,7 +42,7 @@ function synthetic(n: number, extra: Record<string, unknown>[] = []): Record<str
 }
 
 describe('game rows loader', () => {
-  it('pages through match/list (100 a page, oldest first, league games only) and keeps unfinished / playoff rows out', async () => {
+  it('pages through match/list (100 a page, each page from the last row read, oldest first, league games only) and keeps unfinished / playoff rows out', async () => {
     const extra = [
       { mid: 'u', tmid: 't_lg_0_u_A_B', schid: 's', endMatch: 0, statsData: synthetic(1)[0].statsData },
       { mid: 'p', tmid: 't_m_0_A_B', schid: 's', endMatch: 1, statsData: synthetic(1)[0].statsData },
@@ -51,7 +51,9 @@ describe('game rows loader', () => {
     const result = await loadSeasonGames(ctxOf(fake), 't', 40);
     expect(fake.calls).toHaveLength(3);
     expect(fake.calls[0].params).toMatchObject({ tdid: 't', tmid__regex: '_lg_', sort: 'startTime', order: 'asc', count: '100' });
-    expect(fake.calls[2].params.skip).toBe('200');
+    // 232 rows: 0–99, then 99–198, then 198–231 (the first row of each later page is the overlap).
+    expect(fake.calls[1].params.skip).toBe('99');
+    expect(fake.calls[2].params.skip).toBe('198');
     if (!result.ok) throw new Error(result.reason);
     expect(result.games.games).toHaveLength(230);
     expect(result.games.dropped).toEqual({ unfinished: 1, unreadable: 0, nonLeague: 1 });
@@ -93,22 +95,14 @@ describe('game rows loader', () => {
     expect(offline).toMatchObject({ ok: false, kind: 'offline' });
   });
 
-  it('a runaway list stops at the page cap and is marked incomplete', async () => {
-    const fake = new FakeGames({ t: synthetic(MAX_GAME_PAGES * 100 + 5) });
-    const result = await loadSeasonGames(ctxOf(fake), 't', 40);
-    expect(fake.calls).toHaveLength(MAX_GAME_PAGES);
+  it('a runaway list stops at the safety limit and is set aside as incomplete, with the reason', async () => {
+    // The limit itself is 50,000 rows; a lower one keeps the test fast (same code path).
+    const fake = new FakeGames({ t: synthetic(1_500) });
+    const result = await loadSeasonGames({ ...ctxOf(fake, { maxRequests: 1000 }), maxRows: 1_000 }, 't', 40);
+    expect(MAX_SEASON_ROWS).toBe(50_000);
     expect(result.ok && result.games.complete).toBe(false);
-  });
-
-  it('one failed season does not drop the others; a budget stop marks the rest as missing', async () => {
-    const fake = new FakeGames({ a: synthetic(3), b: synthetic(3), c: synthetic(3) });
-    fake.failing.add('b');
-    const load = await loadGames(ctxOf(fake), [{ tournamentId: 'a', status: 40 }, { tournamentId: 'b', status: 40 }, { tournamentId: 'c', status: 40 }], 1);
-    expect([...load.games.keys()]).toEqual(['a', 'c']);
-    expect([...load.failed]).toEqual(['b']);
-    const limited = await loadGames(ctxOf(new FakeGames({ a: synthetic(3), b: synthetic(3) }), { maxRequests: 1 }), [{ tournamentId: 'a', status: 40 }, { tournamentId: 'b', status: 40 }], 1);
-    expect([...limited.failed]).toEqual(['b']);
-    expect(limited.failures[0].kind).toBe('budget');
+    expect(result.ok && result.games.heldReason).toContain('安全上の上限');
+    expect(fake.calls).toHaveLength(11);
   });
 
   it('a cancelled load stops without throwing', async () => {
@@ -258,7 +252,7 @@ describe('leg reconstruction freshness (audit F06)', () => {
   const DAY = 24 * 60 * 60 * 1000;
 
   function timed(fake: FakeGames, clock: { now: number }, cache: AnalyticsCache, forceRefresh = false): GamesContext {
-    return { api: new AnalyticsApi({ transport: fake }), cache, isOnline: () => true, now: () => clock.now, forceRefresh };
+    return { api: new AnalyticsApi({ transport: fake }), cache, isOnline: () => true, now: () => clock.now, forceRefresh, sleep: async () => undefined };
   }
   const run = (ctx: GamesContext) => {
     const s = season2024Data();

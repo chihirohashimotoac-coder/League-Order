@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { EmptyState } from '../../../components/ui';
 import type { Page } from '../../../navigation';
 import { useAppStore } from '../../../state/appStore';
@@ -7,6 +7,7 @@ import { projectSeasons } from '../projection';
 import type { Projection, SeasonAdoption } from '../projection';
 import type { GameScope } from '../roleGames';
 import { PlayerAnalytics } from './PlayerAnalytics';
+import type { FocusSummary } from './PlayerAnalytics';
 import { LoadBanner, PeriodBar, Segmented, SourceNote } from './parts';
 import { AnalysisSummary, effectiveScope, ScopeBar } from './scopeParts';
 import type { MainScope, OthersPart } from './scopeParts';
@@ -48,6 +49,10 @@ export default function AnalyticsPage({
   const [mainScope, setMainScope] = useState<MainScope>('all01');
   const [othersPart, setOthersPart] = useState<OthersPart>('others');
   const scope = effectiveScope(mainScope, othersPart);
+  const [focusSummary, setFocusSummaryState] = useState<FocusSummary | null>(null);
+  const setFocusSummary = useCallback((next: FocusSummary | null) => {
+    setFocusSummaryState((prev) => (prev?.name === next?.name && prev?.status.kind === next?.status.kind && prev?.status.text === next?.status.text ? prev : next));
+  }, []);
 
   const currentId = binding?.lastTournamentId ?? '';
   const request: PeriodRequest | null = binding
@@ -59,7 +64,7 @@ export default function AnalyticsPage({
   const detail = usePlayerDetail(resolved, rawLoad, games.load, reload);
   // The chosen game kind's view of the seasons: which counters each season contributes.
   const projection = useMemo<Projection | null>(
-    () => (state.load ? projectSeasons(state.load.seasons, scope, { games: games.load?.games ?? new Map(), failed: games.load?.failed ?? new Set() }, detail.contributions) : null),
+    () => (state.load ? projectSeasons(state.load.seasons, scope, { games: games.load?.games ?? new Map(), failed: games.load?.failed ?? new Set(), pending: games.load?.pending }, detail.contributions) : null),
     [state.load, scope, games.load, detail.contributions],
   );
 
@@ -123,7 +128,7 @@ export default function AnalyticsPage({
       <ScopeBar main={mainScope} part={othersPart} onMain={setMainScope} onPart={setOthersPart} />
       </div>
       <LoadBanner load={state.load} loading={loading} onRetry={() => setReload((n) => n + 1)} onWatch={openWatchStats} />
-      {state.load && projection && state.load.seasons.length > 0 ? <AnalysisSummary load={state.load} projection={projection} scope={scope} games={games} /> : null}
+      {state.load && projection && state.load.seasons.length > 0 ? <AnalysisSummary load={state.load} projection={projection} scope={scope} games={games} focus={view === 'player' ? focusSummary : null} /> : null}
       {load && load.seasons.length > 0 ? (
         <div className={loading ? 'analytics-body stale' : 'analytics-body'} aria-busy={loading}>
           {view === 'player' ? (
@@ -134,6 +139,7 @@ export default function AnalyticsPage({
               baseTournamentId={baseId}
               onOpenMembers={() => onNavigate('players')}
               role={roleView}
+              onFocusSummary={setFocusSummary}
             />
           ) : TeamView ? (
             <TeamView team={team} players={store.teamPlayers} load={load} baseTournamentId={baseId} role={roleView} />

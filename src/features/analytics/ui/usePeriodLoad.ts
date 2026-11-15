@@ -7,6 +7,7 @@ import type { PeriodLoad } from '../service/periodService';
 import { loadLeagueList } from '../service/seasonLoader';
 import { classifySeason } from '../seasons';
 import type { PeriodRequest } from '../seasons';
+import type { Sleep } from '../service/retry';
 
 /**
  * Loads a period for a screen. Lazy (nothing is requested until a screen mounts), cancelled
@@ -25,6 +26,8 @@ export interface AnalyticsServices {
   /** Adapter for the lazy game-row / leg-detail loads, each with its own request budget. */
   createRoleApi?: (signal: AbortSignal, maxRequests: number) => AnalyticsApi;
   cache: AnalyticsCache;
+  /** Waits between retries and between parts of a long read (tests make it instant). */
+  sleep?: Sleep;
 }
 
 let sharedCache: AnalyticsCache | null = null;

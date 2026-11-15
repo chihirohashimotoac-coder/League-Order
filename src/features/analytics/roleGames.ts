@@ -54,6 +54,11 @@ export interface SeasonGames {
   dropped: { unfinished: number; unreadable: number; nonLeague: number };
   /** Every page was read (a cut-off list must not pass as the whole season). */
   complete: boolean;
+  /**
+   * Why an incomplete list was set aside instead of being read on (the page boundary moved
+   * between requests twice, or the list ran past the safety limit). Absent otherwise.
+   */
+  heldReason?: string;
 }
 
 export interface ClassifiedGame {

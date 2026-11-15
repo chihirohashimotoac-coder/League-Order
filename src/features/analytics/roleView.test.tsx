@@ -46,12 +46,13 @@ const players = [['p1', '和田 圭司', '63Cz'], ['p2', '永野 優子', 'g1vr'
     ({ id, name, teamId: 'team1', archived: false, n01: { opid: null, currentOid: oid, currentTpid: 'pzDR', sourceName: name, rosterActive: true, lastSeenTournamentId: TDID_2024_2ND, lastSeenAt: 0, stats: null } }) as unknown as Player,
 );
 
-const gamesState: GamesState = { status: 'done', load: { ...games, failures: [], usedStaleCache: false, requestsSent: 6 }, needed: [TDID_2024_2ND] };
+const gamesState: GamesState = { status: 'done', load: { ...games, failures: [], usedStaleCache: false, requestsSent: 6, pending: new Set(), progress: new Map(), units: 1 }, needed: [TDID_2024_2ND], retry: () => undefined };
 
-function view(scope: GameScope, run = vi.fn(), ensure = vi.fn()): { load: PeriodLoad; role: RoleViewProps } {
+/** `focus` is the view's automatic-read control: (player shown, whether this view needs their legs). */
+function view(scope: GameScope, run = vi.fn(), focus = vi.fn()): { load: PeriodLoad; role: RoleViewProps } {
   const projection = projectSeasons([s], scope, games);
   const load = { ...emptyLoad({ mode: 'current', currentTournamentId: TDID_2024_2ND }, {}), seasons: projection.seasons, complete: true, window: [{ tournamentId: TDID_2024_2ND, title: s.title, state: 'loaded' as const }] };
-  return { load, role: { scope, adoption: projection.adoption, games: gamesState, detail: { running: null, results: new Map(), contributions: new Map(), run, ensure } } };
+  return { load, role: { scope, adoption: projection.adoption, games: gamesState, detail: { running: null, results: new Map(), contributions: new Map(), partial: new Set(), run, focus, ensure: vi.fn() } } };
 }
 
 describe('game-kind views on screen', () => {
@@ -70,12 +71,12 @@ describe('game-kind views on screen', () => {
 
   it('doubles: the shown player\'s leg details are read without a button; Leg/Set are pair results, and 3DA is not ranked', () => {
     const run = vi.fn();
-    const ensure = vi.fn();
-    const { load, role } = view('doubles', run, ensure);
+    const focus = vi.fn();
+    const { load, role } = view('doubles', run, focus);
     render(<PlayerAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
     // Started automatically for the player shown first (和田), and for nobody else.
-    expect(ensure).toHaveBeenCalledWith(s.players.find((p) => p.oid === '63Cz')!.personKey);
-    expect(new Set(ensure.mock.calls.map((c) => c[0])).size).toBe(1);
+    expect(focus).toHaveBeenCalledWith(s.players.find((p) => p.oid === '63Cz')!.personKey, true);
+    expect(new Set(focus.mock.calls.map((c) => c[0])).size).toBe(1);
     expect(run).not.toHaveBeenCalled();
     expect(screen.queryByTestId('reconstruct-run')).toBeNull();
     expect(screen.getByTestId('metric-3DA').textContent).toContain('準備中');
@@ -88,46 +89,54 @@ describe('game-kind views on screen', () => {
 
   it('others (trios / team …): nothing is read automatically; the reconstruction stays on request', () => {
     const run = vi.fn();
-    const ensure = vi.fn();
-    const { load, role } = view('others', run, ensure);
+    const focus = vi.fn();
+    const { load, role } = view('others', run, focus);
     render(<PlayerAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
-    expect(ensure.mock.calls.every((c) => c[0] === null)).toBe(true); // released only, never a read
+    expect(focus.mock.calls.every((c) => c[1] === false)).toBe(true); // never a read
     expect(screen.getByTestId('metric-3DA').textContent).toContain('個人別に復元できません');
     expect(screen.queryByTestId('metric-個人スタート率')).toBeNull();
     screen.getByTestId('reconstruct-run').click();
     expect(run).toHaveBeenCalledWith(s.players.find((p) => p.oid === '63Cz')!.personKey);
   });
 
-  it('singles and 01全体 never start the doubles read (they only release it: ensure(null))', () => {
-    for (const scope of ['singles', 'all01'] as const) {
-      const ensure = vi.fn();
-      const { load, role } = view(scope, vi.fn(), ensure);
-      const { unmount } = render(<PlayerAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
-      expect(ensure.mock.calls.every((c) => c[0] === null)).toBe(true);
-      unmount();
-    }
+  it('01全体 never starts a read; singles starts it for a player with singles games (First 9・Keep・Break need the legs)', () => {
+    const all = vi.fn();
+    const a = view('all01', vi.fn(), all);
+    const first = render(<PlayerAnalytics team={team()} players={players} load={a.load} baseTournamentId={TDID_2024_2ND} role={a.role} />);
+    expect(all.mock.calls.every((c) => c[1] === false)).toBe(true);
+    first.unmount();
+    const singles = vi.fn();
+    const b = view('singles', vi.fn(), singles);
+    render(<PlayerAnalytics team={team()} players={players} load={b.load} baseTournamentId={TDID_2024_2ND} role={b.role} />);
+    expect(singles).toHaveBeenCalledWith(s.players.find((p) => p.oid === '63Cz')!.personKey, true);
   });
 
-  it('leaving ダブルス, or closing the player view, releases the automatic read (Codex audit)', () => {
-    const ensure = vi.fn();
-    const doubles = view('doubles', vi.fn(), ensure);
+  it('switching ダブルス → シングルス → 01全体 keeps the same player (shared read, never cancelled); closing the view only stops new parts', () => {
+    const focus = vi.fn();
+    const wada = s.players.find((p) => p.oid === '63Cz')!.personKey;
+    const doubles = view('doubles', vi.fn(), focus);
     const { rerender, unmount } = render(<PlayerAnalytics team={team()} players={players} load={doubles.load} baseTournamentId={TDID_2024_2ND} role={doubles.role} />);
-    expect(ensure).toHaveBeenLastCalledWith(s.players.find((p) => p.oid === '63Cz')!.personKey);
-    const singles = view('singles', vi.fn(), ensure);
+    expect(focus).toHaveBeenLastCalledWith(wada, true);
+    const singles = view('singles', vi.fn(), focus);
     rerender(<PlayerAnalytics team={team()} players={players} load={singles.load} baseTournamentId={TDID_2024_2ND} role={singles.role} />);
-    expect(ensure).toHaveBeenLastCalledWith(null);
-    rerender(<PlayerAnalytics team={team()} players={players} load={doubles.load} baseTournamentId={TDID_2024_2ND} role={doubles.role} />);
-    ensure.mockClear();
+    expect(focus).toHaveBeenLastCalledWith(wada, true);
+    const all = view('all01', vi.fn(), focus);
+    rerender(<PlayerAnalytics team={team()} players={players} load={all.load} baseTournamentId={TDID_2024_2ND} role={all.role} />);
+    expect(focus).toHaveBeenLastCalledWith(wada, false);
+    expect(focus.mock.calls.some((c) => c[0] === null)).toBe(false);
+    focus.mockClear();
     unmount();
-    expect(ensure).toHaveBeenCalledWith(null);
+    expect(focus).toHaveBeenCalledWith(wada, false);
   });
 
-  it('singles: the player\'s own 3DA from the game rows, ranked', () => {
+  it('singles: the player\'s own 3DA from the game rows, shown at once; First 9 waits for the leg read', () => {
     const { load, role } = view('singles');
     render(<PlayerAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
     // 和田: 5850 points / 421 darts over 6 singles games.
     expect(screen.getByTestId('metric-3DA').textContent).toContain(((5850 * 3) / 421).toFixed(2));
-    expect(screen.queryByTestId('reconstruction')).toBeNull();
+    expect(screen.getByTestId('reconstruction').getAttribute('data-state')).toBe('waiting');
+    expect(screen.getByTestId('metric-First 9').textContent).toContain('準備中');
+    expect(screen.queryByTestId('reconstruct-run')).toBeNull();
   });
 
   it('team view in a game-kind view: team totals only, no official Match record mixed in', () => {
@@ -182,7 +191,7 @@ describe('final review fixes on screen', () => {
   function teamLoad(s: ReturnType<typeof seasonWithStandings>): { load: PeriodLoad; role: RoleViewProps } {
     const projection = projectSeasons([s], 'all01', games);
     const load = { ...emptyLoad({ mode: 'current', currentTournamentId: TDID_2024_2ND }, {}), seasons: projection.seasons, complete: true, window: [{ tournamentId: TDID_2024_2ND, title: s.title, state: 'loaded' as const }] };
-    return { load, role: { scope: 'all01', adoption: projection.adoption, games: gamesState, detail: { running: null, results: new Map(), contributions: new Map(), run: vi.fn(), ensure: vi.fn() } } };
+    return { load, role: { scope: 'all01', adoption: projection.adoption, games: gamesState, detail: { running: null, results: new Map(), contributions: new Map(), partial: new Set(), run: vi.fn(), ensure: vi.fn(), focus: vi.fn() } } };
   }
 
   it('the official Match rate of a Cricket-mixed season says it includes Cricket results (numbers unchanged)', () => {
@@ -228,13 +237,13 @@ describe('doubles: the automatic read on screen (stored 2024 2nd data, league id
   async function shown(result: PlayerDetailResult, run = vi.fn(), ensure = vi.fn()) {
     const projection = projectSeasons([atdo], 'doubles', games, result.contributions);
     const load = { ...emptyLoad({ mode: 'current', currentTournamentId: TDID_2024_2ND }, {}), seasons: projection.seasons, complete: true, window: [{ tournamentId: TDID_2024_2ND, title: s.title, state: 'loaded' as const }] };
-    const role: RoleViewProps = { scope: 'doubles', adoption: projection.adoption, games: gamesState, detail: { running: null, results: new Map([[personKey, result]]), contributions: result.contributions, run, ensure } };
+    const role: RoleViewProps = { scope: 'doubles', adoption: projection.adoption, games: gamesState, detail: { running: null, results: new Map([[personKey, result]]), contributions: result.contributions, partial: new Set(), run, ensure, focus: vi.fn() } };
     render(<PlayerAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
     return { run };
   }
 
   it('3DA from the verified reconstruction and 個人スタート率 38.5%・5/13スロー, labelled as computed from the legs', async () => {
-    const result = await reconstructPerson({ api: new AnalyticsApi({ transport }), cache: new AnalyticsCache({ memoryOnly: true }), isOnline: () => true, now: () => Date.now() }, { seasons: [atdo], games: games.games, personKey });
+    const result = await reconstructPerson({ api: new AnalyticsApi({ transport }), cache: new AnalyticsCache({ memoryOnly: true }), isOnline: () => true, now: () => Date.now(), sleep: async () => undefined }, { seasons: [atdo], games: games.games, personKey });
     await shown(result);
     const start = screen.getByTestId('metric-個人スタート率').textContent!;
     expect(start).toContain('38.5%');
@@ -252,7 +261,8 @@ describe('doubles: the automatic read on screen (stored 2024 2nd data, league id
     const result = await reconstructPerson({ api: new AnalyticsApi({ transport: failing }), cache: new AnalyticsCache({ memoryOnly: true }), isOnline: () => false, now: () => Date.now() }, { seasons: [atdo], games: games.games, personKey });
     const user = userEvent.setup();
     const { run } = await shown(result);
-    expect(screen.getByTestId('reconstruction').getAttribute('data-state')).toBe('unavailable');
+    expect(screen.getByTestId('reconstruction').getAttribute('data-state')).toBe('failed');
+    expect(screen.getByTestId('reconstruction-badge').textContent).toBe('取得失敗');
     expect(screen.getByTestId('metric-個人スタート率').textContent).toContain('—');
     expect(screen.getByTestId('metric-3DA').textContent).toContain('取得できなかった');
     await user.click(screen.getByTestId('reconstruct-retry'));
@@ -260,11 +270,11 @@ describe('doubles: the automatic read on screen (stored 2024 2nd data, league id
   });
 
   it('a player without a doubles game: "対象なし", and nothing is read for them', () => {
-    const ensure = vi.fn();
-    const { load, role } = view('doubles', vi.fn(), ensure);
+    const focus = vi.fn();
+    const { load, role } = view('doubles', vi.fn(), focus);
     const solo = [{ ...players[0], id: 'p9', name: '阿部', n01: { ...players[0].n01!, currentOid: 'vhqF' } } as Player];
     render(<PlayerAnalytics team={team()} players={solo} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
-    expect(ensure.mock.calls.every((c) => c[0] === null)).toBe(true); // released only, never a read
+    expect(focus.mock.calls.every((c) => c[1] === false)).toBe(true); // never a read
     expect(screen.getByTestId('reconstruction').getAttribute('data-state')).toBe('none');
     expect(screen.getByTestId('metric-3DA').textContent).toContain('ダブルス01の出場がない');
   });
