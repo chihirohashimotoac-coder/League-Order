@@ -84,7 +84,7 @@ export type GamesResult =
     };
 
 interface Checkpoint {
-  v: 3;
+  v: 4;
   tournamentId: string;
   /** When the first row was read: a refresh asked after this invalidates the checkpoint. */
   startedAt: number;
@@ -94,7 +94,20 @@ interface Checkpoint {
   dropped: SeasonGames['dropped'];
   pages: number;
   restarts: number;
+  /**
+   * Positions (in `ids`) of league rows that were not finished when read. A load that continues a
+   * checkpoint reads them again before the season is published: a game finished since then is
+   * counted, and the rows around it must still be where they were.
+   */
+  unfinished: number[];
 }
+
+/**
+ * How long a checkpoint of a running season may be continued. Rows read earlier than this are not
+ * mixed with new ones (a finished game corrected meanwhile would go unnoticed); the season is read
+ * again from its first row. A finished season keeps its checkpoint as long as its list.
+ */
+export const RUNNING_CHECKPOINT_MS = 30 * 60 * 1000;
 
 /** Drops what the cache does not need (names come from the season's stats rows). */
 function compact(game: RawGame): RawGame {
@@ -112,7 +125,7 @@ function failureKind(error: unknown): GamesFailureKind {
 }
 
 function fresh(tournamentId: string, startedAt: number, restarts: number): Checkpoint {
-  return { v: 3, tournamentId, startedAt, ids: [], games: [], dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, pages: 0, restarts };
+  return { v: 4, tournamentId, startedAt, ids: [], games: [], dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, pages: 0, restarts, unfinished: [] };
 }
 
 const ttlOf = (status: number | null): number => (status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason);
@@ -126,17 +139,67 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
   // Only a list read to the end can stand in for the season while it is being read again.
   const stale = cached?.value.complete ? cached.value : null;
   const stored = await ctx.cache.get<Checkpoint>(wipKey);
-  const resumable = stored && stored.value?.v === 3 && stored.value.tournamentId === tournamentId && ctx.cache.isFresh(stored) && stored.value.startedAt >= freshAfter ? stored.value : null;
+  const resumable =
+    stored && stored.value?.v === 4 && stored.value.tournamentId === tournamentId && ctx.cache.isFresh(stored) && stored.value.startedAt >= freshAfter && (status === N01_STATUS.FINISHED || ctx.now() - stored.value.startedAt < RUNNING_CHECKPOINT_MS)
+      ? stored.value
+      : null;
   if (!ctx.isOnline()) {
     if (stale) return { ok: true, games: stale, source: 'stale-cache', fetchedAt: cached!.fetchedAt, pages: 0 };
     return { ok: false, tournamentId, kind: 'offline', reason: 'オフラインで、保存済みのゲーム別データもありません。', progress: resumable ? { rows: resumable.ids.length, pages: resumable.pages } : null, stale: null, pages: 0 };
   }
   const ttl = ttlOf(status);
-  let state: Checkpoint = resumable ? { ...resumable, ids: [...resumable.ids], games: [...resumable.games], dropped: { ...resumable.dropped } } : fresh(tournamentId, ctx.now(), 0);
+  let state: Checkpoint = resumable ? { ...resumable, ids: [...resumable.ids], games: [...resumable.games], dropped: { ...resumable.dropped }, unfinished: [...resumable.unfinished] } : fresh(tournamentId, ctx.now(), 0);
+  // Rows before this position were read by an earlier load (a continued checkpoint).
+  let readBefore = resumable ? resumable.ids.length : 0;
   let pages = 0;
   let seen = new Set(state.ids.filter((id): id is string => id !== null));
   const save = async (): Promise<void> => {
-    if (state.ids.length > 0) await ctx.cache.put(wipKey, state, ttl);
+    if (state.ids.length > 0) await ctx.cache.put(wipKey, state, status === N01_STATUS.FINISHED ? ttl : Math.min(ttl, RUNNING_CHECKPOINT_MS));
+  };
+  const failed = async (error: unknown): Promise<GamesResult> => {
+    await save();
+    const kind = failureKind(error);
+    if (kind !== 'budget' && kind !== 'aborted' && stale) {
+      // A list read to the end earlier is better than none; the checkpoint is kept for the next load.
+      return { ok: true, games: stale, source: 'stale-cache', fetchedAt: cached!.fetchedAt, pages };
+    }
+    return { ok: false, tournamentId, kind, reason: error instanceof RequestBudgetError ? error.message : describeN01Error(error), progress: progress(), stale, pages };
+  };
+  /** The list moved under us: read it again from the first row once, then set it aside. */
+  const movedResult = async (): Promise<GamesResult | null> => {
+    await ctx.cache.delete(wipKey);
+    if (state.restarts < MAX_BOUNDARY_RESTARTS) {
+      state = fresh(tournamentId, ctx.now(), state.restarts + 1);
+      seen = new Set();
+      readBefore = 0;
+      return null;
+    }
+    return { ok: true, games: { tournamentId, games: [], dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, complete: false, heldReason: BOUNDARY_REASON }, source: 'network', fetchedAt: ctx.now(), pages };
+  };
+  /**
+   * Reads again the rows an earlier load found unfinished (one request covers 100 rows): each must
+   * still be at its position, and a game finished since is counted. `false`: the list moved.
+   */
+  const recheckEarlier = async (): Promise<boolean> => {
+    const positions = state.unfinished.filter((at) => at < readBefore).sort((a, b) => a - b);
+    let coveredUntil = -1;
+    for (const at of positions) {
+      if (at <= coveredUntil) continue;
+      const page = await withRetry(ctx, () => ctx.api.gamesAt(tournamentId, at, true));
+      pages += 1;
+      state.pages += 1;
+      const expected = state.ids.slice(at, at + page.ids.length);
+      if (page.ids.length === 0 || page.ids.some((id, i) => i < expected.length && id !== expected[i])) return false;
+      coveredUntil = at + Math.min(page.ids.length, expected.length) - 1;
+      for (const game of page.games) {
+        const position = at + page.ids.indexOf(game.gameId);
+        if (position > coveredUntil || !state.unfinished.includes(position) || !game.finished || !isLeagueGame(game.matchId)) continue;
+        state.games.push(compact(game));
+        state.dropped.unfinished -= 1;
+        state.unfinished = state.unfinished.filter((p) => p !== position);
+      }
+    }
+    return true;
   };
   const progress = (): GamesProgress => ({ rows: state.ids.length, pages: state.pages });
 
@@ -154,13 +217,7 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
     try {
       page = await withRetry(ctx, () => ctx.api.gamesAt(tournamentId, consumed === 0 ? 0 : consumed - 1, state.restarts > 0));
     } catch (error) {
-      await save();
-      const kind = failureKind(error);
-      if (kind !== 'budget' && kind !== 'aborted' && stale) {
-        // A list read to the end earlier is better than none; the checkpoint is kept for the next load.
-        return { ok: true, games: stale, source: 'stale-cache', fetchedAt: cached!.fetchedAt, pages };
-      }
-      return { ok: false, tournamentId, kind, reason: error instanceof RequestBudgetError ? error.message : describeN01Error(error), progress: progress(), stale, pages };
+      return failed(error);
     }
     pages += 1;
     state.pages += 1;
@@ -172,13 +229,9 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
       (overlap && (page.rows === 0 || page.ids[0] !== state.ids[consumed - 1])) ||
       added.some((id, i) => id !== null && (seen.has(id) || added.indexOf(id) !== i));
     if (moved) {
-      await ctx.cache.delete(wipKey);
-      if (state.restarts < MAX_BOUNDARY_RESTARTS) {
-        state = fresh(tournamentId, ctx.now(), state.restarts + 1);
-        seen = new Set();
-        continue;
-      }
-      return { ok: true, games: { tournamentId, games: [], dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, complete: false, heldReason: BOUNDARY_REASON }, source: 'network', fetchedAt: ctx.now(), pages };
+      const held = await movedResult();
+      if (held) return held;
+      continue;
     }
 
     const overlapId = overlap ? page.ids[0] : undefined;
@@ -186,15 +239,30 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
     state.ids.push(...added);
     for (const id of added) if (id !== null) seen.add(id);
     state.dropped.unreadable += page.unreadable - (overlapUnreadable ? 1 : 0);
+    const firstPosition = overlap ? consumed - 1 : 0;
     for (const game of page.games) {
       if (overlap && game.gameId === overlapId) continue;
       if (!isLeagueGame(game.matchId)) state.dropped.nonLeague += 1;
-      else if (!game.finished) state.dropped.unfinished += 1;
-      else state.games.push(compact(game));
+      else if (!game.finished) {
+        state.dropped.unfinished += 1;
+        state.unfinished.push(firstPosition + page.ids.indexOf(game.gameId));
+      } else state.games.push(compact(game));
     }
     onProgress?.(progress());
 
     if (page.rows < GAME_LIST_PAGE) {
+      // Rows left unfinished by an earlier load are read again before the season is published.
+      let unmoved: boolean;
+      try {
+        unmoved = await recheckEarlier();
+      } catch (error) {
+        return failed(error);
+      }
+      if (!unmoved) {
+        const held = await movedResult();
+        if (held) return held;
+        continue;
+      }
       // The last page was reached. A row n01 sent that could not be read is a game we cannot
       // account for: the list is then not the whole season, however short the last page was.
       const complete = state.dropped.unreadable === 0;

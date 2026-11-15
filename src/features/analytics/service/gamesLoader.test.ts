@@ -3,7 +3,7 @@ import { N01Error } from '../../../integrations/n01/client';
 import { AnalyticsApi } from '../api/readApi';
 import type { AnalyticsTransport } from '../api/readApi';
 import { AnalyticsCache } from '../cache/analyticsCache';
-import { BOUNDARY_REASON, gamesKey, gamesProgressKey, loadSeasonGames } from './gamesLoader';
+import { BOUNDARY_REASON, gamesKey, gamesProgressKey, loadSeasonGames, RUNNING_CHECKPOINT_MS } from './gamesLoader';
 import type { GamesContext } from './gamesLoader';
 
 /**
@@ -157,6 +157,44 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 2 }), 't', 30);
     await loadSeasonGames(ctxOf(fake, cache, { freshAfter: Date.now() + 1 }), 't', 30);
     expect(fake.calls.slice(2, 3)).toEqual([0]);
+  });
+
+  it('a game unfinished when an earlier load read it, finished since: read again before the season is published (Codex audit)', async () => {
+    const fake = new FakeList(rows(120, 0, [50]));
+    const cache = memory();
+    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 1 }), 't', 30); // rows 0–99 kept, m50 unfinished
+    fake.list[50] = { ...fake.list[50], endMatch: 1 };
+    const result = await loadSeasonGames(ctxOf(fake, cache), 't', 30);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.complete).toBe(true);
+    expect(result.games.games).toHaveLength(120);
+    expect(result.games.games.map((g) => g.gameId)).toContain('m50');
+    expect(result.games.dropped.unfinished).toBe(0);
+    // The continuation (skip 99), then the row read again where it was (skip 50).
+    expect(fake.calls.slice(1)).toEqual([99, 50]);
+  });
+
+  it('…and if the rows around it moved meanwhile, the old part is dropped and the season read again', async () => {
+    const fake = new FakeList(rows(120, 0, [50]));
+    const cache = memory();
+    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 1 }), 't', 30);
+    fake.list.splice(10, 1); // a game before m50 deleted: every later row moves up by one
+    const result = await loadSeasonGames(ctxOf(fake, cache), 't', 30);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.games.map((g) => g.gameId)).not.toContain('m10');
+    expect(new Set(result.games.games.map((g) => g.gameId)).size).toBe(result.games.games.length);
+    expect(fake.calls).toContain(0);
+  });
+
+  it('a running season\'s checkpoint older than 30 minutes is not continued (its rows may have been corrected)', async () => {
+    let clock = 1_000_000;
+    const fake = new FakeList(rows(250));
+    const cache = new AnalyticsCache({ memoryOnly: true, now: () => clock });
+    const ctx = (max?: number): GamesContext => ({ ...ctxOf(fake, cache, { maxRequests: max }), now: () => clock });
+    await loadSeasonGames(ctx(1), 't', 30);
+    clock += RUNNING_CHECKPOINT_MS + 1;
+    await loadSeasonGames(ctx(), 't', 30);
+    expect(fake.calls).toEqual([0, 0, 99, 198]);
   });
 
   it('offline: an older complete list is used; a checkpoint alone is not passed off as the season', async () => {

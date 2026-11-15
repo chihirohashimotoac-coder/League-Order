@@ -142,6 +142,24 @@ describe('leg details beyond one budget (3 seasons × 25 games of one player)', 
     expect(out.detail!.results.get(personKey)!.checks.every((c) => c.verified.score)).toBe(true);
   });
 
+  it('another player shown between two parts, then back: the read continues from the cache (Codex audit)', async () => {
+    const { world, out, personKey, wait, load } = await setup();
+    const other = load.seasons[0].players.find((p) => p.oid !== TDA_PLAYER && p.personKey !== personKey)!.personKey;
+    const before = world.calls.length;
+    await act(async () => out.detail!.focus(personKey, true));
+    for (let i = 0; !out.detail!.partial.has(personKey) && i < 2000; i += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(out.detail!.partial.has(personKey)).toBe(true); // the first part is shown, the next one under way
+    await act(async () => out.detail!.focus(other, false));
+    expect(out.detail!.running).toBeNull();
+    await act(async () => out.detail!.focus(personKey, true));
+    await wait();
+    const gets = world.gets(before);
+    expect(new Set(gets).size).toBe(75);
+    expect(gets.length - 75).toBeLessThanOrEqual(3);
+    expect(out.detail!.partial.has(personKey)).toBe(false);
+    expect(out.detail!.results.get(personKey)!.checks.every((c) => c.verified.score)).toBe(true);
+  });
+
   it('the singles view needs the legs, 01全体 does not: a paused read continues when wanted again', async () => {
     const { world, out, personKey, wait } = await setup();
     const before = world.calls.length;

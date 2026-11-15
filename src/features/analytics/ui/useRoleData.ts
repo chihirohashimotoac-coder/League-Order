@@ -249,7 +249,12 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
       // Another player (or none) is shown: stop reading, and drop what that part would have shown.
       inFlight.abort.abort();
       controller.current = null;
-      setHeld((s) => (s.running === inFlight.personKey ? { ...s, running: null } : s));
+      // A read cut off after some of its parts were shown is continued (from the cache) when that
+      // player is shown again; a read with no part shown yet simply starts again.
+      setHeld((s) => {
+        const paused = s.partial.has(inFlight.personKey) ? new Set([...s.paused, inFlight.personKey]) : s.paused;
+        return s.running === inFlight.personKey || paused !== s.paused ? { ...s, running: s.running === inFlight.personKey ? null : s.running, paused } : s;
+      });
     }
   }, []);
 
