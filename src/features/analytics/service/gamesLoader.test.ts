@@ -186,6 +186,27 @@ describe('match/list: long lists, page boundaries and resuming', () => {
     expect(fake.calls).toContain(0);
   });
 
+  it('reading the unfinished rows again is itself resumable: many of them across small budgets end, each read once (Codex audit 2)', async () => {
+    const unfinished = Array.from({ length: 10 }, (_, k) => 5 + k * 100);
+    const fake = new FakeList(rows(1000, 0, unfinished));
+    const cache = memory();
+    await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 10 }), 't', 30); // rows 0–990, ten unfinished
+    let result = await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 3 }), 't', 30);
+    let loads = 1;
+    while (!result.ok && loads < 10) {
+      expect(result.kind).toBe('budget');
+      result = await loadSeasonGames(ctxOf(fake, cache, { maxRequests: 3 }), 't', 30);
+      loads += 1;
+    }
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.games.complete).toBe(true);
+    expect(result.games.dropped.unfinished).toBe(10);
+    expect(result.games.games).toHaveLength(990);
+    const rechecks = fake.calls.slice(10).filter((skip) => unfinished.includes(skip));
+    expect(rechecks.sort((a, b) => a - b)).toEqual(unfinished);
+    expect(loads).toBeLessThanOrEqual(6);
+  });
+
   it('a running season\'s checkpoint older than 30 minutes is not continued (its rows may have been corrected)', async () => {
     let clock = 1_000_000;
     const fake = new FakeList(rows(250));

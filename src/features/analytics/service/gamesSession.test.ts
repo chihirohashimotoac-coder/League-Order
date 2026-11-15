@@ -98,6 +98,29 @@ describe('game lists of a long period (several budgets)', () => {
     expect(fake.calls).toEqual([]);
   });
 
+  it('after the safety limit of units, the offered retry really continues (Codex audit 2)', async () => {
+    const fake = new FakeSeasons({ a: list('a', 1000) });
+    const { s, finished } = session(fake, { unitRequests: 2, maxUnits: 2 });
+    s.want([{ tournamentId: 'a', status: 40 }]);
+    const stopped = await finished;
+    expect(stopped.failures).toMatchObject([{ tournamentId: 'a', kind: 'budget' }]);
+    expect(fake.calls).toHaveLength(4);
+    const done = new Promise<GamesLoad>((resolve) => {
+      const check = setInterval(() => {
+        const snap = s.snapshot();
+        if (!s.busy && (snap.games.get('a')?.complete || snap.failures.length > 0)) {
+          clearInterval(check);
+          resolve(snap);
+        }
+      }, 1);
+    });
+    s.retry();
+    const after = await done;
+    expect(after.failures).toMatchObject([{ kind: 'budget' }]); // two more units, then the limit again
+    expect(fake.calls).toHaveLength(8);
+    expect(new Set(fake.calls).size).toBe(8); // continued, nothing read twice
+  });
+
   it('dispose() stops the load: no request after it', async () => {
     const fake = new FakeSeasons(twelve());
     const { s } = session(fake);

@@ -77,6 +77,8 @@ export class GamesSession {
   private usedStale = new Set<string>();
   private requests = 0;
   private units = 0;
+  /** Units used since the last explicit retry: the safety limit counts from there. */
+  private unitsAtRetry = 0;
   private running = false;
   private current: AnalyticsApi | null = null;
 
@@ -128,6 +130,8 @@ export class GamesSession {
       added = true;
     }
     if (added) {
+      // An explicit retry gets a fresh allowance of units (the checkpoints keep what was read).
+      this.unitsAtRetry = this.units;
       this.emit();
       void this.pump();
     }
@@ -185,7 +189,7 @@ export class GamesSession {
     const o = this.options;
     try {
       while (this.queue.length > 0 && !signal.aborted) {
-        if (this.units >= (o.maxUnits ?? GAMES_MAX_UNITS)) {
+        if (this.units - this.unitsAtRetry >= (o.maxUnits ?? GAMES_MAX_UNITS)) {
           for (const id of this.queue) this.failures.set(id, { tournamentId: id, reason: '通信の上限に達したため未取得（「再試行」で続きから取得します）', kind: 'budget' });
           this.queue = [];
           break;

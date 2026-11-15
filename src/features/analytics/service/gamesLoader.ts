@@ -100,6 +100,8 @@ interface Checkpoint {
    * counted, and the rows around it must still be where they were.
    */
   unfinished: number[];
+  /** Rows up to this position were already read again for {@link unfinished} (-1: none). */
+  rechecked: number;
 }
 
 /**
@@ -125,7 +127,7 @@ function failureKind(error: unknown): GamesFailureKind {
 }
 
 function fresh(tournamentId: string, startedAt: number, restarts: number): Checkpoint {
-  return { v: 4, tournamentId, startedAt, ids: [], games: [], dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, pages: 0, restarts, unfinished: [] };
+  return { v: 4, tournamentId, startedAt, ids: [], games: [], dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, pages: 0, restarts, unfinished: [], rechecked: -1 };
 }
 
 const ttlOf = (status: number | null): number => (status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason);
@@ -181,8 +183,9 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
    * still be at its position, and a game finished since is counted. `false`: the list moved.
    */
   const recheckEarlier = async (): Promise<boolean> => {
-    const positions = state.unfinished.filter((at) => at < readBefore).sort((a, b) => a - b);
-    let coveredUntil = -1;
+    // Progress is saved after every request: a load cut off here goes on from where it stopped.
+    const positions = state.unfinished.filter((at) => at < readBefore && at > state.rechecked).sort((a, b) => a - b);
+    let coveredUntil = state.rechecked;
     for (const at of positions) {
       if (at <= coveredUntil) continue;
       const page = await withRetry(ctx, () => ctx.api.gamesAt(tournamentId, at, true));
@@ -198,6 +201,8 @@ export async function loadSeasonGames(ctx: GamesContext, tournamentId: string, s
         state.dropped.unfinished -= 1;
         state.unfinished = state.unfinished.filter((p) => p !== position);
       }
+      state.rechecked = coveredUntil;
+      await save();
     }
     return true;
   };
