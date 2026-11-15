@@ -5,7 +5,7 @@ import type { AnalyticsTransport } from '../api/readApi';
 import { AnalyticsCache } from '../cache/analyticsCache';
 import { safeReconstruct } from '../reconstruct';
 import { desperadoGames, details, season2024Data, TDID_2024_2ND, wireDetail, withDetailSides } from '../realData.roles.fixtures';
-import { HIGH_IN_ATDO_2024_2ND, LEAGUE_ATDO } from '../realData.startRate.fixtures';
+import { HIGH_IN_ATDO_2024_2ND, LEAGUE_ATDO, STARTED_AT_ATDO_2024_2ND } from '../realData.startRate.fixtures';
 import { periodStart } from '../startRate';
 import { detailKey, highInKey, reconstructPerson } from './detailService';
 import type { GamesContext } from './gamesLoader';
@@ -52,7 +52,7 @@ class FakeN01 implements AnalyticsTransport {
   }
 }
 
-const atdoSeason = () => ({ ...season2024Data(), leagueId: LEAGUE_ATDO });
+const atdoSeason = () => ({ ...season2024Data(), leagueId: LEAGUE_ATDO, startedAt: STARTED_AT_ATDO_2024_2ND });
 const ctxOf = (fake: FakeN01, cache = new AnalyticsCache({ memoryOnly: true }), maxRequests?: number): GamesContext => ({ api: new AnalyticsApi({ transport: fake, maxRequests }), cache, isOnline: () => true, now: () => Date.now() });
 const keyOf = (oid: string) => atdoSeason().players.find((p) => p.oid === oid)!.personKey;
 const wired = (list: RawGameDetail[] = details()) => Object.fromEntries(list.map((d) => [d.gameId, wireDetail(d)]));
@@ -89,12 +89,34 @@ describe('個人スタート率 through the reconstruction service', () => {
     expect(result.checks[0].verified.score).toBe(true);
   });
 
-  it('the high-in records cannot be read: the slots are unknown (not assumed double-in); the 3DA is kept', async () => {
+  it('the high-in records cannot be read: the covered slot still counts (5/13), only the cross-check is skipped; 3DA and First 9 are untouched', async () => {
+    const withRecords = await reconstructPerson(ctxOf(new FakeN01(wired())), { seasons: [atdoSeason()], games: seasonGames, personKey: keyOf('63Cz') });
     const fake = new FakeN01(wired(), null);
     const result = await reconstructPerson(ctxOf(fake), { seasons: [atdoSeason()], games: seasonGames, personKey: keyOf('63Cz') });
-    expect(result.starts[0].excludedGames).toEqual({ 'rule-unknown': 3 });
-    expect(result.failures.some((f) => f.includes('ハイイン'))).toBe(true);
-    expect(result.contributions.size).toBeGreaterThan(0);
+    expect(fake.highInCalls()).toBe(1);
+    expect(result.starts[0]).toMatchObject({ counted: 3, attempts: 13, successes: 5, excludedGames: {} });
+    expect(result.starts[0].ruleNotes.join()).toContain('ハイイン記録を取得できず');
+    // Not reported as a failed read (no retry asked for it), and the verified figures are the same.
+    expect(result.failures.some((f) => f.includes('ハイイン'))).toBe(false);
+    expect(result.checks).toEqual(withRecords.checks);
+    expect(result.contributions).toEqual(withRecords.contributions);
+  });
+
+  it('no high-in record yet in the season (its first weeks): the covered slot counts all the same', async () => {
+    const result = await reconstructPerson(ctxOf(new FakeN01(wired(), [])), { seasons: [atdoSeason()], games: seasonGames, personKey: keyOf('63Cz') });
+    expect(result.starts[0]).toMatchObject({ counted: 3, attempts: 13, successes: 5 });
+    expect(periodStart(result.starts)).toMatchObject({ state: 'value', partial: false });
+  });
+
+  it('out of scope: a season before ATDO\'s checked range, or without a start date, reads no high-in and counts nothing', async () => {
+    for (const startedAt of [1_600_000_000_000, null, undefined]) {
+      const fake = new FakeN01(wired());
+      const result = await reconstructPerson(ctxOf(fake), { seasons: [{ ...atdoSeason(), startedAt }], games: seasonGames, personKey: keyOf('63Cz') });
+      expect(fake.highInCalls()).toBe(0);
+      expect(result.starts[0]).toMatchObject({ counted: 0, excludedGames: { 'rule-unknown': 3 } });
+      expect(periodStart(result.starts)).toMatchObject({ state: 'rule-unknown', value: null });
+      expect(result.checks[0].verified.score).toBe(true);
+    }
   });
 
   it('投順不一致: a pair order that breaks n01\'s checksum leaves the start attempts out too (never failures)', async () => {

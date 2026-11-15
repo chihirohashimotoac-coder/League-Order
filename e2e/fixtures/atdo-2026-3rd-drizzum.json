@@ -1,0 +1,444 @@
+{
+ "_note": "n01 read API, 2026-11-15 (anonymous GET): tournament/get of ATDO DARTS LEAGUE 2026 3rd (results left out) and team/player/list of ドリズム (WpZb). Test-only; never fetched in CI.",
+ "tournament": {
+  "tdid": "t_ABvC_5234",
+  "createTime": 1789829175,
+  "status": 30,
+  "kind": "darts",
+  "title": "2026 ATDO DARTS LEAGUE 3rd",
+  "t_date": 0,
+  "s_date": 1789829175,
+  "team_games": 0,
+  "name_sep": "",
+  "lgid": "lg_l3hI_3397",
+  "league": 1,
+  "lg_setting": {
+   "league": 1,
+   "robin_count": 3,
+   "robin_player_count": 6,
+   "turnaround": 1,
+   "include_leg": 0,
+   "include_set": 1,
+   "limit": 3,
+   "limit_leg_count": 2,
+   "drawMode": 0,
+   "limit_set_count": 2,
+   "limit_set_leg_count": 2,
+   "startScore": 501,
+   "limit_rounds": 0,
+   "rounds": 15,
+   "changeFirst": 0,
+   "exitResult": 0,
+   "autoNext": 1,
+   "setOrder": 1,
+   "schedule": [
+    {
+     "subTitle": "チーム",
+     "startScore": 1001,
+     "match_type": "01",
+     "roundLimit": 1,
+     "maxRound": 30,
+     "overkill": 1,
+     "limit_leg_count": 1,
+     "drawMode": null,
+     "num_part": 4,
+     "group": 1,
+     "pt": 0,
+     "ignore_avg": null,
+     "schid": "kwcg"
+    },
+    {
+     "subTitle": "ダブルス1",
+     "startScore": 501,
+     "match_type": "01",
+     "roundLimit": 1,
+     "maxRound": 15,
+     "overkill": 1,
+     "limit_leg_count": 2,
+     "drawMode": null,
+     "num_part": 2,
+     "group": 2,
+     "pt": 0,
+     "ignore_avg": null,
+     "schid": "8kxb"
+    },
+    {
+     "subTitle": "ダブルス2",
+     "startScore": 501,
+     "match_type": "01",
+     "roundLimit": 1,
+     "maxRound": 15,
+     "overkill": 1,
+     "limit_leg_count": 2,
+     "drawMode": null,
+     "num_part": 2,
+     "group": 2,
+     "pt": 0,
+     "ignore_avg": null,
+     "schid": "rdsi"
+    },
+    {
+     "subTitle": "シングルス1",
+     "startScore": 501,
+     "match_type": "01",
+     "roundLimit": 1,
+     "maxRound": 15,
+     "overkill": 1,
+     "limit_leg_count": 2,
+     "drawMode": null,
+     "num_part": 1,
+     "group": 3,
+     "pt": 0,
+     "ignore_avg": null,
+     "schid": "fepq"
+    },
+    {
+     "subTitle": "シングルス2",
+     "startScore": 501,
+     "match_type": "01",
+     "roundLimit": 1,
+     "maxRound": 15,
+     "overkill": 1,
+     "limit_leg_count": 2,
+     "drawMode": null,
+     "num_part": 1,
+     "group": 3,
+     "pt": 0,
+     "ignore_avg": null,
+     "schid": "cvzb"
+    },
+    {
+     "subTitle": "シングルス3",
+     "startScore": 501,
+     "match_type": "01",
+     "roundLimit": 1,
+     "maxRound": 15,
+     "overkill": 1,
+     "limit_leg_count": 2,
+     "drawMode": null,
+     "num_part": 1,
+     "group": 3,
+     "pt": 0,
+     "ignore_avg": null,
+     "schid": "6wav"
+    },
+    {
+     "subTitle": "シングルス4",
+     "startScore": 501,
+     "match_type": "01",
+     "roundLimit": 1,
+     "maxRound": 15,
+     "overkill": 1,
+     "limit_leg_count": 2,
+     "drawMode": null,
+     "num_part": 1,
+     "group": 3,
+     "pt": 0,
+     "ignore_avg": null,
+     "schid": "gsbe"
+    }
+   ],
+   "point_w": 2,
+   "point_d": 0,
+   "point_l": 0,
+   "exclude_from_stats": 0,
+   "game_setting": [
+    {
+     "round": 0,
+     "limit": 3,
+     "match_type": "01",
+     "roundLimit": 0,
+     "maxRound": 15,
+     "overkill": 1,
+     "changeFirst": 0,
+     "exitResult": 0,
+     "autoNext": 1,
+     "schedule": [
+      {
+       "subTitle": "チーム",
+       "startScore": 1001,
+       "match_type": "01",
+       "roundLimit": 1,
+       "maxRound": 30,
+       "overkill": 1,
+       "limit_leg_count": 1,
+       "drawMode": null,
+       "num_part": 4,
+       "group": 1,
+       "pt": 0,
+       "ignore_avg": null,
+       "schid": "qtrl"
+      },
+      {
+       "subTitle": "ダブルス1",
+       "startScore": 501,
+       "match_type": "01",
+       "roundLimit": 1,
+       "maxRound": 15,
+       "overkill": 1,
+       "limit_leg_count": 2,
+       "drawMode": null,
+       "num_part": 2,
+       "group": 2,
+       "pt": 0,
+       "ignore_avg": null,
+       "schid": "2gbr"
+      },
+      {
+       "subTitle": "ダブルス2",
+       "startScore": 501,
+       "match_type": "01",
+       "roundLimit": 1,
+       "maxRound": 15,
+       "overkill": 1,
+       "limit_leg_count": 2,
+       "drawMode": null,
+       "num_part": 2,
+       "group": 2,
+       "pt": 0,
+       "ignore_avg": null,
+       "schid": "0qf2"
+      },
+      {
+       "subTitle": "シングルス1",
+       "startScore": 501,
+       "match_type": "01",
+       "roundLimit": 1,
+       "maxRound": 12,
+       "overkill": 1,
+       "limit_leg_count": 3,
+       "drawMode": 0,
+       "num_part": 1,
+       "group": 3,
+       "pt": 0,
+       "ignore_avg": 0,
+       "schid": "hvv5"
+      },
+      {
+       "subTitle": "シングルス2",
+       "startScore": 501,
+       "match_type": "01",
+       "roundLimit": 1,
+       "maxRound": 12,
+       "overkill": 1,
+       "limit_leg_count": 3,
+       "drawMode": 0,
+       "num_part": 1,
+       "group": 3,
+       "pt": 0,
+       "ignore_avg": 0,
+       "schid": "h949"
+      },
+      {
+       "subTitle": "シングルス3",
+       "startScore": 501,
+       "match_type": "01",
+       "roundLimit": 1,
+       "maxRound": 12,
+       "overkill": 1,
+       "limit_leg_count": 3,
+       "drawMode": 0,
+       "num_part": 1,
+       "group": 3,
+       "pt": 0,
+       "ignore_avg": 0,
+       "schid": "u27z"
+      },
+      {
+       "subTitle": "シングルス4",
+       "startScore": 501,
+       "match_type": "01",
+       "roundLimit": 1,
+       "maxRound": 12,
+       "overkill": 1,
+       "limit_leg_count": 3,
+       "drawMode": 0,
+       "num_part": 1,
+       "group": 3,
+       "pt": 0,
+       "ignore_avg": 0,
+       "schid": "k39v"
+      }
+     ]
+    }
+   ],
+   "pt_setting": [],
+   "low_win": 0,
+   "auto_schedule": false,
+   "priority_win": 0,
+   "include_set_leg": 0,
+   "match_type": "01",
+   "overkill": 1,
+   "autoChange": 0
+  },
+  "lg_table": [
+   [
+    "WpZb",
+    "k18b",
+    "RrVa",
+    "68wv",
+    "M4bk",
+    "GpiQ"
+   ],
+   [
+    "RHbq",
+    "R1Jo",
+    "RcXE",
+    "Vbse",
+    "X6iU",
+    "XDvP"
+   ],
+   [
+    "rIdl",
+    "Gi0h",
+    "pzDR",
+    "UOBW",
+    "7v1X",
+    "iTGA"
+   ]
+  ],
+  "lg_title": [
+   "Aディビジョン",
+   "Bディビジョン",
+   "Cディビジョン"
+  ],
+  "softdarts": 0,
+  "entry_list": [
+   {
+    "tpid": "GpiQ",
+    "name": "kalavinka",
+    "index": 1
+   },
+   {
+    "tpid": "WpZb",
+    "name": "ドリズム",
+    "index": 2
+   },
+   {
+    "tpid": "XDvP",
+    "name": "倒竜門",
+    "index": 3
+   },
+   {
+    "tpid": "rIdl",
+    "name": "ラムチョップ",
+    "index": 4
+   },
+   {
+    "tpid": "RcXE",
+    "name": "5★BANG",
+    "index": 5
+   },
+   {
+    "tpid": "UOBW",
+    "name": "雷",
+    "index": 6
+   },
+   {
+    "tpid": "7v1X",
+    "name": "X6",
+    "index": 7
+   },
+   {
+    "tpid": "X6iU",
+    "name": "ストロベリーガーリック",
+    "index": 8
+   },
+   {
+    "tpid": "pzDR",
+    "name": "Desperado",
+    "index": 9
+   },
+   {
+    "tpid": "RrVa",
+    "name": "8achi-8achi",
+    "index": 10
+   },
+   {
+    "tpid": "k18b",
+    "name": "ALADDIN",
+    "index": 11
+   },
+   {
+    "tpid": "M4bk",
+    "name": "HOLIC",
+    "index": 12
+   },
+   {
+    "tpid": "Vbse",
+    "name": "暁STRIKERS",
+    "index": 13
+   },
+   {
+    "tpid": "iTGA",
+    "name": "トリプ",
+    "index": 14
+   },
+   {
+    "tpid": "68wv",
+    "name": "スピンコブラ",
+    "index": 15
+   },
+   {
+    "tpid": "Gi0h",
+    "name": "じゅーしーめろん",
+    "index": 16
+   },
+   {
+    "tpid": "R1Jo",
+    "name": "ZDO",
+    "index": 17
+   },
+   {
+    "tpid": "RHbq",
+    "name": "MOA",
+    "index": 18
+   }
+  ],
+  "lg_result": {}
+ },
+ "rosterWpZb": [
+  {
+   "tpid": "WpZb",
+   "oid": "o3ul",
+   "opid": "02-0009",
+   "oname": "灰田 裕一郎"
+  },
+  {
+   "tpid": "WpZb",
+   "oid": "z8rg",
+   "opid": "02-0072",
+   "oname": "三坂 淳朗"
+  },
+  {
+   "tpid": "WpZb",
+   "oid": "3oun",
+   "opid": "02-0073",
+   "oname": "柴田 圭介"
+  },
+  {
+   "tpid": "WpZb",
+   "oid": "xuh1",
+   "opid": "02-0074",
+   "oname": "大沢 剛"
+  },
+  {
+   "tpid": "WpZb",
+   "oid": "e1qs",
+   "opid": "02-0093",
+   "oname": "安田 久美"
+  },
+  {
+   "tpid": "WpZb",
+   "oid": "5o3z",
+   "opid": "02-0096",
+   "oname": "宮田 彬"
+  },
+  {
+   "tpid": "WpZb",
+   "oid": "gm3v",
+   "opid": "02-0109",
+   "oname": "西俣 太陽"
+  }
+ ]
+}

@@ -17,7 +17,7 @@ import { AnalyticsApi } from './api/readApi';
 import type { AnalyticsTransport } from './api/readApi';
 import { AnalyticsCache } from './cache/analyticsCache';
 import { details, wireDetail } from './realData.roles.fixtures';
-import { HIGH_IN_ATDO_2024_2ND } from './realData.startRate.fixtures';
+import { HIGH_IN_ATDO_2024_2ND, STARTED_AT_ATDO_2024_2ND } from './realData.startRate.fixtures';
 import { reconstructPerson } from './service/detailService';
 import type { PlayerDetailResult } from './service/detailService';
 
@@ -214,7 +214,7 @@ describe('final review fixes on screen', () => {
 });
 
 describe('doubles: the automatic read on screen (stored 2024 2nd data, league id set to ATDO\'s)', () => {
-  const atdo = { ...s, leagueId: 'lg_l3hI_3397' };
+  const atdo = { ...s, leagueId: 'lg_l3hI_3397', startedAt: STARTED_AT_ATDO_2024_2ND };
   const transport: AnalyticsTransport = {
     async request(operation, params) {
       if (operation === 'match/get') return wired[params.mid] ?? { result: -1, error: 'not found' };

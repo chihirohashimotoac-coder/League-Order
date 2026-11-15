@@ -1,39 +1,71 @@
 import type { HighInRecord } from './api/parse';
 import { slotFamily, slotFor } from './gameKind';
-import type { SlotEvidence } from './gameKind';
 import type { ClassifiedGame } from './roleGames';
 import type { SeasonData } from './seasonData';
 
 /**
- * Is a doubles 01 game played **double-in**? n01 has no field for the in-rule (neither the
- * schedule slot, nor `match/get`, nor the API manual), so the verdict needs two independent
- * pieces of evidence, and a slot without both is "unknown" — never assumed:
+ * Is a doubles 01 game played **double-in**? In order of evidence:
  *
- * 1. The league is one whose doubles the organisers' rules make double-in ({@link DOUBLE_IN_LEAGUES}).
- *    A league is never matched by its name.
- * 2. The season's own public n01 records agree, slot by slot (`tournament/stats?kind=player_high_in`):
- *    n01 keeps "high in" records only where an in-rule is set. Read 2026-11-15:
- *      - ATDO 2026 3rd / 2nd, TDO 2026/3rd / 2nd, TDA 2026 前期 / 中期: records in the doubles
- *        slots only (from 19 to 143 per slot), none in any singles or team slot, highest 160–170
- *        (the double-in maximum is 170 = D-BULL T20 T20; a straight-in first visit reaches 180);
- *      - ATDO 2024 2nd: records in its doubles slot `rdsi` only (19, highest 156).
- *    So a doubles slot counts when it has at least one record, every record of the season is in
- *    1–170, and no record sits in a schedule slot that is not a doubles slot (records of a schid
- *    outside the schedule — TDA 2026 前期 has two, of its play-off — are ignored).
- * The records are evidence of the rule only: attempts and successes are never taken from them.
+ * 1. An explicit setting of the match or the leg. n01 has none: neither the schedule slot, nor
+ *    `match/get`, `match/throws`, nor the API manual (read 2026-11-15) carries an in-rule.
+ * 2. The organiser's rule, for a league identified by its **id** and a **scope** that was checked:
+ *    {@link DOUBLE_IN_RULES}. A league is never matched by its name, and a season before the
+ *    checked range (or one whose date is unknown) is out of scope.
+ * 3. Otherwise "unknown" — never assumed double-in, never straight-in turned into double-in.
+ *
+ * n01's high-in records (`tournament/stats?kind=player_high_in`) are not needed for a verdict:
+ * a season's first weeks have none, and the request can fail. They only cross-check what they
+ * can cover — the same slot (a record no double-in start can make, above 170 or not positive,
+ * puts that slot out) and the same leg of a game (`seasonStartOf` in `detailService.ts`).
+ * Records of other slots never exclude a slot the rule covers. Attempts and successes are
+ * never taken from them.
  */
 
-export interface DoubleInLeague {
+export interface DoubleInRule {
   leagueId: string;
   name: string;
-  basis: string;
+  /** Seasons in scope: league seasons that start at or after this time (epoch ms). */
+  fromStartedAt: number;
+  /** The first season of the checked range, for the details panel. */
+  fromSeason: string;
+  /** Where the rule comes from, and what of it was read. */
+  source: string;
 }
 
-/** Leagues whose doubles are double-in by their rules (the user's statement, 2026-11-15). Matched by id only. */
-export const DOUBLE_IN_LEAGUES: readonly DoubleInLeague[] = [
-  { leagueId: 'lg_l3hI_3397', name: 'ATDO DARTS LEAGUE', basis: 'ダブルスはダブルイン（主催の規則。利用者の確認 2026-11-15）' },
-  { leagueId: 'lg_3qgW_6619', name: '東京ダーツオーガニゼイション（TDO）', basis: 'ダブルスはダブルイン（主催の規則。利用者の確認 2026-11-15）' },
-  { leagueId: 'lg_Ev9v_7379', name: '東京ダーツ協会（TDA）', basis: 'ダブルスはダブルイン（主催の規則。利用者の確認 2026-11-15）' },
+/**
+ * Leagues whose doubles 01 games are double-in by the organiser's rule (the user's statement,
+ * 2026-11-15: ATDO, TDO, TDA — "JDO 団体や TDA もダブルスはダブルイン"). The rule texts
+ * (TDO RuleBook 第8条 on www.tokyodarts.org, TDA「ルールとマナー」on tdaofficial180.wixsite.com)
+ * could not be read from this environment (blocked by its network policy).
+ *
+ * Scope = the regular league seasons whose public n01 records were checked on 2026-11-15
+ * (docs/ANALYTICS_ROLES.md §8), from the first of them onward — the organisers' rule covers the
+ * seasons still to come, which is why a new season counts before it has any high-in record.
+ * Each season starts at its own `startedAt` (t_date / start date / createTime, as n01's league
+ * list gives it); the bounds below are the first checked seasons' `createTime`.
+ */
+export const DOUBLE_IN_RULES: readonly DoubleInRule[] = [
+  {
+    leagueId: 'lg_l3hI_3397',
+    name: 'ATDO DARTS LEAGUE',
+    fromStartedAt: 1_680_417_958_000,
+    fromSeason: '2023 ATDO DARTS LEAGUE 1st（t_on2l_8357）',
+    source: 'ダブルスはダブルイン（主催の規則として利用者が確認、2026-11-15）。2023 1st〜2026 3rd の通常シーズン14季で、n01のハイイン記録がダブルスの枠だけにあり最高160点',
+  },
+  {
+    leagueId: 'lg_3qgW_6619',
+    name: '東京ダーツオーガニゼイション（TDO）',
+    fromStartedAt: 1_751_045_325_000,
+    fromSeason: 'TDO 2025-2nd Season（t_sJo6_5442）',
+    source: 'ダブルスはダブルイン（TDOリーグ競技規則 第8条。本文はこの環境から取得できず未読。利用者の確認、2026-11-15）。2025-2nd〜2026/3rd の通常シーズン5季で、ハイイン記録がダブルスの枠だけにあり最高170点',
+  },
+  {
+    leagueId: 'lg_Ev9v_7379',
+    name: '東京ダーツ協会（TDA）',
+    fromStartedAt: 1_699_879_474_000,
+    fromSeason: '2023年度 後期リーグ戦（t_UlDS_4948）',
+    source: 'ダブルスはダブルイン（TDA公式「ルールとマナー」のリーグ戦のゲーム構成。本文はこの環境から取得できず未読。利用者の確認、2026-11-15）。2023年度後期〜2026年度中期の通常シーズン8季で、ハイイン記録がダブルスの枠だけにあり最高170点',
+  },
 ];
 
 /** The highest score a double-in first visit can make (D-BULL, T20, T20). */
@@ -41,57 +73,59 @@ export const DOUBLE_IN_MAX = 170;
 
 export type StartRuleVerdict = { rule: 'double-in'; basis: string } | { rule: 'straight-in'; basis: string } | { rule: 'unknown'; reason: string };
 
-export function declaredLeague(leagueId: string | null, leagues: readonly DoubleInLeague[] = DOUBLE_IN_LEAGUES): DoubleInLeague | null {
-  return leagueId ? (leagues.find((l) => l.leagueId === leagueId) ?? null) : null;
+export function declaredLeague(leagueId: string | null, rules: readonly DoubleInRule[] = DOUBLE_IN_RULES): DoubleInRule | null {
+  return leagueId ? (rules.find((r) => r.leagueId === leagueId) ?? null) : null;
 }
 
-/** What the season's high-in records say, slot by slot (`null` records: not available). */
+/** The organiser's rule that covers this season, or why none does. */
+export function seasonRule(season: Pick<SeasonData, 'leagueId' | 'startedAt'>, rules: readonly DoubleInRule[] = DOUBLE_IN_RULES): { rule: DoubleInRule } | { reason: string } {
+  const rule = declaredLeague(season.leagueId, rules);
+  if (!rule) return { reason: 'このリーグのダブルスのイン規則を確認できていません' };
+  if (typeof season.startedAt !== 'number') return { reason: 'シーズンの開始日を確認できず、主催者規則の対象範囲か判断できません' };
+  if (season.startedAt < rule.fromStartedAt) return { reason: `主催者規則を確認した範囲（${rule.fromSeason}以降）より前のシーズンです` };
+  return { rule };
+}
+
+/** n01's high-in records of a season, per slot (`null`: not read). */
 export interface HighInEvidence {
-  /** Records per schid (`null` schid is dropped). */
-  bySlot: Map<string, { count: number; max: number }>;
-  /** Why the records cannot support any slot of the season (`null` when they can). */
-  contradiction: string | null;
+  bySlot: Map<string, { count: number; max: number; impossible: number }>;
 }
 
-export function highInEvidence(slots: readonly SlotEvidence[], records: readonly HighInRecord[]): HighInEvidence {
-  const bySlot = new Map<string, { count: number; max: number }>();
-  let contradiction: string | null = null;
+export function highInEvidence(records: readonly HighInRecord[]): HighInEvidence {
+  const bySlot = new Map<string, { count: number; max: number; impossible: number }>();
   for (const r of records) {
-    if (r.highIn === null || r.highIn <= 0 || r.highIn > DOUBLE_IN_MAX) {
-      contradiction = `n01のハイイン記録に${r.highIn ?? '不明'}点があり、ダブルインの記録と確認できません`;
-      continue;
-    }
     if (!r.schid) continue;
-    const slot = slots.find((s) => s.schid === r.schid) ?? null;
-    if (slot && slot.numPart !== 2) contradiction = `ダブルス以外の枠（${slot.subtitle ?? slot.schid}）にハイイン記録があり、記録の意味を確認できません`;
-    const entry = bySlot.get(r.schid) ?? { count: 0, max: 0 };
+    const entry = bySlot.get(r.schid) ?? { count: 0, max: 0, impossible: 0 };
     entry.count += 1;
-    entry.max = Math.max(entry.max, r.highIn);
+    if (r.highIn === null || r.highIn <= 0 || r.highIn > DOUBLE_IN_MAX) entry.impossible += 1;
+    else entry.max = Math.max(entry.max, r.highIn);
     bySlot.set(r.schid, entry);
   }
-  return { bySlot, contradiction };
+  return { bySlot };
 }
 
 /**
- * The verdict for one classified game. `highIns` is `null` when the season's records could not
- * be read (the slot is then unknown, not assumed).
+ * The verdict for one classified game. `highIns` is `null` when the season's records were not
+ * read: that only removes the cross-check, never the verdict.
  */
 export function gameStartRule(
-  season: Pick<SeasonData, 'leagueId' | 'slots'>,
+  season: Pick<SeasonData, 'leagueId' | 'slots' | 'startedAt'>,
   game: Pick<ClassifiedGame, 'schid' | 'division' | 'family' | 'role'>,
   highIns: HighInEvidence | null,
-  leagues: readonly DoubleInLeague[] = DOUBLE_IN_LEAGUES,
+  rules: readonly DoubleInRule[] = DOUBLE_IN_RULES,
 ): StartRuleVerdict {
   if (game.family.family !== '01' || game.role !== 'doubles') return { rule: 'unknown', reason: 'ダブルス01のゲームではありません' };
-  const league = declaredLeague(season.leagueId, leagues);
-  if (!league) return { rule: 'unknown', reason: 'このリーグのダブルスのイン規則を確認できていません' };
+  const covered = seasonRule(season, rules);
+  if ('reason' in covered) return { rule: 'unknown', reason: covered.reason };
   const slot = slotFor(season.slots, game.schid, game.division);
   if (!slot || slot.numPart !== 2 || slotFamily(slot).family !== '01' || slot.startScore === null || slot.startScore <= 0) {
     return { rule: 'unknown', reason: 'ゲーム枠の設定（ダブルス・01・開始点数）を確認できません' };
   }
-  if (!highIns) return { rule: 'unknown', reason: 'この季のn01ハイイン記録を取得できず、枠のイン規則を確認できません' };
-  if (highIns.contradiction) return { rule: 'unknown', reason: highIns.contradiction };
-  const evidence = highIns.bySlot.get(slot.schid);
-  if (!evidence) return { rule: 'unknown', reason: `この季の「${slot.subtitle ?? slot.schid}」にn01のハイイン記録がなく、ダブルインと確認できません` };
-  return { rule: 'double-in', basis: `${league.basis}。この季の「${slot.subtitle ?? slot.schid}」にn01のハイイン記録 ${evidence.count}件（最高 ${evidence.max}点）` };
+  const label = slot.subtitle ?? slot.schid;
+  const records = highIns?.bySlot.get(slot.schid);
+  if (records && records.impossible > 0) {
+    return { rule: 'unknown', reason: `「${label}」にダブルインでは出ない点数のハイイン記録が${records.impossible}件あり、この枠のイン規則を確認できません` };
+  }
+  const evidence = !highIns ? 'この季のハイイン記録は取得できず、枠の照合はしていません' : records ? `この季の「${label}」のハイイン記録 ${records.count}件（最高 ${records.max}点）と矛盾なし` : `この季の「${label}」にハイイン記録はまだありません`;
+  return { rule: 'double-in', basis: `${covered.rule.name}: ${covered.rule.source}。${evidence}` };
 }

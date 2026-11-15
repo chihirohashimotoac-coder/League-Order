@@ -4,7 +4,7 @@ import { AnalyticsApi } from '../api/readApi';
 import type { AnalyticsTransport } from '../api/readApi';
 import { AnalyticsCache } from '../cache/analyticsCache';
 import { desperadoGames, details, season2024Data, TDID_2024_2ND, wireDetail, withDetailSides } from '../realData.roles.fixtures';
-import { HIGH_IN_ATDO_2024_2ND, LEAGUE_ATDO } from '../realData.startRate.fixtures';
+import { HIGH_IN_ATDO_2024_2ND, LEAGUE_ATDO, STARTED_AT_ATDO_2024_2ND } from '../realData.startRate.fixtures';
 import type { PeriodLoad } from '../service/periodService';
 import { emptyLoad } from '../service/periodService';
 import type { GamesLoad } from '../service/gamesLoader';
@@ -19,7 +19,7 @@ import { usePlayerDetail } from './useRoleData';
 
 afterEach(cleanup);
 
-const season = { ...season2024Data(), leagueId: LEAGUE_ATDO };
+const season = { ...season2024Data(), leagueId: LEAGUE_ATDO, startedAt: STARTED_AT_ATDO_2024_2ND };
 const raw = withDetailSides(desperadoGames());
 const games: GamesLoad = {
   games: new Map([[TDID_2024_2ND, { tournamentId: TDID_2024_2ND, games: raw, dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, complete: true }]]),

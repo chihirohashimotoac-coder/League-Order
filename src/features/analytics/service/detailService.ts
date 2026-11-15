@@ -10,7 +10,7 @@ import type { SeasonData } from '../seasonData';
 import type { HighInRecord } from '../api/parse';
 import { isStartTally } from '../startRate';
 import type { SeasonStart, StartGameExclusion } from '../startRate';
-import { declaredLeague, gameStartRule, highInEvidence } from '../startRule';
+import { gameStartRule, highInEvidence, seasonRule } from '../startRule';
 import type { HighInEvidence } from '../startRule';
 import type { GamesContext } from './gamesLoader';
 
@@ -91,6 +91,7 @@ const lacksStart = (entry: { r: GameReconstruction } | undefined): boolean => !!
  * cannot be read: the slots are then "unknown", never assumed double-in.
  */
 async function loadHighIns(ctx: GamesContext, season: SeasonData): Promise<{ records: HighInRecord[] | null; budget: boolean; failure?: string }> {
+  // Only a cross-check: a failure here never removes a verdict, a 3DA or a First 9.
   const key = highInKey(season.tournamentId);
   const cached = await ctx.cache.get<HighInRecord[]>(key);
   if (cached && ctx.cache.isFresh(cached) && !ctx.forceRefresh) return { records: cached.value, budget: false };
@@ -100,7 +101,7 @@ async function loadHighIns(ctx: GamesContext, season: SeasonData): Promise<{ rec
     await ctx.cache.put(key, records, season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason);
     return { records, budget: false };
   } catch (error) {
-    return { records: cached?.value ?? null, budget: error instanceof RequestBudgetError, failure: cached ? undefined : `${season.title}（ハイイン記録）: ${describeN01Error(error)}` };
+    return { records: cached?.value ?? null, budget: error instanceof RequestBudgetError, failure: cached ? undefined : describeN01Error(error) };
   }
 }
 
@@ -125,11 +126,14 @@ export function seasonStartOf(input: {
   attributionVerified: boolean;
   evidence: HighInEvidence | null;
   highIns: readonly HighInRecord[] | null;
+  /** Why the high-in records are missing, when they were wanted (shown as a note only). */
+  highInNote?: string;
 }): SeasonStart {
   const { season, oid } = input;
   const doubles = input.mine.filter((g) => g.family.family === '01' && g.role === 'doubles');
   const out: SeasonStart = { tournamentId: season.tournamentId, title: season.title, doublesGames: doubles.length, counted: 0, attempts: 0, successes: 0, legs: 0, excludedLegs: {}, excludedGames: {}, ruleNotes: [], highInAgreements: 0 };
   const leave = (why: StartGameExclusion): void => void (out.excludedGames[why] = (out.excludedGames[why] ?? 0) + 1);
+  if (input.highInNote && doubles.length > 0) out.ruleNotes.push(input.highInNote);
   for (const game of doubles) {
     const verdict = gameStartRule(season, game, input.evidence);
     if (verdict.rule !== 'double-in') {
@@ -232,13 +236,15 @@ export async function reconstructPerson(
     // The slots' in-rule evidence (one request per season, only where a doubles game of the
     // player could count): read before the legs, so only games that can count are refetched.
     let highIns: HighInRecord[] | null = null;
-    if (doublesCount > 0 && declaredLeague(season.leagueId)) {
+    let highInNote: string | undefined;
+    if (doublesCount > 0 && 'rule' in seasonRule(season)) {
       const loaded = await loadHighIns(ctx, season);
       highIns = loaded.records;
-      if (loaded.failure) result.failures.push(loaded.failure);
+      // Not a failure of the read: the start attempts still count, without the cross-check.
+      if (loaded.failure) highInNote = `${season.title}: n01のハイイン記録を取得できず、Legごとの照合はしていません（${loaded.failure}）`;
       if (loaded.budget) stopped = true;
     }
-    const evidence = highIns ? highInEvidence(season.slots, highIns) : null;
+    const evidence = highIns ? highInEvidence(highIns) : null;
     const stored = await readCached(ctx, season.tournamentId);
     const ttl = season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
     const now = ctx.now();
@@ -322,12 +328,12 @@ export async function reconstructPerson(
 
     if (composition === 'unknown') {
       result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'mismatch', games: mine.length, reconstructed: mine.filter((g) => rebuilt.get(g.gameId)?.ok).length, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: '種別不明のゲーム枠を含むため、n01公式値と照合できません' });
-      if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: false, evidence, highIns }));
+      if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: false, evidence, highIns, highInNote }));
       continue;
     }
     const check = checkPlayerSeason(season.tournamentId, me.oid, me.line, classified, rebuilt, composition === 'pure01');
     result.checks.push(check);
-    if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: check.verified.score, evidence, highIns }));
+    if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: check.verified.score, evidence, highIns, highInNote }));
     addVerified(result.contributions, check, classified, rebuilt);
   }
   // Only confirmed start scores are published; a partial minimum could be worse than the real one.

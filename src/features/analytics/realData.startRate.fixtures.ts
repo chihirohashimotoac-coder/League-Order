@@ -45,3 +45,17 @@ export const HIGH_IN_ATDO_2024_2ND = expand(HIGH_IN_ATDO_2024_2ND_COMPACT);
 export const LEAGUE_ATDO = 'lg_l3hI_3397';
 export const LEAGUE_TDO = 'lg_3qgW_6619';
 export const TDID_TDO_2026_3RD = 't_i3FQ_9507';
+
+/** n01 league-list `createTime` (seconds) of the two seasons, as their `startedAt` (no `t_date` is set). */
+export const STARTED_AT_ATDO_2026_3RD = 1_789_829_175_000;
+export const STARTED_AT_TDO_2026_3RD = 1_790_122_869_000;
+
+/**
+ * 「TDO事務局検証作業用」(`t_Aq5m_2340`, status 25, created 2025-10-31 — inside TDO's checked
+ * date range): its doubles slots have the same `schid`s as the season and carry 180-point
+ * high-in records, which no double-in start can make. The real case of a same-slot contradiction.
+ */
+export const TDO_TEST_TOURNAMENT = { tournamentId: 't_Aq5m_2340', startedAt: 1_761_884_042_000 } as const;
+export const HIGH_IN_TDO_TEST_TOURNAMENT = expand('5ywh:180 5ywh:180 5ywh:180 5ywh:180 kwgs:180 kwgs:180 kwgs:180 kwgs:180 5ywh:120');
+/** ATDO 2024 2nd (`t_kY1n_6823`): its league-list `createTime`, inside ATDO's checked range. */
+export const STARTED_AT_ATDO_2024_2ND = 1_720_440_506_000;

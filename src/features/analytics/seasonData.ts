@@ -51,6 +51,11 @@ export interface SeasonData {
   leagueId: string | null;
   title: string;
   status: number | null;
+  /**
+   * When the season starts (epoch ms), from n01's league list (`t_date` / start date /
+   * `createTime`). Set by the period load; absent where a season is built on its own.
+   */
+  startedAt?: number | null;
   /** Informational fingerprint of the format. It no longer decides whether seasons pool. */
   signature: string;
   /** Schedule slots as n01 wrote them (base + division overrides). */
