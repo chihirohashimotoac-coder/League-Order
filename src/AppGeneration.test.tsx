@@ -233,6 +233,70 @@ describe('a generation superseded on the same team', () => {
   }, 60_000);
 });
 
+describe('a re-generation from other conditions', () => {
+  /** RESULT → SETUP through the breadcrumb, keeping the order being worked on. */
+  async function backToSetup(user: User): Promise<void> {
+    const crumbs = screen.getByRole('navigation', { name: 'パンくずリスト' });
+    await user.click(within(crumbs).getByRole('button', { name: 'オーダー設定' }));
+    await screen.findByRole('heading', { name: 'オーダー設定' });
+  }
+
+  async function generateHere(user: User): Promise<PendingRequest> {
+    const before = runner.pending.length;
+    const generate = screen.getByRole('button', { name: /オーダーを生成|生成中/ });
+    await waitFor(() => expect(generate).toBeEnabled());
+    await user.click(generate);
+    await waitFor(() => expect(runner.pending.length).toBe(before + 1));
+    return runner.pending[runner.pending.length - 1];
+  }
+
+  const p4Included = (input: OrderInput): boolean | undefined =>
+    input.participants.find((config) => config.playerId.endsWith('_p4'))?.include;
+
+  it('is undone in one step: the saved draft pairs each line-up with its own conditions', async () => {
+    await seed();
+    const user = userEvent.setup();
+    renderApp();
+    await screen.findByRole('heading', { name: 'チームA', level: 1 });
+
+    // GEN-1 with Aさん4 out.
+    await user.click(within(nav()).getByRole('button', { name: 'ホーム' }));
+    await user.click(await screen.findByRole('button', { name: '新しいオーダーを作る' }));
+    await screen.findByRole('heading', { name: 'オーダー設定' });
+    await user.click(screen.getByRole('checkbox', { name: 'Aさん4 を参加者に含める' }));
+    const first = await generateHere(user);
+    expect(p4Included(first.input)).toBe(false);
+    answer(first, 'GEN-1');
+    await screen.findByRole('heading', { name: 'オーダー結果' });
+    // The first generation is not undoable.
+    expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+
+    // GEN-2 with Aさん4 back in.
+    await backToSetup(user);
+    await user.click(screen.getByRole('checkbox', { name: 'Aさん4 を参加者に含める' }));
+    const second = await generateHere(user);
+    expect(p4Included(second.input)).toBe(true);
+    answer(second, 'GEN-2');
+    await screen.findByRole('heading', { name: 'オーダー結果' });
+
+    // One undo returns GEN-1 with GEN-1's conditions, and nothing further is left to undo.
+    await user.click(screen.getByRole('button', { name: '元に戻す' }));
+    expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '下書きを保存' }));
+    await waitFor(async () => expect((await storedOrders())[0]?.solution.meta.label).toBe('GEN-1'));
+    let [saved] = await storedOrders();
+    expect(p4Included(saved.input)).toBe(false);
+
+    // Redo returns GEN-2 with GEN-2's conditions.
+    await user.click(screen.getByRole('button', { name: 'やり直す' }));
+    expect(screen.getByRole('button', { name: 'やり直す' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '下書きを保存' }));
+    await waitFor(async () => expect((await storedOrders())[0]?.solution.meta.label).toBe('GEN-2'));
+    [saved] = await storedOrders();
+    expect(p4Included(saved.input)).toBe(true);
+  }, 60_000);
+});
+
 describe('a generation that finishes after a saved order was opened', () => {
   it('does not overwrite the opened order', async () => {
     await seed();

@@ -241,11 +241,13 @@ export function App(): React.JSX.Element {
         if (result.ok) {
           setSession((current) => {
             const base = current && current.present.current ? current : createUndoable(input);
-            const withInput = undoableReducer(base, { type: 'setInput', input });
+            // The input travels in the same action as its result, so a re-generation is a single
+            // undo step: undo returns input and candidates together, never a mix of two runs.
             // An underdog plan travels with the result but is only offered, never shown first.
             // Its status travels with the same candidates; a result without one clears the last one.
-            return undoableReducer(withInput, {
+            return undoableReducer(base, {
               type: 'generated',
+              input,
               candidates: result.candidates,
               underdog: result.underdog ?? null,
               underdogStatus: result.underdogStatus ?? null,

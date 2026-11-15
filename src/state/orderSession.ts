@@ -53,8 +53,8 @@ export interface OrderSessionState {
   underdogStatus: UnderdogStatus | null;
   /**
    * The opponent-data confidence that generation was judged on, kept with its status: the input
-   * can move on (a re-generation's input is set one undo step before its result), the reason
-   * shown for these candidates must not.
+   * can move on (a lock or preset edit after the result), the reason shown for these candidates
+   * must not.
    */
   underdogBasis: Pick<OpponentContext, 'confidence' | 'orderConfidence'> | null;
 }
@@ -69,7 +69,18 @@ export interface UndoableState {
 export const UNDO_DEPTH = 30;
 
 export type OrderSessionAction =
-  | { type: 'generated'; candidates: OrderSolution[]; underdog?: UnderdogSuggestion | null; underdogStatus?: UnderdogStatus | null }
+  | {
+      type: 'generated';
+      candidates: OrderSolution[];
+      underdog?: UnderdogSuggestion | null;
+      underdogStatus?: UnderdogStatus | null;
+      /**
+       * The conditions this result was generated from. Given, it replaces `input` in the same
+       * step, so a re-generation is one undo entry and undo never pairs one generation's input
+       * with another's candidates. Omitted, the current input is kept (a restored saved order).
+       */
+      input?: OrderInput;
+    }
   | { type: 'selectCandidate'; index: number }
   | { type: 'applyUnderdog' }
   | { type: 'restoreStandard' }
@@ -168,8 +179,10 @@ export function sessionReducer(
     case 'generated': {
       // The standard plan is always what a generation shows; an underdog plan is only offered.
       const current = action.candidates[0] ?? null;
+      const input = action.input ?? state.input;
       return {
         ...state,
+        input,
         candidates: action.candidates,
         selectedCandidate: 0,
         current,
@@ -179,10 +192,10 @@ export function sessionReducer(
         showingUnderdog: false,
         // Belongs to this generation only: a result without one never inherits the previous one.
         underdogStatus: action.underdogStatus ?? null,
-        // `input` is the generation's own here (App sets it right before the result).
+        // `input` is the generation's own here: it arrives with the result in this same action.
         underdogBasis:
-          action.underdogStatus && state.input.opponent
-            ? { confidence: state.input.opponent.confidence, orderConfidence: state.input.opponent.orderConfidence }
+          action.underdogStatus && input.opponent
+            ? { confidence: input.opponent.confidence, orderConfidence: input.opponent.orderConfidence }
             : null,
       };
     }
