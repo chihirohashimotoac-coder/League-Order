@@ -99,6 +99,13 @@ function splitOf(name: string): [string, string] | null {
 }
 
 /** A member id's spelling without leading zeros in its numbers (`02-065` and `02-0065` are one id). */
+/**
+ * Words a league is seen to put in the member id column for guests, besides the shared labels of
+ * {@link isSharedLabel} (ATDO: 「助」「申請」). Analytics only, and only where several rows of one
+ * season carry the word; order generation and sync keep their own rules. Compared normalised.
+ */
+const LABEL_WORDS: ReadonlySet<string> = new Set(['助', '申請'].map(normalizeName));
+
 export function idSpelling(opid: string): string {
   return normalizeName(opid).replace(/\d+/gu, (digits) => String(Number(digits)));
 }
@@ -257,9 +264,10 @@ export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDe
   const noOwnId = (r: PersonRow): boolean => { const k = kindOf.get(r.key); return k === 'guest' || k === 'shared'; };
   const guestOnly = (p: Person): boolean => p.rows.every(noOwnId);
   /** The id spellings a person's rows carry (shared ids included), for the compatibility check. */
-  // A word several rows of a season share instead of a member id (「助」「申請」…, no digits) is a label
-  // like 助っ人, not an id to keep apart from other ids.
-  const labelLike = (r: PersonRow): boolean => !r.opid || isSharedLabel(r.opid) || (kindOf.get(r.key) === 'shared' && !/\d/u.test(r.opid));
+  // A word known to be used for guests (「助」「申請」, see LABEL_WORDS) that several rows of a season
+  // share is a label like 助っ人. Anything else is an id, whatever its letters (ＡＢＣ１２３, MEMBER-ALPHA):
+  // compared in its normalised spelling and kept apart from other ids.
+  const labelLike = (r: PersonRow): boolean => !r.opid || isSharedLabel(r.opid) || (kindOf.get(r.key) === 'shared' && LABEL_WORDS.has(normalizeName(r.opid)));
   const spellings = (p: Person): Set<string> => new Set(p.rows.filter((r) => !labelLike(r)).map((r) => idSpelling(r.opid!)));
   const idOf = (p: Person): string | null => {
     const ids = new Set(p.rows.filter((r) => !looseKeys.has(r.key) && r.opid).map((r) => idSpelling(r.opid!)));

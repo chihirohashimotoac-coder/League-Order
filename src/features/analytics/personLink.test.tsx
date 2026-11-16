@@ -299,6 +299,53 @@ describe('2026-11-19: a roster that could not be read, a member id given to two 
     expect(l2.held.find((h) => h.row.key === 'w0:b')?.reason).toContain('会員IDの異なる候補');
   });
 
+  it('1. an id without half-width digits (ＡＢＣ１２３, MEMBER-ALPHA) shared by two rows is still an id: never pooled into ID-100', () => {
+    const at = (id: string, rows: { oid: string; opid: string; team: string; name: string; score: number }[]) =>
+      buildSeasonData(season({ tournament: tournament(id, T), roster: roster(rows), playerStats: rows.map((r) => playerRow(r.oid, r.opid, r.team, r.name, simpleLine(r.score, 30, 1, 2))) }));
+    for (const opid of ['ＡＢＣ１２３', 'MEMBER-ALPHA']) {
+      const seasons = [
+        at('v1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健', score: 600 }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人', score: 600 }]),
+        at('v0', [{ oid: 'b', opid, team: 'KAL', name: '田中 健', score: 900 }, { oid: 'c', opid, team: 'HOL', name: '別 人', score: 600 }]),
+      ];
+      const links = linkPeople(seasons);
+      expect(links.keyOf.get('v0:b')).not.toBe(links.keyOf.get('v1:a'));
+      expect(links.held.find((h) => h.row.key === 'v0:b')?.reason).toContain('会員IDの異なる候補');
+      const me = aggregatePlayers(applyLinks(seasons, links)).find((p) => p.personKey === links.keyOf.get('v1:a'))!;
+      const score = me.seasons.reduce((n, x) => n + (x.line.score ?? 0), 0);
+      const darts = me.seasons.reduce((n, x) => n + (x.line.darts ?? 0), 0);
+      expect(((score / darts) * 3).toFixed(2)).toBe('60.00');
+    }
+  });
+
+  it('1. an id written in full-width (ＩＤ－１００) shared in its season is ID-100 in another spelling: joins on name, team and the next season', () => {
+    const seasons = [
+      make('y1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人' }]),
+      make('y0', [{ oid: 'b', opid: 'ＩＤ－１００', team: 'KAL', name: '田中 健' }, { oid: 'c', opid: 'ＩＤ－１００', team: 'HOL', name: '別 人' }]),
+    ];
+    const links = linkPeople(seasons);
+    expect(links.keyOf.get('y0:b')).toBe(links.keyOf.get('y1:a'));
+    expect(links.keyOf.get('y0:c')).not.toBe(links.keyOf.get('y1:a'));
+    // The usual conditions still apply: a namesake in the season it follows on to leaves it held.
+    const crowded = [
+      make('y1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'h', opid: 'ID-100', team: 'HOL', name: '田中 健' }]),
+      make('y0', [{ oid: 'b', opid: 'ＩＤ－１００', team: 'KAL', name: '田中 健' }, { oid: 'c', opid: 'ＩＤ－１００', team: 'HOL', name: '別 人' }]),
+    ];
+    const l2 = linkPeople(crowded);
+    expect(l2.keyOf.get('y0:b')).not.toBe(l2.keyOf.get('y1:a'));
+  });
+
+  it('1. the known shared words 「助」 and 「申請」 stay labels', () => {
+    for (const opid of ['助', '申請']) {
+      const seasons = [
+        make('l1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人' }]),
+        make('l0', [{ oid: 'b', opid, team: 'KAL', name: '田中 健' }, { oid: 'c', opid, team: 'HOL', name: '別 人' }]),
+      ];
+      const links = linkPeople(seasons);
+      expect(links.keyOf.get('l0:b')).toBe(links.keyOf.get('l1:a'));
+      expect(links.people.get(links.keyOf.get('l1:a')!)!.find((e) => e.row.key === 'l0:b')!.reason).toContain(`共用の会員ID「${opid}」`);
+    }
+  });
+
   it('1. two 田中 健 in the season a guest row would follow on to (other id, other team): held, not joined to the one of the same team', () => {
     const seasons = [
       make('x1', [{ oid: 'k', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'h', opid: 'ID-900', team: 'HOL', name: '田中 健' }]),
