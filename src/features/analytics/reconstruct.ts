@@ -56,12 +56,26 @@ export type GameReconstruction =
        */
       sides?: [SideFigures, SideFigures];
       /**
+       * Per side, the detail's own row (team, legs won, total score and darts): what the list row is
+       * compared with, independent of the throwing order. Absent on entries cached before it existed:
+       * a side without its order cannot be compared then, and the game is read again.
+       */
+      sideRows?: [SideRow, SideRow];
+      /**
        * Start attempts per player (`startRate.ts`). Absent on reconstructions cached before it
        * existed: "not counted yet", never 0/0. `null` when the legs cannot be read that way.
        */
       start?: GameStartTally | null;
     }
   | { gameId: string; ok: false; reason: string };
+
+/** A side as the leg detail writes it. */
+export interface SideRow {
+  teamId: string;
+  legsWon: number;
+  score: number | null;
+  darts: number | null;
+}
 
 /** A side's First 9 (its first three visits of every leg) and Break (legs thrown second, and won). */
 export interface SideFigures {
@@ -88,7 +102,6 @@ export function reconstructGame(detail: RawGameDetail): GameReconstruction {
   const fail = (reason: string): GameReconstruction => ({ gameId: detail.gameId, ok: false, reason });
   if (!detail.finished) return fail('未終了のゲームです');
   if (detail.startScore === null || detail.startScore <= 0) return fail('開始点数が不明です');
-  if (detail.sides.every((side) => side.players.length === 0)) return fail('両チームの投順がありません');
   const perPlayer: Record<string, Contribution> = {};
   const sideTotals = [
     { score: 0, darts: 0 },
@@ -168,7 +181,10 @@ export function reconstructGame(detail: RawGameDetail): GameReconstruction {
       return fail(`Leg明細の合計（${sideTotals[sideIndex].score}点/${sideTotals[sideIndex].darts}投）がゲームの合計（${side.score ?? '—'}点/${side.darts ?? '—'}投）と一致しません`);
     }
   }
-  return { gameId: detail.gameId, ok: true, startScore: detail.startScore, perPlayer, sides: sideFigures, start: startTallyOf(detail) };
+  const sideRows = detail.sides.map((side) => ({ teamId: side.teamId, legsWon: side.legsWon, score: side.score, darts: side.darts })) as [SideRow, SideRow];
+  // Without any throwing order only the sides' figures stand (First 9, Keep/Break of a team);
+  // nothing is credited to a player.
+  return { gameId: detail.gameId, ok: true, startScore: detail.startScore, perPlayer, sides: sideFigures, sideRows, start: startTallyOf(detail) };
 }
 
 class ReconstructionError extends Error {}

@@ -373,8 +373,15 @@ function classifiedOf(season: SeasonData, raw: SeasonGames): ClassifiedGame[] {
  */
 function matchesRow(game: ClassifiedGame, rebuilt: GameReconstruction): boolean {
   if (!rebuilt.ok) return true;
-  return game.sides.every((side) => {
-    // A side without its throwing order is credited to nobody: there is nothing of it to compare.
+  return game.sides.every((side, i) => {
+    // The side as the detail writes it — team, legs won, total score and darts — must be the list
+    // row's side, whatever is known of its throwing order (a missing order is no pass).
+    const row = rebuilt.sideRows?.[i];
+    if (row) {
+      if (row.teamId !== side.teamId || row.legsWon !== side.legsWon) return false;
+      if (side.score !== null && row.score !== side.score) return false;
+      if (side.darts !== null && row.darts !== side.darts) return false;
+    } else if (side.players.length === 0) return false; // an old entry: nothing to compare this side with
     if (side.players.length === 0) return true;
     let score = 0;
     let darts = 0;
@@ -388,6 +395,9 @@ function matchesRow(game: ClassifiedGame, rebuilt: GameReconstruction): boolean 
     return (side.score === null || score === side.score) && (side.darts === null || darts === side.darts);
   });
 }
+
+/** A stored reconstruction that cannot be compared with this row (cached before side rows were kept). */
+const lacksSideRows = (game: ClassifiedGame, entry: { r: GameReconstruction } | undefined): boolean => !!entry && entry.r.ok && !entry.r.sideRows && game.sides.some((side) => side.players.length === 0);
 
 /** The legs list the same players, in the same throwing order, on each side as the list's row. */
 function sameOrder(game: ClassifiedGame, detail: RawGameDetail): boolean {
@@ -492,6 +502,8 @@ export async function reconstructPerson(
     const due = (id: string): boolean => {
       const entry = stored.get(id);
       if (!entry || ctx.forceRefresh === true || entry.at < freshAfter || now - entry.at >= ttl) return true;
+      const game = mine.find((g) => g.gameId === id);
+      if (game && lacksSideRows(game, entry)) return true;
       return entry.fp !== undefined ? entry.fp !== rowPrint.get(id) : listChanged;
     };
     // n01's totals as they stand after the change (the period's are from before it).
@@ -815,7 +827,7 @@ export async function reconstructTeam(
     const due = (g: ClassifiedGame): boolean => {
       const e = stored.get(g.gameId);
       if (!e || ctx.forceRefresh === true || e.at < freshAfter || now - e.at >= ttl) return true;
-      return e.fp !== rowPrint.get(g.gameId) || (e.r.ok && !e.r.sides && g.sides.some((side) => side.players.length === 0));
+      return e.fp !== rowPrint.get(g.gameId) || lacksSideRows(g, e) || (e.r.ok && !e.r.sides && g.sides.some((side) => side.players.length === 0));
     };
     const pending = mine.filter(due);
     const readNow = new Set<string>();

@@ -342,7 +342,7 @@ export function PlayerAnalytics({
                     />
                   );
                 })}
-                {doublesView ? <StartRateCard start={start} pendingText={detailStatus && detailStatus.kind !== 'done' && detailStatus.kind !== 'partial' ? detailStatus.text : null} /> : null}
+                {doublesView ? <StartRateCard start={start} pendingText={detailStatus && detailStatus.kind !== 'done' && detailStatus.kind !== 'partial' ? detailStatus.text : null} seasonsUsed={start && multiSeason && start.seasonsCounted !== commonSeasons ? `${start.seasonsCounted}季分` : null} /> : null}
               </div>
               <details className="analytics-details" open>
                 <summary>スコア・フィニッシュ記録</summary>

@@ -185,7 +185,12 @@ export interface SeasonStart {
   highInAgreements: number;
 }
 
-export type PeriodStartState = 'value' | 'no-trials' | 'no-games' | 'rule-unknown' | 'unavailable';
+/**
+ * `excluded`: only games whose slot is known not to be double-in (straight-in) — a known exclusion;
+ * `rule-unknown`: games whose in-rule could not be established; `failed`: the legs or the season
+ * could not be read (nothing judged); `unavailable`: read, but no leg could be judged.
+ */
+export type PeriodStartState = 'value' | 'no-trials' | 'no-games' | 'rule-unknown' | 'excluded' | 'failed' | 'unavailable';
 
 export interface PeriodStart {
   state: PeriodStartState;
@@ -206,6 +211,8 @@ export interface PeriodStart {
   ruleNotes: string[];
   /** Starts counted here that n01's own high-in records confirm (same player, same points). */
   highInAgreements: number;
+  /** Seasons whose attempts are in the figure (at least one throw counted). */
+  seasonsCounted: number;
   reason?: string;
 }
 
@@ -215,8 +222,9 @@ function addInto<K extends string>(into: Partial<Record<K, number>>, from: Parti
 
 /** Σ successes / Σ attempts over the seasons; nothing is estimated for what was left out. */
 export function periodStart(seasons: readonly SeasonStart[]): PeriodStart {
-  const out: PeriodStart = { state: 'unavailable', attempts: 0, successes: 0, value: null, partial: false, counted: 0, legs: 0, doublesGames: 0, excludedGames: {}, excludedLegs: {}, seasonsMissing: [], ruleNotes: [], highInAgreements: 0 };
+  const out: PeriodStart = { state: 'unavailable', attempts: 0, successes: 0, value: null, partial: false, counted: 0, legs: 0, doublesGames: 0, excludedGames: {}, excludedLegs: {}, seasonsMissing: [], ruleNotes: [], highInAgreements: 0, seasonsCounted: 0 };
   for (const s of seasons) {
+    if (s.attempts > 0) out.seasonsCounted += 1;
     out.attempts += s.attempts;
     out.successes += s.successes;
     out.counted += s.counted;
@@ -238,9 +246,13 @@ export function periodStart(seasons: readonly SeasonStart[]): PeriodStart {
     const onlyRule = leftOutGames > 0 && leftOutGames === (out.excludedGames['rule-unknown'] ?? 0) + (out.excludedGames['straight-in'] ?? 0) && out.seasonsMissing.length === 0;
     if (onlyRule) {
       const straight = (out.excludedGames['straight-in'] ?? 0) === leftOutGames;
-      return { ...out, state: 'rule-unknown', reason: straight ? 'ストレートインのゲーム枠のみのため対象外です' : 'ダブルインと確認できたゲーム枠の出場がないため算出しません' };
+      return straight
+        ? { ...out, state: 'excluded', reason: 'ストレートインと確認できたゲーム枠のみのため対象外です' }
+        : { ...out, state: 'rule-unknown', reason: 'ダブルインと確認できたゲーム枠の出場がないため算出しません（イン規則を確認できていません）' };
     }
-    return { ...out, state: 'unavailable', reason: out.seasonsMissing[0]?.reason ?? '判定できるLeg明細がないため算出しません' };
+    const unread = (out.excludedGames['not-fetched'] ?? 0) + (out.excludedGames['needs-refetch'] ?? 0);
+    if (unread > 0 || out.seasonsMissing.length > 0) return { ...out, state: 'failed', reason: out.seasonsMissing[0]?.reason ?? `Leg明細を取得できていないゲームが${unread}件あるため算出していません` };
+    return { ...out, state: 'unavailable', reason: '判定できるLeg明細がないため算出しません' };
   }
   // Games were admitted but none of their legs could be read: the attempts are unknown, not 0.
   if (out.legs === 0) return { ...out, state: 'unavailable', reason: '判定できるLegがないため算出しません（記録の連続性・決着方法を確定できないLegのみ）' };

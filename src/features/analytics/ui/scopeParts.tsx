@@ -244,6 +244,11 @@ export function AnalysisSummary({
               {g.reasons.length > 0 ? <span className="meta">{g.reasons.join(' / ')}</span> : null}
             </li>
           ))}
+          {gamesNeeded > 0 ? (
+            <li data-testid="games-scope-note">
+              <strong>ゲーム記録の集計対象</strong>：リーグ戦の試合（n01 の試合ID が「_lg_」のもの）だけです。プレーオフ等（「_m_」など）は含みません。01全体の公式通算はn01が数えた全試合のため、プレーオフ等を含む場合があり、ゲーム記録の合計と一致しないことがあります。
+            </li>
+          ) : null}
           {scope !== 'all01' && scope !== 'singles' ? (
             <li>
               <strong>選手個人の3DA</strong>：チーム合計を選手に配分することはしません。Leg明細から復元し、n01公式の通算値と一致した選手・季のみ表示します。
@@ -419,11 +424,13 @@ const START_STATE_NOTE: Record<PeriodStart['state'], string> = {
   'no-trials': '試技なし',
   'no-games': '対象なし',
   'rule-unknown': 'ルール不明',
+  excluded: '対象外（ストレートイン）',
+  failed: '取得失敗',
   unavailable: '算出不可',
 };
 
 /** ダブルイン成功率 as a metric card: the rate with its successes / attempts, or why there is none. */
-export function StartRateCard({ start, pendingText }: { start: PeriodStart | null; pendingText: string | null }): React.JSX.Element {
+export function StartRateCard({ start, pendingText, seasonsUsed = null }: { start: PeriodStart | null; pendingText: string | null; /** 「3季分」: the seasons with attempts, when they differ from the period's common range. */ seasonsUsed?: string | null }): React.JSX.Element {
   // 試技なし (no throw before the pair started) is not 0%: it has no rate at all.
   const shown = start ? (start.state === 'no-trials' ? { value: '試技なし', sample: '0/0スロー' } : formatStart(start)) : { value: '—', sample: '' };
   const note = !start ? (pendingText ?? 'Leg明細の取得後に表示します') : start.state === 'value' ? (start.partial ? '一部集計（内訳は下の「ダブルイン成功率の内訳」）' : 'Leg明細から算出（n01の公式値ではありません）') : (start.reason ?? '');
@@ -432,9 +439,12 @@ export function StartRateCard({ start, pendingText }: { start: PeriodStart | nul
     <div className="metric-card" data-testid="metric-ダブルイン成功率">
       <span className="k">ダブルイン成功率</span>
       <span className="v">{shown.value}</span>
-      <span className="s">{shown.sample || '—'}</span>
+      <span className="s">
+        {shown.sample || '—'}
+        {seasonsUsed && start?.state === 'value' ? ` ・ ${seasonsUsed}` : ''}
+      </span>
       {note ? <span className="n">{note}</span> : null}
-      <span className={`badge${start?.state === 'value' && start.partial ? ' warn' : ''}`}>{badge}</span>
+      <span className={`badge${(start?.state === 'value' && start.partial) || start?.state === 'failed' ? ' warn' : ''}`}>{badge}</span>
     </div>
   );
 }

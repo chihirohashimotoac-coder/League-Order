@@ -23,6 +23,7 @@ export interface GaugeStage {
 const STATE_TEXT: Record<StageState, string> = { waiting: '待機中', running: '取得中', done: '完了', partial: '部分集計', failed: '取得失敗' };
 
 import { formatDateTime } from '../format';
+import type { TeamDetailState } from './useRoleData';
 
 /** hh:mm in Japan time, as the rest of the screen (「最終取得」) shows times. */
 function clock(at: number): string {
@@ -100,4 +101,36 @@ export function LoadGauge({
       ) : null}
     </section>
   );
+}
+
+/** The team view's "Leg明細の照合" stage, from the team read's phase (never 完了 for a read that did not happen). */
+export function teamLegStage(teamDetail: Pick<TeamDetailState, 'phase' | 'result'>): GaugeStage {
+  const seasons = teamDetail.result?.seasons.filter((x) => x.games > 0) ?? [];
+  const total = seasons.reduce((n, x) => n + x.games, 0);
+  const done = seasons.reduce((n, x) => n + x.rebuilt, 0);
+  const p = teamDetail.phase;
+  const TEXT: Record<typeof p, string> = {
+    idle: '',
+    'waiting-games': 'ゲーム一覧の取得を待っています',
+    'games-failed': 'ゲーム一覧を取得できないため、Leg明細を照合できません',
+    running: 'チームのこの種別のゲームのLeg明細を取得しています',
+    'no-games': 'この種別の対象試合がありません',
+    failed: teamDetail.result?.failures[0] ?? 'Leg明細を取得できませんでした',
+    partial: `${total - done}ゲームのLeg明細を確認できていません`,
+    done: '',
+  };
+  return {
+    id: 'legs',
+    label: 'Leg明細の照合',
+    state: p === 'waiting-games' ? 'waiting' : p === 'running' ? 'running' : p === 'games-failed' || p === 'failed' ? 'failed' : p === 'partial' ? 'partial' : 'done',
+    count: teamDetail.result && total > 0 ? { done, total, unit: 'ゲーム' } : null,
+    text: TEXT[p],
+  };
+}
+
+/** The whole read's outcome after loading: a failed or partial stage is never reported as 完了. */
+export function gaugeOutcomeOf(stages: readonly GaugeStage[], hasSeasons: boolean, periodPartial: boolean, at: number | null): { state: 'done' | 'partial' | 'failed'; at: number | null } {
+  const failed = stages.some((x) => x.state === 'failed');
+  const partial = stages.some((x) => x.state === 'partial') || periodPartial;
+  return { state: failed && !hasSeasons ? 'failed' : failed || partial ? 'partial' : 'done', at };
 }

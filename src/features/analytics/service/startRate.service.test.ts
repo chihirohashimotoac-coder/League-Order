@@ -137,7 +137,7 @@ describe('ダブルイン成功率 through the reconstruction service', () => {
     expect(result.checks[0].state).toBe('incomplete');
     expect(result.checks[0].verified.score).toBe(false);
     expect(result.starts[0]).toMatchObject({ counted: 0, attempts: 0, excludedGames: { 'order-unverified': 2, 'not-fetched': 1 } });
-    expect(periodStart(result.starts)).toMatchObject({ state: 'unavailable', value: null });
+    expect(periodStart(result.starts)).toMatchObject({ state: 'failed', value: null });
   });
 
   it('a high-in record of a leg that names the other partner: that game is left out; the same record naming 和田 confirms it', async () => {
@@ -154,7 +154,7 @@ describe('ダブルイン成功率 through the reconstruction service', () => {
     const result = await reconstructPerson(ctxOf(new FakeN01(wired()), undefined, 3), { seasons: [atdoSeason()], games: seasonGames, personKey: keyOf('63Cz') });
     expect(result.checks[0].state).toBe('incomplete');
     expect(result.starts[0].attempts).toBe(0);
-    expect(periodStart(result.starts)).toMatchObject({ state: 'unavailable', value: null });
+    expect(periodStart(result.starts)).toMatchObject({ state: 'failed', value: null });
     const later = { ...atdoSeason(), tournamentId: 'later', title: 'later season' };
     const two = await reconstructPerson(ctxOf(new FakeN01(wired()), undefined, 0), {
       seasons: [atdoSeason(), later],
@@ -202,6 +202,6 @@ describe('an analytics cache written before the start tally existed', () => {
     expect(result.contributions.size).toBeGreaterThan(0);
     expect(result.stale).toEqual([]);
     expect(result.starts[0]).toMatchObject({ counted: 0, attempts: 0, excludedGames: { 'needs-refetch': 3 } });
-    expect(periodStart(result.starts)).toMatchObject({ state: 'unavailable', value: null });
+    expect(periodStart(result.starts)).toMatchObject({ state: 'failed', value: null });
   });
 });

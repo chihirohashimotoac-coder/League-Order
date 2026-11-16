@@ -165,14 +165,14 @@ describe('the period figure (Σ successes / Σ attempts)', () => {
     expect(formatStart(p).value).toBe('0.0%');
   });
 
-  it('no attempt at all (分母0), no doubles games (対象なし), only unknown slots (ルール不明) and nothing readable (算出不可) carry no number', () => {
+  it('no attempt at all (分母0), no doubles games (対象なし), only unknown slots (ルール不明), straight-in only (対象外), not read (取得失敗) and nothing readable (算出不可) carry no number', () => {
     expect(periodStart([season({ attempts: 0 })])).toMatchObject({ state: 'no-trials', value: null });
     expect(periodStart([season({ doublesGames: 0, counted: 0 })])).toMatchObject({ state: 'no-games', value: null });
     expect(periodStart([])).toMatchObject({ state: 'no-games', value: null });
     expect(periodStart([season({ counted: 0, excludedGames: { 'rule-unknown': 2 } })])).toMatchObject({ state: 'rule-unknown', value: null });
-    expect(periodStart([season({ counted: 0, excludedGames: { 'straight-in': 2 } })])).toMatchObject({ state: 'rule-unknown', value: null, reason: expect.stringContaining('ストレートイン') });
+    expect(periodStart([season({ counted: 0, excludedGames: { 'straight-in': 2 } })])).toMatchObject({ state: 'excluded', value: null, reason: expect.stringContaining('ストレートインと確認できた') }); // a known exclusion, not ルール不明
     expect(periodStart([season({ counted: 0, excludedGames: { 'order-unverified': 2 } })])).toMatchObject({ state: 'unavailable', value: null });
-    expect(periodStart([season({ counted: 0, doublesGames: null, seasonReason: 'ゲーム一覧を取得できていません' })])).toMatchObject({ state: 'unavailable', reason: 'ゲーム一覧を取得できていません' });
+    expect(periodStart([season({ counted: 0, doublesGames: null, seasonReason: 'ゲーム一覧を取得できていません' })])).toMatchObject({ state: 'failed', reason: 'ゲーム一覧を取得できていません' }); // 取得失敗
     expect(formatStart(periodStart([season({ attempts: 0 })])).value).toBe('—');
   });
 

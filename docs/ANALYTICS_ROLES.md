@@ -184,3 +184,11 @@ ATDO DARTS LEAGUE (`lg_l3hI_3397`)。数値はすべて `realData.roles.test.ts`
 ### 9.7 検証（2026-11-16）
 - フィクスチャ: `realData.akdo.json`（MC-BREMEN の21ゲームと明細。選手名・opid はテスト値）、`realData.akdo.test.ts`（①②④）、`audit20261116.test.tsx`（③⑤⑥⑦⑧）、`e2e/analyticsAudit.spec.ts`（ブラウザの正常経路、スマホ・PC）。
 - ライブ照合（使い捨てスクリプト、リポジトリ外）: 3団体の今季個人ダブルス ATDO 山口 知美 33.3%（4/12）、TDO 菊地 恭介 64.3%（9/14）、TDA ニシマタ タイヨウ 50.0%（8/16）は従来どおり。
+
+### 9.8 追加修正（2026-11-17, 基準 `46695cd`）
+1. **欠けたチームIDの補い方**（`api/parse.ts` `sidesOf`）: `tmid` 内の位置では補わない。`tmid` の2チームのうち、もう一方の側に明記されたチームでない方に限って補う（n01 の実記録 `4SgVyGoI_1794310182072` は `tmid` 末尾が `5bve_9yvg`、`statsData` は 9yvg, 5bve の順で、両者の並びは一致しない）。両側のIDが欠ける、両側が同じチーム、`tmid` の2チームにないチーム、のいずれかなら、その行は読めない記録として扱い、集計に使わない（`match/list`・`match/get` とも）。
+2. **投順が無い側も一覧と照合**（`detailService.matchesRow`）: Leg 明細に各サイドの行（チーム・勝ちLeg・得点・投数、`GameReconstruction.sideRows`）を持たせ、投順の有無に関係なく一覧の行と比べる。一致しない明細は使わない（チームの First 9・Keep・Break も保留）。両側の投順が無いゲームも、種別・チーム・明細が一覧と一致すればサイドの First 9・Keep・Break を出す（個人への帰属が要る指標は出さない）。`sideRows` の無い保存済みの明細は、投順の無い側があるゲームでは再取得する（再利用しない）。
+3. **ダブルイン成功率**: 試技を採用できた季の数（`seasonsCounted`）を持ち、上部の共通集計季数と異なる場合はカードに「N季分」。状態を区別: 対象外（ストレートインと確認できた枠のみ, `excluded`）／ルール不明（`rule-unknown`）／試技なし（`no-trials`）／取得失敗（明細・季を取得できていない, `failed`）／算出不可（読めたが判定できるLegなし, `unavailable`）。
+4. **チームのLeg明細の照合状態**（`useTeamDetail` の `phase`）: 一覧の取得待ち（`waiting-games`）、一覧がすべて取得失敗（`games-failed`、明細は読まない）、対象試合なし（`no-games`）、明細の取得失敗（`failed`）、部分（`partial`）、完了（`done`）。ゲージは失敗・部分を「完了」としない（`LoadGauge.teamLegStage` / `gaugeOutcomeOf`）。
+
+**集計範囲の区別（判断済み）**: 種別ビューのゲーム記録はリーグ戦（`tmid` が `_lg_`）の試合だけで、プレーオフ等（`_m_` 等）は含まない。01全体の公式通算は n01 が数えた全試合で、プレーオフ等を含む。TDA 2026年度前期（`t_wOVS_6783`）の4チームは、`_lg_` に `_m_` の17ゲームを足すと公式通算と一致する（`npm run verify:analytics-roles` がそのように照合し、ログに区別して出す）。この範囲は変えず、「集計の内訳」に集計対象を明記した。回帰テスト: `audit20261117.test.tsx`。

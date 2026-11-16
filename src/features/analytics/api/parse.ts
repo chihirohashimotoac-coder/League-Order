@@ -294,17 +294,35 @@ function teamsOfMatchId(matchId: string | null): [string, string] | null {
 /**
  * Both sides of a row. A side whose throwing order n01 left out (`order: null`, seen in TDA
  * 2026年度 前期: three games of one team) keeps its team, legs and totals with no players, and the
- * row says so (`missingOrder`): the team's results are known, who threw for it is not. A side
- * without a team (none written and none in the `tmid`) or without its legs makes the row unreadable.
+ * row says so (`missingOrder`): the team's results are known, who threw for it is not.
+ *
+ * A side without its team id takes the one team of the `tmid`'s pair that the other side is not —
+ * never the `tmid`'s position: the `tmid` lists the pair in its own order, which need not be the
+ * sides' (AKDO `4SgVyGoI_1794310182072`: `tmid` ends `5bve_9yvg`, `statsData` is 9yvg, 5bve). The row
+ * is unreadable (counted, never guessed) when that cannot be settled: both team ids missing, the
+ * same team on both sides, or a team the `tmid`'s pair does not hold. A side without its legs is
+ * unreadable too.
  */
 function sidesOf(sideRows: unknown, matchId: string | null): { sides: [RawGameSide, RawGameSide]; missingOrder?: [boolean, boolean] } | null {
   if (!Array.isArray(sideRows) || sideRows.length !== 2) return null;
+  const pair = teamsOfMatchId(matchId);
+  const consistent = (sides: readonly RawGameSide[]): boolean =>
+    sides[0].teamId !== sides[1].teamId && (!pair || sides.every((side) => pair.includes(side.teamId)));
   const strict = sideRows.map((row) => sideOf(row));
-  if (strict.every((side) => side !== null)) return { sides: strict as [RawGameSide, RawGameSide] };
-  const teams = teamsOfMatchId(matchId);
-  const lenient = sideRows.map((row, i) => sideOf(row, true, teams?.[i] ?? null));
+  if (strict.every((side) => side !== null)) return consistent(strict as RawGameSide[]) ? { sides: strict as [RawGameSide, RawGameSide] } : null;
+  const written = sideRows.map((row) => (isRec(row) ? str(firstOf(row, ['tpid', 'team'])) : null));
+  let ids: (string | null)[] = written;
+  if (written.some((id) => id === null)) {
+    // One team id missing: the other one of the tmid's pair, when the written one belongs to it.
+    const known = written.filter((id): id is string => id !== null);
+    if (!pair || known.length !== 1 || !pair.includes(known[0]) || pair[0] === pair[1]) return null;
+    const other = pair[0] === known[0] ? pair[1] : pair[0];
+    ids = written.map((id) => id ?? other);
+  }
+  const lenient = sideRows.map((row, i) => sideOf(row, true, ids[i]));
   if (lenient.some((side) => side === null)) return null;
   const sides = lenient as [RawGameSide, RawGameSide];
+  if (!consistent(sides)) return null;
   return { sides, missingOrder: [sides[0].players.length === 0, sides[1].players.length === 0] };
 }
 

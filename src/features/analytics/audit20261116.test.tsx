@@ -250,7 +250,7 @@ describe('⑥ the common range of a multi-season period', () => {
 });
 
 describe('⑦ ダブルイン成功率', () => {
-  const start = (p: Partial<PeriodStart>): PeriodStart => ({ state: 'value', attempts: 0, successes: 0, value: null, partial: false, counted: 1, legs: 1, doublesGames: 1, excludedGames: {}, excludedLegs: {}, seasonsMissing: [], ruleNotes: [], highInAgreements: 0, ...p });
+  const start = (p: Partial<PeriodStart>): PeriodStart => ({ state: 'value', attempts: 0, successes: 0, value: null, partial: false, counted: 1, legs: 1, doublesGames: 1, excludedGames: {}, excludedLegs: {}, seasonsMissing: [], ruleNotes: [], highInAgreements: 0, seasonsCounted: 1, ...p });
   it('66.7%（6/9スロー）, 0.0%（0/4スロー） and 試技なし — never 0% for no attempt', () => {
     const { rerender } = render(<StartRateCard start={start({ attempts: 9, successes: 6, value: 6 / 9 })} pendingText={null} />);
     const card = (): string => screen.getByTestId('metric-ダブルイン成功率').textContent ?? '';

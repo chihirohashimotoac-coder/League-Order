@@ -55,6 +55,21 @@ async function allGames(api: AnalyticsApi, tdid: string): Promise<{ games: RawGa
   return { games: [...games.values()], complete: false, unreadable };
 }
 
+/** Finished 01 games outside the league table (playoffs …), classified; `null` when they cannot be read. */
+async function otherGames(api: AnalyticsApi, tdid: string, season: Parameters<typeof classifyGames>[0]): Promise<ReturnType<typeof classifyGames> | null> {
+  const found: RawGame[] = [];
+  try {
+    for (let page = 0; page < 30; page += 1) {
+      const result = await api.gamesAt(tdid, page * GAME_LIST_PAGE, false, false);
+      for (const g of result.games) if (g.finished && !isLeagueGame(g.matchId)) found.push(g);
+      if (result.rows < GAME_LIST_PAGE) return classifyGames(season, found).filter((g) => g.family.family === '01');
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 /** Checks one season; `playerSample` players are reconstructed (fewest multi-thrower games first). */
 export async function verifySeasonRoles(api: AnalyticsApi, tdid: string, playerSample = 4): Promise<RoleCheckLine[]> {
   const out: RoleCheckLine[] = [];
@@ -80,6 +95,8 @@ export async function verifySeasonRoles(api: AnalyticsApi, tdid: string, playerS
   const tally = tallyGames(games);
   say('note', `ゲーム ${games.length}件: 01=${tally.byFamily['01']} cricket=${tally.byFamily.cricket} unknown=${tally.byFamily.unknown} / singles=${tally.byRole.singles} doubles=${tally.byRole.doubles} trios=${tally.byRole.trios} gallon=${tally.byRole.gallon} team=${tally.byRole.team} 分類不能=${tally.byRole.unknown}`);
 
+  const others = await otherGames(api, tdid, season);
+  if (others && others.length > 0) say('note', `リーグ戦以外（_lg_ 以外の tmid）の終了済みゲーム ${others.length}件（種別ビューの集計対象外）`);
   const lines = linesFromGames(games, 'all01');
   // n01's season score / darts leave the `ignore_avg` slots out (AKDO, 2026-11-16); legs and sets do not.
   const averaged = linesFromGames(games.filter((g) => g.avgExcluded !== true), 'all01');
@@ -92,7 +109,16 @@ export async function verifySeasonRoles(api: AnalyticsApi, tdid: string, playerS
     const scoreOk = team.line.score === avg.score && team.line.darts === avg.darts;
     const legDiff = (team.line.leg ?? 0) - (mine.leg ?? 0);
     const setDiff = (team.line.set ?? 0) - (mine.set ?? 0);
-    say(scoreOk ? 'pass' : composition.composition === 'unknown' ? 'note' : 'fail', `team ${team.name}: 01ゲーム ${avg.score}/${avg.darts} vs 公式 ${team.line.score}/${team.line.darts}${legDiff || setDiff ? ` ・ 公式との差 Leg ${legDiff} / Set ${setDiff}` : ''}`);
+    if (!scoreOk && others) {
+      // n01's season totals count every game of the tournament; the role views count the league
+      // table's games (`_lg_`) only. With the other games (playoffs, `_m_` …) added they may agree.
+      const extra = linesFromGames(others.filter((g) => g.avgExcluded !== true), 'all01').teams.get(team.teamId);
+      if (extra && team.line.score === (avg.score ?? 0) + (extra.score ?? 0) && team.line.darts === (avg.darts ?? 0) + (extra.darts ?? 0)) {
+        say('pass', `team ${team.name}: リーグ戦(_lg_) ${avg.score}/${avg.darts} + リーグ戦以外 ${extra.score}/${extra.darts} = 公式 ${team.line.score}/${team.line.darts}（公式通算はプレーオフ等を含む。種別ビューはリーグ戦のみ）`);
+        continue;
+      }
+    }
+    say(scoreOk ? 'pass' : composition.composition === 'unknown' ? 'note' : 'fail', `team ${team.name}: リーグ戦(_lg_)の01ゲーム ${avg.score}/${avg.darts} vs 公式 ${team.line.score}/${team.line.darts}${legDiff || setDiff ? ` ・ 公式との差 Leg ${legDiff} / Set ${setDiff}` : ''}`);
   }
 
   const multiCount = (oid: string): number => games.filter((g) => g.sides.some((s) => s.players.length > 1 && s.players.some((p) => p.oid === oid))).length;

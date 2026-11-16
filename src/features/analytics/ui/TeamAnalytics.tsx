@@ -93,7 +93,10 @@ export function TeamAnalytics({
   const teamLegNote = (hasValue: boolean): string => {
     if (!teamDetail) return '';
     const failed = (teamDetail.result?.failures.length ?? 0) > 0;
-    if (teamDetail.running || teamDetail.partial || (!teamDetail.result && teamDetail.key)) return hasValue ? `取得中・Leg明細を確認できた季のみ（${legSeasons.length}季中${legDone}季）` : 'このチームのLeg明細を取得中…';
+    if (teamDetail.phase === 'waiting-games') return 'ゲーム一覧の取得を待っています';
+    if (teamDetail.phase === 'games-failed') return 'ゲーム一覧を取得できないため、Leg明細を照合できません';
+    if (teamDetail.phase === 'no-games') return 'この種別の対象試合がありません';
+    if (teamDetail.running || teamDetail.partial) return hasValue ? `取得中・Leg明細を確認できた季のみ（${legSeasons.length}季中${legDone}季）` : 'このチームのLeg明細を取得中…';
     if (!hasValue) return failed ? `Leg明細を取得できませんでした（${teamDetail.result!.failures[0]}）` : legSeasons.length === 0 ? 'この種別の出場がありません' : 'Leg明細を確認できた季がないため表示しません';
     const base = 'このチームのLeg明細から算出（チーム側の集計。ペアのLegは1回だけ数えます）';
     return legDone < legSeasons.length ? `部分集計：${legSeasons.length}季中${legDone}季。${base}` : base;

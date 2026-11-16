@@ -188,8 +188,9 @@ export class AnalyticsApi {
    * its end while a season runs. `reread`: ask n01 again even if this adapter already has the
    * answer (a list read again from the start after its page boundary moved).
    */
-  gamesAt(tournamentId: string, skip: number, reread = false): Promise<{ games: RawGame[]; rows: number; unreadable: number; ids: (string | null)[] }> {
-    const params: Record<string, string> = { tdid: tournamentId, tmid__regex: '_lg_', sort: 'startTime', order: 'asc', count: String(GAME_LIST_PAGE) };
+  gamesAt(tournamentId: string, skip: number, reread = false, leagueOnly = true): Promise<{ games: RawGame[]; rows: number; unreadable: number; ids: (string | null)[] }> {
+    // `leagueOnly: false` (the live check only): every game of the tournament, playoffs included.
+    const params: Record<string, string> = { tdid: tournamentId, ...(leagueOnly ? { tmid__regex: '_lg_' } : {}), sort: 'startTime', order: 'asc', count: String(GAME_LIST_PAGE) };
     if (skip > 0) params.skip = String(skip);
     return this.parsed('match/list', params, parseGameList, reread);
   }

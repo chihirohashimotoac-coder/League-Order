@@ -313,9 +313,18 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
   return { running: state.running, results: shownResults, contributions, partial: state.partial, run, focus, ensure };
 }
 
+/**
+ * Where the team read stands: `waiting-games` — the game lists it needs are still being read;
+ * `games-failed` — none of them could be read; `running`; `no-games` — the team has no game of the
+ * kind; `failed` — legs were wanted but none could be read; `partial` — some games without legs;
+ * `done`.
+ */
+export type TeamDetailPhase = 'idle' | 'waiting-games' | 'games-failed' | 'running' | 'no-games' | 'failed' | 'partial' | 'done';
+
 export interface TeamDetailState {
   /** The team read for the current view (`null`: none needed — not the team view, or 01全体 / その他). */
   key: string | null;
+  phase: TeamDetailPhase;
   running: boolean;
   /** More parts follow (the read crossed its budget). */
   partial: boolean;
@@ -376,5 +385,30 @@ export function useTeamDetail(services: AnalyticsServices, load: PeriodLoad | nu
   const mine = held.load === load && held.key === key ? held : null;
   const contributions = useMemo(() => (mine?.result && load ? currentTeamContributions(mine.result, games?.games ?? null, load.seasons) : new Map()), [mine?.result, games, load]);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
-  return { key, running: mine?.running ?? key !== null, partial: mine?.partial ?? false, result: mine?.result ?? null, contributions, retry };
+  const phase = teamPhase(key, load, games, teams, coverage, mine);
+  return { key, phase, running: phase === 'running', partial: mine?.partial ?? false, result: mine?.result ?? null, contributions, retry };
+}
+
+function teamPhase(
+  key: string | null,
+  load: PeriodLoad | null,
+  games: GamesLoad | null,
+  teams: ReadonlyMap<string, string> | null,
+  coverage: string,
+  mine: { running: boolean; result: TeamDetailResult | null } | null,
+): TeamDetailPhase {
+  if (!key || !load || !teams) return 'idle';
+  if (coverage === '') {
+    // No list of the team's seasons is complete yet: still being read, or none could be read.
+    const ids = load.seasons.filter((s) => teams.has(s.tournamentId)).map((s) => s.tournamentId);
+    const waiting = !games || ids.some((id) => games.pending.has(id) || (!games.games.has(id) && !games.failed.has(id)));
+    return waiting ? 'waiting-games' : 'games-failed';
+  }
+  if (!mine || mine.running || !mine.result) return 'running';
+  const seasons = mine.result.seasons.filter((x) => x.games > 0);
+  const total = seasons.reduce((n, x) => n + x.games, 0);
+  const rebuilt = seasons.reduce((n, x) => n + x.rebuilt, 0);
+  if (total === 0) return mine.result.failures.length > 0 ? 'failed' : 'no-games';
+  if (rebuilt === 0) return 'failed';
+  return rebuilt < total ? 'partial' : 'done';
 }

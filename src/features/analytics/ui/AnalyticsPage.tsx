@@ -9,7 +9,7 @@ import type { GameScope } from '../roleGames';
 import { PlayerAnalytics } from './PlayerAnalytics';
 import type { FocusSummary } from './PlayerAnalytics';
 import { LoadBanner, PeriodBar, Segmented, SourceNote } from './parts';
-import { LoadGauge } from './LoadGauge';
+import { gaugeOutcomeOf, LoadGauge, teamLegStage } from './LoadGauge';
 import type { GaugeStage } from './LoadGauge';
 import { periodLabelAllowed } from '../service/periodService';
 import { AnalysisSummary, effectiveScope, ScopeBar } from './scopeParts';
@@ -158,22 +158,8 @@ export default function AnalyticsPage({
     const k = focusSummary.status.kind;
     stages.push({ id: 'legs', label: 'Leg明細の照合', state: k === 'waiting' || k === 'running' ? 'running' : k === 'partial' ? 'partial' : k === 'failed' ? 'failed' : 'done', count: null, text: `${focusSummary.name}：${focusSummary.status.text}` });
   }
-  if (!loading && view === 'team' && teamDetail.key) {
-    const seasons = teamDetail.result?.seasons.filter((x) => x.games > 0) ?? [];
-    const total = seasons.reduce((n, x) => n + x.games, 0);
-    const done = seasons.reduce((n, x) => n + x.rebuilt, 0);
-    const failedTeam = (teamDetail.result?.failures.length ?? 0) > 0;
-    stages.push({
-      id: 'legs',
-      label: 'Leg明細の照合',
-      state: teamDetail.running ? 'running' : !teamDetail.result ? 'waiting' : done < total ? (done > 0 ? 'partial' : 'failed') : 'done',
-      count: teamDetail.result && total > 0 ? { done, total, unit: 'ゲーム' } : null,
-      text: teamDetail.running ? 'チームのこの種別のゲームのLeg明細を取得しています' : failedTeam ? teamDetail.result!.failures[0] : '',
-    });
-  }
-  const anyFailed = stages.some((x) => x.state === 'failed');
-  const anyPartial = stages.some((x) => x.state === 'partial') || (state.load ? periodLabelAllowed(state.load) === 'partial' : false);
-  const gaugeOutcome = loading ? null : { state: anyFailed && !state.load?.seasons.length ? ('failed' as const) : anyFailed || anyPartial ? ('partial' as const) : ('done' as const), at: periodState.loadedAt };
+  if (!loading && view === 'team' && teamDetail.key) stages.push(teamLegStage(teamDetail));
+  const gaugeOutcome = loading ? null : gaugeOutcomeOf(stages, !!state.load?.seasons.length, state.load ? periodLabelAllowed(state.load) === 'partial' : false, periodState.loadedAt);
   const previousAt = loading && sameCondition && state.load ? periodState.loadedAt : null;
 
   return (
