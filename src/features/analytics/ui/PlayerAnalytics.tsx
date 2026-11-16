@@ -59,7 +59,12 @@ export function PlayerAnalytics({
   const multiThrower = roleView && gameScope !== 'singles';
   const available_ = useMemo(() => scopeMetrics(gameScope, load.seasons, 'player'), [gameScope, load.seasons]);
   const CARD_METRICS = available_.cards;
-  const base = load.seasons.find((s) => s.tournamentId === baseTournamentId) ?? null;
+  const baseSeason = load.seasons.find((s) => s.tournamentId === baseTournamentId) ?? null;
+  // 直近3季・直近12季 with the base season not read: go on with the seasons read (their figures only),
+  // and say so. 今季・指定季 without it have nothing to show.
+  const multiPeriod = load.request.mode === 'last3' || load.request.mode === 'last12';
+  const baseMissing = !baseSeason && multiPeriod && load.seasons.length > 0;
+  const base = baseSeason ?? (baseMissing ? load.seasons[0] : null);
   const binding = team.n01;
 
   // The team in the base season: its tpid is season-scoped, so a past season is matched by
@@ -145,13 +150,15 @@ export function PlayerAnalytics({
           return { id: p.id, name: p.name, personKey: match.personKey, reason: match.reason, period: match.personKey ? (byKey.get(match.personKey) ?? null) : null };
         }
         // ⑩: the member's row anywhere in the period (本人照合 applied); figures only where they played.
-        const match = findPersonInPeriod(load.seasons, base, p.n01 ? { ...p.n01, name: p.n01.sourceName ?? p.name } : undefined, links, multi, withFigures);
+        const match = findPersonInPeriod(load.seasons, baseSeason, p.n01 ? { ...p.n01, name: p.n01.sourceName ?? p.name } : undefined, links, multi, withFigures);
         const period = match.state === 'found' && match.personKey ? (byKey.get(match.personKey) ?? null) : null;
         const failed = !period && load.failures.length > 0 ? `（取得できなかった季が${load.failures.length}季あります）` : '';
-        const reason = period ? (match.inBase ? undefined : '今季は出場記録なし') : `${match.reason ?? '成績を確認できません'}${failed}`;
+        // Without the base season read, "no record now" is not known: it says the season failed instead.
+        const notInBase = baseMissing ? '今季は取得できませんでした' : '今季は出場記録なし';
+        const reason = period ? (match.inBase ? undefined : notInBase) : baseMissing && match.state === 'none-period' ? `取得済みの季に出場記録なし（今季は取得できませんでした）` : `${match.reason ?? '成績を確認できません'}${failed}`;
         return { id: p.id, name: p.name, personKey: period ? match.personKey : null, reason, period };
       });
-  }, [base, baseTeam, specifiedSeason, players, byKey, seasonGames, role?.identity?.links, load.request.mode, load.seasons, load.failures.length]);
+  }, [base, baseSeason, baseMissing, baseTeam, specifiedSeason, players, byKey, seasonGames, role?.identity?.links, load.request.mode, load.seasons, load.failures.length]);
 
   const [selected, setSelectedKey] = useState<string | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -310,7 +317,8 @@ export function PlayerAnalytics({
               <p className="small-text muted" data-testid="player-basis">
                 {person.metrics.seasons}シーズンの合算{roleView ? `（${GAME_SCOPE_LABEL[gameScope]}のゲームのみ）` : ''}
                 {person.linked ? '（本人と確認できた季のみ結合。内訳は下の「本人照合」）' : ''}
-                {!person.seasons.some((x) => x.tournamentId === baseTournamentId) ? <span data-testid="player-no-base"> ・ {load.request.mode === 'specified' ? '指定季は出場記録なし' : '今季は出場記録なし'}（期間内の他の季の成績）</span> : null}
+                {baseMissing ? <span data-testid="player-base-missing"> ・ 今季は取得できませんでした（取得済みの過去季で部分集計）</span> : null}
+                {!baseMissing && !person.seasons.some((x) => x.tournamentId === baseTournamentId) ? <span data-testid="player-no-base"> ・ {load.request.mode === 'specified' ? '指定季は出場記録なし' : '今季は出場記録なし'}（期間内の他の季の成績）</span> : null}
                 {roleView
                   ? ` ・ ${person.metrics.setRate.den}ゲーム`
                   : ` ・ 出場 ${person.metrics.counts.match ?? '—'} 試合（勝利数ではありません）`}

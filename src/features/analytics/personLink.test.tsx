@@ -71,7 +71,7 @@ describe('⑨ 本人照合 on a period', () => {
     expect(undone.keyOf.get('s1:g1')).not.toBe(undone.keyOf.get('s3:p3'));
     // Two candidates (two 山田 花子 in s2 of KAL under other ids): held, not joined.
     const two = league();
-    two[1] = buildSeasonData(season({ tournament: tournament('s2', TEAMS), roster: roster([{ oid: 'p2', opid: 'X-1', team: 'KAL', name: '山田花子' }, { oid: 'p2b', opid: 'X-2', team: 'KAL', name: '山田 花子' }]), playerStats: [playerRow('p2', 'X-1', 'KAL', '山田花子', line(2)), playerRow('p2b', 'X-2', 'KAL', '山田 花子', line(1))] }));
+    two[1] = buildSeasonData(season({ tournament: tournament('s2', TEAMS), roster: roster([{ oid: 'p2', opid: 'X-1', team: 'KAL', name: '山田花子' }, { oid: 'p2b', opid: 'X-2', team: 'KAL', name: '山田 花子' }, { oid: 'z2', opid: 'Z-1', team: 'HOL', name: '他 人' }]), playerStats: [playerRow('p2', 'X-1', 'KAL', '山田花子', line(2)), playerRow('p2b', 'X-2', 'KAL', '山田 花子', line(1))] }));
     const held = linkPeople(two);
     expect(held.held.find((h) => h.row.key === 's1:g1')).toBeTruthy();
     expect(held.keyOf.get('s1:g1')).not.toBe(held.keyOf.get('s3:p3'));
@@ -215,5 +215,87 @@ describe('Codex audit (2026-11-18): reused ids, undone rows, gaps and held rows'
     expect(confirmed.held).toEqual([]);
     expect(confirmed.keyOf.get('m0:rm0')).toBe(confirmed.keyOf.get('m2:rm2'));
     expect(aggregatePlayers(applyLinks(seasons, confirmed)).find((p) => p.personKey === confirmed.keyOf.get('m2:rm2'))!.seasons).toHaveLength(2);
+  });
+});
+
+describe('2026-11-19: a roster that could not be read, a member id given to two people now, and a failed current season', () => {
+  const T = [{ id: 'KAL', name: 'kala' }, { id: 'HOL', name: 'holic' }];
+  const make = (id: string, rows: { oid: string; opid: string | null; team: string; name: string; stats?: boolean }[], rosterRead = true) =>
+    buildSeasonData(season({ tournament: tournament(id, T), roster: rosterRead ? roster(rows) : null, playerStats: rows.filter((r) => r.stats !== false).map((r) => playerRow(r.oid, r.opid, r.team, r.name, line(1))) }));
+
+  it('1. a member id of a season whose roster was not read is not a shared label: ID-900 never joins ID-100 on the name alone', () => {
+    const seasons = [make('u1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人' }]), make('u0', [{ oid: 'b', opid: 'ID-900', team: 'KAL', name: '田中 健' }], false)];
+    const links = linkPeople(seasons);
+    expect(links.keyOf.get('u0:b')).not.toBe(links.keyOf.get('u1:a'));
+    const entry = links.people.get(links.keyOf.get('u0:b')!)![0];
+    expect(entry.basis).not.toBe('guest');
+    expect(entry.reason).not.toContain('共用');
+    expect(aggregatePlayers(applyLinks(seasons, links)).find((p) => p.personKey === links.keyOf.get('u1:a'))!.seasons).toHaveLength(1);
+  });
+
+  it('1. the same id in that season, or a 助っ人 row there: held (the roster cannot show they are the only one), never joined automatically', () => {
+    const same = linkPeople([make('u1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人' }]), make('u0', [{ oid: 'b', opid: 'ID-100', team: 'KAL', name: '田中 健' }], false)]);
+    expect(same.keyOf.get('u0:b')).not.toBe(same.keyOf.get('u1:a'));
+    expect(same.held.find((h) => h.row.key === 'u0:b')?.reason).toContain('名簿');
+    const guest = linkPeople([make('u1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人' }]), make('u0', [{ oid: 'g', opid: '助っ人', team: 'KAL', name: '田中 健' }], false)]);
+    expect(guest.keyOf.get('u0:g')).not.toBe(guest.keyOf.get('u1:a'));
+    expect(guest.held.find((h) => h.row.key === 'u0:g')?.reason).toContain('名簿');
+  });
+
+  it('2. two people under the member id now: neither is chosen; the one confirmed row of an earlier season is found (and held when that is not one either)', () => {
+    const seasons = [
+      make('v1', [{ oid: 'x', opid: 'ID-100', team: 'KAL', name: '山本 一' }, { oid: 'y', opid: 'ID-100', team: 'HOL', name: '川口 二' }]),
+      make('v0', [{ oid: 't', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人' }]),
+    ];
+    const links = linkPeople(seasons);
+    const linked = applyLinks(seasons, links);
+    const figures = new Set(aggregatePlayers(linked).map((p) => p.personKey));
+    const member = { opid: 'ID-100', currentOid: 'old', lastSeenTournamentId: 'outside', name: '田中 健' };
+    expect(findPersonInPeriod(linked, linked[0], member, links, true, figures)).toMatchObject({ state: 'found', personKey: links.keyOf.get('v0:t') });
+    expect(findPersonInPeriod(linked, linked[0], member, links, false, figures)).toMatchObject({ state: 'held', personKey: null });
+    const twoBefore = [seasons[0], make('v0', [{ oid: 't', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 't2', opid: 'ID-100', team: 'HOL', name: '田中 健' }])];
+    const l2 = linkPeople(twoBefore);
+    expect(findPersonInPeriod(applyLinks(twoBefore, l2), applyLinks(twoBefore, l2)[0], member, l2, true, figures).personKey).toBeNull();
+  });
+
+  it('3. 直近3季 with the current season failed: the member’s earlier figures open, said to be partial; 今季 alone still says it failed', () => {
+    const seasons = league().slice(1, 3); // s2, s1 read; s3 (the current season) failed
+    const links = linkPeople(seasons);
+    const linked = applyLinks(seasons, links);
+    const team = { id: 't', name: 'kala', createdAt: 0, n01: { provider: 'n01', leagueId: 'lg_test', leagueTitle: 'L', stableIdentity: { kind: 'name', value: 'kala' }, lastTournamentId: 's3', lastTournamentTitle: 's3', lastTeamId: 'KAL', lastTeamName: 'kala', lastDivisionIndex: 0, lastDivisionTitle: 'A', discipline: 'SOFT', managedFormatId: null, linkedAt: 0, lastSuccessfulSyncAt: 0 } } as unknown as Team;
+    const member = (id: string, name: string, n01: object) => ({ id, name, teamId: 't', archived: false, n01: { ...n01, currentTpid: 'KAL', sourceName: name, rosterActive: true, lastSeenAt: 0, stats: null } }) as unknown as Player;
+    const players = [member('m-h', '堀田 和夫', { opid: 'X-65', currentOid: 'h3', lastSeenTournamentId: 's3' }), member('m-e', '江口 一', { opid: 'X-9', currentOid: 'e3', lastSeenTournamentId: 's3' })];
+    const role = { scope: 'all01' as const, adoption: [], games: { status: 'idle' as const, load: null, needed: [], retry: () => undefined }, detail: { running: null, results: new Map(), contributions: new Map(), partial: new Set<string>(), run: () => undefined, focus: () => undefined, ensure: () => undefined }, identity: { links, controls: { decisions: { unlinks: [], confirms: {} }, unlink: () => undefined, confirm: () => undefined, reset: () => undefined } } };
+    const failure = { tournamentId: 's3', title: 'Season s3', reason: 'ネットワークに接続できません', kind: 'network' as const };
+    const last3: PeriodLoad = { ...emptyLoad({ mode: 'last3', currentTournamentId: 's3' }, {}), seasons: linked, failures: [failure], complete: false };
+    const view = render(<PlayerAnalytics team={team} players={players} load={last3} baseTournamentId="s3" role={role} />);
+    const rows = () => screen.getAllByRole('button').filter((b) => b.classList.contains('list-row'));
+    expect(rows()[0].textContent).toContain('3DA 60.00');
+    expect(rows()[0].textContent).toContain('今季は取得できませんでした');
+    expect(rows()[1].textContent).not.toContain('出場記録なし'); // not known: the current season was not read
+    expect(screen.getByTestId('analytics-detail').textContent).toContain('堀田 和夫');
+    expect(screen.getByTestId('player-base-missing').textContent).toContain('取得済みの過去季で部分集計');
+    // 今季 alone, failed: the screen says so (no figures as 0).
+    const current: PeriodLoad = { ...emptyLoad({ mode: 'current', currentTournamentId: 's3' }, {}), seasons: [], failures: [failure], complete: false };
+    view.rerender(<PlayerAnalytics team={team} players={players} load={current} baseTournamentId="s3" role={{ ...role, identity: { ...role.identity, links: linkPeople([]) } }} />);
+    expect(screen.getByText(/基準となるシーズンの成績を取得できませんでした/)).toBeTruthy();
+  });
+
+  it('1. a word shared instead of an id (「申請」) is a label; a shared numeric id of someone else, with a rival under another id, is held', () => {
+    const label = [
+      make('w1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人' }]),
+      make('w0', [{ oid: 'b', opid: '申請', team: 'KAL', name: '田中 健' }, { oid: 'c', opid: '申請', team: 'HOL', name: '別 人' }]),
+    ];
+    const l1 = linkPeople(label);
+    expect(l1.keyOf.get('w0:b')).toBe(l1.keyOf.get('w1:a'));
+    expect(l1.people.get(l1.keyOf.get('w1:a')!)!.find((e) => e.row.key === 'w0:b')!.reason).toContain('共用の会員ID「申請」');
+    // ID-555 is shared by two rows of w0 (one of them someone else); the next season's 田中 健 is ID-100.
+    const shared = [
+      make('w1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人' }]),
+      make('w0', [{ oid: 'b', opid: 'ID-555', team: 'KAL', name: '田中 健' }, { oid: 'c', opid: 'ID-555', team: 'HOL', name: '長井 芳' }]),
+    ];
+    const l2 = linkPeople(shared);
+    expect(l2.keyOf.get('w0:b')).not.toBe(l2.keyOf.get('w1:a'));
+    expect(l2.held.find((h) => h.row.key === 'w0:b')?.reason).toContain('会員IDの異なる候補');
   });
 });

@@ -31,6 +31,13 @@ import { teamKeys } from './seasonData';
 
 export type LinkBasis = 'id' | 'rename' | 'guest' | 'id-variant' | 'confirmed';
 
+/**
+ * What a row's member id says in its season: `unique` (one row, roster read), `shared` (two rows of
+ * the season), `unproven` (an explicit id in a season whose roster could not be read), `guest` (a
+ * shared label or none, roster read), `guest-unproven` (the same, roster not read).
+ */
+export type IdKind = 'unique' | 'shared' | 'unproven' | 'guest' | 'guest-unproven';
+
 export interface PersonRow {
   /** `<tdid>:<oid>` */
   key: string;
@@ -172,12 +179,23 @@ export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDe
     personOf.set(row.key, p);
   };
 
+  // What a row's member id can tell. Only a shared label or no id at all enters the name-based pass
+  // (rule 2); an explicit id that its season cannot prove (roster not read) or that two rows of its
+  // season share is never treated as a shared label.
+  const kindOf = new Map<string, IdKind>();
+  const rosterRead = (season: SeasonData): boolean => season.coverage?.complete === true;
+  for (const row of rows) {
+    const season = seasonOf.get(row.seasonIndex)!;
+    const guestLike = !row.opid || isSharedLabel(row.opid);
+    kindOf.set(row.key, guestLike ? (rosterRead(season) ? 'guest' : 'guest-unproven') : usableId(row, season) ? 'unique' : rosterRead(season) ? 'shared' : 'unproven');
+  }
+
   // 1. Same member id, oldest season first.
   const byId = new Map<string, PersonRow[]>();
   const loose: PersonRow[] = [];
   for (const row of rows) {
-    const season = seasonOf.get(row.seasonIndex)!;
-    if (usableId(row, season)) byId.set(row.opid!, [...(byId.get(row.opid!) ?? []), row]);
+    const kind = kindOf.get(row.key)!;
+    if (kind === 'unique') byId.set(row.opid!, [...(byId.get(row.opid!) ?? []), row]);
     else loose.push(row);
   }
   for (const [opid, group] of byId) {
@@ -219,60 +237,121 @@ export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDe
       }
     }
   }
-  for (const row of loose) single(row, isSharedLabel(row.opid) || !row.opid ? 'guest' : 'id', row.opid ? `会員ID ${row.opid}（この季では1人と確認できない）` : '会員IDなし');
+  const LOOSE_REASON: Record<Exclude<IdKind, 'unique'>, (row: PersonRow) => string> = {
+    guest: (row) => (row.opid ? `共用の会員ID「${row.opid}」` : '会員IDなし'),
+    'guest-unproven': (row) => `${row.opid ? `共用の会員ID「${row.opid}」` : '会員IDなし'}（この季の名簿を取得できず、該当者が1人と確認できない）`,
+    shared: (row) => `会員ID ${row.opid}（この季で複数の行が同じIDを持つ）`,
+    unproven: (row) => `会員ID ${row.opid}（この季の名簿を取得できず、1人を指すと確認できない）`,
+  };
+  for (const row of loose) {
+    const kind = kindOf.get(row.key) as Exclude<IdKind, 'unique'>;
+    single(row, kind === 'guest' || kind === 'guest-unproven' ? 'guest' : 'id', LOOSE_REASON[kind](row));
+  }
 
   // 2. Rows without a usable id (or a spelling variant of one): same team, same full name, the next
   //    or previous season, one candidate only. Repeated so that a chain of seasons follows on.
   const looseKeys = new Set(loose.map((r) => r.key));
+  /** Rows whose season cannot prove who they are (roster not read) or whose id two rows share. */
+  const unprovable = (p: Person): boolean => p.rows.some((r) => { const k = kindOf.get(r.key); return k === 'guest-unproven' || k === 'unproven'; });
+  /** Rows with no proven id of their own: a shared label, none, or an id two rows of the season share. */
+  const noOwnId = (r: PersonRow): boolean => { const k = kindOf.get(r.key); return k === 'guest' || k === 'shared'; };
+  const guestOnly = (p: Person): boolean => p.rows.every(noOwnId);
+  /** The id spellings a person's rows carry (shared ids included), for the compatibility check. */
+  // A word several rows of a season share instead of a member id (「助」「申請」…, no digits) is a label
+  // like 助っ人, not an id to keep apart from other ids.
+  const labelLike = (r: PersonRow): boolean => !r.opid || isSharedLabel(r.opid) || (kindOf.get(r.key) === 'shared' && !/\d/u.test(r.opid));
+  const spellings = (p: Person): Set<string> => new Set(p.rows.filter((r) => !labelLike(r)).map((r) => idSpelling(r.opid!)));
   const idOf = (p: Person): string | null => {
     const ids = new Set(p.rows.filter((r) => !looseKeys.has(r.key) && r.opid).map((r) => idSpelling(r.opid!)));
     return ids.size === 1 ? [...ids][0] : null;
+  };
+  // Holds made so far are final ones (same id, names that cannot be told apart; roster not read): no
+  // automatic join goes into or out of them. The holds of this pass are provisional until it settles —
+  // two 助っ人 rows of consecutive seasons first join each other, and then have one candidate.
+  const finalHeld = new Set(held.keys());
+  type Verdict = { join: Person } | { hold: Person[]; reason: string } | null;
+  const evaluate = (unit: Person): Verdict => {
+    const mineRows = unit.rows;
+    if (mineRows.some((r) => unlinked.has(r.key) || finalHeld.has(r.key))) return null;
+    // A row its season cannot prove (roster not read) joins nobody automatically: held when a candidate
+    // with a compatible id is there.
+    if (unprovable(unit)) {
+      if (mineRows.length !== 1) return null;
+      const m = mineRows[0];
+      const kind = kindOf.get(m.key);
+      const compatible = people.filter(
+        (p) =>
+          p !== unit &&
+          !unprovable(p) &&
+          !p.rows.some((r) => unlinked.has(r.key) || r.seasonIndex === m.seasonIndex) &&
+          p.rows.some((r) => adjacent(r, m) && r.teamKey === m.teamKey && fullName(r.name) === fullName(m.name)) &&
+          (kind === 'guest-unproven' || (m.opid !== null && idOf(p) === idSpelling(m.opid))),
+      );
+      return compatible.length > 0 ? { hold: compatible, reason: 'この季の名簿を取得できず、該当者が1人と確認できないため保留' } : null;
+    }
+    // A person of rows without an own id may join anyone whose ids are compatible; a person with a
+    // proven id only someone whose id is the same id in another spelling.
+    const unitId = guestOnly(unit) ? null : idOf(unit);
+    if (unitId === null && !guestOnly(unit)) return null;
+    const open = (p: Person): boolean => {
+      if (p === unit) return false;
+      // A row undone by hand, a final hold, or a person whose rows cannot be proven: never joined into.
+      if (p.rows.some((r) => unlinked.has(r.key) || finalHeld.has(r.key))) return false;
+      if (unprovable(p)) return false;
+      const theirs = seasonsOf(p);
+      return !mineRows.some((r) => theirs.has(r.seasonIndex));
+    };
+    const eligible = (p: Person): boolean => {
+      if (!open(p)) return false;
+      if (unitId !== null) return idOf(p) === unitId;
+      // Rows without an own id carrying an explicit (shared) id join only someone whose ids are that id
+      // in some spelling, or who has none: never a person under another member id.
+      const mine = spellings(unit);
+      if (mine.size === 0) return true;
+      const theirsIds = spellings(p);
+      return theirsIds.size === 0 || [...theirsIds].every((x) => mine.has(x));
+    };
+    const matches = (p: Person, near: (a: PersonRow, b: PersonRow) => boolean): boolean => mineRows.some((m) => p.rows.some((r) => near(r, m) && r.teamKey === m.teamKey && fullName(r.name) === fullName(m.name)));
+    const candidates = people.filter((p) => eligible(p) && matches(p, adjacent));
+    // Someone with the same name and team in the next season but another member id is a rival, not
+    // nobody: with a rival the row is held (confirmable), never joined to the other candidate.
+    const rivals = unitId === null ? people.filter((p) => open(p) && !eligible(p) && matches(p, adjacent)) : [];
+    if (rivals.length > 0) return { hold: [...candidates, ...rivals], reason: '同じ氏名・チームで隣接する季に、会員IDの異なる候補がいるため保留' };
+    if (candidates.length === 0) {
+      // Only across a season that could not be read: not enough to say they follow on. Two people with
+      // an id hold only the older one (the newer keeps its figures).
+      const gap = people.filter((p) => eligible(p) && matches(p, acrossGap) && (unitId === null || newest(p).seasonIndex < newest(unit).seasonIndex));
+      return gap.length > 0 ? { hold: gap, reason: '間の季を取得できず、隣接する季で確認できないため保留' } : null;
+    }
+    // Two people with an id: the older one joins the newer (the newest spelling names the person).
+    if (unitId !== null && candidates.length === 1 && newest(candidates[0]).seasonIndex > newest(unit).seasonIndex) return null;
+    // Nobody else in the row's season answers to that name.
+    const crowded = mineRows.some((m) => rows.some((r) => r.seasonIndex === m.seasonIndex && r.key !== m.key && fullName(r.name) === fullName(m.name)));
+    if (candidates.length > 1 || crowded) return { hold: candidates, reason: candidates.length > 1 ? '同じ氏名・チームで隣接する季の候補が複数あるため保留' : '同じ季に同じ氏名の行が複数あるため保留' };
+    return { join: candidates[0] };
   };
   for (let changed = true; changed; ) {
     changed = false;
     for (const unit of [...people]) {
       if (!people.includes(unit)) continue;
-      const mineRows = unit.rows;
-      if (mineRows.some((r) => unlinked.has(r.key))) continue;
-      // A person of loose rows (no usable id) may join anyone; a person with an id only someone whose
-      // id is the same id in another spelling.
-      const unitId = mineRows.every((r) => looseKeys.has(r.key)) ? null : idOf(unit);
-      if (unitId === null && !mineRows.every((r) => looseKeys.has(r.key))) continue;
-      const eligible = (p: Person): boolean => {
-        if (p === unit) return false;
-        // A row undone by hand is never joined into, nor joined.
-        if (p.rows.some((r) => unlinked.has(r.key))) return false;
-        const theirs = seasonsOf(p);
-        if (mineRows.some((r) => theirs.has(r.seasonIndex))) return false;
-        return unitId === null || idOf(p) === unitId;
-      };
-      const matches = (p: Person, near: (a: PersonRow, b: PersonRow) => boolean): boolean => mineRows.some((m) => p.rows.some((r) => near(r, m) && r.teamKey === m.teamKey && fullName(r.name) === fullName(m.name)));
-      const candidates = people.filter((p) => eligible(p) && matches(p, adjacent));
-      if (candidates.length === 0) {
-        // Only across a season that could not be read: not enough to say they follow on.
-        // Two people with an id hold only the older one (the newer keeps its figures); a loose row is held.
-        const gap = people.filter((p) => eligible(p) && matches(p, acrossGap) && (unitId === null || newest(p).seasonIndex < newest(unit).seasonIndex));
-        if (gap.length > 0) for (const m of mineRows) if (!held.has(m.key)) held.set(m.key, { row: m, candidates: gap.map((c) => c.rows[0].key), reason: '間の季を取得できず、隣接する季で確認できないため保留' });
-        continue;
-      }
-      // Two people with an id: the older one joins the newer (the newest spelling names the person).
-      if (unitId !== null && candidates.length === 1 && newest(candidates[0]).seasonIndex > newest(unit).seasonIndex) continue;
-      // Nobody else in the row's season answers to that name.
-      const crowded = mineRows.some((m) => rows.some((r) => r.seasonIndex === m.seasonIndex && r.key !== m.key && fullName(r.name) === fullName(m.name)));
-      if (candidates.length > 1 || crowded) {
-        for (const m of mineRows) if (!held.has(m.key)) held.set(m.key, { row: m, candidates: candidates.map((c) => c.rows[0].key), reason: candidates.length > 1 ? '同じ氏名・チームで隣接する季の候補が複数あるため保留' : '同じ季に同じ氏名の行が複数あるため保留' });
-        continue;
-      }
-      const target = candidates[0];
-      for (const m of mineRows) {
+      const verdict = evaluate(unit);
+      if (!verdict || !('join' in verdict)) continue;
+      const unitId = guestOnly(unit) ? null : idOf(unit);
+      for (const m of unit.rows) {
         const basis: LinkBasis = unitId !== null ? 'id-variant' : 'guest';
-        const reason = basis === 'id-variant' ? `会員IDの表記ゆれ（${m.opid}）・同じチーム・同じ氏名・隣接する季` : `${m.opid ? `共用の会員ID「${m.opid}」` : '会員IDなし'}・同じチーム・同じ氏名・隣接する季で該当者が1人`;
-        join(target, m, basis, reason, true);
-        held.delete(m.key);
+        const label = !m.opid ? '会員IDなし' : labelLike(m) ? `共用の会員ID「${m.opid}」` : `会員ID ${m.opid}（この季で複数の行が共有）`;
+        const reason = basis === 'id-variant' ? `会員IDの表記ゆれ（${m.opid}）・同じチーム・同じ氏名・隣接する季` : `${label}・同じチーム・同じ氏名・隣接する季で該当者が1人`;
+        join(verdict.join, m, basis, reason, true);
       }
       people.splice(people.indexOf(unit), 1);
       changed = true;
     }
+  }
+  // What is still undecided once nothing more joins: held, with its candidates.
+  for (const unit of people) {
+    const verdict = evaluate(unit);
+    if (!verdict || !('hold' in verdict)) continue;
+    for (const m of unit.rows) if (!held.has(m.key)) held.set(m.key, { row: m, candidates: verdict.hold.map((c) => c.rows[0].key), reason: verdict.reason });
   }
 
   // Joins confirmed by hand.
