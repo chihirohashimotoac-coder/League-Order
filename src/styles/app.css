@@ -9421,3 +9421,85 @@ ul.plain {
     max-width: 820px;
   }
 }
+
+/* ------------------------------------------- header: チーム切替 / 管理 (2026-11-16) */
+/* 初めての人が探さずに見つけられるよう、全画面のヘッダーに文字つきで置く。
+   ヘッダーは 1 行のまま・高さも変えない (戻る・メニューと同じ 44px の高さに収める):
+   見えている画面を狭くしない。PC・タブレット (600px〜) は「チーム切替 / 管理」の小さなボタン、
+   スマホは 44px 四方ほどの「アイコン + チーム切替」の縦並びにして、タイトルの幅を残す。 */
+.header-team {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-height: var(--tap-target);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+  color: var(--color-accent-text);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.header-team:hover,
+.header-team:active,
+.header-team[aria-expanded='true'] {
+  background: var(--color-accent-tint);
+  border-color: var(--color-accent);
+}
+
+/* スマホ: アイコンの下に短い文字。 */
+.header-team {
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px;
+  font-size: 10.5px;
+}
+
+.header-team .header-team-label-long {
+  display: none;
+}
+
+/* PC・タブレット: 横並び、「チーム切替 / 管理」。 */
+@media (min-width: 600px) {
+  .header-team {
+    flex-direction: row;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 13.5px;
+  }
+
+  .header-team .header-team-label-long {
+    display: inline;
+  }
+
+  .header-team .header-team-label-short {
+    display: none;
+  }
+}
+
+/* 狭いスマホ (400px 未満): ボタンの分だけタイトルが縮まないよう、ヘッダー右の状態バッジ
+   (DRAFT / vN / DEMO) は出さない。同じ内容は画面の中の状態バナー・DEMO バナーにある。 */
+@media (max-width: 399px) {
+  .app-header > .status,
+  .app-header > .demo-badge {
+    display: none;
+  }
+}
+
+/* 長いチーム名: 切れ目のない英数字の語が行より長いと、ページ全体が横に広がり (スマホでは画面が
+   縮小され)、シートも画面の外へ出ていた。その語だけを枠の幅で省略する。ふつうの長さの語・
+   日本語・空白で区切られた名前は、これまでどおり折り返す。 */
+.team-name .k-word.nowrap,
+.drawer-team-name .k-word.nowrap {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
