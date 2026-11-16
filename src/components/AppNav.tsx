@@ -41,6 +41,35 @@ export function Breadcrumbs({ page, onNavigate }: { page: Page; onNavigate: (pag
   );
 }
 
+/**
+ * ヘッダーの「チーム切替 / 管理」。HOME の「ACTIVE TEAM」カードと同じチーム管理シートを開く。
+ *
+ * 文字つきのボタンにして、初めて使う人にもチームの操作だと分かるようにする。ヘッダーの高さは
+ * 変えない: 幅が足りないスマホでは「アイコン + チーム切替」の縦並びの小さなボタンにして、
+ * タイトルの幅を残す (PC は「チーム切替 / 管理」)。どちらの表示も名前は同じ。
+ */
+export function TeamSwitchButton({ open, onClick }: { open: boolean; onClick: () => void }): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      className="header-team"
+      onClick={onClick}
+      aria-label="チーム切替 / 管理"
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      data-testid="header-team-switch"
+    >
+      <Icon name="users" size={17} />
+      <span className="header-team-label-short" aria-hidden="true">
+        チーム切替
+      </span>
+      <span className="header-team-label-long" aria-hidden="true">
+        チーム切替 / 管理
+      </span>
+    </button>
+  );
+}
+
 /** Hamburger button; the three bars fold into a cross while the menu is open. */
 export function MenuButton({ open, onClick }: { open: boolean; onClick: () => void }): React.JSX.Element {
   return (

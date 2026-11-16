@@ -513,7 +513,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
 
     // A second team with one member and a one-game format.
     await tab(page, 'ホーム').click();
-    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: '切替 / 管理', exact: true }).click();
     await page.getByRole('button', { name: 'チームを追加' }).click();
     await page.getByLabel('チーム名').fill('Bチーム');
     await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -538,7 +538,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
 
     // Team A's order is untouched: still one version, still A's players.
     await tab(page, 'ホーム').click();
-    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: '切替 / 管理', exact: true }).click();
     await page.locator('.sheet .list-row').filter({ hasText: 'サンプルチーム' }).click();
     await tab(page, '履歴').click();
     await expect(page.locator('.list-row')).toHaveCount(1);
@@ -672,7 +672,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await generate(page); // a draft that was never saved
 
     await tab(page, 'ホーム').click();
-    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: '切替 / 管理', exact: true }).click();
     await page.getByRole('button', { name: 'チームを追加' }).click();
     await page.getByLabel('チーム名').fill('Bチーム');
     await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -687,7 +687,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await expect(page.getByRole('button', { name: '作業中のオーダーを開く' })).toBeVisible();
 
     // Confirming switches and drops it.
-    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: '切替 / 管理', exact: true }).click();
     await page.locator('.sheet .list-row').filter({ hasText: 'Bチーム' }).click();
     await page.getByRole('button', { name: '破棄して切り替える' }).click();
     await expect(page.getByRole('heading', { name: 'Bチーム', level: 1 })).toBeVisible();

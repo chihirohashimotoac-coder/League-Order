@@ -31,7 +31,8 @@ import { BACK_TARGETS, PAGE_TITLES, TAB_FOR_PAGE, TABS, type Page } from './navi
 import { onUpdateAvailable } from './pwa';
 import { ConfirmDialog, EmptyState, STATE_META, StatusBadge, useToast } from './components/ui';
 import { Icon } from './components/icons';
-import { Breadcrumbs, MenuButton, MenuDrawer } from './components/AppNav';
+import { Breadcrumbs, MenuButton, MenuDrawer, TeamSwitchButton } from './components/AppNav';
+import { TeamManager } from './components/TeamManager';
 import { KineticText } from './components/motion';
 import { ChangelogSheet } from './components/ChangelogSheet';
 import { HomePage, type WorkingOrderSummary } from './pages/HomePage';
@@ -100,6 +101,8 @@ export function App(): React.JSX.Element {
   /** What to do once the captain agrees to discard unsaved work (null = no dialog). */
   const [confirmDiscard, setConfirmDiscard] = useState<(() => void) | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  /** チーム管理シート。ヘッダーと HOME のどちらの入口からも、この 1 つを開く。 */
+  const [teamManagerOpen, setTeamManagerOpen] = useState(false);
   /** A format to open in the editor when FORMAT opens (the first-run "自分の構成を作る"). */
   const [formatToEdit, setFormatToEdit] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
@@ -734,6 +737,7 @@ export function App(): React.JSX.Element {
           </StatusBadge>
         ) : null}
         {page === 'home' && store.activeTeam?.demo ? <span className="demo-badge">DEMO</span> : null}
+        <TeamSwitchButton open={teamManagerOpen} onClick={() => setTeamManagerOpen(true)} />
         <MenuButton open={menuOpen} onClick={() => setMenuOpen(true)} />
       </header>
 
@@ -752,8 +756,13 @@ export function App(): React.JSX.Element {
             </button>
           </div>
         ) : null}
-        {/* Keyed by the screen: its sections enter in a short stagger (CSS, `.page-view`). */}
-        <div className="page-view" key={page}>
+        {/* Keyed by the screen: its sections enter in a short stagger (CSS, `.page-view`).
+            チームに属する画面は使用中のチームも鍵に含める: 切替の前後で画面が作り直され、
+            元のチームの選手の絞り込みや選択が新しいチームに残らない (観戦の画面はチームに依存しない)。 */}
+        <div
+          className="page-view"
+          key={page === 'matches' || page === 'live' || page === 'watch' ? page : `${page}:${store.activeTeamId}`}
+        >
         {page === 'home' ? (
           <HomePage
             onNavigate={setPage}
@@ -763,6 +772,7 @@ export function App(): React.JSX.Element {
             onNextMatch={generateNextMatch}
             currentParticipants={draft?.participants ?? null}
             onOpenOrder={openSavedOrder}
+            onOpenTeams={() => setTeamManagerOpen(true)}
           />
         ) : null}
         {page === 'players' ? <PlayersPage /> : null}
@@ -864,6 +874,8 @@ export function App(): React.JSX.Element {
       ) : null}
 
       {showChangelog ? <ChangelogSheet onClose={() => setShowChangelog(false)} /> : null}
+
+      {teamManagerOpen ? <TeamManager hasUnsavedWork={unsaved} onClose={() => setTeamManagerOpen(false)} /> : null}
 
       {confirmDiscard ? (
         <ConfirmDialog

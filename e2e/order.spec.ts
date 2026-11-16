@@ -286,7 +286,7 @@ test.describe('first run (§50-§53)', () => {
   });
   test('leaving the demo keeps a team the captain created next to it', async ({ page }) => {
     await openFresh(page);
-    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: '切替 / 管理', exact: true }).click();
     await page.getByRole('button', { name: 'チームを追加' }).click();
     await page.getByLabel('チーム名').fill('KALAVINKA');
     await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -303,7 +303,7 @@ test.describe('first run (§50-§53)', () => {
     await expect(page.getByTestId('demo-banner')).toHaveCount(0);
     await page.reload();
     await expect(page.getByRole('heading', { name: 'KALAVINKA', level: 1 })).toBeVisible();
-    await page.getByRole('button', { name: '切替 / 管理' }).click();
+    await page.getByRole('button', { name: '切替 / 管理', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'チーム' }).locator('.list-row')).toHaveCount(1);
   });
 });

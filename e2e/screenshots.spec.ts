@@ -84,7 +84,7 @@ test('n01 screens', async ({ page }, testInfo) => {
   await page.keyboard.press('Escape');
   server.offline = false;
 
-  await page.getByRole('button', { name: '切替 / 管理' }).click();
+  await page.getByRole('button', { name: '切替 / 管理', exact: true }).click();
   await page.getByRole('button', { name: '編集' }).first().click();
   await page.waitForTimeout(300);
   await shot(page, 'team');
