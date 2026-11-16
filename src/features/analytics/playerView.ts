@@ -1,4 +1,4 @@
-import { isUsableOpid } from '../../domain/n01/identity';
+import { isSharedLabel, isUsableOpid } from '../../domain/n01/identity';
 import type { PlayerPeriod } from './aggregate';
 import { aggregatePlayers } from './aggregate';
 import { formatValue } from './format';
@@ -232,6 +232,19 @@ export interface PeriodPersonMatch {
   reason?: string;
 }
 
+const UNPROVEN_REASONS = {
+  shared: '会員IDを共有する選手がいるため、本人を確認できません',
+  missing: '名簿を取得できず、会員IDだけでは本人を確認できません',
+  partial: '名簿が揃っていない季があり、会員IDだけでは本人を確認できません',
+  /** A known shared label (助っ人 etc.) on one row only: not several people under one id. */
+  label: '助っ人などの共用ラベルの登録のため、この会員IDだけでは本人を確認できません',
+} as const;
+
+/** The hold's wording for what actually made the id unprovable; several causes are all said. */
+function unprovenReason(causes: ReadonlySet<keyof typeof UNPROVEN_REASONS>): string {
+  return (['missing', 'partial', 'shared', 'label'] as const).filter((c) => causes.has(c)).map((c) => UNPROVEN_REASONS[c]).join('。また、');
+}
+
 /**
  * Finds a League Order member in the period: their row of the base season (by its `oid` when the
  * member was last seen there, else a member id that names one row there), else — in a multi-season
@@ -276,7 +289,18 @@ export function findPersonInPeriod(
   // A season whose roster was not read (or is short) cannot show that one row under the id is the only
   // one: its rows are never taken on the member id alone (the exact row of step 1 still is).
   let unproven = false;
+  // Why a season could not prove the id (only the wording of the hold depends on it, never whether
+  // the row is held): its roster was not read, only some teams' rows were read, or the roster is
+  // complete and shows the id under several people (or only a known shared label on one row).
+  const causes = new Set<keyof typeof UNPROVEN_REASONS>();
   const proves = (s: SeasonData): boolean => isUsableOpid(binding.opid, s.sharedOpidSet);
+  const noteUnproven = (s: SeasonData): void => {
+    unproven = true;
+    if (s.coverage === null) causes.add('missing');
+    else if (!s.coverage.complete) causes.add('partial');
+    else if (isSharedLabel(binding.opid) && new Set(rowsOf(s).filter((r) => r.opid === binding.opid).map((r) => r.key)).size <= 1) causes.add('label');
+    else causes.add('shared');
+  };
   if (!rowKey && binding.opid && base) {
     const hits = rowsOf(base).filter((r) => r.opid === binding.opid);
     // Two rows under the id now: neither is chosen — a multi-season period looks for the member's own
@@ -284,20 +308,24 @@ export function findPersonInPeriod(
     if (hits.length > 1) sharedNow = true;
     // Someone else under the id now: not them — their own earlier rows are still looked for below.
     else if (hits.length === 1 && otherPerson(hits[0].name)) reused = true;
-    else if (hits.length === 1 && !proves(base)) unproven = true;
+    else if (hits.length === 1 && !proves(base)) noteUnproven(base);
     else if (hits.length === 1) rowKey = hits[0].key;
   }
   if (!rowKey && sharedNow && !multi) return { personKey: null, state: 'held', inBase: false, reason: 'IDを共有する選手がいるため、同一人物として扱えません' };
   // 3. Multi-season: the one person the member id belongs to in the period.
   if (!rowKey && multi && binding.opid) {
-    const all = seasons.filter((s) => !(sharedNow && s === base)).flatMap((s) => rowsOf(s).filter((r) => r.opid === binding.opid && !otherPerson(r.name)).map((r) => ({ ...r, proven: proves(s) })));
-    if (all.some((r) => !r.proven)) unproven = true;
+    const all = seasons.filter((s) => !(sharedNow && s === base)).flatMap((s) => rowsOf(s).filter((r) => r.opid === binding.opid && !otherPerson(r.name)).map((r) => ({ ...r, season: s, proven: proves(s) })));
+    for (const r of all) if (!r.proven) noteUnproven(r.season);
     const hits = all.filter((r) => r.proven);
     const keys = new Set(hits.map((r) => links.keyOf.get(r.key) ?? r.key));
     if (keys.size > 1) return { personKey: null, state: 'held', inBase: false, reason: 'この会員IDの行が期間内で複数の人に分かれているため、本人を特定できません（本人照合の内訳を確認してください）' };
     if (keys.size === 1) rowKey = hits[0].key;
   }
-  if (!rowKey && unproven) return { personKey: null, state: 'held', inBase: false, reason: 'この会員IDの行がある季の名簿を取得できず、会員IDだけでは本人を確認できません' };
+  if (!rowKey && unproven) {
+    // Two rows under the id now is a shared id too, besides the seasons that could not prove it.
+    if (sharedNow) causes.add('shared');
+    return { personKey: null, state: 'held', inBase: false, reason: unprovenReason(causes) };
+  }
   if (!rowKey && sharedNow) return { personKey: null, state: 'held', inBase: false, reason: '今季は会員IDを共有する行が複数あり、期間内の過去季でも本人を1人に確認できません' };
   if (!rowKey) return { personKey: null, state: 'unknown', inBase: false, reason: reused ? REUSED : multi ? '選択期間の名簿・成績に該当する選手を確認できません' : 'この季の成績に該当する選手を確認できません' };
   if (links.held.some((h) => h.row.key === rowKey)) return { personKey: null, state: 'held', inBase: false, reason: '本人照合が保留です（候補が複数か根拠が不足。内訳で確認できます）' };
