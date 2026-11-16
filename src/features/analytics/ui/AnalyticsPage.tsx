@@ -17,6 +17,10 @@ import type { MainScope, OthersPart } from './scopeParts';
 import { defaultServices, usePeriodLoad } from './usePeriodLoad';
 import type { AnalyticsServices } from './usePeriodLoad';
 import { useGamesLoad, usePlayerDetail, useTeamDetail } from './useRoleData';
+import { useIdentityDecisions } from './useIdentityDecisions';
+import type { IdentityControls } from './useIdentityDecisions';
+import { applyLinks, linkPeople } from '../personLink';
+import type { PeriodLinks } from '../personLink';
 import { aggregateTeams } from '../aggregate';
 import { resolveBaseTeam } from '../teamView';
 import { pushWatchLink, requestWatchTab } from '../../matches/watchLink';
@@ -68,7 +72,15 @@ export default function AnalyticsPage({
   // shown as this one: only the gauge for the new condition is. The same condition read again keeps
   // its previous figures, said to be the previous ones.
   const sameCondition = periodState.loadKey === periodState.requestKey;
-  const state = sameCondition ? periodState : { ...periodState, load: null };
+  const shown = sameCondition ? periodState : { ...periodState, load: null };
+  // ⑨ 本人照合: the period's rows joined into people (automatic rules + the decisions kept on this device).
+  const identity = useIdentityDecisions(binding?.leagueId ?? null);
+  const linked = useMemo(() => {
+    if (!shown.load) return null;
+    const links = linkPeople(shown.load.seasons, identity.decisions);
+    return { load: { ...shown.load, seasons: applyLinks(shown.load.seasons, links) }, links };
+  }, [shown.load, identity.decisions]);
+  const state = { ...shown, load: linked?.load ?? null };
   const rawLoad = state.status === 'done' ? state.load : null;
   const games = useGamesLoad(resolved, rawLoad, scope, reload);
   const detail = usePlayerDetail(resolved, rawLoad, games.load, reload);
@@ -120,7 +132,7 @@ export default function AnalyticsPage({
   };
   const load = state.load && projection ? { ...state.load, seasons: projection.seasons } : state.load;
   const loading = state.status === 'loading';
-  const roleView: RoleViewProps = { scope, adoption: projection?.adoption ?? [], games, detail, teamDetail };
+  const roleView: RoleViewProps = { scope, adoption: projection?.adoption ?? [], games, detail, teamDetail, identity: linked ? { links: linked.links, controls: identity } : undefined };
 
   // 読み込みゲージ: the stages this view needs now.
   const stages: GaugeStage[] = [];
@@ -223,6 +235,8 @@ export interface RoleViewProps {
   detail: DetailState & DetailControls;
   /** The team view's leg read of the shown team (シングルス / ダブルス). */
   teamDetail?: TeamDetailState;
+  /** ⑨ 本人照合: who is who across the period, and the controls to undo / confirm a join. */
+  identity?: { links: PeriodLinks; controls: IdentityControls };
 }
 
 export interface TeamViewProps {

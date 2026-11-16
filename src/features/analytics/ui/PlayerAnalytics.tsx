@@ -5,7 +5,7 @@ import { normalizeName } from '../../../domain/n01/names';
 import { formatSample, formatValue, METRIC_LABEL } from '../format';
 import type { RankMetric } from '../format';
 import { MIN_SAMPLE, reliabilityOf } from '../metrics';
-import { buildInsights, buildPopulation, cellText, COMPARE_METRICS, findPerson, metricValue, rankIn, standingOf, trendOf } from '../playerView';
+import { buildInsights, buildPopulation, cellText, COMPARE_METRICS, findPerson, findPersonInPeriod, metricValue, rankIn, standingOf, trendOf } from '../playerView';
 import type { PlayerScope } from '../ranking';
 import type { PeriodLoad } from '../service/periodService';
 import type { MetricId } from '../types';
@@ -13,7 +13,7 @@ import { SCOPE_LABEL as GAME_SCOPE_LABEL } from '../roleGames';
 import { scopeMetrics } from '../scopeMetrics';
 import type { RoleViewProps } from './AnalyticsPage';
 import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './parts';
-import { LegDetailPanel, ReconstructionPanel, seasonsUsedText, StartRateCard } from './scopeParts';
+import { IdentityPanel, LegDetailPanel, ReconstructionPanel, seasonsUsedText, StartRateCard } from './scopeParts';
 import { contributingSeasons } from '../projection';
 import { detailCoverage, doublesCoverage, roleExposure, singlesCoverage } from '../service/detailService';
 import { periodStart } from '../startRate';
@@ -133,13 +133,24 @@ export function PlayerAnalytics({
         };
       });
     }
+    const multi = load.request.mode === 'last3' || load.request.mode === 'last12';
+    const withFigures = new Set(byKey.keys());
+    const links = role?.identity?.links;
     return players
       .filter((p) => !p.archived && !p.guest)
       .map((p) => {
-        const match = findPerson(base, p.n01);
-        return { id: p.id, name: p.name, personKey: match.personKey, reason: match.reason, period: match.personKey ? (byKey.get(match.personKey) ?? null) : null };
+        if (!links) {
+          const match = findPerson(base, p.n01);
+          return { id: p.id, name: p.name, personKey: match.personKey, reason: match.reason, period: match.personKey ? (byKey.get(match.personKey) ?? null) : null };
+        }
+        // ⑩: the member's row anywhere in the period (本人照合 applied); figures only where they played.
+        const match = findPersonInPeriod(load.seasons, base, p.n01, links, multi, withFigures);
+        const period = match.state === 'found' && match.personKey ? (byKey.get(match.personKey) ?? null) : null;
+        const failed = !period && load.failures.length > 0 ? `（取得できなかった季が${load.failures.length}季あります）` : '';
+        const reason = period ? (match.inBase ? undefined : '今季は出場記録なし') : `${match.reason ?? '成績を確認できません'}${failed}`;
+        return { id: p.id, name: p.name, personKey: period ? match.personKey : null, reason, period };
       });
-  }, [base, baseTeam, specifiedSeason, players, byKey, seasonGames]);
+  }, [base, baseTeam, specifiedSeason, players, byKey, seasonGames, role?.identity?.links, load.request.mode, load.seasons, load.failures.length]);
 
   const [selected, setSelectedKey] = useState<string | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -277,7 +288,7 @@ export function PlayerAnalytics({
                     <span className="title">{name}</span>
                     <span className="meta">
                       {period
-                        ? `3DA ${formatValue('ppr', period.metrics.ppr.value)} ・ Leg ${formatValue('legRate', period.metrics.legRate.value)}${period.linked ? ` ・ ${period.seasons.length}季` : ''}`
+                        ? `3DA ${formatValue('ppr', period.metrics.ppr.value)} ・ Leg ${formatValue('legRate', period.metrics.legRate.value)}${period.linked ? ` ・ ${period.seasons.length}季` : ''}${reason ? ` ・ ${reason}` : ''}`
                         : (reason ?? '成績を確認できません')}
                     </span>
                   </span>
@@ -297,7 +308,8 @@ export function PlayerAnalytics({
             <Card title={person.name} kicker="PLAYER">
               <p className="small-text muted" data-testid="player-basis">
                 {person.metrics.seasons}シーズンの合算{roleView ? `（${GAME_SCOPE_LABEL[gameScope]}のゲームのみ）` : ''}
-                {person.linked ? '（n01のIDが一意と確認できた季のみ結合）' : ''}
+                {person.linked ? '（本人と確認できた季のみ結合。内訳は下の「本人照合」）' : ''}
+                {!person.seasons.some((x) => x.tournamentId === baseTournamentId) ? <span data-testid="player-no-base"> ・ {load.request.mode === 'specified' ? '指定季は出場記録なし' : '今季は出場記録なし'}（期間内の他の季の成績）</span> : null}
                 {roleView
                   ? ` ・ ${person.metrics.setRate.den}ゲーム`
                   : ` ・ 出場 ${person.metrics.counts.match ?? '—'} 試合（勝利数ではありません）`}
@@ -377,6 +389,7 @@ export function PlayerAnalytics({
                   {!roleView && person.metrics.extremes.bestLeg !== null ? ' Best Leg は n01 公式値で、開始点数（501/1001等）の区別はありません。' : ''}
                 </p>
               </details>
+              {role?.identity ? <IdentityPanel personKey={person.personKey} identity={role.identity} /> : null}
               {myStanding?.state === 'reference' ? <p className="small-text muted">この指標はサンプル数が基準({MIN_SAMPLE[metric as MetricId] ?? '—'})未満のため、順位に含めていません。</p> : null}
             </Card>
 

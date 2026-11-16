@@ -209,3 +209,72 @@ export function cellText(person: { metrics: Metrics }, metric: RankMetric): { te
   const reference = metric !== 'bestLeg' && sample < MIN_SAMPLE[metric];
   return { text: formatValue(metric, value), reference };
 }
+
+// ---- ⑩ a member found across the period (本人照合 ⑨ applied) -------------------------------------
+
+export type PeriodPersonState =
+  /** Figures in the period (`inBase`: also in the base season). */
+  | 'found'
+  /** Known (registered), but no stats row in the base season — 今季 / 指定季 only. */
+  | 'none-base'
+  /** Known, but no stats row anywhere in the period. */
+  | 'none-period'
+  /** Their row is held by 本人照合 (several candidates / too little evidence). */
+  | 'held'
+  | 'unknown';
+
+export interface PeriodPersonMatch {
+  personKey: string | null;
+  state: PeriodPersonState;
+  inBase: boolean;
+  reason?: string;
+}
+
+/**
+ * Finds a League Order member in the period: their row of the base season (by its `oid` when the
+ * member was last seen there, else a member id that names one row there), else — in a multi-season
+ * period — their row of the season they were last seen in, else the one person their member id belongs
+ * to in the period. A member without a stats row in the base season is still found when the period
+ * has their figures elsewhere; a blank season is never counted as 0.
+ */
+export function findPersonInPeriod(
+  seasons: readonly SeasonData[],
+  base: SeasonData,
+  binding: LocalPlayerBinding | undefined,
+  links: { keyOf: ReadonlyMap<string, string>; held: readonly { row: { key: string } }[] },
+  multi: boolean,
+  withFigures: ReadonlySet<string>,
+): PeriodPersonMatch {
+  if (!binding) return { personKey: null, state: 'unknown', inBase: false, reason: 'n01 と連携していない選手です' };
+  const rowsOf = (s: SeasonData): { key: string; opid: string | null }[] => [
+    ...s.players.map((p) => ({ key: `${s.tournamentId}:${p.oid}`, opid: p.opid })),
+    ...(s.roster ?? []).filter((r) => !s.players.some((p) => p.oid === r.oid)).map((r) => ({ key: `${s.tournamentId}:${r.oid}`, opid: r.opid })),
+  ];
+  let rowKey: string | null = null;
+  if (binding.currentOid && binding.lastSeenTournamentId === base.tournamentId && rowsOf(base).some((r) => r.key === `${base.tournamentId}:${binding.currentOid}`)) rowKey = `${base.tournamentId}:${binding.currentOid}`;
+  if (!rowKey && binding.opid) {
+    const hits = rowsOf(base).filter((r) => r.opid === binding.opid);
+    if (hits.length > 1) return { personKey: null, state: 'held', inBase: false, reason: 'IDを共有する選手がいるため、同一人物として扱えません' };
+    if (hits.length === 1) rowKey = hits[0].key;
+  }
+  if (!rowKey && multi && binding.currentOid) {
+    const seen = seasons.find((s) => s.tournamentId === binding.lastSeenTournamentId);
+    if (seen && rowsOf(seen).some((r) => r.key === `${seen.tournamentId}:${binding.currentOid}`)) rowKey = `${seen.tournamentId}:${binding.currentOid}`;
+  }
+  if (!rowKey && multi && binding.opid) {
+    const keys = new Set(seasons.flatMap((s) => rowsOf(s).filter((r) => r.opid === binding.opid).map((r) => links.keyOf.get(r.key) ?? r.key)));
+    if (keys.size > 1) return { personKey: null, state: 'held', inBase: false, reason: 'この会員IDの行が期間内で複数の人に分かれているため、本人を特定できません（本人照合の内訳を確認してください）' };
+    if (keys.size === 1) {
+      const key = [...keys][0];
+      return { personKey: key, state: withFigures.has(key) ? 'found' : 'none-period', inBase: base.players.some((p) => p.personKey === key), ...(withFigures.has(key) ? {} : { reason: '選択期間に出場記録なし' }) };
+    }
+  }
+  if (!rowKey) return { personKey: null, state: 'unknown', inBase: false, reason: multi ? '選択期間の名簿・成績に該当する選手を確認できません' : 'この季の成績に該当する選手を確認できません' };
+  if (links.held.some((h) => h.row.key === rowKey)) return { personKey: null, state: 'held', inBase: false, reason: '本人照合が保留です（候補が複数か根拠が不足。内訳で確認できます）' };
+  const personKey = links.keyOf.get(rowKey) ?? null;
+  const inBase = !!personKey && base.players.some((p) => p.personKey === personKey);
+  if (!personKey) return { personKey: null, state: 'unknown', inBase: false, reason: 'この季の成績に該当する選手を確認できません' };
+  if (inBase) return { personKey, state: 'found', inBase };
+  if (multi && withFigures.has(personKey)) return { personKey, state: 'found', inBase };
+  return { personKey, state: multi ? 'none-period' : 'none-base', inBase, reason: multi ? '選択期間に出場記録なし' : '今季は出場記録なし' };
+}

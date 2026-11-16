@@ -1,5 +1,8 @@
 import { Icon } from '../../../components/icons';
 import { pairOf } from '../metrics';
+import { fullName } from '../personLink';
+import type { LinkBasis, PeriodLinks } from '../personLink';
+import type { IdentityControls } from './useIdentityDecisions';
 import type { MetricId, StatLine } from '../types';
 import type { Composition } from '../gameKind';
 import { contributingSeasons, METRIC_GROUP_LABEL } from '../projection';
@@ -497,4 +500,61 @@ export function seasonsUsedText(lines: readonly (StatLine | null)[], metric: Met
   if (!multi || !hasValue || common === null) return null;
   const n = lines.filter((line) => line !== null && pairOf(metric, line) !== null).length;
   return n !== common ? `${n}季分` : null;
+}
+
+const BASIS_LABEL: Record<LinkBasis, string> = { id: '会員ID', rename: '姓の変更', guest: '共用ラベル・IDなし', 'id-variant': '会員IDの表記ゆれ', confirmed: '手動で確認' };
+
+/**
+ * ⑨ 本人照合 of the shown player: every season row joined into them with its basis, a way to undo an
+ * automatic join (the row stays apart after the next read too), the rows held because they may be
+ * theirs (confirm by hand), and the rows undone before (take the undo back).
+ */
+export function IdentityPanel({ personKey, identity }: { personKey: string; identity: { links: PeriodLinks; controls: IdentityControls } }): React.JSX.Element | null {
+  const entries = identity.links.people.get(personKey) ?? [];
+  const mine = new Set(entries.map((e) => e.row.key));
+  const held = identity.links.held.filter((h) => h.candidates.includes(personKey) && !mine.has(h.row.key));
+  const rows = new Map([...identity.links.people.values()].flat().map((e) => [e.row.key, e.row]));
+  // Rows undone that bear this player's name (so they can be taken back from here).
+  const names = new Set(entries.map((e) => fullName(e.row.name)));
+  const undone = identity.controls.decisions.unlinks.map((k) => rows.get(k)).filter((r): r is NonNullable<typeof r> => !!r && names.has(fullName(r.name)));
+  const seasons = new Set(entries.map((e) => e.row.tournamentId)).size;
+  if (entries.length === 0) return null;
+  return (
+    <details className="analytics-details" data-testid="identity-links">
+      <summary>本人照合（{seasons}季{held.length > 0 ? `・保留 ${held.length}件` : ''}）</summary>
+      <p className="small-text muted">同じリーグで会員ID・氏名・所属・時系列から本人と確認できた行だけを結合しています（n01公式値との数値の照合とは別です）。自動で結合した行は解除でき、解除した行は取得し直しても自動では戻りません。</p>
+      <ul className="plain-list small-text">
+        {entries.map((e) => (
+          <li key={e.row.key} data-testid="identity-row">
+            <strong>{e.row.title}</strong>：{e.row.name}（{e.row.opid ?? '会員IDなし'}）{e.row.hasStats ? '' : '・成績行なし'}
+            <span className="meta">
+              {BASIS_LABEL[e.basis]}：{e.reason}
+            </span>
+            {e.undoable ? (
+              <button type="button" className="btn small" onClick={() => identity.controls.unlink(e.row.key)} data-testid="identity-unlink">
+                この季の結合を解除
+              </button>
+            ) : null}
+          </li>
+        ))}
+        {held.map((h) => (
+          <li key={`held-${h.row.key}`} data-testid="identity-held">
+            保留：<strong>{h.row.title}</strong> {h.row.name}（{h.row.opid ?? '会員IDなし'}）
+            <span className="meta">{h.reason}</span>
+            <button type="button" className="btn small" onClick={() => identity.controls.confirm(h.row.key, entries[0].row.key)} data-testid="identity-confirm">
+              本人と確認して結合
+            </button>
+          </li>
+        ))}
+        {undone.map((r) => (
+          <li key={`undone-${r.key}`} data-testid="identity-undone">
+            解除済み：<strong>{r.title}</strong> {r.name}
+            <button type="button" className="btn small" onClick={() => identity.controls.reset(r.key)}>
+              解除を取り消す
+            </button>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
 }

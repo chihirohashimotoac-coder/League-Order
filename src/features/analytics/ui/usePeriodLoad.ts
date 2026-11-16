@@ -113,7 +113,9 @@ export function usePeriodLoad(
     // `request` is represented by `requestKey`.
   }, [services, leagueId, requestKey, reloadToken]);
 
-  return useMemo(() => state, [state]);
+  // The request of this render, not of the last effect: right after the period or season changes, the
+  // load still held belongs to the previous request and must not be shown as this one (⑧/⑩).
+  return useMemo(() => ({ ...state, requestKey }), [state, requestKey]);
 }
 
 function failedLoad(request: PeriodRequest, reason: string): PeriodLoad {
