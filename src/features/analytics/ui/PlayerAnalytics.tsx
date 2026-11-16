@@ -124,6 +124,7 @@ export function PlayerAnalytics({
       return [...rows.map((r) => ({ oid: r.oid, name: r.name })), ...extra].map((r) => {
         const stats = statsOf.get(r.oid);
         const conflict = base.conflicts.some((c) => c.oid === r.oid);
+        if (!stats && (base.heldPlayers ?? []).some((p) => p.oid === r.oid)) return { id: `oid:${r.oid}`, name: r.name, personKey: null, reason: '本人照合が保留です（内訳で確認できます）', period: null };
         return {
           id: `oid:${r.oid}`,
           name: stats?.name ?? r.name,
@@ -144,7 +145,7 @@ export function PlayerAnalytics({
           return { id: p.id, name: p.name, personKey: match.personKey, reason: match.reason, period: match.personKey ? (byKey.get(match.personKey) ?? null) : null };
         }
         // ⑩: the member's row anywhere in the period (本人照合 applied); figures only where they played.
-        const match = findPersonInPeriod(load.seasons, base, p.n01, links, multi, withFigures);
+        const match = findPersonInPeriod(load.seasons, base, p.n01 ? { ...p.n01, name: p.n01.sourceName ?? p.name } : undefined, links, multi, withFigures);
         const period = match.state === 'found' && match.personKey ? (byKey.get(match.personKey) ?? null) : null;
         const failed = !period && load.failures.length > 0 ? `（取得できなかった季が${load.failures.length}季あります）` : '';
         const reason = period ? (match.inBase ? undefined : '今季は出場記録なし') : `${match.reason ?? '成績を確認できません'}${failed}`;

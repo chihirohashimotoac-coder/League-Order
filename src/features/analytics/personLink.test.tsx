@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Team } from '../../domain/types';
 import type { Player } from '../../domain/types';
 import { aggregatePlayers } from './aggregate';
-import { applyLinks, idSpelling, linkPeople, nameRelation } from './personLink';
+import { applyLinks, idSpelling, linkPeople, nameRelation, NO_DECISIONS } from './personLink';
 import { findPersonInPeriod } from './playerView';
 import { buildSeasonData } from './seasonData';
 import type { SeasonData } from './seasonData';
@@ -147,5 +147,47 @@ describe('⑧⑩ switching the period never shows the previous period as the new
     expect(hook.result.current.requestKey).toContain('last3');
     expect(hook.result.current.loadKey).not.toBe(hook.result.current.requestKey);
     await waitFor(() => expect(hook.result.current.loadKey).toBe(hook.result.current.requestKey));
+  });
+});
+
+describe('Codex audit (2026-11-18): reused ids, undone rows, gaps and held rows', () => {
+  it('a member last seen as another person under a reused id is never switched to the new holder of the id', () => {
+    const seasons = league();
+    const links = linkPeople(seasons);
+    const linked = applyLinks(seasons, links);
+    const figures = new Set(aggregatePlayers(linked).map((p) => p.personKey));
+    const Q = { opid: 'X-1', currentOid: 'q0', lastSeenTournamentId: 's0', name: '佐藤 一郎' };
+    // 直近12季-like: the member's own row (s0) is in the period.
+    expect(findPersonInPeriod(linked, linked[0], Q, links, true, figures).personKey).toBe(links.keyOf.get('s0:q0'));
+    // 今季: only the new holder of X-1 is there — not taken.
+    const current = linked.slice(0, 1);
+    expect(findPersonInPeriod(current, current[0], Q, linkPeople(current), false, figures)).toMatchObject({ personKey: null, reason: expect.stringContaining('再利用') });
+  });
+
+  it('an undone row is not a target either: the older spelling of the id does not join it', () => {
+    const seasons = league();
+    const links = linkPeople(seasons, { unlinks: ['s3:h3'], confirms: {} });
+    expect(links.keyOf.get('s3:h3')).not.toBe(links.keyOf.get('s2:h2'));
+    expect(links.people.get(links.keyOf.get('s3:h3')!)!.map((e) => e.row.key)).toEqual(['s3:h3']);
+  });
+
+  it('a season between two that could not be read: the guest row is held, not joined', () => {
+    const seasons = league();
+    // Window: s3, s2, (failed), s1, s0 — s2 and s1 are not adjacent any more.
+    const positions = new Map([['s3', 0], ['s2', 1], ['s1', 3], ['s0', 4]]);
+    const links = linkPeople(seasons, NO_DECISIONS, positions);
+    expect(links.keyOf.get('s1:g1')).not.toBe(links.keyOf.get('s2:p2'));
+    expect(links.held.find((h) => h.row.key === 's1:g1')?.reason).toContain('間の季');
+  });
+
+  it('a held row is out of every figure (and of the population) until confirmed', () => {
+    const two = league();
+    two[1] = buildSeasonData(season({ tournament: tournament('s2', TEAMS), roster: roster([{ oid: 'p2', opid: 'X-1', team: 'KAL', name: '山田花子' }, { oid: 'p2b', opid: 'X-2', team: 'KAL', name: '山田 花子' }, { oid: 'z2', opid: 'Z-1', team: 'HOL', name: '他 人' }]), playerStats: [playerRow('p2', 'X-1', 'KAL', '山田花子', line(2)), playerRow('p2b', 'X-2', 'KAL', '山田 花子', line(1))] }));
+    const links = linkPeople(two);
+    expect(links.held.some((h) => h.row.key === 's1:g1')).toBe(true);
+    const linked = applyLinks(two, links);
+    expect(linked[2].players.some((p) => p.oid === 'g1')).toBe(false);
+    expect(linked[2].heldPlayers?.map((p) => p.oid)).toEqual(['g1']);
+    expect(aggregatePlayers(linked).some((p) => p.seasons.some((x) => x.tournamentId === 's1' && x.teamId === 'KAL' && p.name.includes('山田')))).toBe(false);
   });
 });

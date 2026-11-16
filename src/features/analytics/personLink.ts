@@ -37,6 +37,11 @@ export interface PersonRow {
   tournamentId: string;
   title: string;
   seasonIndex: number;
+  /**
+   * The season's position in the period's window (failed seasons keep theirs): what "the next / the
+   * previous season" is measured on. Equal to {@link seasonIndex} when no window is given.
+   */
+  position: number;
   oid: string;
   opid: string | null;
   name: string;
@@ -113,7 +118,7 @@ const newest = (p: Person): PersonRow => p.rows.reduce((a, b) => (b.seasonIndex 
 const usableId = (row: PersonRow, season: SeasonData): boolean => isUsableOpid(row.opid, season.sharedOpidSet);
 
 /** The rows of the period: stats rows and registered roster rows, one per `(season, oid)`. */
-export function periodRows(seasons: readonly SeasonData[]): PersonRow[] {
+export function periodRows(seasons: readonly SeasonData[], positions?: ReadonlyMap<string, number>): PersonRow[] {
   const teams = teamKeys(seasons);
   const rows: PersonRow[] = [];
   seasons.forEach((season, seasonIndex) => {
@@ -121,7 +126,7 @@ export function periodRows(seasons: readonly SeasonData[]): PersonRow[] {
     const add = (oid: string, opid: string | null, name: string, teamId: string, hasStats: boolean): void => {
       if (seen.has(oid)) return;
       seen.add(oid);
-      rows.push({ key: `${season.tournamentId}:${oid}`, tournamentId: season.tournamentId, title: season.title, seasonIndex, oid, opid, name, teamId, teamKey: teams.get(`${season.tournamentId}:${teamId}`) ?? `team:${season.tournamentId}:${teamId}`, hasStats });
+      rows.push({ key: `${season.tournamentId}:${oid}`, tournamentId: season.tournamentId, title: season.title, seasonIndex, position: positions?.get(season.tournamentId) ?? seasonIndex, oid, opid, name, teamId, teamKey: teams.get(`${season.tournamentId}:${teamId}`) ?? `team:${season.tournamentId}:${teamId}`, hasStats });
     };
     for (const p of season.players) add(p.oid, p.opid, p.name, p.teamId, true);
     for (const r of season.roster ?? []) add(r.oid, r.opid, r.name, r.teamId, false);
@@ -133,8 +138,12 @@ export function periodRows(seasons: readonly SeasonData[]): PersonRow[] {
  * Links the rows of a period's seasons (newest first, one league) into people. Seasons whose roster
  * does not prove ids keep each row on its own.
  */
-export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDecisions = NO_DECISIONS): PeriodLinks {
-  const rows = periodRows(seasons);
+export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDecisions = NO_DECISIONS, positions?: ReadonlyMap<string, number>): PeriodLinks {
+  const rows = periodRows(seasons, positions);
+  const loadedPositions = new Set(rows.map((r) => r.position));
+  /** Next / previous season; a season between them that could not be read makes them not adjacent. */
+  const adjacent = (a: PersonRow, b: PersonRow): boolean => Math.abs(a.position - b.position) === 1;
+  const acrossGap = (a: PersonRow, b: PersonRow): boolean => Math.abs(a.position - b.position) === 2 && !loadedPositions.has(Math.min(a.position, b.position) + 1);
   const seasonOf = new Map(seasons.map((s, i) => [i, s]));
   const unlinked = new Set(decisions.unlinks);
   // Splits known anywhere in the league's rows: 「橋本 千尋」 tells how to read 「橋本千尋」.
@@ -190,7 +199,7 @@ export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDe
         continue;
       }
       const renames = verdicts.filter((v) => v.relation === 'surname-change');
-      const follows = (v: (typeof verdicts)[number]): boolean => Math.abs(v.last.seasonIndex - row.seasonIndex) === 1 && v.last.teamKey === row.teamKey;
+      const follows = (v: (typeof verdicts)[number]): boolean => adjacent(v.last, row) && v.last.teamKey === row.teamKey;
       if (same.length === 0 && renames.length === 1 && follows(renames[0]) && verdicts.every((v) => v === renames[0] || v.relation === 'different')) {
         join(renames[0].p, row, 'rename', `会員ID ${opid}・名「${(splitOf(row.name) ?? splits.get(fullName(row.name)))![1]}」が一致し、隣接する季に同じチーム（姓の変更）`, true);
         continue;
@@ -229,14 +238,22 @@ export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDe
       // id is the same id in another spelling.
       const unitId = mineRows.every((r) => looseKeys.has(r.key)) ? null : idOf(unit);
       if (unitId === null && !mineRows.every((r) => looseKeys.has(r.key))) continue;
-      const candidates = people.filter((p) => {
+      const eligible = (p: Person): boolean => {
         if (p === unit) return false;
+        // A row undone by hand is never joined into, nor joined.
+        if (p.rows.some((r) => unlinked.has(r.key))) return false;
         const theirs = seasonsOf(p);
         if (mineRows.some((r) => theirs.has(r.seasonIndex))) return false;
-        if (unitId !== null && idOf(p) !== unitId) return false;
-        return mineRows.some((m) => p.rows.some((r) => Math.abs(r.seasonIndex - m.seasonIndex) === 1 && r.teamKey === m.teamKey && fullName(r.name) === fullName(m.name)));
-      });
-      if (candidates.length === 0) continue;
+        return unitId === null || idOf(p) === unitId;
+      };
+      const matches = (p: Person, near: (a: PersonRow, b: PersonRow) => boolean): boolean => mineRows.some((m) => p.rows.some((r) => near(r, m) && r.teamKey === m.teamKey && fullName(r.name) === fullName(m.name)));
+      const candidates = people.filter((p) => eligible(p) && matches(p, adjacent));
+      if (candidates.length === 0) {
+        // Only across a season that could not be read: not enough to say they follow on.
+        const gap = people.filter((p) => eligible(p) && matches(p, acrossGap));
+        if (gap.length > 0) for (const m of mineRows) if (!held.has(m.key)) held.set(m.key, { row: m, candidates: gap.map((c) => c.rows[0].key), reason: '間の季を取得できず、隣接する季で確認できないため保留' });
+        continue;
+      }
       // Two people with an id: the older one joins the newer (the newest spelling names the person).
       if (unitId !== null && candidates.length === 1 && newest(candidates[0]).seasonIndex > newest(unit).seasonIndex) continue;
       // Nobody else in the row's season answers to that name.
@@ -294,15 +311,22 @@ export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDe
 
 /**
  * The period's seasons with each player's `personKey` from {@link linkPeople} (and `linkable` when the
- * person has rows in more than one season). Rows of a held person stay on their own.
+ * person has rows in more than one season). Held rows leave `players` for `heldPlayers`.
  */
 export function applyLinks(seasons: readonly SeasonData[], links: PeriodLinks): SeasonData[] {
-  return seasons.map((season) => ({
-    ...season,
-    players: season.players.map((p) => {
-      const key = links.keyOf.get(`${season.tournamentId}:${p.oid}`) ?? p.personKey;
-      const entries = links.people.get(key) ?? [];
-      return { ...p, personKey: key, linkable: new Set(entries.map((e) => e.row.tournamentId)).size > 1 };
-    }),
-  }));
+  const held = new Set(links.held.map((h) => h.row.key));
+  return seasons.map((season) => {
+    const mine = (p: SeasonData['players'][number]) => held.has(`${season.tournamentId}:${p.oid}`);
+    return {
+      ...season,
+      // A held row is out of every figure (rankings, averages, the player's own) until it is confirmed;
+      // it stays listed in 本人照合.
+      players: season.players.filter((p) => !mine(p)).map((p) => {
+        const key = links.keyOf.get(`${season.tournamentId}:${p.oid}`) ?? p.personKey;
+        const entries = links.people.get(key) ?? [];
+        return { ...p, personKey: key, linkable: new Set(entries.map((e) => e.row.tournamentId)).size > 1 };
+      }),
+      heldPlayers: season.players.filter(mine),
+    };
+  });
 }

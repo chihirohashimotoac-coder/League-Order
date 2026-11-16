@@ -77,7 +77,8 @@ export default function AnalyticsPage({
   const identity = useIdentityDecisions(binding?.leagueId ?? null);
   const linked = useMemo(() => {
     if (!shown.load) return null;
-    const links = linkPeople(shown.load.seasons, identity.decisions);
+    const positions = new Map(shown.load.window.map((w, i) => [w.tournamentId, i]));
+    const links = linkPeople(shown.load.seasons, identity.decisions, positions);
     return { load: { ...shown.load, seasons: applyLinks(shown.load.seasons, links) }, links };
   }, [shown.load, identity.decisions]);
   const state = { ...shown, load: linked?.load ?? null };

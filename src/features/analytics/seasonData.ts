@@ -81,6 +81,8 @@ export interface SeasonData {
   emptyEntries?: string[];
   /** `opid`s that are shared or unproven in this season. */
   sharedOpidSet: ReadonlySet<string>;
+  /** Stats rows held out by 本人照合 (`personLink.applyLinks`): not in any figure until confirmed. */
+  heldPlayers?: PlayerSeason[];
   /** Players held out because the same oid carried two teams. */
   conflicts: { oid: string; teamIds: string[] }[];
   /** Stats rows dropped because their team is not registered in this tournament. */
