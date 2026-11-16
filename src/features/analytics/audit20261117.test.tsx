@@ -201,4 +201,23 @@ describe('4. the team read never stays "running" without reading, and the gauge 
     expect(gaugeOutcomeOf([{ id: 'season', label: 'シーズン取得', state: 'done', count: null, text: '' }, stage], true, false, 0).state).not.toBe('done');
     act(() => failing.result.current.retry());
   });
+
+  it('two seasons, one list read and one not: never done / no-games — partial or games-failed with the missing season said (Codex audit)', async () => {
+    const other = { ...s2, tournamentId: 't_side_old', title: 'old' };
+    const twoSeasons: PeriodLoad = { ...period, seasons: [s2, other] };
+    const teams = new Map([[TD, 'T1'], ['t_side_old', 'T1']]);
+    const services = servicesWith({ request: async () => detail() });
+    // The read season has the team's game, the other season's list failed.
+    const withGame = new Map([[TD, { tournamentId: TD, games: parseGameList({ result: 0, list: [listRow()] }).games, dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, complete: true } satisfies SeasonGames]]);
+    const a = renderHook(() => useTeamDetail(services, twoSeasons, gamesLoad({ games: withGame, failed: new Set(['t_side_old']) }), 'doubles', teams, 0));
+    await waitFor(() => expect(a.result.current.phase).toBe('partial'));
+    expect(teamLegStage(a.result.current).text).toContain('ゲーム一覧を取得できていない季が1季');
+    // The read season has no game of the kind: "no games" cannot be said while the other is unknown.
+    const empty = new Map([[TD, { tournamentId: TD, games: [], dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, complete: true } satisfies SeasonGames]]);
+    const b = renderHook(() => useTeamDetail(services, twoSeasons, gamesLoad({ games: empty, failed: new Set(['t_side_old']) }), 'doubles', teams, 0));
+    await waitFor(() => expect(b.result.current.running).toBe(false));
+    await waitFor(() => expect(b.result.current.phase).toBe('games-failed'));
+    const c = renderHook(() => useTeamDetail(services, twoSeasons, gamesLoad({ games: empty, pending: new Set(['t_side_old']) }), 'doubles', teams, 0));
+    await waitFor(() => expect(c.result.current.phase).toBe('waiting-games'));
+  });
 });

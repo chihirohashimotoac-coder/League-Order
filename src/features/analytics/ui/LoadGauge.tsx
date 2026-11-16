@@ -104,7 +104,7 @@ export function LoadGauge({
 }
 
 /** The team view's "Leg明細の照合" stage, from the team read's phase (never 完了 for a read that did not happen). */
-export function teamLegStage(teamDetail: Pick<TeamDetailState, 'phase' | 'result'>): GaugeStage {
+export function teamLegStage(teamDetail: Pick<TeamDetailState, 'phase' | 'result'> & { listsMissing?: number }): GaugeStage {
   const seasons = teamDetail.result?.seasons.filter((x) => x.games > 0) ?? [];
   const total = seasons.reduce((n, x) => n + x.games, 0);
   const done = seasons.reduce((n, x) => n + x.rebuilt, 0);
@@ -116,7 +116,7 @@ export function teamLegStage(teamDetail: Pick<TeamDetailState, 'phase' | 'result
     running: 'チームのこの種別のゲームのLeg明細を取得しています',
     'no-games': 'この種別の対象試合がありません',
     failed: teamDetail.result?.failures[0] ?? 'Leg明細を取得できませんでした',
-    partial: `${total - done}ゲームのLeg明細を確認できていません`,
+    partial: [total > done ? `${total - done}ゲームのLeg明細を確認できていません` : '', teamDetail.listsMissing ? `ゲーム一覧を取得できていない季が${teamDetail.listsMissing}季あります` : ''].filter(Boolean).join('。'),
     done: '',
   };
   return {

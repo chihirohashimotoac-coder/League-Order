@@ -325,6 +325,8 @@ export interface TeamDetailState {
   /** The team read for the current view (`null`: none needed — not the team view, or 01全体 / その他). */
   key: string | null;
   phase: TeamDetailPhase;
+  /** The team's seasons whose game list is not (yet) complete: their games are not in the figures. */
+  listsMissing: number;
   running: boolean;
   /** More parts follow (the read crossed its budget). */
   partial: boolean;
@@ -386,7 +388,22 @@ export function useTeamDetail(services: AnalyticsServices, load: PeriodLoad | nu
   const contributions = useMemo(() => (mine?.result && load ? currentTeamContributions(mine.result, games?.games ?? null, load.seasons) : new Map()), [mine?.result, games, load]);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const phase = teamPhase(key, load, games, teams, coverage, mine);
-  return { key, phase, running: phase === 'running', partial: mine?.partial ?? false, result: mine?.result ?? null, contributions, retry };
+  const lists = key && load && teams ? teamLists(load, games, teams) : { waiting: 0, missing: 0 };
+  return { key, phase, listsMissing: lists.waiting + lists.missing, running: phase === 'running', partial: mine?.partial ?? false, result: mine?.result ?? null, contributions, retry };
+}
+
+/** The team's seasons whose game list is not complete: still being read (`waiting`), or not obtained (`missing`). */
+function teamLists(load: PeriodLoad, games: GamesLoad | null, teams: ReadonlyMap<string, string>): { waiting: number; missing: number } {
+  let waiting = 0;
+  let missing = 0;
+  for (const s of load.seasons) {
+    if (!teams.has(s.tournamentId)) continue;
+    const raw = games?.games.get(s.tournamentId);
+    if (raw?.complete) continue;
+    if (!games || games.pending.has(s.tournamentId) || (!raw && !games.failed.has(s.tournamentId))) waiting += 1;
+    else missing += 1;
+  }
+  return { waiting, missing };
 }
 
 function teamPhase(
@@ -398,17 +415,19 @@ function teamPhase(
   mine: { running: boolean; result: TeamDetailResult | null } | null,
 ): TeamDetailPhase {
   if (!key || !load || !teams) return 'idle';
-  if (coverage === '') {
-    // No list of the team's seasons is complete yet: still being read, or none could be read.
-    const ids = load.seasons.filter((s) => teams.has(s.tournamentId)).map((s) => s.tournamentId);
-    const waiting = !games || ids.some((id) => games.pending.has(id) || (!games.games.has(id) && !games.failed.has(id)));
-    return waiting ? 'waiting-games' : 'games-failed';
-  }
+  const lists = teamLists(load, games, teams);
+  if (coverage === '') return lists.waiting > 0 ? 'waiting-games' : 'games-failed';
   if (!mine || mine.running || !mine.result) return 'running';
   const seasons = mine.result.seasons.filter((x) => x.games > 0);
   const total = seasons.reduce((n, x) => n + x.games, 0);
   const rebuilt = seasons.reduce((n, x) => n + x.rebuilt, 0);
-  if (total === 0) return mine.result.failures.length > 0 ? 'failed' : 'no-games';
+  if (total === 0) {
+    // "No game of the kind" only when every season's list is known; otherwise it is not known yet.
+    if (mine.result.failures.length > 0) return 'failed';
+    if (lists.waiting > 0) return 'waiting-games';
+    if (lists.missing > 0) return 'games-failed';
+    return 'no-games';
+  }
   if (rebuilt === 0) return 'failed';
-  return rebuilt < total ? 'partial' : 'done';
+  return rebuilt < total || lists.waiting + lists.missing > 0 ? 'partial' : 'done';
 }
