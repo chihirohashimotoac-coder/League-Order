@@ -259,8 +259,9 @@ export function findPersonInPeriod(
   for (const s of seasons) for (const r of rowsOf(s)) { const parts = r.name.normalize('NFKC').trim().split(/\s+/u); if (parts.length === 2) splits.set(fullName(r.name), [parts[0].toLowerCase(), parts[1].toLowerCase()]); }
   const otherPerson = (name: string): boolean => {
     if (!binding.name) return false;
-    const relation = nameRelation(binding.name, name, splits);
-    return relation !== 'same' && relation !== 'surname-change';
+    // Only the same name: a surname change is the business of 本人照合 (given name, team, adjacent
+    // seasons), never of a member id alone.
+    return nameRelation(binding.name, name, splits) !== 'same';
   };
   const REUSED = 'この会員IDの行は別の氏名の選手です（会員IDの再利用の可能性）。本人を特定できません';
   let rowKey: string | null = null;
@@ -268,13 +269,13 @@ export function findPersonInPeriod(
   const seen = seasons.find((s) => s.tournamentId === binding.lastSeenTournamentId);
   if (binding.currentOid && seen && (seen === base || multi) && rowsOf(seen).some((r) => r.key === `${seen.tournamentId}:${binding.currentOid}`)) rowKey = `${seen.tournamentId}:${binding.currentOid}`;
   // 2. The member id in the base season.
+  let reused = false;
   if (!rowKey && binding.opid) {
     const hits = rowsOf(base).filter((r) => r.opid === binding.opid);
     if (hits.length > 1) return { personKey: null, state: 'held', inBase: false, reason: 'IDを共有する選手がいるため、同一人物として扱えません' };
-    if (hits.length === 1) {
-      if (otherPerson(hits[0].name)) return { personKey: null, state: 'unknown', inBase: false, reason: REUSED };
-      rowKey = hits[0].key;
-    }
+    // Someone else under the id now: not them — their own earlier rows are still looked for below.
+    if (hits.length === 1 && otherPerson(hits[0].name)) reused = true;
+    else if (hits.length === 1) rowKey = hits[0].key;
   }
   // 3. Multi-season: the one person the member id belongs to in the period.
   if (!rowKey && multi && binding.opid) {
@@ -283,7 +284,7 @@ export function findPersonInPeriod(
     if (keys.size > 1) return { personKey: null, state: 'held', inBase: false, reason: 'この会員IDの行が期間内で複数の人に分かれているため、本人を特定できません（本人照合の内訳を確認してください）' };
     if (keys.size === 1) rowKey = hits[0].key;
   }
-  if (!rowKey) return { personKey: null, state: 'unknown', inBase: false, reason: multi ? '選択期間の名簿・成績に該当する選手を確認できません' : 'この季の成績に該当する選手を確認できません' };
+  if (!rowKey) return { personKey: null, state: 'unknown', inBase: false, reason: reused ? REUSED : multi ? '選択期間の名簿・成績に該当する選手を確認できません' : 'この季の成績に該当する選手を確認できません' };
   if (links.held.some((h) => h.row.key === rowKey)) return { personKey: null, state: 'held', inBase: false, reason: '本人照合が保留です（候補が複数か根拠が不足。内訳で確認できます）' };
   const personKey = links.keyOf.get(rowKey) ?? null;
   if (!personKey) return { personKey: null, state: 'unknown', inBase: false, reason: 'この季の成績に該当する選手を確認できません' };

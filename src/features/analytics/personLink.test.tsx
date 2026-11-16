@@ -190,4 +190,30 @@ describe('Codex audit (2026-11-18): reused ids, undone rows, gaps and held rows'
     expect(linked[2].heldPlayers?.map((p) => p.oid)).toEqual(['g1']);
     expect(aggregatePlayers(linked).some((p) => p.seasons.some((x) => x.tournamentId === 's1' && x.teamId === 'KAL' && p.name.includes('山田')))).toBe(false);
   });
+
+  it('round 2: a member id alone never takes a surname change; a reused id now does not stop the search of earlier seasons', () => {
+    const s = (id: string, rows: { oid: string; opid: string; team: string; name: string }[]) => buildSeasonData(season({ tournament: tournament(id, TEAMS), roster: roster(rows), playerStats: rows.map((r) => playerRow(r.oid, r.opid, r.team, r.name, line(1))) }));
+    const seasons = [s('n2', [{ oid: 'x', opid: 'Y-7', team: 'HOL', name: '田中 恵' }, { oid: 'k', opid: 'K-1', team: 'KAL', name: '他 人' }]), s('n1', [{ oid: 'y', opid: 'Y-7', team: 'KAL', name: '鈴木 恵' }, { oid: 'h', opid: 'K-2', team: 'HOL', name: '別 人' }])];
+    const links = linkPeople(seasons);
+    const linked = applyLinks(seasons, links);
+    const figures = new Set(aggregatePlayers(linked).map((p) => p.personKey));
+    // Saved as 鈴木 恵 in a season outside the period: 今季's 田中 恵 (another team) is not taken.
+    const member = { opid: 'Y-7', currentOid: 'old', lastSeenTournamentId: 'n0', name: '鈴木 恵' };
+    expect(findPersonInPeriod(linked.slice(0, 1), linked[0], member, linkPeople(linked.slice(0, 1)), false, figures).personKey).toBeNull();
+    // Multi-season: 今季's holder is someone else, but their own row of n1 is found.
+    expect(findPersonInPeriod(linked, linked[0], member, links, true, figures)).toMatchObject({ state: 'found', personKey: links.keyOf.get('n1:y') });
+  });
+
+  it('round 2: two id spellings across a season that could not be read hold only the older; confirming brings it back whole', () => {
+    const s = (id: string, opid: string) => buildSeasonData(season({ tournament: tournament(id, TEAMS), roster: roster([{ oid: `r${id}`, opid, team: 'KAL', name: '同 名' }, { oid: `o${id}`, opid: 'O-1', team: 'HOL', name: '他 人' }]), playerStats: [playerRow(`r${id}`, opid, 'KAL', '同 名', line(1))] }));
+    const seasons = [s('m2', 'X-1'), s('m0', 'X-01')];
+    const positions = new Map([['m2', 0], ['m0', 2]]); // m1 could not be read
+    const links = linkPeople(seasons, NO_DECISIONS, positions);
+    expect(links.held.map((h) => h.row.key)).toEqual(['m0:rm0']);
+    expect(applyLinks(seasons, links)[0].players.map((p) => p.oid)).toContain('rm2'); // the newer keeps its figures
+    const confirmed = linkPeople(seasons, { unlinks: [], confirms: { 'm0:rm0': 'm2:rm2' } }, positions);
+    expect(confirmed.held).toEqual([]);
+    expect(confirmed.keyOf.get('m0:rm0')).toBe(confirmed.keyOf.get('m2:rm2'));
+    expect(aggregatePlayers(applyLinks(seasons, confirmed)).find((p) => p.personKey === confirmed.keyOf.get('m2:rm2'))!.seasons).toHaveLength(2);
+  });
 });

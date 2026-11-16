@@ -108,6 +108,7 @@ export function AnalysisSummary({
   scope,
   games,
   focus = null,
+  identity = null,
 }: {
   load: PeriodLoad;
   projection: Projection;
@@ -115,6 +116,8 @@ export function AnalysisSummary({
   games: GamesState;
   /** The shown player's leg read (player view of シングルス / ダブルス). */
   focus?: { name: string; status: DetailStatus } | null;
+  /** ⑨ 本人照合: the held rows can be confirmed here (a held player has no card to open). */
+  identity?: { links: PeriodLinks; controls: IdentityControls } | null;
 }): React.JSX.Element {
   const multi = load.request.mode === 'last3' || load.request.mode === 'last12';
   const used = contributingSeasons(projection.adoption);
@@ -187,6 +190,7 @@ export function AnalysisSummary({
             <p className="small-text muted">Leg明細から求める指標（{scope === 'doubles' ? '個人の3DA・First 9・ダブルイン成功率' : 'First 9・Keep率・Break率・100+〜180・High Finish'}）は、この選手の分だけ取得・照合しています。下の「リーグ全体」は、チーム・ランキングの集計に使う取得状況です。</p>
           </section>
         ) : null}
+        {identity && identity.links.held.length > 0 ? <HeldRows identity={identity} /> : null}
         <h3 className="mini-title">リーグ全体の取得状況</h3>
         <div className="analytics-table-wrap">
           <table className="analytics-table compact" data-testid="season-adoption">
@@ -556,5 +560,30 @@ export function IdentityPanel({ personKey, identity }: { personKey: string; iden
         ))}
       </ul>
     </details>
+  );
+}
+
+/** 本人照合で保留した行（集計に入れていない）と、本人と確認して結合する操作。 */
+function HeldRows({ identity }: { identity: { links: PeriodLinks; controls: IdentityControls } }): React.JSX.Element {
+  const first = (personKey: string) => identity.links.people.get(personKey)?.[0]?.row ?? null;
+  return (
+    <section data-testid="identity-held-list">
+      <h3 className="mini-title">本人照合の保留（{identity.links.held.length}件・集計に入れていません）</h3>
+      <ul className="plain-list small-text">
+        {identity.links.held.map((h) => (
+          <li key={h.row.key}>
+            <strong>{h.row.title}</strong> {h.row.name}（{h.row.opid ?? '会員IDなし'}）<span className="meta">{h.reason}</span>
+            {h.candidates.map((c) => {
+              const target = first(c);
+              return target ? (
+                <button key={c} type="button" className="btn small" onClick={() => identity.controls.confirm(h.row.key, target.key)} data-testid="identity-held-confirm">
+                  {target.name}（{target.title}）と本人と確認
+                </button>
+              ) : null;
+            })}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

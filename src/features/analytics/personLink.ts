@@ -250,7 +250,8 @@ export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDe
       const candidates = people.filter((p) => eligible(p) && matches(p, adjacent));
       if (candidates.length === 0) {
         // Only across a season that could not be read: not enough to say they follow on.
-        const gap = people.filter((p) => eligible(p) && matches(p, acrossGap));
+        // Two people with an id hold only the older one (the newer keeps its figures); a loose row is held.
+        const gap = people.filter((p) => eligible(p) && matches(p, acrossGap) && (unitId === null || newest(p).seasonIndex < newest(unit).seasonIndex));
         if (gap.length > 0) for (const m of mineRows) if (!held.has(m.key)) held.set(m.key, { row: m, candidates: gap.map((c) => c.rows[0].key), reason: '間の季を取得できず、隣接する季で確認できないため保留' });
         continue;
       }
@@ -275,14 +276,20 @@ export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDe
   }
 
   // Joins confirmed by hand.
+  // The whole person of the confirmed row joins (several seasons held together come back together),
+  // and every hold between the two is settled.
   for (const [rowKey, targetKey] of Object.entries(decisions.confirms)) {
     const from = personOf.get(rowKey);
     const to = personOf.get(targetKey);
-    if (!from || !to || from === to || from.rows.length !== 1) continue;
-    if (seasonsOf(to).has(from.rows[0].seasonIndex)) continue;
-    join(to, from.rows[0], 'confirmed', '内訳で本人と確認', true);
+    if (!from || !to || from === to) continue;
+    const theirs = seasonsOf(to);
+    if (from.rows.some((r) => theirs.has(r.seasonIndex))) continue;
+    for (const r of from.rows) {
+      join(to, r, 'confirmed', '内訳で本人と確認', true);
+      held.delete(r.key);
+    }
+    for (const r of to.rows) held.delete(r.key);
     people.splice(people.indexOf(from), 1);
-    held.delete(rowKey);
   }
 
   // Person keys: a member id's newest person keeps `opid:<id>` (as before); everyone else is named by

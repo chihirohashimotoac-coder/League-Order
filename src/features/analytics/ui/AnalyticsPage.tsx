@@ -203,7 +203,7 @@ export default function AnalyticsPage({
       </div>
       <LoadGauge stages={stages} outcome={gaugeOutcome} previous={previousAt} />
       <LoadBanner load={state.load} loading={loading} onRetry={() => setReload((n) => n + 1)} onWatch={openWatchStats} />
-      {state.load && projection && state.load.seasons.length > 0 ? <AnalysisSummary load={state.load} projection={projection} scope={scope} games={games} focus={view === 'player' ? focusSummary : null} /> : null}
+      {state.load && projection && state.load.seasons.length > 0 ? <AnalysisSummary load={state.load} projection={projection} scope={scope} games={games} focus={view === 'player' ? focusSummary : null} identity={linked ? { links: linked.links, controls: identity } : null} /> : null}
       {load && load.seasons.length > 0 ? (
         <div className={loading ? 'analytics-body stale' : 'analytics-body'} aria-busy={loading}>
           {view === 'player' ? (
