@@ -33,8 +33,8 @@ export function TeamManager({
   const [confirmSwitch, setConfirmSwitch] = useState<Team | null>(null);
   const [wizard, setWizard] = useState<N01WizardMode | null>(null);
 
-  // Switching teams detaches the working order (it belongs to the old team), so unsaved
-  // work there is confirmed first, exactly like starting a new order.
+  // チームを切り替えると、作業中のオーダーは (元のチームのものなので) 切り離される。
+  // そのため未保存の作業は、新しいオーダーを始めるときと同じく、先に確認する。
   const switchTeam = (target: Team): void => {
     store.setActiveTeam(target.id);
     onClose();
@@ -165,8 +165,8 @@ export function TeamManager({
           destructive
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => {
-            // The dialog stays up until the deletion is stored, so "削除しました" is only
-            // ever shown about a deletion that will still be gone after a restart.
+            // 削除が保存されるまで確認ダイアログは閉じない。「削除しました」は、再起動後も
+            // 消えたままの削除についてだけ表示される。
             void store.deleteTeam(confirmDelete.id).then(() => {
               toast.show('削除しました', 'ok');
               setConfirmDelete(null);
@@ -207,7 +207,7 @@ function TeamEditor({
   onClose: () => void;
   onSave: (team: Team) => void;
   onDelete: () => void;
-  /** Offered for an existing team that is not linked to n01 yet. */
+  /** n01 とまだ接続していない既存のチームにだけ表示する。 */
   onLinkN01?: () => void;
 }): React.JSX.Element {
   const [draft, setDraft] = useState(team);
