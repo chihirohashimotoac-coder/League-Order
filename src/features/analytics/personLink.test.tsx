@@ -258,6 +258,27 @@ describe('2026-11-19: a roster that could not be read, a member id given to two 
     expect(findPersonInPeriod(applyLinks(twoBefore, l2), applyLinks(twoBefore, l2)[0], member, l2, true, figures).personKey).toBeNull();
   });
 
+  it('2. a season whose roster was not read cannot prove its one row under the member id is them: not taken on the id alone (base season nor earlier ones)', () => {
+    const member = { opid: 'ID-100', currentOid: 'old', lastSeenTournamentId: 'outside', name: '田中 健' };
+    const nameless = { opid: 'ID-100', currentOid: 'old', lastSeenTournamentId: 'outside' };
+    const now = [make('n1', [{ oid: 't', opid: 'ID-100', team: 'KAL', name: '田中 健' }], false)];
+    const l1 = linkPeople(now);
+    const linked1 = applyLinks(now, l1);
+    const f1 = new Set(aggregatePlayers(linked1).map((p) => p.personKey));
+    for (const who of [member, nameless]) {
+      expect(findPersonInPeriod(linked1, linked1[0], who, l1, false, f1)).toMatchObject({ personKey: null, reason: expect.stringContaining('名簿') });
+      expect(findPersonInPeriod(linked1, linked1[0], who, l1, true, f1)).toMatchObject({ personKey: null, reason: expect.stringContaining('名簿') });
+    }
+    // Earlier season unread, current season read without the member: still not taken.
+    const past = [make('n1', [{ oid: 'o', opid: 'O-1', team: 'KAL', name: '他 人' }]), make('n0', [{ oid: 't', opid: 'ID-100', team: 'KAL', name: '田中 健' }], false)];
+    const l2 = linkPeople(past);
+    const linked2 = applyLinks(past, l2);
+    const f2 = new Set(aggregatePlayers(linked2).map((p) => p.personKey));
+    expect(findPersonInPeriod(linked2, linked2[0], member, l2, true, f2)).toMatchObject({ personKey: null });
+    // The exact row the member was last seen as (season and oid) is still found there.
+    expect(findPersonInPeriod(linked1, linked1[0], { ...member, currentOid: 't', lastSeenTournamentId: 'n1' }, l1, false, f1)).toMatchObject({ state: 'found' });
+  });
+
   it('3. 直近3季 with the current season failed: the member’s earlier figures open, said to be partial; 今季 alone still says it failed', () => {
     const seasons = league().slice(1, 3); // s2, s1 read; s3 (the current season) failed
     const links = linkPeople(seasons);
