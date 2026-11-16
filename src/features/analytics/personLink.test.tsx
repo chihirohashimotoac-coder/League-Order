@@ -392,3 +392,56 @@ describe('2026-11-19: a roster that could not be read, a member id given to two 
     expect(options).toContain('山田花子');
   });
 });
+
+describe('本人照合の保留理由: 名簿の状態（完全取得・一部・未取得）と共有IDを区別する', () => {
+  const T = [{ id: 'KAL', name: 'kala' }, { id: 'HOL', name: 'holic' }];
+  type Row = { oid: string; opid: string | null; team: string; name: string };
+  const make = (id: string, rows: Row[], rosterRows: Row[] | null = rows) =>
+    buildSeasonData(season({ tournament: tournament(id, T), roster: rosterRows ? roster(rosterRows) : null, playerStats: rows.map((r) => playerRow(r.oid, r.opid, r.team, r.name, line(1))) }));
+  const member = { opid: 'ID-100', currentOid: 'old', lastSeenTournamentId: 'outside', name: '田中 健' };
+  const NOW: Row[] = [{ oid: 'n', opid: 'O-1', team: 'KAL', name: '他 人' }, { oid: 'm', opid: 'O-2', team: 'HOL', name: '別 人' }];
+  const run = (seasons: SeasonData[]) => {
+    const links = linkPeople(seasons);
+    const linked = applyLinks(seasons, links);
+    const figures = new Set(aggregatePlayers(linked).map((p) => p.personKey));
+    return findPersonInPeriod(linked, linked[0], member, links, true, figures);
+  };
+
+  it('名簿を揃えた過去季で同じ会員IDを別々の2人が使う（片方だけ同名）: 共有IDの理由で、personKey は null・状態は held', () => {
+    const result = run([
+      make('t1', NOW),
+      make('t0', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'b', opid: 'ID-100', team: 'HOL', name: '山本 一' }, { oid: 'o', opid: 'O-3', team: 'KAL', name: '佐藤 二' }]),
+    ]);
+    expect(result).toMatchObject({ personKey: null, state: 'held', reason: '会員IDを共有する選手がいるため、本人を確認できません' });
+  });
+
+  it('名簿を取得できない過去季: 取得できずの理由で、personKey は null・状態は held', () => {
+    const result = run([make('t1', NOW), make('t0', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }], null)]);
+    expect(result).toMatchObject({ personKey: null, state: 'held', reason: '名簿を取得できず、会員IDだけでは本人を確認できません' });
+  });
+
+  it('名簿の一部のチームだけ取得できた過去季: 名簿が揃っていない理由で、personKey は null・状態は held', () => {
+    const rows: Row[] = [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }];
+    const result = run([make('t1', NOW), make('t0', rows)]);
+    expect(result).toMatchObject({ personKey: null, state: 'held', reason: '名簿が揃っていない季があり、会員IDだけでは本人を確認できません' });
+    expect(result.reason).not.toContain('取得できず');
+  });
+
+  it('理由が複数あるときは両方を示す（名簿未取得の季と共有IDの季）', () => {
+    const result = run([
+      make('t2', NOW),
+      make('t1', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'b', opid: 'ID-100', team: 'HOL', name: '山本 一' }, { oid: 'o', opid: 'O-3', team: 'KAL', name: '佐藤 二' }]),
+      make('t0', [{ oid: 'c', opid: 'ID-100', team: 'KAL', name: '田中 健' }], null),
+    ]);
+    expect(result).toMatchObject({ personKey: null, state: 'held' });
+    expect(result.reason).toContain('名簿を取得できず');
+    expect(result.reason).toContain('会員IDを共有する選手がいるため');
+  });
+
+  it('回帰: 名簿を取得済みで会員IDが1人だけの過去季は本人が確定して表示される', () => {
+    const result = run([make('t1', NOW), make('t0', [{ oid: 'a', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-3', team: 'HOL', name: '佐藤 二' }])]);
+    expect(result).toMatchObject({ state: 'found', inBase: false });
+    expect(result.personKey).not.toBeNull();
+    expect(result.reason).toBeUndefined();
+  });
+});
