@@ -396,8 +396,19 @@ function matchesRow(game: ClassifiedGame, rebuilt: GameReconstruction): boolean 
   });
 }
 
-/** A stored reconstruction that cannot be compared with this row (cached before side rows were kept). */
-const lacksSideRows = (game: ClassifiedGame, entry: { r: GameReconstruction } | undefined): boolean => !!entry && entry.r.ok && !entry.r.sideRows && game.sides.some((side) => side.players.length === 0);
+/**
+ * The failure an earlier version stored for a game whose two sides had no throwing order. Such legs
+ * are read now (the sides' figures stand), so this stored failure — and only this one — is read again.
+ */
+export const LEGACY_NO_ORDER_FAILURE = '両チームの投順がありません';
+
+/**
+ * A stored reconstruction that an earlier version made and the current one would not: cached before
+ * side rows were kept (a side without its order cannot be compared), or the old failure for a game
+ * without any throwing order. Read again; other entries, failures of the current rules included, stay.
+ */
+const lacksSideRows = (game: ClassifiedGame, entry: { r: GameReconstruction } | undefined): boolean =>
+  !!entry && game.sides.some((side) => side.players.length === 0) && (entry.r.ok ? !entry.r.sideRows : entry.r.reason === LEGACY_NO_ORDER_FAILURE);
 
 /** The legs list the same players, in the same throwing order, on each side as the list's row. */
 function sameOrder(game: ClassifiedGame, detail: RawGameDetail): boolean {

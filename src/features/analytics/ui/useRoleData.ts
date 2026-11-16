@@ -10,6 +10,7 @@ import type { PlayerDetailResult } from '../service/detailService';
 import { emptyGamesLoad, GamesSession } from '../service/gamesSession';
 import type { GamesLoad } from '../service/gamesSession';
 import type { GamesMemory } from '../service/gamesLoader';
+import { gamesVersion } from '../service/gamesLoader';
 import type { PeriodLoad } from '../service/periodService';
 import { defaultSleep } from '../service/retry';
 import type { Sleep } from '../service/retry';
@@ -350,8 +351,10 @@ export function useTeamDetail(services: AnalyticsServices, load: PeriodLoad | nu
   const memory = useRef<DetailMemory>(newDetailMemory());
   const gamesRef = useRef(games);
   gamesRef.current = games;
-  // The seasons of the team whose list is complete now: a result made with fewer is read again.
-  const coverage = key && load && games ? load.seasons.filter((s) => teams?.has(s.tournamentId) && games.games.get(s.tournamentId)?.complete).map((s) => s.tournamentId).join(',') : '';
+  // The seasons of the team whose list is complete now, with the content version of each list: a result
+  // made with fewer seasons, or with another content of the same season's list, is read again (only the
+  // games whose rows changed ask n01 again — the others keep their stored legs).
+  const coverage = key && load && games ? load.seasons.filter((s) => teams?.has(s.tournamentId) && games.games.get(s.tournamentId)?.complete).map((s) => `${s.tournamentId}@${gamesVersion(games.games.get(s.tournamentId)!)}`).join(',') : '';
   useEffect(() => {
     if (!key || !load || !teams || coverage === '' || !role) return;
     const c = new AbortController();
@@ -412,12 +415,13 @@ function teamPhase(
   games: GamesLoad | null,
   teams: ReadonlyMap<string, string> | null,
   coverage: string,
-  mine: { running: boolean; result: TeamDetailResult | null } | null,
+  mine: { running: boolean; result: TeamDetailResult | null; coverage: string } | null,
 ): TeamDetailPhase {
   if (!key || !load || !teams) return 'idle';
   const lists = teamLists(load, games, teams);
   if (coverage === '') return lists.waiting > 0 ? 'waiting-games' : 'games-failed';
-  if (!mine || mine.running || !mine.result) return 'running';
+  // A result made for other lists (a season's list read again with other content) is being read again.
+  if (!mine || mine.running || !mine.result || mine.coverage !== coverage) return 'running';
   const seasons = mine.result.seasons.filter((x) => x.games > 0);
   const total = seasons.reduce((n, x) => n + x.games, 0);
   const rebuilt = seasons.reduce((n, x) => n + x.rebuilt, 0);
