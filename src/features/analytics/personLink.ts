@@ -325,9 +325,15 @@ export function linkPeople(seasons: readonly SeasonData[], decisions: IdentityDe
     }
     // Two people with an id: the older one joins the newer (the newest spelling names the person).
     if (unitId !== null && candidates.length === 1 && newest(candidates[0]).seasonIndex > newest(unit).seasonIndex) return null;
-    // Nobody else in the row's season answers to that name.
-    const crowded = mineRows.some((m) => rows.some((r) => r.seasonIndex === m.seasonIndex && r.key !== m.key && fullName(r.name) === fullName(m.name)));
-    if (candidates.length > 1 || crowded) return { hold: candidates, reason: candidates.length > 1 ? '同じ氏名・チームで隣接する季の候補が複数あるため保留' : '同じ季に同じ氏名の行が複数あるため保留' };
+    // Nobody else answers to that name, in the row's season nor in the season of the row it follows on
+    // (two 田中 健 next season — under other ids or teams — leave the match open).
+    const sameName = (season: number, name: string, except: ReadonlySet<string>): boolean => rows.some((r) => r.seasonIndex === season && !except.has(r.key) && fullName(r.name) === fullName(name));
+    const target = candidates.length === 1 ? candidates[0] : null;
+    const theirRows = new Set(target?.rows.map((r) => r.key) ?? []);
+    const crowded =
+      mineRows.some((m) => sameName(m.seasonIndex, m.name, new Set([m.key]))) ||
+      (!!target && mineRows.some((m) => target.rows.some((r) => adjacent(r, m) && r.teamKey === m.teamKey && fullName(r.name) === fullName(m.name) && sameName(r.seasonIndex, r.name, theirRows))));
+    if (candidates.length > 1 || crowded) return { hold: candidates, reason: candidates.length > 1 ? '同じ氏名・チームで隣接する季の候補が複数あるため保留' : '同じ季（本人の季または結合先の季）に同じ氏名の行が複数あるため保留' };
     return { join: candidates[0] };
   };
   for (let changed = true; changed; ) {

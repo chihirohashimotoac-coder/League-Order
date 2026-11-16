@@ -298,4 +298,29 @@ describe('2026-11-19: a roster that could not be read, a member id given to two 
     expect(l2.keyOf.get('w0:b')).not.toBe(l2.keyOf.get('w1:a'));
     expect(l2.held.find((h) => h.row.key === 'w0:b')?.reason).toContain('会員IDの異なる候補');
   });
+
+  it('1. two 田中 健 in the season a guest row would follow on to (other id, other team): held, not joined to the one of the same team', () => {
+    const seasons = [
+      make('x1', [{ oid: 'k', opid: 'ID-100', team: 'KAL', name: '田中 健' }, { oid: 'h', opid: 'ID-900', team: 'HOL', name: '田中 健' }]),
+      make('x0', [{ oid: 'g', opid: null, team: 'KAL', name: '田中 健' }, { oid: 'o', opid: 'O-1', team: 'HOL', name: '他 人' }]),
+    ];
+    const links = linkPeople(seasons);
+    expect(links.keyOf.get('x0:g')).not.toBe(links.keyOf.get('x1:k'));
+    expect(links.held.find((h) => h.row.key === 'x0:g')?.reason).toContain('同じ氏名');
+  });
+
+  it('3. with the current season failed, the ranking, averages and comparison use the newest season read (and say so)', () => {
+    const seasons = league().slice(1, 3);
+    const links = linkPeople(seasons);
+    const linked = applyLinks(seasons, links);
+    const team = { id: 't', name: 'kala', createdAt: 0, n01: { provider: 'n01', leagueId: 'lg_test', leagueTitle: 'L', stableIdentity: { kind: 'name', value: 'kala' }, lastTournamentId: 's3', lastTournamentTitle: 's3', lastTeamId: 'KAL', lastTeamName: 'kala', lastDivisionIndex: 0, lastDivisionTitle: 'A', discipline: 'SOFT', managedFormatId: null, linkedAt: 0, lastSuccessfulSyncAt: 0 } } as unknown as Team;
+    const players = [({ id: 'm-h', name: '堀田 和夫', teamId: 't', archived: false, n01: { opid: 'X-65', currentOid: 'h3', lastSeenTournamentId: 's3', currentTpid: 'KAL', sourceName: '堀田 和夫', rosterActive: true, lastSeenAt: 0, stats: null } }) as unknown as Player];
+    const role = { scope: 'all01' as const, adoption: [], games: { status: 'idle' as const, load: null, needed: [], retry: () => undefined }, detail: { running: null, results: new Map(), contributions: new Map(), partial: new Set<string>(), run: () => undefined, focus: () => undefined, ensure: () => undefined }, identity: { links, controls: { decisions: { unlinks: [], confirms: {} }, unlink: () => undefined, confirm: () => undefined, reset: () => undefined } } };
+    const last3: PeriodLoad = { ...emptyLoad({ mode: 'last3', currentTournamentId: 's3' }, {}), seasons: linked, failures: [{ tournamentId: 's3', title: 'Season s3', reason: 'x', kind: 'network' }], complete: false };
+    render(<PlayerAnalytics team={team} players={players} load={last3} baseTournamentId="s3" role={role} />);
+    expect(screen.getByTestId('ranking-anchor-note').textContent).toContain('Season s2');
+    // The team population is there: the comparison offers the other players of the team in s2.
+    const options = [...document.querySelectorAll('option')].map((o) => o.textContent);
+    expect(options).toContain('山田花子');
+  });
 });

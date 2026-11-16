@@ -65,6 +65,9 @@ export function PlayerAnalytics({
   const multiPeriod = load.request.mode === 'last3' || load.request.mode === 'last12';
   const baseMissing = !baseSeason && multiPeriod && load.seasons.length > 0;
   const base = baseSeason ?? (baseMissing ? load.seasons[0] : null);
+  // The season the comparison (team / division / league population) is anchored on: the base season, or
+  // — when it failed in a multi-season period — the newest season read (said so next to the ranking).
+  const anchorId = base?.tournamentId ?? baseTournamentId;
   const binding = team.n01;
 
   // The team in the base season: its tpid is season-scoped, so a past season is matched by
@@ -92,11 +95,11 @@ export function PlayerAnalytics({
 
   const scopeKey = scope.kind === 'team' ? `team:${scope.teamId}` : scope.kind === 'division' ? `division:${scope.divisionIndex}` : 'league';
   const population = useMemo(
-    () => buildPopulation(load.seasons, scope, baseTournamentId),
+    () => buildPopulation(load.seasons, scope, anchorId),
     // `scope` is fully described by `scopeKey`.
-    [load.seasons, scopeKey, baseTournamentId],
+    [load.seasons, scopeKey, anchorId],
   );
-  const everyone = useMemo(() => buildPopulation(load.seasons, { kind: 'league' }, baseTournamentId).people, [load.seasons, baseTournamentId]);
+  const everyone = useMemo(() => buildPopulation(load.seasons, { kind: 'league' }, anchorId).people, [load.seasons, anchorId]);
   const byKey = useMemo(() => new Map(everyone.map((p) => [p.personKey, p])), [everyone]);
 
   // The roster. 今季・複数季: League Order's members, matched to n01 rows only where identity is
@@ -260,7 +263,7 @@ export function PlayerAnalytics({
   const myStanding = person ? standingOf(ranking, person.personKey) : null;
   const teamNameOf = (id: string): string => {
     const p = byKey.get(id);
-    const entry = p?.seasons.find((s) => s.tournamentId === baseTournamentId) ?? p?.seasons[0];
+    const entry = p?.seasons.find((s) => s.tournamentId === anchorId) ?? p?.seasons[0];
     return base.teams.find((t) => t.teamId === entry?.teamId)?.name ?? '';
   };
   const comparePeople = compare.map((key) => byKey.get(key)).filter((p): p is NonNullable<typeof p> => !!p);
@@ -532,6 +535,11 @@ export function PlayerAnalytics({
             </p>
           ) : null}
           {activeScope === 'league' && load.request.mode !== 'current' ? <p className="small-text muted">期間内にディビジョンや試合形式が異なる成績を含む場合があります。</p> : null}
+          {baseMissing && base ? (
+            <p className="small-text muted" data-testid="ranking-anchor-note">
+              今季を取得できなかったため、比較の母集団（チーム・ディビジョン）は取得できた最新の季（{base.title}）の所属で判定しています（部分集計）。
+            </p>
+          ) : null}
           {available_.notes.map((note) => (
             <p key={note} className="small-text muted" data-testid="scope-rank-note">
               {note}
