@@ -137,6 +137,30 @@ describe('header entry to the team manager', () => {
     expect((await new Repository(await openBackend()).loadAll()).settings.activeTeamId).toBe(TEAM_B);
   });
 
+  it('does not carry a player filter of the previous team over to the new team', async () => {
+    await seed();
+    const user = userEvent.setup();
+    renderApp();
+    await screen.findByRole('heading', { name: 'チームA', level: 1 });
+
+    await openScreen(user, 'ペア相性');
+    // 全組み合わせを出し、選手 A を 1 人指定する (チームAの p1 を含む組み合わせだけが残る)。
+    await user.click(await screen.findByRole('checkbox', { name: /設定済みのペアだけ表示/ }));
+    await user.selectOptions(screen.getByLabelText('選手 A'), TEAM_A + '_p1');
+    expect((await screen.findAllByText(/Aさん\d \/ Aさん\d/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText('表示するペアがありません')).toBeNull();
+
+    await user.click(headerButton());
+    await pickTeam(user, 'チームB');
+    await waitFor(() => expect(headerEl()).toHaveTextContent('チームB'));
+    // 新しいチームでも全組み合わせを出す (既定は「設定済みのペアだけ」なので、必要なら外す)。
+    const only = screen.getByRole('checkbox', { name: /設定済みのペアだけ表示/ }) as HTMLInputElement;
+    if (only.checked) await user.click(only);
+    // 元のチームの選手の絞り込みが残っていると、新しいチームの組み合わせが 1 件も出なくなる。
+    expect((await screen.findAllByText(/Bさん\d \/ Bさん\d/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText('表示するペアがありません')).toBeNull();
+  });
+
   it('edits and adds teams from the header entry', async () => {
     await seed();
     const user = userEvent.setup();

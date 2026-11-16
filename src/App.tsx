@@ -756,8 +756,13 @@ export function App(): React.JSX.Element {
             </button>
           </div>
         ) : null}
-        {/* Keyed by the screen: its sections enter in a short stagger (CSS, `.page-view`). */}
-        <div className="page-view" key={page}>
+        {/* Keyed by the screen: its sections enter in a short stagger (CSS, `.page-view`).
+            チームに属する画面は使用中のチームも鍵に含める: 切替の前後で画面が作り直され、
+            元のチームの選手の絞り込みや選択が新しいチームに残らない (観戦の画面はチームに依存しない)。 */}
+        <div
+          className="page-view"
+          key={page === 'matches' || page === 'live' || page === 'watch' ? page : `${page}:${store.activeTeamId}`}
+        >
         {page === 'home' ? (
           <HomePage
             onNavigate={setPage}
