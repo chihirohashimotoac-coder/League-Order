@@ -1,4 +1,7 @@
+// @vitest-environment jsdom
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { useTeamDetail } from './ui/useRoleData';
 import { aggregateTeams } from './aggregate';
 import { AnalyticsApi } from './api/readApi';
 import { AnalyticsCache } from './cache/analyticsCache';
@@ -177,5 +180,35 @@ describe('AKDO 2026/2nd: ④ MC-BREMEN singles from the team’s own legs', () =
     // First 9 darts: at most 9 per leg of the side (not 9 per partner).
     expect(m.first9.den).toBeLessThanOrEqual(9 * m.legRate.den);
     expect(m.first9.den).toBeGreaterThan(6 * m.legRate.den);
+  });
+});
+
+describe('AKDO 2026/2nd: ④ the team read keeps old and new legs apart (Codex audit)', () => {
+  it('legs that had to be read again but could not be are not used (no figure from them, the reason is given)', async () => {
+    const { fake, period, games, cache } = await loaded();
+    const teams = new Map([[AKDO_TDID, AKDO_TEAM]]);
+    const ctx = (extra: Record<string, unknown> = {}) => ({ api: new AnalyticsApi({ transport: fake, maxRequests: 60 }), cache, isOnline: () => true, now: () => Date.now(), sleep: async () => undefined, ...extra });
+    const first = await reconstructTeam(ctx(), { seasons: period.seasons, games: games.games, teams, role: 'singles', key: 'k' });
+    expect(first.seasons[0].rebuilt).toBe(12);
+    for (const g of SNAP.games) fake.down.add(String(g.mid));
+    const again = await reconstructTeam(ctx({ freshAfter: Date.now() + 1 }), { seasons: period.seasons, games: games.games, teams, role: 'singles', key: 'k' });
+    expect(again.seasons[0]).toMatchObject({ games: 12, rebuilt: 0, reason: expect.stringContaining('保存済みの古い明細は使っていません') });
+    expect(again.contributions.size).toBe(0);
+  });
+
+  it('a retry read in several parts reads each game once (the freshness point is fixed for the whole read)', async () => {
+    const { fake, period, games, cache } = await loaded();
+    const services = { createApi: (signal: AbortSignal) => new AnalyticsApi({ transport: fake, signal }), createRoleApi: (signal: AbortSignal) => new AnalyticsApi({ transport: fake, signal, maxRequests: 5 }), cache, sleep: async () => undefined };
+    const teams = new Map([[AKDO_TDID, AKDO_TEAM]]);
+    const { result } = renderHook(() => useTeamDetail(services, period, games, 'singles', teams, 0));
+    await waitFor(() => expect(result.current.result?.seasons[0].rebuilt).toBe(12));
+    expect(result.current.running).toBe(false);
+    const n = fake.calls.length;
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.running).toBe(false));
+    await waitFor(() => expect(result.current.result?.seasons[0].rebuilt).toBe(12));
+    const gets = fake.calls.slice(n).filter((c) => c.startsWith('match/get'));
+    expect(gets).toHaveLength(12);
+    expect(new Set(gets).size).toBe(12);
   });
 });

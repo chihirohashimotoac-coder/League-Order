@@ -98,6 +98,7 @@ export function PlayerAnalytics({
   // proven. 指定季: everyone registered for the team in that season (former members included),
   // opened by that season's own player id — a player without a stats row is "出場なし".
   const specifiedSeason = load.request.mode === 'specified';
+  const seasonGames = base ? role?.games.load?.games.get(base.tournamentId) : undefined;
   const rosterNote = specifiedSeason && base && baseTeam ? (base.roster ? null : '名簿を取得できないため、この季に成績のある選手だけを表示しています。') : null;
   const roster = useMemo((): { id: string; name: string; personKey: string | null; reason?: string; period: (typeof everyone)[number] | null }[] => {
     if (!base) return [];
@@ -106,6 +107,14 @@ export function PlayerAnalytics({
       const rows = base.roster ? base.roster.filter((r) => r.teamId === baseTeam.teamId) : [];
       const listed = new Set(rows.map((r) => r.oid));
       const extra = [...statsOf.values()].filter((p) => !listed.has(p.oid)).map((p) => ({ oid: p.oid, name: p.name }));
+      // 出場なし only when the season's whole game list shows no game of theirs; a game of theirs
+      // without a stats row is a missing record; without a complete list, it is not known.
+      const list = seasonGames?.complete ? seasonGames : null;
+      const played = (oid: string): boolean | null => (list ? list.games.some((g) => g.sides.some((x) => x.players.some((p) => p.oid === oid))) : null);
+      const noStats = (oid: string): string => {
+        const p = played(oid);
+        return p === false ? '出場なし（この季のゲーム記録に出場がありません）' : p === true ? '記録欠損（ゲーム記録に出場がありますが、n01の成績行がありません）' : '成績記録なし（出場の有無はゲーム記録で未確認）';
+      };
       return [...rows.map((r) => ({ oid: r.oid, name: r.name })), ...extra].map((r) => {
         const stats = statsOf.get(r.oid);
         const conflict = base.conflicts.some((c) => c.oid === r.oid);
@@ -113,7 +122,7 @@ export function PlayerAnalytics({
           id: `oid:${r.oid}`,
           name: stats?.name ?? r.name,
           personKey: stats?.personKey ?? null,
-          reason: stats ? undefined : conflict ? '同じ選手IDが複数チームにあるため集計から除外しています' : '出場なし（この季の成績の記録がありません）',
+          reason: stats ? undefined : conflict ? '同じ選手IDが複数チームにあるため集計から除外しています' : noStats(r.oid),
           period: stats ? (byKey.get(stats.personKey) ?? null) : null,
         };
       });
@@ -124,7 +133,7 @@ export function PlayerAnalytics({
         const match = findPerson(base, p.n01);
         return { id: p.id, name: p.name, personKey: match.personKey, reason: match.reason, period: match.personKey ? (byKey.get(match.personKey) ?? null) : null };
       });
-  }, [base, baseTeam, specifiedSeason, players, byKey]);
+  }, [base, baseTeam, specifiedSeason, players, byKey, seasonGames]);
 
   const [selected, setSelectedKey] = useState<string | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -192,7 +201,10 @@ export function PlayerAnalytics({
     if (!detailStatus) return undefined;
     if (doublesView && (m === 'ppr' || m === 'first9')) {
       const verified = doubles ? (m === 'ppr' ? doubles.scoreVerified : doubles.f9Verified) : 0;
-      return legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, doubles?.seasons ?? 0);
+      const note = legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, doubles?.seasons ?? 0);
+      // n01 has no average for an ignore_avg slot: those games are backed by its 100+〜180 / High Finish.
+      const outside = hasValue && !!detailResult?.checks.some((c) => (c.avgExcludedGames ?? 0) > 0 && c.verified.outsideAvg);
+      return outside && note ? `${note}。平均の対象外の枠（ignore_avg）のゲームは、100+〜180・High Finishの公式記録との一致で照合` : note;
     }
     if (singlesView && (m === 'first9' || m === 'keep' || m === 'break')) {
       const verified = singles ? (m === 'first9' ? singles.f9Verified : singles.breakVerified) : 0;

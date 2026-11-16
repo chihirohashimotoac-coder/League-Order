@@ -104,16 +104,29 @@ describe('③ a row whose throwing order n01 left out (TDA 2026年度 前期)', 
     expect(aggregateTeams(doubles.seasons).find((t) => t.name === 'Hurricane')!.metrics.legRate).toMatchObject({ num: 1, den: 3 });
   });
 
-  it('a player of side-R is not checked against n01 (their games are not known) and no retry is offered for it', async () => {
+  it('a player of side-R is not checked against n01 (their games are not known), no retry is offered for it, and their own singles legs still count', async () => {
     const s = tdaSeason();
-    const page = parseGameList({ result: 0, list: [...DEFECT_ROWS, singlesRow('g2', 'sA9C', 's1', 'PJP3', 'jr1r', [1, 2], 1)] });
+    // 選手 s1's own singles game: one leg, s1 threw first (50, 50, 50), jr1r checked out 501 in 9 darts.
+    const g2 = { mid: 'g2', tdid: TD, tmid: `${TD}_lg_1_x_sA9C_PJP3`, schid: 'ykby', endMatch: 1, statsData: [{ tpid: 'sA9C', order: [{ oid: 's1', opid: 't-s1', oname: 's1' }], winLegs: 0, allScore: 150, allDarts: 9 }, { tpid: 'PJP3', order: [{ oid: 'jr1r', opid: 't-jr1r', oname: 'jr1r' }], winLegs: 1, allScore: 501, allDarts: 9 }] };
+    const detail = { result: 0, match: { ...g2, startScore: 501, legData: [{ first: 0, winner: 1, endFlag: 1, playerData: [[{ score: 0, left: 501 }, { score: 50, left: 451 }, { score: 50, left: 401 }, { score: 50, left: 351 }], [{ score: 0, left: 501 }, { score: 180, left: 321 }, { score: 180, left: 141 }, { score: -3, left: 0 }]] }] } };
+    const page = parseGameList({ result: 0, list: [...DEFECT_ROWS, g2] });
     const games = new Map([[TD, { tournamentId: TD, games: page.games, dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, complete: true } satisfies SeasonGames]]);
-    const transport: AnalyticsTransport = { request: async () => { throw new Error('no request expected'); } };
+    const asked: string[] = [];
+    const transport: AnalyticsTransport = {
+      request: async (operation, params) => {
+        asked.push(operation);
+        if (operation === 'match/get' && params.mid === 'g2') return detail;
+        throw new Error(`unexpected ${operation}`);
+      },
+    };
     const me = s.players.find((p) => p.oid === 's1')!;
     const result = await reconstructPerson({ api: new AnalyticsApi({ transport, maxRequests: 60 }), cache: new AnalyticsCache({ memoryOnly: true }), isOnline: () => true, now: () => Date.now() }, { seasons: [s], games, personKey: me.personKey });
+    expect(asked).toEqual(['match/get']); // no n01 totals, no high-in records: nothing to check them with
     expect(result.checks[0]).toMatchObject({ state: 'incomplete', byRecord: true, reason: expect.stringContaining('投順が記録されていない') });
-    expect(result.contributions.size).toBe(0);
     expect(needsRetry(result)).toBe(false);
+    expect(result.contributions.get('g2')?.get('s1')).toMatchObject({ score: 150, darts: 9, f9Score: 150, f9Darts: 9, breakLegs: 0 });
+    // The singles view still holds s1 (side-R's missing singles game may be theirs); the legs wait in the result.
+    expect(projectSeasons([s], 'singles', { games, failed: new Set() }, result.contributions).seasons[0].players.find((p) => p.oid === 's1')!.line.f9Score).toBeNull();
   });
 });
 
@@ -175,11 +188,20 @@ describe('⑤ 指定季: the player list is that season’s registered roster', 
     const load: PeriodLoad = { ...emptyLoad({ mode: 'specified', currentTournamentId: 's_now', specifiedTournamentId: 's_past' }, {}), seasons: [data], complete: true };
     render(<PlayerAnalytics team={team} players={[]} load={load} baseTournamentId="s_past" />);
     const rows = screen.getAllByRole('button').filter((b) => b.classList.contains('list-row'));
-    expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining('Hiraga'), expect.stringContaining('出場なし')]);
+    expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining('Hiraga'), expect.stringContaining('成績記録なし')]);
     expect(rows[0].textContent).toContain('3DA 54.00');
     expect((rows[1] as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('season-roster-note').textContent).toContain('MC-B');
     expect(screen.getByTestId('analytics-detail').textContent).toContain('Hiraga');
+  });
+
+  it('with the season’s whole game list read, a member with no game is 出場なし (not a missing record)', () => {
+    const load: PeriodLoad = { ...emptyLoad({ mode: 'specified', currentTournamentId: 's_now', specifiedTournamentId: 's_past' }, {}), seasons: [data], complete: true };
+    const games = new Map([['s_past', { tournamentId: 's_past', games: parseGameList({ result: 0, list: [{ mid: 'm1', tmid: 's_past_lg_0_x_MCB_OTH', schid: 's1', endMatch: 1, statsData: [{ tpid: 'MCB', order: [{ oid: 'h1' }], winLegs: 2, allScore: 900, allDarts: 50 }, { tpid: 'OTH', order: [{ oid: 'o1' }], winLegs: 0, allScore: 300, allDarts: 50 }] }] }).games, dropped: { unfinished: 0, unreadable: 0, nonLeague: 0 }, complete: true } satisfies SeasonGames]]);
+    const role = { scope: 'all01' as const, adoption: [], games: gamesState(['s_past'], games), detail: { running: null, results: new Map(), contributions: new Map(), partial: new Set<string>(), run: () => undefined, focus: () => undefined, ensure: () => undefined } };
+    render(<PlayerAnalytics team={team} players={[]} load={load} baseTournamentId="s_past" role={role} />);
+    const rows = screen.getAllByRole('button').filter((b) => b.classList.contains('list-row'));
+    expect(rows[1].textContent).toContain('出場なし');
   });
 });
 

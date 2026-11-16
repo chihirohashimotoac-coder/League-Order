@@ -347,11 +347,13 @@ export function useTeamDetail(services: AnalyticsServices, load: PeriodLoad | nu
     setHeld((s) => (s.load === load && s.key === key ? { ...s, running: true } : { load, key, running: true, partial: false, result: null, coverage }));
     void (async () => {
       let total = 0;
+      // Fixed once for the whole read: a later part must not count what an earlier part read as old.
+      const freshAfter = (attempt > 0 ? Date.now() : reloadAt) || undefined;
       try {
         for (let unit = 0; unit < DETAIL_MAX_UNITS; unit += 1) {
           const api = roleApi(services, c.signal, DETAIL_MAX_REQUESTS);
           const result = await reconstructTeam(
-            { api, cache: services.cache, isOnline, now: () => Date.now(), freshAfter: (attempt > 0 ? Date.now() : reloadAt) || undefined, signal: c.signal, sleep: services.sleep },
+            { api, cache: services.cache, isOnline, now: () => Date.now(), freshAfter, signal: c.signal, sleep: services.sleep },
             { seasons: load.seasons, games: gamesRef.current?.games ?? new Map(), teams, role, key, memory: memory.current },
           );
           if (c.signal.aborted) return;

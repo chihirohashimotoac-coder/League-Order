@@ -448,13 +448,10 @@ export async function reconstructPerson(
     // A game of the player's team whose throwing order n01 left out may be the player's: their games
     // of the season are not known, so nothing of theirs is checked (the team's results still count).
     const hidden = classified.filter((g) => g.missingOrder && g.family.family !== 'cricket' && g.sides.some((side, i) => g.missingOrder![i] && side.teamId === me.teamId)).length;
-    if (hidden > 0) {
-      const reason = `チームの投順が記録されていないゲームが${hidden}件あり、この選手が出場したゲームを確定できないため照合していません`;
-      result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'incomplete', games: mine.length, reconstructed: 0, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason, byRecord: true });
-      holdAll(`${season.title}: ${reason}`);
-      result.starts.push(unexamined(doublesCount, reason));
-      continue;
-    }
+    // Such a game stops n01's totals from checking the player (and their start attempts), but the legs
+    // of the player's own known games are still read: a singles game stands on its legs (the views
+    // whose kind the missing game may be hold the player out by themselves, `projection.ts`).
+    const recordHeld = hidden > 0 ? `チームの投順が記録されていないゲームが${hidden}件あり、この選手が出場したゲームを確定できないため、n01公式値との照合（複数人のゲームの個人値・ダブルイン成功率）はしていません` : null;
     if (stopped) {
       result.notAttempted.push({ tournamentId: season.tournamentId, title: season.title });
       holdAll(`${season.title}: 通信の上限のため未確認`);
@@ -465,7 +462,7 @@ export async function reconstructPerson(
     // player could count): read before the legs, so only games that can count are refetched.
     let highIns: HighInRecord[] | null = null;
     let highInNote: string | undefined;
-    if (doublesCount > 0 && 'rule' in seasonRule(season)) {
+    if (!recordHeld && doublesCount > 0 && 'rule' in seasonRule(season)) {
       const loaded = await loadHighIns(ctx, season, input.memory);
       if (loaded.saveFailed) result.saveFailed = true;
       highIns = loaded.records;
@@ -499,7 +496,7 @@ export async function reconstructPerson(
     };
     // n01's totals as they stand after the change (the period's are from before it).
     let official: StatLine = me.line;
-    if (listChanged) {
+    if (listChanged && !recordHeld) {
       const loaded = await loadOfficial(ctx, season, version, input.memory, input.recheckOfficial === true);
       if (loaded.saveFailed) result.saveFailed = true;
       if (loaded.fetched) fetched += 1;
@@ -633,6 +630,15 @@ export async function reconstructPerson(
       for (const [start, darts] of seasonBest) result.bestLegs.set(start, Math.min(result.bestLegs.get(start) ?? Infinity, darts));
     };
 
+    if (recordHeld) {
+      publishBest(false);
+      const held: SeasonCheck = { tournamentId: season.tournamentId, oid: me.oid, state: 'incomplete', games: mine.length, reconstructed: mine.filter((g) => rebuilt.get(g.gameId)?.ok).length, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: recordHeld, byRecord: true, singles: { games: mine.filter((g) => g.sides.some((x) => x.players.length === 1 && x.players[0].oid === me.oid)).length, rebuilt: mine.filter((g) => g.sides.some((x) => x.players.length === 1 && x.players[0].oid === me.oid) && rebuilt.get(g.gameId)?.ok).length } };
+      result.checks.push(held);
+      if (doublesCount > 0) result.starts.push(unexamined(doublesCount, recordHeld));
+      addVerified(result.contributions, held, classified, rebuilt);
+      for (const g of mine) if (result.contributions.has(g.gameId)) result.gameSeason[g.gameId] = season.tournamentId;
+      continue;
+    }
     if (composition === 'unknown') {
       publishBest(false);
       result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'mismatch', games: mine.length, reconstructed: mine.filter((g) => rebuilt.get(g.gameId)?.ok).length, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: '種別不明のゲーム枠を含むため、n01公式値と照合できません' });
@@ -811,6 +817,7 @@ export async function reconstructTeam(
       return e.fp !== rowPrint.get(g.gameId) || (e.r.ok && !e.r.sides && g.sides.some((side) => side.players.length === 0));
     };
     const pending = mine.filter(due);
+    const readNow = new Set<string>();
     for (let i = 0; i < pending.length && !stopped; i += concurrency) {
       if (ctx.signal?.aborted) {
         stopped = true;
@@ -824,6 +831,7 @@ export async function reconstructTeam(
         if (outcome.status === 'fulfilled') {
           const r = safeReconstruct(outcome.value);
           stored.set(g.gameId, { r, at: ctx.now(), fp: matchesRow(g, r) && sameOrder(g, outcome.value) ? rowPrint.get(g.gameId) : UNMATCHED });
+          readNow.add(g.gameId);
           added += 1;
           fetched += 1;
           return;
@@ -838,9 +846,16 @@ export async function reconstructTeam(
       });
       if (added > 0 && !(await ctx.cache.put(detailKey(season.tournamentId), { v: 2, games: Object.fromEntries(stored) } satisfies CachedDetail, ttl))) result.saveFailed = true;
     }
+    let stale = 0;
     for (const g of mine) {
       const e = stored.get(g.gameId);
       if (!e || !e.r.ok || e.fp !== rowPrint.get(g.gameId) || !matchesRow(g, e.r)) continue;
+      // Legs that had to be read again (expired, or older than the refresh) but could not be: never
+      // mixed with the fresh ones (a correction inside a leg leaves the row's totals as they were).
+      if (!readNow.has(g.gameId) && due(g)) {
+        stale += 1;
+        continue;
+      }
       const sideIndex = g.sides[0].teamId === teamId ? 0 : 1;
       const figures = sideFiguresOf(e.r, sideIndex, g.sides[sideIndex].players.map((p) => p.oid));
       if (!figures) continue;
@@ -849,7 +864,7 @@ export async function reconstructTeam(
       forGame.set(teamId, Number.isFinite(figures.breakLegs) ? figures : { f9Score: figures.f9Score, f9Darts: figures.f9Darts });
       result.contributions.set(g.gameId, forGame);
     }
-    if (entry.rebuilt < entry.games && !entry.reason) entry.reason = stopped ? '通信の上限または中断のため一部未取得' : `${entry.games - entry.rebuilt}ゲームのLeg明細を確認できません`;
+    if (entry.rebuilt < entry.games && !entry.reason) entry.reason = stopped ? '通信の上限または中断のため一部未取得' : stale > 0 ? `${stale}ゲームのLeg明細を取り直せず、保存済みの古い明細は使っていません` : `${entry.games - entry.rebuilt}ゲームのLeg明細を確認できません`;
   }
   result.requestsSent = ctx.api.requestCount;
   result.fetched = fetched;
