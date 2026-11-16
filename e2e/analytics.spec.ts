@@ -80,10 +80,13 @@ test.describe('PLAYER ANALYTICS', () => {
     // Trend over the seasons (or an honest "needs 2 seasons" message).
     await expect(page.locator('.trend-svg, :text("2シーズン以上")').first()).toBeVisible();
 
-    // 直近12季: the fixture league has fewer seasons, so the figure is labelled partial.
+    // 直近12季: the fixture league has fewer seasons than 12 — that is the period's range, not seasons
+    // that could not be read (audit 2026-11-16 ⑥).
     await page.getByRole('button', { name: '直近12季' }).click();
     await expect(page.getByTestId('analysis-summary')).toContainText('直近12季');
-    await expect(page.getByTestId('summary-missing')).toBeVisible();
+    await expect(page.getByTestId('summary-range')).toContainText('対象');
+    await expect(page.getByTestId('summary-fewer')).toBeAttached();
+    await expect(page.getByTestId('summary-missing')).toHaveCount(0);
     await expect(page.getByTestId('analytics-page')).toBeVisible();
     await noSideScroll(page);
   });
@@ -111,7 +114,7 @@ test.describe('PLAYER ANALYTICS', () => {
     await expect(panel).toBeVisible();
     await expect(panel).toHaveAttribute('data-state', /unavailable|failed|partial|none/);
     await expect(page.getByTestId('reconstruct-run')).toHaveCount(0);
-    await expect(page.getByTestId('metric-個人スタート率')).toBeVisible();
+    await expect(page.getByTestId('metric-ダブルイン成功率')).toBeVisible();
     const state = await panel.getAttribute('data-state');
     const gets = (): number => extras.log.filter((e) => e.startsWith('match/get')).length;
     if (state === 'none') expect(gets()).toBe(0);

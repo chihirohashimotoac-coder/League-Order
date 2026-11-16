@@ -1,7 +1,7 @@
 import type { HighInRecord } from './api/parse';
 
 /**
- * Measured n01 data behind the 個人スタート率 (read 2026-11-15 through the n01 read API,
+ * Measured n01 data behind the ダブルイン成功率 (read 2026-11-15 through the n01 read API,
  * anonymous GET; reduced to the fields analytics reads, player names left out). Nothing here is
  * fetched in CI. What each piece showed:
  *

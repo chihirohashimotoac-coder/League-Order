@@ -1,6 +1,6 @@
 import type { Composition } from './gameKind';
 import { classifyGames, linesFromGames, tallyGames } from './roleGames';
-import type { ClassifiedGame, GameScope, GameTally, PerPlayerScores, SeasonGames } from './roleGames';
+import type { ClassifiedGame, GameScope, GameTally, PerPlayerScores, SeasonGames, TeamContributions } from './roleGames';
 import type { PlayerSeason, SeasonData, TeamSeason } from './seasonData';
 import type { StatCounter, StatLine } from './types';
 
@@ -68,6 +68,13 @@ export interface SeasonAdoption {
   /** Per-player 3DA for multi-thrower games in this view. */
   playerPpr: 'exact' | 'partly-verified' | 'not-applicable' | 'unavailable';
   notes: string[];
+  /**
+   * Teams of this season held out of the view because of game rows whose throwing order n01 left
+   * out: `players` — the team's results count, its players' figures do not (who threw is not
+   * known); `team` — the game's kind cannot be told either, so the team's figures are held too.
+   * Every other team and player of the season is counted as usual.
+   */
+  held?: { teamId: string; players: boolean; team: boolean; games: number; reason: string }[];
 }
 
 export interface GamesSource {
@@ -150,7 +157,7 @@ function withLines(season: SeasonData, team: (t: TeamSeason) => StatLine | null,
   };
 }
 
-export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope, source: GamesSource, perPlayer: PerPlayerScores = new Map()): Projection {
+export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope, source: GamesSource, perPlayer: PerPlayerScores = new Map(), perTeam: TeamContributions = new Map()): Projection {
   const projected: SeasonData[] = [];
   const adoption: SeasonAdoption[] = [];
   for (const season of seasons) {
@@ -169,8 +176,19 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
             : 'not-needed';
     const usable = raw?.complete ? classified : null;
     const partialReason = raw?.heldReason ?? (raw && raw.dropped.unreadable > 0 ? unreadableGames(raw.dropped.unreadable) : PARTIAL_GAMES);
-    const lines = usable ? linesFromGames(usable, scope, perPlayer) : null;
+    const lines = usable ? linesFromGames(usable, scope, perPlayer, perTeam) : null;
     const notes: string[] = [];
+    const teamName = (id: string): string => season.teams.find((t) => t.teamId === id)?.name ?? id;
+    const held = new Map<string, NonNullable<SeasonAdoption['held']>[number]>();
+    for (const [teamId, ids] of lines?.orderMissing ?? []) {
+      held.set(teamId, { teamId, players: true, team: false, games: ids.length, reason: `${teamName(teamId)}：投順が記録されていないゲームが${ids.length}件あり、誰が投げたか分からないため、この季のこのチームの選手の成績は集計していません（チームの勝敗・得点は集計）` });
+    }
+    for (const [teamId, ids] of lines?.kindUnknown ?? []) {
+      held.set(teamId, { teamId, players: true, team: true, games: ids.length, reason: `${teamName(teamId)}：投順が記録されていないためゲーム種別を判定できないゲームが${ids.length}件あり、この季のこのチームと選手の成績は集計していません` });
+    }
+    const heldPlayer = (p: PlayerSeason): boolean => held.get(p.teamId)?.players === true;
+    const heldTeam = (t: TeamSeason): boolean => held.get(t.teamId)?.team === true;
+    if (held.size > 0) notes.push(...[...held.values()].map((h) => h.reason));
     if (raw && (raw.dropped.unfinished > 0 || raw.dropped.unreadable > 0)) {
       notes.push(`未終了 ${raw.dropped.unfinished} ゲーム・読めない記録 ${raw.dropped.unreadable} 件は集計していません`);
     }
@@ -183,6 +201,7 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
       gamesCounted: lines?.games ?? 0,
       unreadableGames: raw?.dropped.unreadable ?? 0,
       notes,
+      ...(held.size > 0 ? { held: [...held.values()] } : {}),
     };
 
     if (scope === 'all01' && composition === 'pure01') {
@@ -201,8 +220,8 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
       projected.push(
         withLines(
           season,
-          (t) => (!t.line || pureDivision(t.divisionIndex) ? t.line : mixedLine(t.line, lines ? (lines.teams.get(t.teamId) ?? zeroGames()) : null)),
-          (p) => (pureDivision(p.divisionIndex) ? p.line : mixedLine(p.line, lines ? (lines.players.get(p.oid) ?? zeroGames()) : null)),
+          (t) => (!t.line || pureDivision(t.divisionIndex) ? t.line : mixedLine(t.line, lines && !heldTeam(t) ? (lines.teams.get(t.teamId) ?? zeroGames()) : null)),
+          (p) => (pureDivision(p.divisionIndex) ? p.line : mixedLine(p.line, lines && !heldPlayer(p) ? (lines.players.get(p.oid) ?? zeroGames()) : null)),
         ),
       );
       adoption.push({
@@ -230,24 +249,28 @@ export function projectSeasons(seasons: readonly SeasonData[], scope: GameScope,
     projected.push(
       withLines(
         season,
-        (t) => (lines ? (lines.teams.get(t.teamId) ?? null) : emptied(t.line)),
-        (p) => (lines ? (lines.players.get(p.oid) ?? zeroGames()) : (emptied(p.line) as StatLine)),
+        (t) => (lines && !heldTeam(t) ? (lines.teams.get(t.teamId) ?? null) : emptied(t.line)),
+        (p) => (lines && !heldPlayer(p) ? (lines.players.get(p.oid) ?? zeroGames()) : (emptied(p.line) as StatLine)),
       ),
     );
     const unknownReason = '種別不明のゲーム枠を含むため、公式の通算値を採用できません';
     // A figure of the game rows' players that only verified reconstructions supply.
     const rebuiltPlayers = (fields: readonly StatCounter[]): number => (lines ? [...lines.players.values()].filter((l) => fields.some((f) => l[f] !== null)).length : 0);
-    const legsOnly = (fields: readonly StatCounter[], fallback: MetricAdoption): MetricAdoption => {
+    const rebuiltTeams = (fields: readonly StatCounter[]): number => (lines ? [...lines.teams.values()].filter((l) => fields.some((f) => l[f] !== null)).length : 0);
+    const legsOnly = (fields: readonly StatCounter[], fallback: MetricAdoption, teamsToo = false): MetricAdoption => {
       const n = rebuiltPlayers(fields);
-      return n > 0 ? { state: 'players', reason: `Leg明細を復元し、n01公式の通算値と一致した選手のみ（${n}名）。チーム・その他の選手はゲーム記録に含まれないため対象外` } : fallback;
+      const t = teamsToo ? rebuiltTeams(fields) : 0;
+      if (n === 0 && t === 0) return fallback;
+      const who = [n > 0 ? `選手${n}名` : '', t > 0 ? `チーム${t}` : ''].filter(Boolean).join('・');
+      return { state: 'players', reason: `Leg明細を取得・照合できた${who}のみ（シングルスは本人のLeg明細、複数人のゲームの個人値はn01公式の通算値と一致した場合、チームはチーム側のLeg明細）。その他はゲーム記録に含まれないため対象外` };
     };
     adoption.push({
       ...base,
       metrics: {
         ppr: lines ? { state: 'recomputed', reason: multi ? 'チームの3DAはゲーム記録から。選手個人の3DAはLeg明細から復元・検証できた場合のみ' : undefined } : { state: 'excluded', reason: missingReason },
-        first9: roleView ? legsOnly(['f9Score'], { state: 'unavailable', reason: NEEDS_LEGS }) : { state: 'excluded', reason: unknownReason },
+        first9: roleView ? legsOnly(['f9Score'], { state: 'unavailable', reason: NEEDS_LEGS }, true) : { state: 'excluded', reason: unknownReason },
         legSet: lines ? { state: 'recomputed' } : { state: 'excluded', reason: missingReason },
-        keepBreak: roleView ? legsOnly(['breakLegs'], { state: 'unavailable', reason: NEEDS_LEGS }) : { state: 'excluded', reason: unknownReason },
+        keepBreak: roleView ? legsOnly(['breakLegs'], { state: 'unavailable', reason: NEEDS_LEGS }, true) : { state: 'excluded', reason: unknownReason },
         records: roleView ? legsOnly(['ton00', 'highOut'], { state: 'unavailable', reason: NEEDS_LEGS }) : { state: 'excluded', reason: unknownReason },
         match: roleView ? { state: 'unavailable', reason: '公式のMatch勝敗は試合単位のため、ゲーム種別ごとには分けません' } : { state: 'official' },
       },

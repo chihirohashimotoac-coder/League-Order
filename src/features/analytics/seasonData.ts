@@ -69,8 +69,20 @@ export interface SeasonData {
   players: PlayerSeason[];
   standings: OfficialStandingGroup[];
   coverage: RosterCoverage | null;
+  /**
+   * The season's roster rows of its registered teams (`null`: the roster could not be read). Lets a
+   * past season list everyone registered for a team — players without a stats row included.
+   */
+  roster?: { oid: string; opid: string | null; name: string; teamId: string }[] | null;
+  /**
+   * Registered entries with no roster row, no stats row and no player (a bye such as AKDO's
+   * "NO GAME"): they hold nobody, so they do not make the roster incomplete.
+   */
+  emptyEntries?: string[];
   /** `opid`s that are shared or unproven in this season. */
   sharedOpidSet: ReadonlySet<string>;
+  /** Stats rows held out by 本人照合 (`personLink.applyLinks`): not in any figure until confirmed. */
+  heldPlayers?: PlayerSeason[];
   /** Players held out because the same oid carried two teams. */
   conflicts: { oid: string; teamIds: string[] }[];
   /** Stats rows dropped because their team is not registered in this tournament. */
@@ -118,8 +130,16 @@ export function buildSeasonData(input: SeasonInput): SeasonData {
   let droppedUnregisteredRows = input.teamStats.filter((row) => !registered.has(row.teamId)).length;
 
   // Identity -------------------------------------------------------------
-  const coverage = input.roster ? rosterCoverage(input.roster, registered.keys()) : null;
-  const rosterRows = input.roster ?? [];
+  // Only the rows of registered teams describe this season's people: n01's roster also returns
+  // teams the tournament does not list (AKDO 2026/1st: 45 teams for 22 entries), whose rows repeat
+  // the members' ids under other oids and must not make every id look shared.
+  const rosterRows = (input.roster ?? []).filter((r) => registered.has(r.teamId));
+  const inRoster = new Set(rosterRows.map((r) => r.teamId));
+  const withPlayers = new Set(input.playerStats.map((r) => r.teamId));
+  // An entry is empty only when n01 says so everywhere: no roster row, no stats row, no player, and
+  // an official standing that played no match (a roster that merely left a team out proves nothing).
+  const emptyEntries = [...registered.keys()].filter((teamId) => !inRoster.has(teamId) && !statsByTeam.has(teamId) && !withPlayers.has(teamId) && officialByTeam.get(teamId)?.played === 0);
+  const coverage = input.roster ? rosterCoverage(input.roster, [...registered.keys()].filter((id) => !emptyEntries.includes(id))) : null;
   // A season whose whole roster is missing or short proves nothing: no opid is trusted in it.
   const sharedOpidSet: ReadonlySet<string> =
     coverage?.complete === true
@@ -175,6 +195,8 @@ export function buildSeasonData(input: SeasonInput): SeasonData {
     players,
     standings: [...input.standings],
     coverage,
+    roster: input.roster ? rosterRows.map((r) => ({ oid: r.oid, opid: r.opid, name: r.name, teamId: r.teamId })) : null,
+    ...(emptyEntries.length > 0 ? { emptyEntries } : {}),
     sharedOpidSet,
     conflicts,
     droppedUnregisteredRows,

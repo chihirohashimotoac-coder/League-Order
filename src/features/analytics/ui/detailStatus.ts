@@ -30,6 +30,11 @@ export type DetailRole = 'singles' | 'doubles';
 
 const ROLE_LABEL: Record<DetailRole, string> = { singles: 'シングルス01', doubles: 'ダブルス01' };
 const METRICS_OF: Record<DetailRole, string> = { singles: 'First 9・Keep率・Break率', doubles: '個人の3DA・First 9' };
+/**
+ * What a season must pass for the role's leg figures: a singles game has one thrower, so its legs
+ * only have to add up to the game's row; a doubles player's share needs n01's totals.
+ */
+const MATCHED: Record<DetailRole, string> = { singles: 'Leg明細とゲームの合計が一致', doubles: '公式値と一致' };
 
 export interface Exposure {
   games: number;
@@ -49,7 +54,7 @@ function verifiedSeasons(role: DetailRole, result: PlayerDetailResult, exposure:
     return { seasons: Math.max(c.seasons, exposure.seasons.length), verified: c.scoreVerified, checked };
   }
   const c = singlesCoverage(result, exposure.seasons);
-  return { seasons: c.seasons, verified: c.scoreVerified, checked: c.checked };
+  return { seasons: c.seasons, verified: c.f9Verified, checked: c.checked };
 }
 
 export function detailStatusOf(input: {
@@ -84,28 +89,28 @@ export function detailStatusOf(input: {
   if (result.checks.length === 0 && result.failures.length > 0) return { kind: 'failed', text: result.failures[0] };
   if (v.verified === 0) {
     if (retry) return { kind: 'failed', text: `一部のLeg明細を取得できなかったため、${METRICS_OF[role]}は表示していません` };
-    return { kind: 'unavailable', text: `n01公式の通算値と一致した季がないため、${METRICS_OF[role]}は表示していません（記録不足）` };
+    return { kind: 'unavailable', text: role === 'singles' ? `シングルスのLeg明細を確認できた季がないため、${METRICS_OF[role]}は表示していません（記録不足）` : `n01公式の通算値と一致した季がないため、${METRICS_OF[role]}は表示していません（記録不足）` };
   }
   const waitingSeasons = exposure.unknownSeasons > 0 && input.gamesLoading;
   if (v.verified < v.seasons || exposure.unknownSeasons > 0) {
     const tail = waitingSeasons ? '。残りの季のゲーム記録を取得中（そろい次第更新）' : exposure.unknownSeasons > 0 ? '。ゲーム記録を取得できない季は含めていません' : '（残りは表示に含めていません）';
-    return { kind: 'partial', text: `部分集計：${label}出場${v.seasons}季中${v.verified}季で公式値と一致${tail}`, retry };
+    return { kind: 'partial', text: `部分集計：${label}出場${v.seasons}季中${v.verified}季で${MATCHED[role]}${tail}`, retry };
   }
-  if (retry) return { kind: 'partial', text: `${label}出場${v.seasons}季すべてで公式値と一致。一部のLeg明細を取得できませんでした（採否は「照合の内訳」を参照）`, retry };
-  return { kind: 'done', text: `取得済み：${label}出場${v.seasons}季すべてで公式値と一致` };
+  if (retry) return { kind: 'partial', text: `${label}出場${v.seasons}季すべてで${MATCHED[role]}。一部のLeg明細を取得できませんでした（採否は「照合の内訳」を参照）`, retry };
+  return { kind: 'done', text: `取得済み：${label}出場${v.seasons}季すべてで${MATCHED[role]}` };
 }
 
 /**
  * The note of a card whose figure comes from the leg read (`undefined`: the generic note).
  * `verified`: seasons of the role whose check admitted this metric.
  */
-export function legCardNote(metricLabel: string, hasValue: boolean, status: DetailStatus | null, verified: number, seasons: number): string | undefined {
+export function legCardNote(metricLabel: string, hasValue: boolean, status: DetailStatus | null, verified: number, seasons: number, role: DetailRole = 'doubles'): string | undefined {
   if (!status) return undefined;
   if (!hasValue) {
-    if (status.kind === 'done' || status.kind === 'partial') return `${metricLabel}は公式値と一致した季がないため表示しません（記録不足）`;
+    if (status.kind === 'done' || status.kind === 'partial') return role === 'singles' ? `${metricLabel}はLeg明細を確認できた季がないため表示しません（記録不足）` : `${metricLabel}は公式値と一致した季がないため表示しません（記録不足）`;
     return status.text;
   }
-  const base = 'Leg明細から復元（公式値と一致した季のみ）';
+  const base = role === 'singles' ? 'Leg明細から算出（シングルスの明細がゲームの合計と一致した季のみ）' : 'Leg明細から復元（公式値と一致した季のみ）';
   if (status.kind === 'waiting' || status.kind === 'running') return `取得中・照合済みの季のみ：${base}`;
   return verified < seasons ? `部分集計：${seasons}季中${verified}季。${base}` : base;
 }

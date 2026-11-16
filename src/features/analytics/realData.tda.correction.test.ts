@@ -99,7 +99,14 @@ describe('a corrected game (300 → 301) is checked only with legs and totals re
     expect(r.checks[0].verified.score).toBe(false);
     expect(r.checks[0].verified.f9).toBe(false);
     expect(r.awaitingOfficial).toEqual([TDA_TDID]);
-    expect(r.contributions.size).toBe(0);
+    // The corrected game's old legs are never used; other singles games keep the legs read for their
+    // current rows (one thrower: they do not depend on n01's totals), and the multi-thrower games
+    // give no per-player score while the check fails.
+    expect(r.contributions.has(FIX.mid)).toBe(false);
+    for (const players of r.contributions.values()) {
+      const c = players.get(TDA_PLAYER);
+      if (c && c.score !== undefined) expect(c.f9Score).toBeDefined();
+    }
     const view = shown(s.period, v2, r, s.me.personKey);
     expect(view.metrics.first9.value).toBeNull(); // withheld, not the old 68.26
     expect(view.adoption.metrics.first9.state).not.toBe('players');
@@ -148,7 +155,7 @@ describe('a corrected game (300 → 301) is checked only with legs and totals re
     // the legs give — First 9, Keep/Break, 100+… — stays withheld: its old legs are never used.
     expect(r.checks[0].verified).toMatchObject({ f9: false, break: false, tons: false });
     expect(r.failures.length).toBeGreaterThan(0);
-    for (const players of r.contributions.values()) expect(players.get(TDA_PLAYER)?.f9Score).toBeUndefined();
+    expect(r.contributions.get(FIX.mid)?.get(TDA_PLAYER)).toBeUndefined();
     expect(shown(s.period, v2, r, s.me.personKey).metrics.first9.value).toBeNull();
   });
 

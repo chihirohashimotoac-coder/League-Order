@@ -31,6 +31,8 @@ export interface PeriodServiceOptions {
   now?: () => number;
   forceRefresh?: boolean;
   signal?: AbortSignal;
+  /** Seasons read (or failed) so far, of those the period can have (the loading gauge). */
+  onProgress?: (progress: { done: number; total: number }) => void;
 }
 
 export interface SeasonMeta {
@@ -65,6 +67,12 @@ export interface PeriodLoad {
    * place — it is never silently replaced by an older one.
    */
   window: WindowSlot[];
+  /**
+   * Seasons of the period that exist in the league's list (≤ {@link wanted}): a league with five
+   * seasons gives 5 for 直近12季 — fewer seasons is not a failure to read them. Absent on loads
+   * built elsewhere (then {@link wanted}).
+   */
+  available?: number;
   /**
    * True only when every season the period calls for was read. A multi-season period must
    * not be shown as complete unless this is true.
@@ -168,6 +176,8 @@ export async function loadPeriod(options: PeriodServiceOptions): Promise<PeriodL
   const filled = (): number => loaded.length + failures.length;
   let cursor = 0;
   let stopped = false;
+  const progress = (): void => options.onProgress?.({ done: filled(), total: Math.min(wanted, candidates.length) });
+  progress();
   while (filled() < wanted && cursor < candidates.length && !stopped) {
     if (options.signal?.aborted) {
       complete = false;
@@ -198,12 +208,15 @@ export async function loadPeriod(options: PeriodServiceOptions): Promise<PeriodL
       loaded.push({ ...buildSeasonData(result.input), startedAt: summary.startedAt });
       window.push({ tournamentId: summary.tournamentId, title: summary.title, state: 'loaded' });
     });
+    progress();
     await yieldToBrowser();
   }
 
   // Positions nobody filled: the history is shorter, or fetching stopped (budget / cancel).
+  // A shorter history is what the period is (all its seasons read); a stop is not.
+  const historyEnded = filled() < wanted && cursor >= candidates.length && !stopped && !options.signal?.aborted;
   if (filled() < wanted) {
-    complete = false;
+    if (!historyEnded) complete = false;
     for (const summary of candidates.slice(cursor, cursor + (wanted - filled()))) {
       window.push({ tournamentId: summary.tournamentId, title: summary.title, state: 'not-fetched', reason: stopped ? '通信の上限または中断のため未取得' : undefined });
     }
@@ -218,6 +231,7 @@ export async function loadPeriod(options: PeriodServiceOptions): Promise<PeriodL
     failures,
     skipped,
     window,
+    available: historyEnded ? filled() : wanted,
     complete,
     listError: null,
     offline,
@@ -241,7 +255,7 @@ function toMeta(summary: N01TournamentSummary, result: SeasonLoaded): SeasonMeta
 /** What the UI may call the figure. A full period needs every wanted season, read without gaps. */
 export function periodLabelAllowed(load: PeriodLoad): 'full' | 'partial' | 'none' {
   if (load.seasons.length === 0) return 'none';
-  return load.complete && load.failures.length === 0 && load.seasons.length >= load.wanted ? 'full' : 'partial';
+  return load.complete && load.failures.length === 0 && load.seasons.length >= (load.available ?? load.wanted) ? 'full' : 'partial';
 }
 
 /** Plain-language state for the screens. */

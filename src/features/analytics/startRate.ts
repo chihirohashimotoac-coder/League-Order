@@ -1,10 +1,10 @@
 import type { RawGameDetail, RawVisit } from './api/parse';
 
 /**
- * 個人スタート率（ダブルイン）: per player, the throws that started the pair out of the throws
+ * ダブルイン成功率（ダブルイン）: per player, the throws that started the pair out of the throws
  * the player actually threw while the pair had not started yet.
  *
- *   個人スタート率 = 本人がペアをスタートさせたスロー数 ÷ ペアが未スタートの状態で本人が投げた、判定可能なスロー数
+ *   ダブルイン成功率 = 本人がペアをスタートさせたスロー数 ÷ ペアが未スタートの状態で本人が投げた、判定可能なスロー数
  *
  * One throw (visit, up to 3 darts) is one attempt. Not n01's figure: it is counted here from the
  * leg detail (`match/get`), and only for slots whose in-rule is confirmed (`startRule.ts`).
@@ -104,7 +104,8 @@ export function startTallyOf(detail: RawGameDetail): GameStartTally | null {
   const start = detail.startScore;
   if (start === null || start <= 0) return null;
   const orders = detail.sides.map((side) => side.players.map((p) => p.oid));
-  if (orders.some((order) => order.length === 0 || order.some((oid) => !oid))) return null;
+  // A side without its throwing order (n01 left it out) is not counted; the other side still is.
+  if (orders.every((order) => order.length === 0) || orders.some((order) => order.some((oid) => !oid))) return null;
   const perPlayer: Record<string, PlayerStartCount> = {};
   for (const order of orders) for (const oid of order) perPlayer[oid as string] ??= { attempts: 0, successes: 0 };
   const sides: [SideStartLegs, SideStartLegs] = [
@@ -117,6 +118,7 @@ export function startTallyOf(detail: RawGameDetail): GameStartTally | null {
     if (leg.visits[0].length === 0 && leg.visits[1].length === 0) continue; // n01's trailing, unplayed leg row
     if (typeof leg.time === 'number') legTimes.push(leg.time);
     for (const sideIndex of [0, 1] as const) {
+      if (orders[sideIndex].length === 0) continue;
       const opponent = leg.visits[sideIndex === 0 ? 1 : 0];
       const opponentCheckedOut = leg.winner === (sideIndex === 0 ? 1 : 0) && closedByCheckout(opponent);
       const outcome = readSide(leg.visits[sideIndex], start, orders[sideIndex] as string[], leg.ended, leg.middle === true, leg.time ?? null, opponentCheckedOut);
@@ -183,7 +185,12 @@ export interface SeasonStart {
   highInAgreements: number;
 }
 
-export type PeriodStartState = 'value' | 'no-trials' | 'no-games' | 'rule-unknown' | 'unavailable';
+/**
+ * `excluded`: only games whose slot is known not to be double-in (straight-in) — a known exclusion;
+ * `rule-unknown`: games whose in-rule could not be established; `failed`: the legs or the season
+ * could not be read (nothing judged); `unavailable`: read, but no leg could be judged.
+ */
+export type PeriodStartState = 'value' | 'no-trials' | 'no-games' | 'rule-unknown' | 'excluded' | 'failed' | 'unavailable';
 
 export interface PeriodStart {
   state: PeriodStartState;
@@ -204,6 +211,8 @@ export interface PeriodStart {
   ruleNotes: string[];
   /** Starts counted here that n01's own high-in records confirm (same player, same points). */
   highInAgreements: number;
+  /** Seasons whose attempts are in the figure (at least one throw counted). */
+  seasonsCounted: number;
   reason?: string;
 }
 
@@ -213,8 +222,9 @@ function addInto<K extends string>(into: Partial<Record<K, number>>, from: Parti
 
 /** Σ successes / Σ attempts over the seasons; nothing is estimated for what was left out. */
 export function periodStart(seasons: readonly SeasonStart[]): PeriodStart {
-  const out: PeriodStart = { state: 'unavailable', attempts: 0, successes: 0, value: null, partial: false, counted: 0, legs: 0, doublesGames: 0, excludedGames: {}, excludedLegs: {}, seasonsMissing: [], ruleNotes: [], highInAgreements: 0 };
+  const out: PeriodStart = { state: 'unavailable', attempts: 0, successes: 0, value: null, partial: false, counted: 0, legs: 0, doublesGames: 0, excludedGames: {}, excludedLegs: {}, seasonsMissing: [], ruleNotes: [], highInAgreements: 0, seasonsCounted: 0 };
   for (const s of seasons) {
+    if (s.attempts > 0) out.seasonsCounted += 1;
     out.attempts += s.attempts;
     out.successes += s.successes;
     out.counted += s.counted;
@@ -236,9 +246,13 @@ export function periodStart(seasons: readonly SeasonStart[]): PeriodStart {
     const onlyRule = leftOutGames > 0 && leftOutGames === (out.excludedGames['rule-unknown'] ?? 0) + (out.excludedGames['straight-in'] ?? 0) && out.seasonsMissing.length === 0;
     if (onlyRule) {
       const straight = (out.excludedGames['straight-in'] ?? 0) === leftOutGames;
-      return { ...out, state: 'rule-unknown', reason: straight ? 'ストレートインのゲーム枠のみのため対象外です' : 'ダブルインと確認できたゲーム枠の出場がないため算出しません' };
+      return straight
+        ? { ...out, state: 'excluded', reason: 'ストレートインと確認できたゲーム枠のみのため対象外です' }
+        : { ...out, state: 'rule-unknown', reason: 'ダブルインと確認できたゲーム枠の出場がないため算出しません（イン規則を確認できていません）' };
     }
-    return { ...out, state: 'unavailable', reason: out.seasonsMissing[0]?.reason ?? '判定できるLeg明細がないため算出しません' };
+    const unread = (out.excludedGames['not-fetched'] ?? 0) + (out.excludedGames['needs-refetch'] ?? 0);
+    if (unread > 0 || out.seasonsMissing.length > 0) return { ...out, state: 'failed', reason: out.seasonsMissing[0]?.reason ?? `Leg明細を取得できていないゲームが${unread}件あるため算出していません` };
+    return { ...out, state: 'unavailable', reason: '判定できるLeg明細がないため算出しません' };
   }
   // Games were admitted but none of their legs could be read: the attempts are unknown, not 0.
   if (out.legs === 0) return { ...out, state: 'unavailable', reason: '判定できるLegがないため算出しません（記録の連続性・決着方法を確定できないLegのみ）' };
@@ -251,5 +265,5 @@ export function periodStart(seasons: readonly SeasonStart[]): PeriodStart {
 /** 「50%・3/6スロー」 */
 export function formatStart(start: Pick<PeriodStart, 'value' | 'successes' | 'attempts'>): { value: string; sample: string } {
   if (start.value === null) return { value: '—', sample: start.attempts > 0 ? `${start.successes}/${start.attempts}スロー` : '' };
-  return { value: `${Math.round(start.value * 1000) / 10}%`, sample: `${start.successes}/${start.attempts}スロー` };
+  return { value: `${(start.value * 100).toFixed(1)}%`, sample: `${start.successes}/${start.attempts}スロー` };
 }

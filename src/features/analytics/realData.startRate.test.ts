@@ -9,7 +9,7 @@ import { DOUBLE_IN_RULES, gameStartRule, highInEvidence } from './startRule';
 import type { HighInRecord } from './api/parse';
 
 /**
- * 個人スタート率 against the **measured** n01 records (read 2026-11-15; see the fixtures file).
+ * ダブルイン成功率 against the **measured** n01 records (read 2026-11-15; see the fixtures file).
  * Expected attempts were counted by hand from the visits printed in the comments, not by the code.
  * The last block uses intentional data on top of the real slots (marked so).
  */

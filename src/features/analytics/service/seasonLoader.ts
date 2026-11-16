@@ -27,6 +27,11 @@ export interface CachedSeason {
   roster: N01RosterPlayer[] | null;
   /** Schedule slots as written (`match_type` absence kept). */
   slots: SlotEvidence[];
+  /**
+   * 2: the slots carry `ignore_avg` (which games n01 leaves out of its averages). An entry
+   * without it is read again when online (offline it is still used, as saved data).
+   */
+  slotsV?: 2;
 }
 
 export type DataSource = 'network' | 'cache' | 'stale-cache';
@@ -73,6 +78,7 @@ export function toCached(input: SeasonInput, missing: readonly string[]): Cached
     standings: missing.includes('standings') ? null : [...input.standings],
     roster: input.roster ? [...input.roster] : null,
     slots: [...input.slots],
+    slotsV: 2,
   };
 }
 
@@ -115,7 +121,7 @@ function fromEntry(tournamentId: string, entry: CacheEntry<CachedSeason>, source
 export async function loadSeason(ctx: LoaderContext, tournamentId: string): Promise<SeasonResult> {
   const key = seasonKey(tournamentId);
   const cached = await ctx.cache.get<CachedSeason>(key);
-  if (cached && ctx.cache.isFresh(cached) && !ctx.forceRefresh) return fromEntry(tournamentId, cached, 'cache');
+  if (cached && cached.value.slotsV === 2 && ctx.cache.isFresh(cached) && !ctx.forceRefresh) return fromEntry(tournamentId, cached, 'cache');
 
   if (!ctx.isOnline()) {
     if (cached) return fromEntry(tournamentId, cached, 'stale-cache', 'オフラインのため保存済みのデータを表示しています。');

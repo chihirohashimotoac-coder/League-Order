@@ -50,7 +50,7 @@ test('TDA: シングルス opened directly reads the shown player\'s legs by its
   const n01 = await serveTdaWorld(page);
   await openSingles(page);
   await expectFigures(page);
-  await expect(page.getByTestId('metric-First 9')).toContainText('Leg明細から復元');
+  await expect(page.getByTestId('metric-First 9')).toContainText('Leg明細から算出');
   // His 25 games (9 singles, 7 doubles, 9 team games) were each read exactly once; the doubles view was never opened.
   const gets = n01.log.filter((e) => e.startsWith('match/get'));
   for (const mid of gamesOf(TDA_PLAYER)) expect(gets.filter((e) => e === `match/get?mid=${mid}`)).toHaveLength(1);
@@ -164,7 +164,7 @@ test('a game corrected on n01 (simulated: 1 more point on one visit): after the 
   await expect(page.getByTestId('metric-3DA')).toContainText(((10860 * 3) / 487).toFixed(2), { timeout: 30_000 });
   await expect(page.getByTestId('reconstruction')).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
   await expect(page.getByTestId('metric-First 9')).toContainText(((4711 * 3) / 207).toFixed(2));
-  await expect(page.getByTestId('metric-First 9')).toContainText('Leg明細から復元');
+  await expect(page.getByTestId('metric-First 9')).toContainText('Leg明細から算出');
   expect(n01.log.filter((e) => e.includes('kind=player_stats_list')).length).toBeGreaterThan(stats); // n01's totals read again
   await page.getByTestId('analysis-details').locator('summary').first().click();
   await expect(page.getByTestId('focus-summary')).toContainText('取得済み');

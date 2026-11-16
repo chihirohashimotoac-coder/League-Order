@@ -44,7 +44,7 @@ describe('verify:analytics-roles (on the captured 2024 2nd responses)', () => {
     const text = lines.map((l) => `${l.status} ${l.text}`).join('\n');
     expect(text).toContain('構成 mixed');
     expect(text).toContain('8kxb クリケット num_part=2 start=0 legs=2 match_type=(なし) → cricket (start-score+name)');
-    expect(text).toMatch(/pass team Desperado: 01ゲーム 48844\/3559 vs 公式 48844\/3559 ・ 公式との差 Leg 18 \/ Set 8/);
+    expect(text).toMatch(/pass team Desperado: リーグ戦\(_lg_\)の01ゲーム 48844\/3559 vs 公式 48844\/3559 ・ 公式との差 Leg 18 \/ Set 8/);
     // The sample is the player with the fewest multi-thrower games: 阿部 証人 (one team game).
     expect(text).toMatch(/pass player vhqF \(2ゲーム\): partly-verified 3DA=true/);
     expect(formatRoleReport({ lines, requests: api.requestCount, unreachable: false }).exitCode).toBe(0);

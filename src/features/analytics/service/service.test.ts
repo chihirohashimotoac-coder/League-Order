@@ -162,10 +162,13 @@ describe('loadPeriod', () => {
     const starts = first.seasons.map((s) => s.startedAt);
     expect(starts.every((t) => typeof t === 'number')).toBe(true);
     expect([...starts].sort((a, b) => b! - a!)).toEqual(starts);
-    // Only 4 regular seasons exist: "直近12季" is shown as partial, never as 12 seasons.
+    // Only 4 regular seasons exist: the period has 4 seasons (all read) — fewer seasons than the
+    // limit is not a season that could not be read, and it is never shown as 12 seasons.
     expect(first.wanted).toBe(12);
-    expect(periodLabelAllowed(first)).toBe('partial');
-    expect(describeLoad(first).message).toContain('12季のうち4季');
+    expect(first.available).toBe(4);
+    expect(first.complete).toBe(true);
+    expect(periodLabelAllowed(first)).toBe('full');
+    expect(describeLoad(first).kind).toBe('ready');
     const calls = fake.calls.length;
     const second = await loadPeriod({ ...base, api, cache, request: req });
     expect(second.seasons).toHaveLength(4);

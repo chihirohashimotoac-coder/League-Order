@@ -14,6 +14,8 @@ import { SCOPE_LABEL as GAME_SCOPE_LABEL } from '../roleGames';
 import { scopeMetrics } from '../scopeMetrics';
 import type { RoleViewProps } from './AnalyticsPage';
 import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './parts';
+import { seasonsUsedText } from './scopeParts';
+import { contributingSeasons } from '../projection';
 
 /**
  * TEAM ANALYTICS (design §5). The team's own scorecard, n01's official standing (shown as
@@ -83,6 +85,22 @@ export function TeamAnalytics({
   }
 
   const official = officialOf(base, baseTeam);
+  // シングルス / ダブルス: First 9 and Keep/Break come from this team's legs (read automatically).
+  const teamDetail = role?.teamDetail;
+  const legView = (gameScope === 'singles' || gameScope === 'doubles') && !!teamDetail;
+  const legSeasons = teamDetail?.result?.seasons.filter((x) => x.games > 0) ?? [];
+  const legDone = legSeasons.filter((x) => x.rebuilt === x.games).length;
+  const teamLegNote = (hasValue: boolean): string => {
+    if (!teamDetail) return '';
+    const failed = (teamDetail.result?.failures.length ?? 0) > 0;
+    if (teamDetail.phase === 'waiting-games') return 'ゲーム一覧の取得を待っています';
+    if (teamDetail.phase === 'games-failed') return 'ゲーム一覧を取得できないため、Leg明細を照合できません';
+    if (teamDetail.phase === 'no-games') return 'この種別の対象試合がありません';
+    if (teamDetail.running || teamDetail.partial) return hasValue ? `取得中・Leg明細を確認できた季のみ（${legSeasons.length}季中${legDone}季）` : 'このチームのLeg明細を取得中…';
+    if (!hasValue) return failed ? `Leg明細を取得できませんでした（${teamDetail.result!.failures[0]}）` : legSeasons.length === 0 ? 'この種別の出場がありません' : 'Leg明細を確認できた季がないため表示しません';
+    const base = 'このチームのLeg明細から算出（チーム側の集計。ペアのLegは1回だけ数えます）';
+    return legDone < legSeasons.length ? `部分集計：${legSeasons.length}季中${legDone}季。${base}` : base;
+  };
   const myKey = myPeriod.teamKey;
   const ranking = rankTeams(population.scoped.members, metric);
   const rankingFor = (m: MetricId) => rankTeams(population.scoped.members, m);
@@ -120,8 +138,10 @@ export function TeamAnalytics({
               {CARD_METRICS.map((id) => {
                 const ratio = m[id];
                 const avg = population.averages[id];
+                // From the shown team's own legs only: no other team has the figure to compare with.
+                const fromLegs = legView && (id === 'first9' || id === 'keep' || id === 'break');
                 const diff =
-                  ratio.value !== null && avg.value !== null
+                  !fromLegs && ratio.value !== null && avg.value !== null
                     ? id === 'ppr' || id === 'first9'
                       ? `${SCOPE_LABEL[activeScope]}平均 ${formatValue(id, avg.value)}（${ratio.value - avg.value >= 0 ? '+' : ''}${(ratio.value - avg.value).toFixed(2)}）`
                       : `${SCOPE_LABEL[activeScope]}平均 ${formatValue(id, avg.value)}（${ratio.value - avg.value >= 0 ? '+' : ''}${((ratio.value - avg.value) * 100).toFixed(1)}pt）`
@@ -132,16 +152,25 @@ export function TeamAnalytics({
                     key={id}
                     label={METRIC_LABEL[id]}
                     value={formatValue(id, ratio.value)}
-                    sample={formatSample(id, ratio.den)}
+                    sample={`${formatSample(id, ratio.den)}${((u) => (u ? ` ・ ${u}` : ''))(seasonsUsedText(myPeriod.seasons.map((x) => x.line), id, role ? contributingSeasons(role.adoption) : load.seasons.length, load.request.mode === 'last3' || load.request.mode === 'last12', ratio.value !== null))}`}
                     reliability={reliabilityOf(id, ratio)}
                     compare={diff}
                     rank={st?.rank ? `独自 ${st.rank}位 / ${st.population}チーム` : undefined}
-                    note={ratio.value === null ? (roleView ? 'データ不足（ゲーム記録に含まれません）' : 'データ不足') : undefined}
+                    note={fromLegs ? teamLegNote(ratio.value !== null) : ratio.value === null ? (roleView ? 'データ不足（ゲーム記録に含まれません）' : 'データ不足') : undefined}
                   />
                 );
               })}
             </div>
           )}
+          {legView && teamDetail && ((teamDetail.result?.failures.length ?? 0) > 0 || legDone < legSeasons.length) && !teamDetail.running ? (
+            <p className="small-text" data-testid="team-leg-status">
+              {legSeasons.filter((x) => x.rebuilt < x.games).map((x) => `${x.title}: ${x.reason ?? `${x.games - x.rebuilt}ゲーム未確認`}`).join(' / ')}
+              {' '}
+              <button type="button" className="btn small" onClick={teamDetail.retry} data-testid="team-leg-retry">
+                Leg明細を再試行
+              </button>
+            </p>
+          ) : null}
           <details className="analytics-details" open>
             <summary>Match / Set / Leg 実績とスコア記録</summary>
             <dl className="kv-grid">

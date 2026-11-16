@@ -224,7 +224,11 @@ describe('leg reconstruction service (real 2024 2nd data)', () => {
     const personKey = s.players.find((p) => p.oid === '63Cz')!.personKey;
     const result = await reconstructPerson(ctxOf(fake, { maxRequests: 3 }), { seasons: [s], games: seasonGames, personKey });
     expect(result.checks[0].state).toBe('incomplete');
-    expect(result.contributions.size).toBe(0);
+    // Nothing is estimated: a multi-thrower game read within the budget gives no per-player score
+    // (only its side's Break, from its legs); a singles game's figures come from its own legs.
+    const singles = new Set(games.filter((g) => g.sides.some((x) => x.players.length === 1 && x.players[0].oid === '63Cz')).map((g) => g.gameId));
+    for (const [gameId, players] of result.contributions) if (!singles.has(gameId)) expect(players.get('63Cz')?.score).toBeUndefined();
+    expect(result.contributions.size).toBeLessThanOrEqual(3);
   });
 });
 

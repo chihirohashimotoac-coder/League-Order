@@ -5,7 +5,7 @@ import { normalizeName } from '../../../domain/n01/names';
 import { formatSample, formatValue, METRIC_LABEL } from '../format';
 import type { RankMetric } from '../format';
 import { MIN_SAMPLE, reliabilityOf } from '../metrics';
-import { buildInsights, buildPopulation, cellText, COMPARE_METRICS, findPerson, metricValue, rankIn, standingOf, trendOf } from '../playerView';
+import { buildInsights, buildPopulation, cellText, COMPARE_METRICS, findPerson, findPersonInPeriod, metricValue, rankIn, standingOf, trendOf } from '../playerView';
 import type { PlayerScope } from '../ranking';
 import type { PeriodLoad } from '../service/periodService';
 import type { MetricId } from '../types';
@@ -13,7 +13,8 @@ import { SCOPE_LABEL as GAME_SCOPE_LABEL } from '../roleGames';
 import { scopeMetrics } from '../scopeMetrics';
 import type { RoleViewProps } from './AnalyticsPage';
 import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './parts';
-import { LegDetailPanel, ReconstructionPanel, StartRateCard } from './scopeParts';
+import { IdentityPanel, LegDetailPanel, ReconstructionPanel, seasonsUsedText, StartRateCard } from './scopeParts';
+import { contributingSeasons } from '../projection';
 import { detailCoverage, doublesCoverage, roleExposure, singlesCoverage } from '../service/detailService';
 import { periodStart } from '../startRate';
 import { detailStatusOf, legCardNote } from './detailStatus';
@@ -58,7 +59,15 @@ export function PlayerAnalytics({
   const multiThrower = roleView && gameScope !== 'singles';
   const available_ = useMemo(() => scopeMetrics(gameScope, load.seasons, 'player'), [gameScope, load.seasons]);
   const CARD_METRICS = available_.cards;
-  const base = load.seasons.find((s) => s.tournamentId === baseTournamentId) ?? null;
+  const baseSeason = load.seasons.find((s) => s.tournamentId === baseTournamentId) ?? null;
+  // 直近3季・直近12季 with the base season not read: go on with the seasons read (their figures only),
+  // and say so. 今季・指定季 without it have nothing to show.
+  const multiPeriod = load.request.mode === 'last3' || load.request.mode === 'last12';
+  const baseMissing = !baseSeason && multiPeriod && load.seasons.length > 0;
+  const base = baseSeason ?? (baseMissing ? load.seasons[0] : null);
+  // The season the comparison (team / division / league population) is anchored on: the base season, or
+  // — when it failed in a multi-season period — the newest season read (said so next to the ranking).
+  const anchorId = base?.tournamentId ?? baseTournamentId;
   const binding = team.n01;
 
   // The team in the base season: its tpid is season-scoped, so a past season is matched by
@@ -86,23 +95,73 @@ export function PlayerAnalytics({
 
   const scopeKey = scope.kind === 'team' ? `team:${scope.teamId}` : scope.kind === 'division' ? `division:${scope.divisionIndex}` : 'league';
   const population = useMemo(
-    () => buildPopulation(load.seasons, scope, baseTournamentId),
+    () => buildPopulation(load.seasons, scope, anchorId),
     // `scope` is fully described by `scopeKey`.
-    [load.seasons, scopeKey, baseTournamentId],
+    [load.seasons, scopeKey, anchorId],
   );
-  const everyone = useMemo(() => buildPopulation(load.seasons, { kind: 'league' }, baseTournamentId).people, [load.seasons, baseTournamentId]);
+  const everyone = useMemo(() => buildPopulation(load.seasons, { kind: 'league' }, anchorId).people, [load.seasons, anchorId]);
   const byKey = useMemo(() => new Map(everyone.map((p) => [p.personKey, p])), [everyone]);
 
-  // The roster as League Order knows it, matched to n01 rows only where identity is proven.
-  const roster = useMemo(() => {
+  // The roster. 今季・複数季: League Order's members, matched to n01 rows only where identity is
+  // proven. 指定季: everyone registered for the team in that season (former members included),
+  // opened by that season's own player id — a player without a stats row is "出場なし".
+  const specifiedSeason = load.request.mode === 'specified';
+  const seasonGames = base ? role?.games.load?.games.get(base.tournamentId) : undefined;
+  const rosterNote = specifiedSeason && base && baseTeam ? (base.roster ? null : '名簿を取得できないため、この季に成績のある選手だけを表示しています。') : null;
+  const roster = useMemo((): { id: string; name: string; personKey: string | null; reason?: string; period: (typeof everyone)[number] | null }[] => {
     if (!base) return [];
+    if (specifiedSeason && baseTeam) {
+      const statsOf = new Map(base.players.filter((p) => p.teamId === baseTeam.teamId).map((p) => [p.oid, p]));
+      const rows = base.roster ? base.roster.filter((r) => r.teamId === baseTeam.teamId) : [];
+      const listed = new Set(rows.map((r) => r.oid));
+      const extra = [...statsOf.values()].filter((p) => !listed.has(p.oid)).map((p) => ({ oid: p.oid, name: p.name }));
+      // 出場なし only when the season's whole game list shows no game of theirs; a game of theirs
+      // without a stats row is a missing record; without a complete list, it is not known.
+      const list = seasonGames?.complete ? seasonGames : null;
+      // A game of the team whose throwing order n01 left out may be theirs: then nobody is known absent.
+      const orderMissing = !!list?.games.some((g) => g.missingOrder && g.sides.some((x, i) => g.missingOrder![i] && x.teamId === baseTeam.teamId));
+      const played = (oid: string): boolean | null => {
+        if (!list) return null;
+        if (list.games.some((g) => g.sides.some((x) => x.players.some((p) => p.oid === oid)))) return true;
+        return orderMissing ? null : false;
+      };
+      const noStats = (oid: string): string => {
+        const p = played(oid);
+        return p === false ? '出場なし（この季のゲーム記録に出場がありません）' : p === true ? '記録欠損（ゲーム記録に出場がありますが、n01の成績行がありません）' : '成績記録なし（出場の有無はゲーム記録で未確認）';
+      };
+      return [...rows.map((r) => ({ oid: r.oid, name: r.name })), ...extra].map((r) => {
+        const stats = statsOf.get(r.oid);
+        const conflict = base.conflicts.some((c) => c.oid === r.oid);
+        if (!stats && (base.heldPlayers ?? []).some((p) => p.oid === r.oid)) return { id: `oid:${r.oid}`, name: r.name, personKey: null, reason: '本人照合が保留です（内訳で確認できます）', period: null };
+        return {
+          id: `oid:${r.oid}`,
+          name: stats?.name ?? r.name,
+          personKey: stats?.personKey ?? null,
+          reason: stats ? undefined : conflict ? '同じ選手IDが複数チームにあるため集計から除外しています' : noStats(r.oid),
+          period: stats ? (byKey.get(stats.personKey) ?? null) : null,
+        };
+      });
+    }
+    const multi = load.request.mode === 'last3' || load.request.mode === 'last12';
+    const withFigures = new Set(byKey.keys());
+    const links = role?.identity?.links;
     return players
       .filter((p) => !p.archived && !p.guest)
       .map((p) => {
-        const match = findPerson(base, p.n01);
-        return { player: p, personKey: match.personKey, reason: match.reason, period: match.personKey ? (byKey.get(match.personKey) ?? null) : null };
+        if (!links) {
+          const match = findPerson(base, p.n01);
+          return { id: p.id, name: p.name, personKey: match.personKey, reason: match.reason, period: match.personKey ? (byKey.get(match.personKey) ?? null) : null };
+        }
+        // ⑩: the member's row anywhere in the period (本人照合 applied); figures only where they played.
+        const match = findPersonInPeriod(load.seasons, baseSeason, p.n01 ? { ...p.n01, name: p.n01.sourceName ?? p.name } : undefined, links, multi, withFigures);
+        const period = match.state === 'found' && match.personKey ? (byKey.get(match.personKey) ?? null) : null;
+        const failed = !period && load.failures.length > 0 ? `（取得できなかった季が${load.failures.length}季あります）` : '';
+        // Without the base season read, "no record now" is not known: it says the season failed instead.
+        const notInBase = baseMissing ? '今季は取得できませんでした' : '今季は出場記録なし';
+        const reason = period ? (match.inBase ? undefined : notInBase) : baseMissing && match.state === 'none-period' ? `取得済みの季に出場記録なし（今季は取得できませんでした）` : `${match.reason ?? '成績を確認できません'}${failed}`;
+        return { id: p.id, name: p.name, personKey: period ? match.personKey : null, reason, period };
       });
-  }, [base, players, byKey]);
+  }, [base, baseSeason, baseMissing, baseTeam, specifiedSeason, players, byKey, seasonGames, role?.identity?.links, load.request.mode, load.seasons, load.failures.length]);
 
   const [selected, setSelectedKey] = useState<string | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -170,11 +229,14 @@ export function PlayerAnalytics({
     if (!detailStatus) return undefined;
     if (doublesView && (m === 'ppr' || m === 'first9')) {
       const verified = doubles ? (m === 'ppr' ? doubles.scoreVerified : doubles.f9Verified) : 0;
-      return legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, doubles?.seasons ?? 0);
+      const note = legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, doubles?.seasons ?? 0);
+      // n01 has no average for an ignore_avg slot: those games are backed by its 100+〜180 / High Finish.
+      const outside = hasValue && !!detailResult?.checks.some((c) => (c.avgExcludedGames ?? 0) > 0 && c.verified.outsideAvg);
+      return outside && note ? `${note}。平均の対象外の枠（ignore_avg）のゲームは、100+〜180・High Finishの公式記録との一致で照合` : note;
     }
     if (singlesView && (m === 'first9' || m === 'keep' || m === 'break')) {
       const verified = singles ? (m === 'first9' ? singles.f9Verified : singles.breakVerified) : 0;
-      return legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, singles?.seasons ?? 0);
+      return legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, singles?.seasons ?? 0, 'singles');
     }
     return undefined;
   };
@@ -201,20 +263,31 @@ export function PlayerAnalytics({
   const myStanding = person ? standingOf(ranking, person.personKey) : null;
   const teamNameOf = (id: string): string => {
     const p = byKey.get(id);
-    const entry = p?.seasons.find((s) => s.tournamentId === baseTournamentId) ?? p?.seasons[0];
+    const entry = p?.seasons.find((s) => s.tournamentId === anchorId) ?? p?.seasons[0];
     return base.teams.find((t) => t.teamId === entry?.teamId)?.name ?? '';
   };
   const comparePeople = compare.map((key) => byKey.get(key)).filter((p): p is NonNullable<typeof p> => !!p);
   const compareCandidates = population.scoped.members.filter((m) => m.personKey !== selectedKey && !compare.includes(m.personKey));
-  const sampleText = (m: MetricId): string => (person ? formatSample(m, person.metrics[m].den) : '');
+  const multiSeason = load.request.mode === 'last3' || load.request.mode === 'last12';
+  const commonSeasons = role ? contributingSeasons(role.adoption) : load.seasons.length;
+  const sampleText = (m: MetricId): string => {
+    if (!person) return '';
+    const used = seasonsUsedText(person.seasons.map((x) => x.line), m, commonSeasons, multiSeason, person.metrics[m].value !== null);
+    return `${formatSample(m, person.metrics[m].den)}${used ? ` ・ ${used}` : ''}`;
+  };
 
   return (
     <div className="analytics-columns">
         <Card title="チームメンバー" kicker="ROSTER" className="analytics-roster-card" action={onOpenMembers ? <button type="button" className="btn small" onClick={onOpenMembers}>メンバー管理</button> : undefined}>
+          {specifiedSeason && baseTeam ? (
+            <p className="small-text muted" data-testid="season-roster-note">
+              {base.title}に{baseTeam.name}で登録された選手です（その季の選手IDで成績を開きます）。{rosterNote ?? ''}
+            </p>
+          ) : null}
           {roster.length === 0 ? <p className="small-text muted">メンバーが登録されていません。</p> : null}
           <ul className="list analytics-roster">
-            {roster.map(({ player, personKey, reason, period }) => (
-              <li key={player.id}>
+            {roster.map(({ id, name, personKey, reason, period }) => (
+              <li key={id}>
                 <button
                   type="button"
                   className="list-row"
@@ -223,10 +296,10 @@ export function PlayerAnalytics({
                   onClick={() => personKey && setSelected(personKey)}
                 >
                   <span className="grow">
-                    <span className="title">{player.name}</span>
+                    <span className="title">{name}</span>
                     <span className="meta">
                       {period
-                        ? `3DA ${formatValue('ppr', period.metrics.ppr.value)} ・ Leg ${formatValue('legRate', period.metrics.legRate.value)}${period.linked ? ` ・ ${period.seasons.length}季` : ''}`
+                        ? `3DA ${formatValue('ppr', period.metrics.ppr.value)} ・ Leg ${formatValue('legRate', period.metrics.legRate.value)}${period.linked ? ` ・ ${period.seasons.length}季` : ''}${reason ? ` ・ ${reason}` : ''}`
                         : (reason ?? '成績を確認できません')}
                     </span>
                   </span>
@@ -246,7 +319,9 @@ export function PlayerAnalytics({
             <Card title={person.name} kicker="PLAYER">
               <p className="small-text muted" data-testid="player-basis">
                 {person.metrics.seasons}シーズンの合算{roleView ? `（${GAME_SCOPE_LABEL[gameScope]}のゲームのみ）` : ''}
-                {person.linked ? '（n01のIDが一意と確認できた季のみ結合）' : ''}
+                {person.linked ? '（本人と確認できた季のみ結合。内訳は下の「本人照合」）' : ''}
+                {baseMissing ? <span data-testid="player-base-missing"> ・ 今季は取得できませんでした（取得済みの過去季で部分集計）</span> : null}
+                {!baseMissing && !person.seasons.some((x) => x.tournamentId === baseTournamentId) ? <span data-testid="player-no-base"> ・ {load.request.mode === 'specified' ? '指定季は出場記録なし' : '今季は出場記録なし'}（期間内の他の季の成績）</span> : null}
                 {roleView
                   ? ` ・ ${person.metrics.setRate.den}ゲーム`
                   : ` ・ 出場 ${person.metrics.counts.match ?? '—'} 試合（勝利数ではありません）`}
@@ -291,7 +366,7 @@ export function PlayerAnalytics({
                     />
                   );
                 })}
-                {doublesView ? <StartRateCard start={start} pendingText={detailStatus && detailStatus.kind !== 'done' && detailStatus.kind !== 'partial' ? detailStatus.text : null} /> : null}
+                {doublesView ? <StartRateCard start={start} pendingText={detailStatus && detailStatus.kind !== 'done' && detailStatus.kind !== 'partial' ? detailStatus.text : null} seasonsUsed={start && multiSeason && start.seasonsCounted !== commonSeasons ? `${start.seasonsCounted}季分` : null} /> : null}
               </div>
               <details className="analytics-details" open>
                 <summary>スコア・フィニッシュ記録</summary>
@@ -326,6 +401,7 @@ export function PlayerAnalytics({
                   {!roleView && person.metrics.extremes.bestLeg !== null ? ' Best Leg は n01 公式値で、開始点数（501/1001等）の区別はありません。' : ''}
                 </p>
               </details>
+              {role?.identity ? <IdentityPanel personKey={person.personKey} identity={role.identity} /> : null}
               {myStanding?.state === 'reference' ? <p className="small-text muted">この指標はサンプル数が基準({MIN_SAMPLE[metric as MetricId] ?? '—'})未満のため、順位に含めていません。</p> : null}
             </Card>
 
@@ -459,6 +535,11 @@ export function PlayerAnalytics({
             </p>
           ) : null}
           {activeScope === 'league' && load.request.mode !== 'current' ? <p className="small-text muted">期間内にディビジョンや試合形式が異なる成績を含む場合があります。</p> : null}
+          {baseMissing && base ? (
+            <p className="small-text muted" data-testid="ranking-anchor-note">
+              今季を取得できなかったため、比較の母集団（チーム・ディビジョン）は取得できた最新の季（{base.title}）の所属で判定しています（部分集計）。
+            </p>
+          ) : null}
           {available_.notes.map((note) => (
             <p key={note} className="small-text muted" data-testid="scope-rank-note">
               {note}
