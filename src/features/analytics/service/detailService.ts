@@ -631,7 +631,8 @@ export async function reconstructPerson(
     };
 
     if (recordHeld) {
-      publishBest(false);
+      // The missing game may be one of their singles (a shorter won leg): Best Leg is not confirmed.
+      holdAll(`${season.title}: ${recordHeld}`);
       const held: SeasonCheck = { tournamentId: season.tournamentId, oid: me.oid, state: 'incomplete', games: mine.length, reconstructed: mine.filter((g) => rebuilt.get(g.gameId)?.ok).length, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: recordHeld, byRecord: true, singles: { games: mine.filter((g) => g.sides.some((x) => x.players.length === 1 && x.players[0].oid === me.oid)).length, rebuilt: mine.filter((g) => g.sides.some((x) => x.players.length === 1 && x.players[0].oid === me.oid) && rebuilt.get(g.gameId)?.ok).length } };
       result.checks.push(held);
       if (doublesCount > 0) result.starts.push(unexamined(doublesCount, recordHeld));

@@ -110,7 +110,13 @@ export function PlayerAnalytics({
       // 出場なし only when the season's whole game list shows no game of theirs; a game of theirs
       // without a stats row is a missing record; without a complete list, it is not known.
       const list = seasonGames?.complete ? seasonGames : null;
-      const played = (oid: string): boolean | null => (list ? list.games.some((g) => g.sides.some((x) => x.players.some((p) => p.oid === oid))) : null);
+      // A game of the team whose throwing order n01 left out may be theirs: then nobody is known absent.
+      const orderMissing = !!list?.games.some((g) => g.missingOrder && g.sides.some((x, i) => g.missingOrder![i] && x.teamId === baseTeam.teamId));
+      const played = (oid: string): boolean | null => {
+        if (!list) return null;
+        if (list.games.some((g) => g.sides.some((x) => x.players.some((p) => p.oid === oid)))) return true;
+        return orderMissing ? null : false;
+      };
       const noStats = (oid: string): string => {
         const p = played(oid);
         return p === false ? '出場なし（この季のゲーム記録に出場がありません）' : p === true ? '記録欠損（ゲーム記録に出場がありますが、n01の成績行がありません）' : '成績記録なし（出場の有無はゲーム記録で未確認）';

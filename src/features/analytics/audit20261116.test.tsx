@@ -125,6 +125,8 @@ describe('③ a row whose throwing order n01 left out (TDA 2026年度 前期)', 
     expect(result.checks[0]).toMatchObject({ state: 'incomplete', byRecord: true, reason: expect.stringContaining('投順が記録されていない') });
     expect(needsRetry(result)).toBe(false);
     expect(result.contributions.get('g2')?.get('s1')).toMatchObject({ score: 150, darts: 9, f9Score: 150, f9Darts: 9, breakLegs: 0 });
+    // Best Leg waits: the missing game may hold a shorter won leg of theirs.
+    expect(result.bestLegHeld.all).toBe(true);
     // The singles view still holds s1 (side-R's missing singles game may be theirs); the legs wait in the result.
     expect(projectSeasons([s], 'singles', { games, failed: new Set() }, result.contributions).seasons[0].players.find((p) => p.oid === 's1')!.line.f9Score).toBeNull();
   });
@@ -202,6 +204,13 @@ describe('⑤ 指定季: the player list is that season’s registered roster', 
     render(<PlayerAnalytics team={team} players={[]} load={load} baseTournamentId="s_past" role={role} />);
     const rows = screen.getAllByRole('button').filter((b) => b.classList.contains('list-row'));
     expect(rows[1].textContent).toContain('出場なし');
+    cleanup();
+    // A game of MC-B whose order n01 left out: the former member may have played in it.
+    const withMissing = new Map([['s_past', { ...games.get('s_past')!, games: [...games.get('s_past')!.games, ...parseGameList({ result: 0, list: [{ mid: 'm2', tmid: 's_past_lg_0_y_MCB_OTH', schid: 's1', endMatch: 1, statsData: [{ tpid: 'MCB', order: null, winLegs: 0, allScore: 300, allDarts: 30 }, { tpid: 'OTH', order: [{ oid: 'o1' }], winLegs: 2, allScore: 501, allDarts: 30 }] }] }).games] }]]);
+    render(<PlayerAnalytics team={team} players={[]} load={load} baseTournamentId="s_past" role={{ ...role, games: gamesState(['s_past'], withMissing) }} />);
+    const again = screen.getAllByRole('button').filter((b) => b.classList.contains('list-row'));
+    expect(again[1].textContent).toContain('成績記録なし');
+    expect(again[1].textContent).not.toContain('出場なし');
   });
 });
 
