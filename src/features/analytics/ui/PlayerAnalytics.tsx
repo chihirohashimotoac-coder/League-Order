@@ -13,7 +13,8 @@ import { SCOPE_LABEL as GAME_SCOPE_LABEL } from '../roleGames';
 import { scopeMetrics } from '../scopeMetrics';
 import type { RoleViewProps } from './AnalyticsPage';
 import { InsightList, MetricCard, RankingTable, Segmented, TrendChart } from './parts';
-import { LegDetailPanel, ReconstructionPanel, StartRateCard } from './scopeParts';
+import { LegDetailPanel, ReconstructionPanel, seasonsUsedText, StartRateCard } from './scopeParts';
+import { contributingSeasons } from '../projection';
 import { detailCoverage, doublesCoverage, roleExposure, singlesCoverage } from '../service/detailService';
 import { periodStart } from '../startRate';
 import { detailStatusOf, legCardNote } from './detailStatus';
@@ -93,16 +94,37 @@ export function PlayerAnalytics({
   const everyone = useMemo(() => buildPopulation(load.seasons, { kind: 'league' }, baseTournamentId).people, [load.seasons, baseTournamentId]);
   const byKey = useMemo(() => new Map(everyone.map((p) => [p.personKey, p])), [everyone]);
 
-  // The roster as League Order knows it, matched to n01 rows only where identity is proven.
-  const roster = useMemo(() => {
+  // The roster. 今季・複数季: League Order's members, matched to n01 rows only where identity is
+  // proven. 指定季: everyone registered for the team in that season (former members included),
+  // opened by that season's own player id — a player without a stats row is "出場なし".
+  const specifiedSeason = load.request.mode === 'specified';
+  const rosterNote = specifiedSeason && base && baseTeam ? (base.roster ? null : '名簿を取得できないため、この季に成績のある選手だけを表示しています。') : null;
+  const roster = useMemo((): { id: string; name: string; personKey: string | null; reason?: string; period: (typeof everyone)[number] | null }[] => {
     if (!base) return [];
+    if (specifiedSeason && baseTeam) {
+      const statsOf = new Map(base.players.filter((p) => p.teamId === baseTeam.teamId).map((p) => [p.oid, p]));
+      const rows = base.roster ? base.roster.filter((r) => r.teamId === baseTeam.teamId) : [];
+      const listed = new Set(rows.map((r) => r.oid));
+      const extra = [...statsOf.values()].filter((p) => !listed.has(p.oid)).map((p) => ({ oid: p.oid, name: p.name }));
+      return [...rows.map((r) => ({ oid: r.oid, name: r.name })), ...extra].map((r) => {
+        const stats = statsOf.get(r.oid);
+        const conflict = base.conflicts.some((c) => c.oid === r.oid);
+        return {
+          id: `oid:${r.oid}`,
+          name: stats?.name ?? r.name,
+          personKey: stats?.personKey ?? null,
+          reason: stats ? undefined : conflict ? '同じ選手IDが複数チームにあるため集計から除外しています' : '出場なし（この季の成績の記録がありません）',
+          period: stats ? (byKey.get(stats.personKey) ?? null) : null,
+        };
+      });
+    }
     return players
       .filter((p) => !p.archived && !p.guest)
       .map((p) => {
         const match = findPerson(base, p.n01);
-        return { player: p, personKey: match.personKey, reason: match.reason, period: match.personKey ? (byKey.get(match.personKey) ?? null) : null };
+        return { id: p.id, name: p.name, personKey: match.personKey, reason: match.reason, period: match.personKey ? (byKey.get(match.personKey) ?? null) : null };
       });
-  }, [base, players, byKey]);
+  }, [base, baseTeam, specifiedSeason, players, byKey]);
 
   const [selected, setSelectedKey] = useState<string | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -174,7 +196,7 @@ export function PlayerAnalytics({
     }
     if (singlesView && (m === 'first9' || m === 'keep' || m === 'break')) {
       const verified = singles ? (m === 'first9' ? singles.f9Verified : singles.breakVerified) : 0;
-      return legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, singles?.seasons ?? 0);
+      return legCardNote(METRIC_LABEL[m], hasValue, detailStatus, verified, singles?.seasons ?? 0, 'singles');
     }
     return undefined;
   };
@@ -206,15 +228,26 @@ export function PlayerAnalytics({
   };
   const comparePeople = compare.map((key) => byKey.get(key)).filter((p): p is NonNullable<typeof p> => !!p);
   const compareCandidates = population.scoped.members.filter((m) => m.personKey !== selectedKey && !compare.includes(m.personKey));
-  const sampleText = (m: MetricId): string => (person ? formatSample(m, person.metrics[m].den) : '');
+  const multiSeason = load.request.mode === 'last3' || load.request.mode === 'last12';
+  const commonSeasons = role ? contributingSeasons(role.adoption) : load.seasons.length;
+  const sampleText = (m: MetricId): string => {
+    if (!person) return '';
+    const used = seasonsUsedText(person.seasons.map((x) => x.line), m, commonSeasons, multiSeason, person.metrics[m].value !== null);
+    return `${formatSample(m, person.metrics[m].den)}${used ? ` ・ ${used}` : ''}`;
+  };
 
   return (
     <div className="analytics-columns">
         <Card title="チームメンバー" kicker="ROSTER" className="analytics-roster-card" action={onOpenMembers ? <button type="button" className="btn small" onClick={onOpenMembers}>メンバー管理</button> : undefined}>
+          {specifiedSeason && baseTeam ? (
+            <p className="small-text muted" data-testid="season-roster-note">
+              {base.title}に{baseTeam.name}で登録された選手です（その季の選手IDで成績を開きます）。{rosterNote ?? ''}
+            </p>
+          ) : null}
           {roster.length === 0 ? <p className="small-text muted">メンバーが登録されていません。</p> : null}
           <ul className="list analytics-roster">
-            {roster.map(({ player, personKey, reason, period }) => (
-              <li key={player.id}>
+            {roster.map(({ id, name, personKey, reason, period }) => (
+              <li key={id}>
                 <button
                   type="button"
                   className="list-row"
@@ -223,7 +256,7 @@ export function PlayerAnalytics({
                   onClick={() => personKey && setSelected(personKey)}
                 >
                   <span className="grow">
-                    <span className="title">{player.name}</span>
+                    <span className="title">{name}</span>
                     <span className="meta">
                       {period
                         ? `3DA ${formatValue('ppr', period.metrics.ppr.value)} ・ Leg ${formatValue('legRate', period.metrics.legRate.value)}${period.linked ? ` ・ ${period.seasons.length}季` : ''}`

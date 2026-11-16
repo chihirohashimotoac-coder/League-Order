@@ -80,7 +80,7 @@ describe('game-kind views on screen', () => {
     expect(run).not.toHaveBeenCalled();
     expect(screen.queryByTestId('reconstruct-run')).toBeNull();
     expect(screen.getByTestId('metric-3DA').textContent).toContain('準備中');
-    expect(screen.getByTestId('metric-個人スタート率').textContent).toContain('取得待ち');
+    expect(screen.getByTestId('metric-ダブルイン成功率').textContent).toContain('取得待ち');
     expect(screen.getByTestId('metric-Leg勝率').textContent).toContain('ペア・チームとしての結果');
     const options = within(screen.getByLabelText('指標')).getAllByRole('option').map((o) => o.textContent);
     expect(options).toEqual(['Leg勝率', 'Set勝率']);
@@ -94,7 +94,7 @@ describe('game-kind views on screen', () => {
     render(<PlayerAnalytics team={team()} players={players} load={load} baseTournamentId={TDID_2024_2ND} role={role} />);
     expect(focus.mock.calls.every((c) => c[1] === false)).toBe(true); // never a read
     expect(screen.getByTestId('metric-3DA').textContent).toContain('個人別に復元できません');
-    expect(screen.queryByTestId('metric-個人スタート率')).toBeNull();
+    expect(screen.queryByTestId('metric-ダブルイン成功率')).toBeNull();
     screen.getByTestId('reconstruct-run').click();
     expect(run).toHaveBeenCalledWith(s.players.find((p) => p.oid === '63Cz')!.personKey);
   });
@@ -242,10 +242,10 @@ describe('doubles: the automatic read on screen (stored 2024 2nd data, league id
     return { run };
   }
 
-  it('3DA from the verified reconstruction and 個人スタート率 38.5%・5/13スロー, labelled as computed from the legs', async () => {
+  it('3DA from the verified reconstruction and ダブルイン成功率 38.5%・5/13スロー, labelled as computed from the legs', async () => {
     const result = await reconstructPerson({ api: new AnalyticsApi({ transport }), cache: new AnalyticsCache({ memoryOnly: true }), isOnline: () => true, now: () => Date.now(), sleep: async () => undefined }, { seasons: [atdo], games: games.games, personKey });
     await shown(result);
-    const start = screen.getByTestId('metric-個人スタート率').textContent!;
+    const start = screen.getByTestId('metric-ダブルイン成功率').textContent!;
     expect(start).toContain('38.5%');
     expect(start).toContain('5/13スロー');
     expect(start).toContain('Leg明細から算出');
@@ -263,7 +263,7 @@ describe('doubles: the automatic read on screen (stored 2024 2nd data, league id
     const { run } = await shown(result);
     expect(screen.getByTestId('reconstruction').getAttribute('data-state')).toBe('failed');
     expect(screen.getByTestId('reconstruction-badge').textContent).toBe('取得失敗');
-    expect(screen.getByTestId('metric-個人スタート率').textContent).toContain('—');
+    expect(screen.getByTestId('metric-ダブルイン成功率').textContent).toContain('—');
     expect(screen.getByTestId('metric-3DA').textContent).toContain('取得できなかった');
     await user.click(screen.getByTestId('reconstruct-retry'));
     expect(run).toHaveBeenCalledWith(personKey, { fresh: false, auto: true, recheck: true });

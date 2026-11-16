@@ -5,17 +5,17 @@ import { serveDoublesWorld } from './doublesWorld';
 /**
  * The doubles view's positive path in a real browser (phone and desktop projects), against a
  * fixture n01 holding one real season (`doublesWorld.ts`): with no button pressed, the shown
- * player's legs alone are read, and 3DA, First 9 and 個人スタート率 appear.
+ * player's legs alone are read, and 3DA, First 9 and ダブルイン成功率 appear.
  *
  * Expected values (灰田 裕一郎, `o3ul`, ATDO 2026 3rd — n01's own totals, read 2026-10-13):
  *  - 3DA 473 × 3 / 26 = 54.58; First 9 96 × 3 / 6 = 48.00 (the reconstruction equals them);
- *  - 個人スタート率 1/1: his only doubles game (`mfLrlWMg_1790853252790`, ダブルス1 `2gbr`,
+ *  - ダブルイン成功率 1/1: his only doubles game (`mfLrlWMg_1790853252790`, ダブルス1 `2gbr`,
  *    pair [gm3v, o3ul]): leg 1 `0` (gm3v ✗) then `56` (o3ul ✓); leg 2 `61` (gm3v ✓) — he never
  *    threw again before the pair started.
  */
 test.use({ serviceWorkers: 'block' });
 
-test('doubles: 3DA, First 9 and 個人スタート率 appear without a button, reading the shown player only', async ({ page }, info) => {
+test('doubles: 3DA, First 9 and ダブルイン成功率 appear without a button, reading the shown player only', async ({ page }, info) => {
   const n01 = await serveDoublesWorld(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'n01から作成' }).click();
@@ -36,8 +36,8 @@ test('doubles: 3DA, First 9 and 個人スタート率 appear without a button, r
   await expect(page.getByTestId('reconstruction')).toHaveAttribute('data-state', 'done');
   await expect(page.getByTestId('metric-3DA')).toContainText('54.58');
   await expect(page.getByTestId('metric-First 9')).toContainText('48.00');
-  const start = page.getByTestId('metric-個人スタート率');
-  await expect(start).toContainText('100%');
+  const start = page.getByTestId('metric-ダブルイン成功率');
+  await expect(start).toContainText('100.0%');
   await expect(start).toContainText('1/1スロー');
   await expect(start).toContainText('Leg明細から算出');
   await expect(page.getByTestId('reconstruct-run')).toHaveCount(0);
@@ -55,7 +55,7 @@ test('doubles: 3DA, First 9 and 個人スタート率 appear without a button, r
   const settled = n01.log.length;
   await page.getByTestId('scope-bar').getByRole('button', { name: '01全体', exact: true }).click();
   await page.getByTestId('scope-bar').getByRole('button', { name: 'ダブルス', exact: true }).click();
-  await expect(page.getByTestId('metric-個人スタート率')).toContainText('1/1スロー');
+  await expect(page.getByTestId('metric-ダブルイン成功率')).toContainText('1/1スロー');
   expect(n01.log.slice(settled).filter((e) => e.startsWith('match/get') || e.includes('player_high_in'))).toEqual([]);
 
   // No sideways scroll, and WCAG 2.1 AA with the figures on screen.

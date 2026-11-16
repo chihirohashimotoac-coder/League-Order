@@ -213,6 +213,7 @@ function slotsOf(value: unknown, division: number | null, settingMatchType: stri
       // Kept as written: an absent match_type stays null here (the shared parser fills in 01).
       matchType: str(firstOf(row, ['match_type', 'matchType', 'matchtype'])),
       settingMatchType,
+      ...(num(firstOf(row, ['ignore_avg', 'ignoreAvg'])) === 1 ? { ignoreAvg: true } : {}),
     });
   });
   return slots;
@@ -264,6 +265,8 @@ export interface RawGame {
   finished: boolean;
   startTime: number | null;
   sides: [RawGameSide, RawGameSide];
+  /** Per side: n01 left out the throwing order (the side's `players` is then empty). Absent: both known. */
+  missingOrder?: [boolean, boolean];
 }
 
 function playersOf(value: unknown): RawGamePlayer[] {
@@ -273,16 +276,43 @@ function playersOf(value: unknown): RawGamePlayer[] {
     .filter((p) => p.oid !== null || p.opid !== null);
 }
 
-function sideOf(value: unknown): RawGameSide | null {
+function sideOf(value: unknown, allowMissingOrder = false, teamFallback: string | null = null): RawGameSide | null {
   if (!isRec(value)) return null;
-  const teamId = str(firstOf(value, ['tpid', 'team']));
+  const teamId = str(firstOf(value, ['tpid', 'team'])) ?? (allowMissingOrder ? teamFallback : null);
   const legsWon = num(firstOf(value, ['winLegs', 'win_legs']));
   const players = playersOf(firstOf(value, ['order', 'players']));
-  if (!teamId || legsWon === null || players.length === 0) return null;
+  if (!teamId || legsWon === null || (players.length === 0 && !allowMissingOrder)) return null;
   return { teamId, players, legsWon, score: num(firstOf(value, ['allScore', 'all_score'])), darts: num(firstOf(value, ['allDarts', 'all_darts'])) };
 }
 
-/** `match/list`: one page. A row without two readable sides is counted, not guessed. */
+/** The two teams of a league `tmid` (`<tdid>_lg_<division>_<lsid>_<tpid>_<tpid>`), when it carries them. */
+function teamsOfMatchId(matchId: string | null): [string, string] | null {
+  const hit = matchId ? /_lg_\d+_[^_]+_([^_]+)_([^_]+)$/u.exec(matchId) : null;
+  return hit ? [hit[1], hit[2]] : null;
+}
+
+/**
+ * Both sides of a row. A side whose throwing order n01 left out (`order: null`, seen in TDA
+ * 2026年度 前期: three games of one team) keeps its team, legs and totals with no players, and the
+ * row says so (`missingOrder`): the team's results are known, who threw for it is not. A side
+ * without a team (none written and none in the `tmid`) or without its legs makes the row unreadable.
+ */
+function sidesOf(sideRows: unknown, matchId: string | null): { sides: [RawGameSide, RawGameSide]; missingOrder?: [boolean, boolean] } | null {
+  if (!Array.isArray(sideRows) || sideRows.length !== 2) return null;
+  const strict = sideRows.map((row) => sideOf(row));
+  if (strict.every((side) => side !== null)) return { sides: strict as [RawGameSide, RawGameSide] };
+  const teams = teamsOfMatchId(matchId);
+  const lenient = sideRows.map((row, i) => sideOf(row, true, teams?.[i] ?? null));
+  if (lenient.some((side) => side === null)) return null;
+  const sides = lenient as [RawGameSide, RawGameSide];
+  return { sides, missingOrder: [sides[0].players.length === 0, sides[1].players.length === 0] };
+}
+
+/**
+ * `match/list`: one page. A row without two readable sides is counted, not guessed; a row whose
+ * sides miss only their throwing order is kept with `missingOrder` (its teams, legs and totals are
+ * read; its effect on the figures is judged per team, player and game kind in `roleGames.ts`).
+ */
 export function parseGameList(raw: unknown): { games: RawGame[]; rows: number; unreadable: number; ids: (string | null)[] } {
   const body = assertOk('match/list', raw);
   const list = firstOf(body, ['list', 'matches', 'match_list']);
@@ -299,21 +329,22 @@ export function parseGameList(raw: unknown): { games: RawGame[]; rows: number; u
     }
     const gameId = str(firstOf(row, ['mid', 'id']));
     ids.push(gameId);
-    const sideRows = firstOf(row, ['statsData', 'stats_data']);
-    const sides = Array.isArray(sideRows) && sideRows.length === 2 ? sideRows.map(sideOf) : null;
-    if (!gameId || !sides || sides.some((s) => s === null)) {
+    const matchId = str(row.tmid);
+    const read = sidesOf(firstOf(row, ['statsData', 'stats_data']), matchId);
+    if (!gameId || !read) {
       unreadable += 1;
       continue;
     }
     const startTime = num(row.startTime);
     games.push({
       gameId,
-      matchId: str(row.tmid),
+      matchId,
       schid: str(row.schid),
       matchType: str(firstOf(row, ['match_type', 'matchType'])),
       finished: num(row.endMatch) === 1,
       startTime: startTime !== null && startTime > 0 ? startTime : null,
-      sides: sides as [RawGameSide, RawGameSide],
+      sides: read.sides,
+      ...(read.missingOrder ? { missingOrder: read.missingOrder } : {}),
     });
   }
   return { games, rows: list.length, unreadable, ids };
@@ -351,6 +382,8 @@ export interface RawGameDetail {
   finished: boolean;
   legs: RawLeg[];
   sides: [RawGameSide, RawGameSide];
+  /** As in {@link RawGame}: a side without its throwing order. */
+  missingOrder?: [boolean, boolean];
 }
 
 function visitsOf(value: unknown): RawVisit[] | null {
@@ -372,9 +405,8 @@ export function parseGameDetail(raw: unknown): RawGameDetail {
   const match = isRec(body.match) ? body.match : null;
   if (!match) throw new AnalyticsSchemaError('match/get', '試合 (match) が見つかりません。');
   const gameId = str(match.mid);
-  const sideRows = match.statsData;
-  const sides = Array.isArray(sideRows) && sideRows.length === 2 ? sideRows.map(sideOf) : null;
-  if (!gameId || !sides || sides.some((s) => s === null) || !Array.isArray(match.legData)) {
+  const read = sidesOf(match.statsData, str(match.tmid));
+  if (!gameId || !read || !Array.isArray(match.legData)) {
     throw new AnalyticsSchemaError('match/get', '試合の明細 (legData / statsData) を読めません。');
   }
   const legs: RawLeg[] = [];
@@ -402,7 +434,8 @@ export function parseGameDetail(raw: unknown): RawGameDetail {
     startScore: num(match.startScore),
     finished: num(match.endMatch) === 1,
     legs,
-    sides: sides as [RawGameSide, RawGameSide],
+    sides: read.sides,
+    ...(read.missingOrder ? { missingOrder: read.missingOrder } : {}),
   };
 }
 

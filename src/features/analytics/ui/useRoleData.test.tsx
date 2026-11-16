@@ -34,6 +34,8 @@ const games: GamesLoad = {
   units: 1,
 };
 const load: PeriodLoad = emptyLoad({ mode: 'current', currentTournamentId: TDID_2024_2ND }, { seasons: [season], complete: true });
+/** Games with more than one thrower per side (their per-player figures need n01's totals). */
+const doublesIds = new Set(raw.filter((g) => g.sides[0].players.length > 1).map((g) => g.gameId));
 const correct = Object.fromEntries(details().map((d) => [d.gameId, wireDetail(d)]));
 const CORRECTED = 'VU6AjbQE_1724326953016';
 const target = details().find((d) => d.gameId === CORRECTED)!;
@@ -105,13 +107,14 @@ describe('R01: a reconstruction run again replaces the player’s figures', () =
     await run('63Cz'); // 「再度復元する」: read again (forceRefresh), no longer adds up
     const check = out.detail!.results.get(keyOf('63Cz'))!.checks[0];
     expect(check.verified.score).toBe(false);
-    expect(out.detail!.results.get(keyOf('63Cz'))!.contributions.size).toBe(0);
+    // No multi-thrower game keeps a per-player score (singles games stand on their own legs).
+    for (const [gameId, players] of out.detail!.results.get(keyOf('63Cz'))!.contributions) if (doublesIds.has(gameId)) expect(players.get('63Cz')?.score).toBeUndefined();
     // The page: no per-player figures for 63Cz any more (the pair's games are withheld again)…
     expect(shown(out.detail!, '63Cz').darts).toBeNull();
     expect(shown(out.detail!, '63Cz').score).toBeNull();
     // …and the other verified player is untouched.
     expect(fed(out.detail!, '6s5w')).toEqual(verifiedOther);
-    expect(fed(out.detail!, '63Cz').size).toBe(0);
+    expect([...fed(out.detail!, '63Cz')].filter(([gameId, c]) => doublesIds.has(gameId) && c?.score !== undefined)).toEqual([]);
 
     n01.details = correct;
     await run('63Cz'); // corrected again: only the newest figures, the same as the first verified ones

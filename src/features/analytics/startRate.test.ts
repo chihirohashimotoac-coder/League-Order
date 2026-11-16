@@ -5,7 +5,7 @@ import { formatStart, isStartTally, periodStart, startTallyOf } from './startRat
 import type { SeasonStart } from './startRate';
 
 /**
- * 個人スタート率 on **intentional test data** (not n01 records): each leg below is written to
+ * ダブルイン成功率 on **intentional test data** (not n01 records): each leg below is written to
  * pin one rule of the definition. The measured n01 examples are in `realData.startRate.test.ts`.
  */
 
@@ -156,13 +156,13 @@ describe('the period figure (Σ successes / Σ attempts)', () => {
     const p = periodStart([season({ attempts: 2, successes: 1 }), season({ tournamentId: 'u', attempts: 8, successes: 2 })]);
     expect(p).toMatchObject({ state: 'value', attempts: 10, successes: 3, partial: false });
     expect(p.value).toBeCloseTo(0.3); // not (0.5 + 0.25) / 2
-    expect(formatStart({ value: 0.5, successes: 3, attempts: 6 })).toEqual({ value: '50%', sample: '3/6スロー' });
+    expect(formatStart({ value: 0.5, successes: 3, attempts: 6 })).toEqual({ value: '50.0%', sample: '3/6スロー' });
   });
 
   it('attempts without a success is 0%, not "no data"', () => {
     const p = periodStart([season({ attempts: 4, successes: 0 })]);
     expect(p).toMatchObject({ state: 'value', value: 0 });
-    expect(formatStart(p).value).toBe('0%');
+    expect(formatStart(p).value).toBe('0.0%');
   });
 
   it('no attempt at all (分母0), no doubles games (対象なし), only unknown slots (ルール不明) and nothing readable (算出不可) carry no number', () => {

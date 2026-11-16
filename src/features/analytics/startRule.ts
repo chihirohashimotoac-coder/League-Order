@@ -24,10 +24,23 @@ import type { SeasonData } from './seasonData';
 export interface DoubleInRule {
   leagueId: string;
   name: string;
-  /** Seasons in scope: league seasons that start at or after this time (epoch ms). */
+  /**
+   * Seasons in scope: league seasons that start at or after this time (epoch ms). Ignored when
+   * {@link seasons} is given (an explicit list never extends to seasons nobody checked).
+   */
   fromStartedAt: number;
-  /** The first season of the checked range, for the details panel. */
+  /** The first season of the checked range (or the checked seasons), for the details panel. */
   fromSeason: string;
+  /**
+   * The only seasons (`tdid`) the rule was confirmed for. A season not listed is out of scope —
+   * used when the organiser's rule could be tied to some seasons only (AKDO, 2026-11-16).
+   */
+  seasons?: readonly string[];
+  /**
+   * The only slots (`schid`) the rule was confirmed for, when known. A doubles 01 slot not listed
+   * is out of scope (another slot of the same season may be played otherwise).
+   */
+  slots?: readonly string[];
   /** Where the rule comes from, and what of it was read. */
   source: string;
 }
@@ -66,6 +79,20 @@ export const DOUBLE_IN_RULES: readonly DoubleInRule[] = [
     fromSeason: '2023年度 後期リーグ戦（t_UlDS_4948）',
     source: 'ダブルスはダブルイン（TDA公式「ルールとマナー」のリーグ戦のゲーム構成。本文はこの環境から取得できず未読。利用者の確認、2026-11-15）。2023年度後期〜2026年度中期の通常シーズン8季で、ハイイン記録がダブルスの枠だけにあり最高170点',
   },
+  {
+    // AKDO: the public rule book (a transcription, article 7) was confirmed at the audit
+    // (2026-11-16); the organiser's current PDF and the season the rule started were not. So the
+    // rule is applied only to the season whose records were checked, and only to its two doubles
+    // 01 slots. The earlier 2026/1st (`t_Fbsj_6639`) has high-in records on the same slots only
+    // (jwps 51・il25 45件, max 160), but it is not in scope until the rule's start is confirmed.
+    leagueId: 'lg_Amgb_5525',
+    name: 'AKDO DARTS LEAGUE',
+    fromStartedAt: Number.POSITIVE_INFINITY,
+    fromSeason: 'AKDO DARTS LEAGUE 2026/2nd（t_Oyyg_8973）のダブルス1・ダブルス2',
+    seasons: ['t_Oyyg_8973'],
+    slots: ['jwps', 'il25'],
+    source: 'ダブルスはダブルイン（AKDOルールブック第7条。監査時に転載版 paperzz.com/doc/6309456 で確認、この環境からは取得できず未読。現行の主催者PDFと過去季への適用開始は未確認のため、記録を確認した2026/2ndのダブルス1・2だけに適用）。2026/2ndのハイイン記録はダブルス1・2の枠だけにあり最高160点（2026-11-16）',
+  },
 ];
 
 /** The highest score a double-in first visit can make (D-BULL, T20, T20). */
@@ -78,9 +105,13 @@ export function declaredLeague(leagueId: string | null, rules: readonly DoubleIn
 }
 
 /** The organiser's rule that covers this season, or why none does. */
-export function seasonRule(season: Pick<SeasonData, 'leagueId' | 'startedAt'>, rules: readonly DoubleInRule[] = DOUBLE_IN_RULES): { rule: DoubleInRule } | { reason: string } {
+export function seasonRule(season: Pick<SeasonData, 'leagueId' | 'startedAt'> & { tournamentId?: string }, rules: readonly DoubleInRule[] = DOUBLE_IN_RULES): { rule: DoubleInRule } | { reason: string } {
   const rule = declaredLeague(season.leagueId, rules);
   if (!rule) return { reason: 'このリーグのダブルスのイン規則を確認できていません' };
+  if (rule.seasons) {
+    if (!season.tournamentId || !rule.seasons.includes(season.tournamentId)) return { reason: `主催者規則の適用を確認できたシーズン（${rule.fromSeason}）ではありません` };
+    return { rule };
+  }
   if (typeof season.startedAt !== 'number') return { reason: 'シーズンの開始日を確認できず、主催者規則の対象範囲か判断できません' };
   if (season.startedAt < rule.fromStartedAt) return { reason: `主催者規則を確認した範囲（${rule.fromSeason}以降）より前のシーズンです` };
   return { rule };
@@ -114,7 +145,7 @@ export function highInEvidence(records: readonly HighInRecord[]): HighInEvidence
  * read: that only removes the cross-check, never the verdict.
  */
 export function gameStartRule(
-  season: Pick<SeasonData, 'leagueId' | 'slots' | 'startedAt'>,
+  season: Pick<SeasonData, 'leagueId' | 'slots' | 'startedAt'> & { tournamentId?: string },
   game: Pick<ClassifiedGame, 'schid' | 'division' | 'family' | 'role'>,
   highIns: HighInEvidence | null,
   rules: readonly DoubleInRule[] = DOUBLE_IN_RULES,
@@ -127,6 +158,7 @@ export function gameStartRule(
     return { rule: 'unknown', reason: 'ゲーム枠の設定（ダブルス・01・開始点数）を確認できません' };
   }
   const label = slot.subtitle ?? slot.schid;
+  if (covered.rule.slots && !covered.rule.slots.includes(slot.schid)) return { rule: 'unknown', reason: `「${label}」は主催者規則の適用を確認できた枠ではありません` };
   const records = highIns?.bySlot.get(slot.schid);
   if (records && records.impossible > 0) {
     return { rule: 'unknown', reason: `「${label}」にダブルインでは出ない点数のハイイン記録が${records.impossible}件あり、この枠のイン規則を確認できません` };

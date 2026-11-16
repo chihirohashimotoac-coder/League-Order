@@ -89,7 +89,11 @@ export interface ClassifiedGame {
   role: GameRole;
   /** The slot's start score when known (501 / 1001 …). */
   startScore: number | null;
+  /** The slot is `ignore_avg`: n01 leaves the game out of its players' score / darts / First 9. */
+  avgExcluded?: boolean;
   sides: [RawGameSide, RawGameSide];
+  /** Per side: n01 left out the throwing order (`RawGame.missingOrder`). */
+  missingOrder?: [boolean, boolean];
 }
 
 const LEAGUE_TMID = /_lg_(\d+)_/u;
@@ -112,15 +116,29 @@ export function classifyGames(season: Pick<SeasonData, 'slots'>, games: readonly
   return games.map((game) => {
     const division = divisionOfMatchId(game.matchId);
     const slot = slotFor(season.slots, game.schid, division);
+    // A side without its throwing order takes the other side's size (the slot must agree), so the
+    // game keeps its kind; with neither side listed, the slot alone tells it.
+    const known = game.sides.filter((s) => s.players.length > 0).map((s) => s.players.length);
+    const sizes: [number, number] = !game.missingOrder
+      ? [game.sides[0].players.length, game.sides[1].players.length]
+      : known.length === 1
+        ? [known[0], known[0]]
+        : known.length === 2
+          ? [known[0], known[1]]
+          : slot?.numPart
+            ? [slot.numPart, slot.numPart]
+            : [0, 0];
     return {
       gameId: game.gameId,
       matchId: game.matchId,
       division,
       schid: game.schid,
       family: gameFamily(game.matchType, slot ? slotFamily(slot) : null),
-      role: gameRole(slot, [game.sides[0].players.length, game.sides[1].players.length]),
+      role: gameRole(slot, sizes),
       startScore: slot?.startScore ?? null,
+      ...(slot?.ignoreAvg ? { avgExcluded: true } : {}),
       sides: game.sides,
+      ...(game.missingOrder ? { missingOrder: game.missingOrder } : {}),
     };
   });
 }
@@ -146,6 +164,12 @@ export function tallyGames(games: readonly ClassifiedGame[]): GameTally {
  * checksum (`reconstruct.ts`); only verified fields are present.
  */
 export type PerPlayerScores = ReadonlyMap<string, ReadonlyMap<string, VerifiedContribution>>;
+
+/**
+ * A team's side figures of a game, from its legs (`detailService.reconstructTeam`): First 9 and
+ * Break of the pair / team as a whole. Game id → team id → figures.
+ */
+export type TeamContributions = ReadonlyMap<string, ReadonlyMap<string, VerifiedContribution>>;
 
 /** A line holding only what game rows can tell; everything else stays `null` (not measured). */
 function blankLine(): StatLine {
@@ -225,6 +249,16 @@ export interface GameLines {
   players: Map<string, StatLine>;
   /** Games counted (01 family, in scope). */
   games: number;
+  /**
+   * Teams with a game of this view whose throwing order n01 left out (game ids). The team's own
+   * results count; its players' figures for the view are not known (any of them may have thrown).
+   */
+  orderMissing: Map<string, string[]>;
+  /**
+   * Teams with a game whose kind cannot be told because of a missing order (game ids): it may
+   * belong to this view, so neither the team's nor its players' figures are complete.
+   */
+  kindUnknown: Map<string, string[]>;
 }
 
 /**
@@ -232,7 +266,7 @@ export interface GameLines {
  * score/darts from their own side totals; players get them for singles (one thrower) or from
  * `perPlayer` (verified reconstruction) — never a side's total copied onto a partner.
  */
-export function linesFromGames(games: readonly ClassifiedGame[], scope: GameScope, perPlayer: PerPlayerScores = new Map()): GameLines {
+export function linesFromGames(games: readonly ClassifiedGame[], scope: GameScope, perPlayer: PerPlayerScores = new Map(), perTeam: TeamContributions = new Map()): GameLines {
   const teams = new Map<string, Acc>();
   const players = new Map<string, Acc>();
   const acc = (map: Map<string, Acc>, key: string): Acc => {
@@ -244,13 +278,25 @@ export function linesFromGames(games: readonly ClassifiedGame[], scope: GameScop
     return found;
   };
   let counted = 0;
+  const orderMissing = new Map<string, string[]>();
+  const kindUnknown = new Map<string, string[]>();
+  const note = (map: Map<string, string[]>, teamId: string, gameId: string): void => void map.set(teamId, [...(map.get(teamId) ?? []), gameId]);
   for (const game of games) {
+    if (game.missingOrder && game.family.family !== 'cricket' && game.role === 'unknown') {
+      // Not classified because a side's order is missing: it may be a game of this view.
+      for (const side of game.sides) note(kindUnknown, side.teamId, game.gameId);
+      continue;
+    }
     if (game.family.family !== '01' || !inScope(game.role, scope)) continue;
     counted += 1;
     game.sides.forEach((side, index) => {
+      if (game.missingOrder?.[index]) note(orderMissing, side.teamId, game.gameId);
+    });
+    game.sides.forEach((side, index) => {
       const opponent = game.sides[1 - index];
       const sideScore: VerifiedContribution | null = side.score !== null && side.darts !== null ? { score: side.score, darts: side.darts } : null;
-      credit(acc(teams, side.teamId), side, opponent, sideScore);
+      const teamLegs = perTeam.get(game.gameId)?.get(side.teamId);
+      credit(acc(teams, side.teamId), side, opponent, teamLegs ? { ...(sideScore ?? {}), ...teamLegs } : sideScore);
       const reconstructed = perPlayer.get(game.gameId);
       for (const player of side.players) {
         if (!player.oid) continue;
@@ -264,5 +310,7 @@ export function linesFromGames(games: readonly ClassifiedGame[], scope: GameScop
     teams: new Map([...teams].map(([k, v]) => [k, finish(v)])),
     players: new Map([...players].map(([k, v]) => [k, finish(v)])),
     games: counted,
+    orderMissing,
+    kindUnknown,
   };
 }

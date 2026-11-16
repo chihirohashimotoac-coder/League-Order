@@ -1,10 +1,10 @@
 import type { RawGameDetail, RawVisit } from './api/parse';
 
 /**
- * 個人スタート率（ダブルイン）: per player, the throws that started the pair out of the throws
+ * ダブルイン成功率（ダブルイン）: per player, the throws that started the pair out of the throws
  * the player actually threw while the pair had not started yet.
  *
- *   個人スタート率 = 本人がペアをスタートさせたスロー数 ÷ ペアが未スタートの状態で本人が投げた、判定可能なスロー数
+ *   ダブルイン成功率 = 本人がペアをスタートさせたスロー数 ÷ ペアが未スタートの状態で本人が投げた、判定可能なスロー数
  *
  * One throw (visit, up to 3 darts) is one attempt. Not n01's figure: it is counted here from the
  * leg detail (`match/get`), and only for slots whose in-rule is confirmed (`startRule.ts`).
@@ -104,7 +104,8 @@ export function startTallyOf(detail: RawGameDetail): GameStartTally | null {
   const start = detail.startScore;
   if (start === null || start <= 0) return null;
   const orders = detail.sides.map((side) => side.players.map((p) => p.oid));
-  if (orders.some((order) => order.length === 0 || order.some((oid) => !oid))) return null;
+  // A side without its throwing order (n01 left it out) is not counted; the other side still is.
+  if (orders.every((order) => order.length === 0) || orders.some((order) => order.some((oid) => !oid))) return null;
   const perPlayer: Record<string, PlayerStartCount> = {};
   for (const order of orders) for (const oid of order) perPlayer[oid as string] ??= { attempts: 0, successes: 0 };
   const sides: [SideStartLegs, SideStartLegs] = [
@@ -117,6 +118,7 @@ export function startTallyOf(detail: RawGameDetail): GameStartTally | null {
     if (leg.visits[0].length === 0 && leg.visits[1].length === 0) continue; // n01's trailing, unplayed leg row
     if (typeof leg.time === 'number') legTimes.push(leg.time);
     for (const sideIndex of [0, 1] as const) {
+      if (orders[sideIndex].length === 0) continue;
       const opponent = leg.visits[sideIndex === 0 ? 1 : 0];
       const opponentCheckedOut = leg.winner === (sideIndex === 0 ? 1 : 0) && closedByCheckout(opponent);
       const outcome = readSide(leg.visits[sideIndex], start, orders[sideIndex] as string[], leg.ended, leg.middle === true, leg.time ?? null, opponentCheckedOut);
@@ -251,5 +253,5 @@ export function periodStart(seasons: readonly SeasonStart[]): PeriodStart {
 /** 「50%・3/6スロー」 */
 export function formatStart(start: Pick<PeriodStart, 'value' | 'successes' | 'attempts'>): { value: string; sample: string } {
   if (start.value === null) return { value: '—', sample: start.attempts > 0 ? `${start.successes}/${start.attempts}スロー` : '' };
-  return { value: `${Math.round(start.value * 1000) / 10}%`, sample: `${start.successes}/${start.attempts}スロー` };
+  return { value: `${(start.value * 100).toFixed(1)}%`, sample: `${start.successes}/${start.attempts}スロー` };
 }

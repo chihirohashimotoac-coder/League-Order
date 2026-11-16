@@ -81,13 +81,18 @@ export async function verifySeasonRoles(api: AnalyticsApi, tdid: string, playerS
   say('note', `ゲーム ${games.length}件: 01=${tally.byFamily['01']} cricket=${tally.byFamily.cricket} unknown=${tally.byFamily.unknown} / singles=${tally.byRole.singles} doubles=${tally.byRole.doubles} trios=${tally.byRole.trios} gallon=${tally.byRole.gallon} team=${tally.byRole.team} 分類不能=${tally.byRole.unknown}`);
 
   const lines = linesFromGames(games, 'all01');
+  // n01's season score / darts leave the `ignore_avg` slots out (AKDO, 2026-11-16); legs and sets do not.
+  const averaged = linesFromGames(games.filter((g) => g.avgExcluded !== true), 'all01');
+  const excludedGames = games.filter((g) => g.avgExcluded === true).length;
+  if (excludedGames > 0) say('note', `平均の対象外（ignore_avg）の枠のゲーム ${excludedGames}件は、チームの得点・投数の照合に含めません`);
   for (const team of season.teams) {
     const mine = lines.teams.get(team.teamId);
     if (!team.line || !mine) continue;
-    const scoreOk = team.line.score === mine.score && team.line.darts === mine.darts;
+    const avg = averaged.teams.get(team.teamId) ?? mine;
+    const scoreOk = team.line.score === avg.score && team.line.darts === avg.darts;
     const legDiff = (team.line.leg ?? 0) - (mine.leg ?? 0);
     const setDiff = (team.line.set ?? 0) - (mine.set ?? 0);
-    say(scoreOk ? 'pass' : composition.composition === 'unknown' ? 'note' : 'fail', `team ${team.name}: 01ゲーム ${mine.score}/${mine.darts} vs 公式 ${team.line.score}/${team.line.darts}${legDiff || setDiff ? ` ・ 公式との差 Leg ${legDiff} / Set ${setDiff}` : ''}`);
+    say(scoreOk ? 'pass' : composition.composition === 'unknown' ? 'note' : 'fail', `team ${team.name}: 01ゲーム ${avg.score}/${avg.darts} vs 公式 ${team.line.score}/${team.line.darts}${legDiff || setDiff ? ` ・ 公式との差 Leg ${legDiff} / Set ${setDiff}` : ''}`);
   }
 
   const multiCount = (oid: string): number => games.filter((g) => g.sides.some((s) => s.players.length > 1 && s.players.some((p) => p.oid === oid))).length;

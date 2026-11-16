@@ -2,10 +2,10 @@ import { describeN01Error } from '../../../integrations/n01/client';
 import { N01_STATUS } from '../../../integrations/n01/types';
 import { RequestBudgetError } from '../api/readApi';
 import { TTL } from '../cache/analyticsCache';
-import { addVerified, bestLegsByStart, checkPlayerSeason, safeReconstruct } from '../reconstruct';
-import type { GameReconstruction, PlayerContributions, SeasonCheck } from '../reconstruct';
+import { addVerified, bestLegsByStart, checkPlayerSeason, safeReconstruct, sideFiguresOf } from '../reconstruct';
+import type { GameReconstruction, PlayerContributions, SeasonCheck, VerifiedContribution } from '../reconstruct';
 import { classifyGames } from '../roleGames';
-import type { ClassifiedGame, SeasonGames } from '../roleGames';
+import type { ClassifiedGame, SeasonGames, TeamContributions } from '../roleGames';
 import type { SeasonData } from '../seasonData';
 import type { StatLine } from '../types';
 import type { HighInRecord, RawGameDetail } from '../api/parse';
@@ -87,7 +87,7 @@ export interface PlayerDetailResult {
    */
   awaitingOfficial?: string[];
   /**
-   * 個人スタート率 per season of the period the player appears in (doubles 01, double-in slots
+   * ダブルイン成功率 per season of the period the player appears in (doubles 01, double-in slots
    * only; see `startRate.ts` / `startRule.ts`). Pooled by `periodStart`.
    */
   starts: SeasonStart[];
@@ -374,6 +374,8 @@ function classifiedOf(season: SeasonData, raw: SeasonGames): ClassifiedGame[] {
 function matchesRow(game: ClassifiedGame, rebuilt: GameReconstruction): boolean {
   if (!rebuilt.ok) return true;
   return game.sides.every((side) => {
+    // A side without its throwing order is credited to nobody: there is nothing of it to compare.
+    if (side.players.length === 0) return true;
     let score = 0;
     let darts = 0;
     for (const p of side.players) {
@@ -443,6 +445,16 @@ export async function reconstructPerson(
     const classified = classifyGames(season, raw.games);
     const mine = personGames(classified, me.oid);
     const doublesCount = mine.filter((g) => g.role === 'doubles').length;
+    // A game of the player's team whose throwing order n01 left out may be the player's: their games
+    // of the season are not known, so nothing of theirs is checked (the team's results still count).
+    const hidden = classified.filter((g) => g.missingOrder && g.family.family !== 'cricket' && g.sides.some((side, i) => g.missingOrder![i] && side.teamId === me.teamId)).length;
+    if (hidden > 0) {
+      const reason = `チームの投順が記録されていないゲームが${hidden}件あり、この選手が出場したゲームを確定できないため照合していません`;
+      result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'incomplete', games: mine.length, reconstructed: 0, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason, byRecord: true });
+      holdAll(`${season.title}: ${reason}`);
+      result.starts.push(unexamined(doublesCount, reason));
+      continue;
+    }
     if (stopped) {
       result.notAttempted.push({ tournamentId: season.tournamentId, title: season.title });
       holdAll(`${season.title}: 通信の上限のため未確認`);
@@ -625,6 +637,9 @@ export async function reconstructPerson(
       publishBest(false);
       result.checks.push({ tournamentId: season.tournamentId, oid: me.oid, state: 'mismatch', games: mine.length, reconstructed: mine.filter((g) => rebuilt.get(g.gameId)?.ok).length, verified: { score: false, f9: false, tons: false, highOut: false, break: false }, compared: null, reason: '種別不明のゲーム枠を含むため、n01公式値と照合できません' });
       if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: false, evidence, highIns, highInNote }));
+      // Singles legs do not depend on n01's totals: their figures stand (the season check cannot run).
+      addVerified(result.contributions, result.checks[result.checks.length - 1], classified, rebuilt);
+      for (const g of mine) if (result.contributions.has(g.gameId)) result.gameSeason[g.gameId] = season.tournamentId;
       continue;
     }
     const unmatched = mine.filter((g) => stored.has(g.gameId) && stored.get(g.gameId)!.r.ok && !rebuilt.has(g.gameId) && stored.get(g.gameId)!.fp !== rowPrint.get(g.gameId)).length;
@@ -640,7 +655,7 @@ export async function reconstructPerson(
     }
     result.checks.push(check);
     publishBest(check.verified.score && !(result.awaitingOfficial ?? []).includes(season.tournamentId));
-    if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: check.verified.score, evidence, highIns, highInNote }));
+    if (doublesCount > 0) result.starts.push(seasonStartOf({ season, oid: me.oid, mine, rebuilt, attributionVerified: check.multi?.score ?? check.verified.score, evidence, highIns, highInNote }));
     addVerified(result.contributions, check, classified, rebuilt);
     for (const g of mine) if (result.contributions.has(g.gameId)) result.gameSeason[g.gameId] = season.tournamentId;
   }
@@ -686,31 +701,168 @@ export function doublesExposure(seasons: readonly SeasonData[], games: ReadonlyM
 
 /**
  * Seasons with singles games of the player (`seasons`, from {@link roleExposure}), and how many of
- * them passed n01's checksum for First 9 and for Keep/Break (every 01 game of the season rebuilt).
+ * them have every singles game's legs read (`f9Verified` / `breakVerified`: singles figures come
+ * from their own legs and do not depend on the season's checksum). `scoreVerified`: the season
+ * matched n01's averaged totals (shown in the details only).
  */
 export function singlesCoverage(result: PlayerDetailResult, seasons: readonly string[]): { seasons: number; scoreVerified: number; f9Verified: number; breakVerified: number; checked: number } {
   const checkOf = (id: string) => result.checks.find((c) => c.tournamentId === id);
+  const allLegs = (id: string): boolean => {
+    const s = checkOf(id)?.singles;
+    return !!s && s.games > 0 && s.rebuilt === s.games;
+  };
   return {
     seasons: seasons.length,
     scoreVerified: seasons.filter((id) => checkOf(id)?.verified.score).length,
-    checked: seasons.filter((id) => { const c = checkOf(id); return !!c && c.state !== 'incomplete'; }).length,
-    f9Verified: seasons.filter((id) => checkOf(id)?.verified.f9).length,
-    breakVerified: seasons.filter((id) => checkOf(id)?.verified.break).length,
+    checked: seasons.filter((id) => !!checkOf(id)?.singles).length,
+    f9Verified: seasons.filter(allLegs).length,
+    breakVerified: seasons.filter(allLegs).length,
   };
 }
 
-/** Seasons with doubles games of the player, and how many of them passed n01's checksum (3DA / First 9). */
+/** Seasons with doubles games of the player, and how many of them admitted the per-player 3DA / First 9. */
 export function doublesCoverage(result: PlayerDetailResult): { seasons: number; scoreVerified: number; f9Verified: number } {
   const seasons = result.starts.filter((s) => s.doublesGames === null || s.doublesGames > 0);
   const checkOf = (id: string) => result.checks.find((c) => c.tournamentId === id);
   return {
     seasons: seasons.length,
-    scoreVerified: seasons.filter((s) => checkOf(s.tournamentId)?.verified.score).length,
-    f9Verified: seasons.filter((s) => checkOf(s.tournamentId)?.verified.f9).length,
+    scoreVerified: seasons.filter((s) => { const c = checkOf(s.tournamentId); return !!c && (c.multi ? c.multi.score : c.verified.score); }).length,
+    f9Verified: seasons.filter((s) => { const c = checkOf(s.tournamentId); return !!c && (c.multi ? c.multi.score && c.multi.f9 : c.verified.f9); }).length,
   };
 }
 
 /** A run that should be offered again: something was not read (network, budget, cancel) — not a mismatch. */
 export function needsRetry(result: PlayerDetailResult): boolean {
-  return result.budgetStopped === true || (result.awaitingOfficial?.length ?? 0) > 0 || result.failures.length > 0 || result.notAttempted.length > 0 || result.stale.length > 0 || result.checks.some((c) => c.state === 'incomplete' && c.games > 0) || result.starts.some((s) => (s.excludedGames['not-fetched'] ?? 0) > 0 || (s.excludedGames['needs-refetch'] ?? 0) > 0);
+  return result.budgetStopped === true || (result.awaitingOfficial?.length ?? 0) > 0 || result.failures.length > 0 || result.notAttempted.length > 0 || result.stale.length > 0 || result.checks.some((c) => c.state === 'incomplete' && c.games > 0 && !c.byRecord) || result.starts.some((s) => (s.excludedGames['not-fetched'] ?? 0) > 0 || (s.excludedGames['needs-refetch'] ?? 0) > 0);
+}
+
+// ---- one team's side figures (チームのシングルス・ダブルス) ---------------------------------------
+
+/** The team's games of one kind whose legs one team read needs (per season). */
+export interface TeamDetailSeason {
+  tournamentId: string;
+  title: string;
+  /** The team's finished 01 games of the kind, and how many have legs read for their current row. */
+  games: number;
+  rebuilt: number;
+  /** Why the season gives no figure (list not complete, not attempted for the budget …). */
+  reason?: string;
+}
+
+type MutableTeamContributions = Map<string, Map<string, VerifiedContribution>>;
+
+export interface TeamDetailResult {
+  /** `<role>|<season:team,…>`: the team and kind the result belongs to. */
+  key: string;
+  contributions: MutableTeamContributions;
+  seasons: TeamDetailSeason[];
+  failures: string[];
+  requestsSent: number;
+  budgetStopped?: boolean;
+  fetched?: number;
+  transient?: boolean;
+  saveFailed?: boolean;
+  /** List version per season the figures were read against (another version gives none). */
+  versions: Record<string, string>;
+}
+
+/**
+ * First 9 and Keep/Break of one team's singles or doubles games, from their legs (`match/get`).
+ * They are figures of the team's side — its first three visits of every leg, its legs thrown first
+ * and second — so no attribution to a thrower is needed and a pair's leg counts once. Only the
+ * shown team's games of the shown kind are read (never another team's), newest season first,
+ * sharing the per-game cache with the player reads; a game's legs are used only when they were read
+ * for the row the list shows now (same players, order and totals).
+ */
+export async function reconstructTeam(
+  ctx: GamesContext,
+  input: { seasons: readonly SeasonData[]; games: ReadonlyMap<string, SeasonGames>; teams: ReadonlyMap<string, string>; role: 'singles' | 'doubles'; key: string; memory?: DetailMemory; concurrency?: number },
+): Promise<TeamDetailResult> {
+  const result: TeamDetailResult = { key: input.key, contributions: new Map(), seasons: [], failures: [], requestsSent: 0, versions: {} };
+  const concurrency = Math.max(1, input.concurrency ?? 3);
+  let stopped = false;
+  let fetched = 0;
+  for (const season of input.seasons) {
+    const teamId = input.teams.get(season.tournamentId);
+    if (!teamId) continue;
+    const raw = input.games.get(season.tournamentId);
+    if (!raw?.complete) {
+      result.seasons.push({ tournamentId: season.tournamentId, title: season.title, games: 0, rebuilt: 0, reason: 'ゲーム一覧を取得できていません' });
+      continue;
+    }
+    const version = gamesVersion(raw);
+    result.versions[season.tournamentId] = version;
+    const mine = classifiedOf(season, raw).filter((g) => g.family.family === '01' && g.role === input.role && g.sides.some((side) => side.teamId === teamId));
+    const entry: TeamDetailSeason = { tournamentId: season.tournamentId, title: season.title, games: mine.length, rebuilt: 0 };
+    result.seasons.push(entry);
+    if (mine.length === 0) continue;
+    if (stopped) {
+      entry.reason = '通信の上限または中断のため未取得';
+      continue;
+    }
+    const stored = await readCached(ctx, season.tournamentId, input.memory);
+    const rowPrint = new Map(raw.games.map((g) => [g.gameId, fingerprint(g)]));
+    const ttl = season.status === N01_STATUS.FINISHED ? TTL.finishedSeason : TTL.runningSeason;
+    const now = ctx.now();
+    const freshAfter = ctx.freshAfter ?? 0;
+    const due = (g: ClassifiedGame): boolean => {
+      const e = stored.get(g.gameId);
+      if (!e || ctx.forceRefresh === true || e.at < freshAfter || now - e.at >= ttl) return true;
+      return e.fp !== rowPrint.get(g.gameId) || (e.r.ok && !e.r.sides && g.sides.some((side) => side.players.length === 0));
+    };
+    const pending = mine.filter(due);
+    for (let i = 0; i < pending.length && !stopped; i += concurrency) {
+      if (ctx.signal?.aborted) {
+        stopped = true;
+        break;
+      }
+      const batch = pending.slice(i, i + concurrency);
+      const outcomes = await Promise.allSettled(batch.map((g) => withRetry(ctx, () => ctx.api.gameDetail(g.gameId))));
+      let added = 0;
+      outcomes.forEach((outcome, index) => {
+        const g = batch[index];
+        if (outcome.status === 'fulfilled') {
+          const r = safeReconstruct(outcome.value);
+          stored.set(g.gameId, { r, at: ctx.now(), fp: matchesRow(g, r) && sameOrder(g, outcome.value) ? rowPrint.get(g.gameId) : UNMATCHED });
+          added += 1;
+          fetched += 1;
+          return;
+        }
+        if (outcome.reason instanceof RequestBudgetError) {
+          stopped = true;
+          result.budgetStopped = true;
+        } else if (!ctx.signal?.aborted) {
+          result.failures.push(`${season.title}: ${describeN01Error(outcome.reason)}`);
+          if (isTransient(outcome.reason)) result.transient = true;
+        }
+      });
+      if (added > 0 && !(await ctx.cache.put(detailKey(season.tournamentId), { v: 2, games: Object.fromEntries(stored) } satisfies CachedDetail, ttl))) result.saveFailed = true;
+    }
+    for (const g of mine) {
+      const e = stored.get(g.gameId);
+      if (!e || !e.r.ok || e.fp !== rowPrint.get(g.gameId) || !matchesRow(g, e.r)) continue;
+      const sideIndex = g.sides[0].teamId === teamId ? 0 : 1;
+      const figures = sideFiguresOf(e.r, sideIndex, g.sides[sideIndex].players.map((p) => p.oid));
+      if (!figures) continue;
+      entry.rebuilt += 1;
+      const forGame = result.contributions.get(g.gameId) ?? new Map<string, VerifiedContribution>();
+      forGame.set(teamId, Number.isFinite(figures.breakLegs) ? figures : { f9Score: figures.f9Score, f9Darts: figures.f9Darts });
+      result.contributions.set(g.gameId, forGame);
+    }
+    if (entry.rebuilt < entry.games && !entry.reason) entry.reason = stopped ? '通信の上限または中断のため一部未取得' : `${entry.games - entry.rebuilt}ゲームのLeg明細を確認できません`;
+  }
+  result.requestsSent = ctx.api.requestCount;
+  result.fetched = fetched;
+  return result;
+}
+
+/** A team result's figures that still belong to the loaded game lists (another version gives none). */
+export function currentTeamContributions(result: TeamDetailResult, games: ReadonlyMap<string, SeasonGames> | null, seasons: readonly SeasonData[]): TeamContributions {
+  if (!games) return result.contributions;
+  const ok = new Set(Object.entries(result.versions).filter(([tid, v]) => { const raw = games.get(tid); return !!raw?.complete && gamesVersion(raw) === v; }).map(([tid]) => tid));
+  const seasonOf = new Map<string, string>();
+  for (const season of seasons) for (const g of games.get(season.tournamentId)?.games ?? []) seasonOf.set(g.gameId, season.tournamentId);
+  const out: MutableTeamContributions = new Map();
+  for (const [gameId, teams] of result.contributions) if (ok.has(seasonOf.get(gameId) ?? '')) out.set(gameId, teams);
+  return out;
 }

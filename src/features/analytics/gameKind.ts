@@ -57,6 +57,18 @@ export interface SlotEvidence {
   matchType: string | null;
   /** `match_type` of the setting that holds the slot, `null` when absent. */
   settingMatchType: string | null;
+  /**
+   * `ignore_avg: 1`: n01 leaves the slot's games out of its players' **score / darts / First 9**
+   * totals (its 3-dart average). Legs, sets, Break, 100+–180 and High Finish still count them
+   * (AKDO 2026/2nd, 2026-11-16: 竹内 淳 official 3,370 / 148 = his three singles only, while his
+   * official 100+ 17 and Break 9 include his doubles and gallon games). Absent = counted.
+   */
+  ignoreAvg?: boolean;
+}
+
+/** n01 leaves this game's score / darts / First 9 out of its players' official averages. */
+export function avgExcluded(slots: readonly SlotEvidence[], schid: string | null, division: number | null): boolean {
+  return slotFor(slots, schid, division)?.ignoreAvg === true;
 }
 
 const CRICKET_NAME = /cricket|クリケット/iu;

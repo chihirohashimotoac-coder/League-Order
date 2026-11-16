@@ -4456,6 +4456,103 @@ input[type='range'] {
   gap: 8px;
 }
 
+/* 読み込みゲージ: the stages the current view needs, each with a bar (determinate when its size is known). */
+.load-gauge {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+}
+
+.load-gauge p {
+  margin: 0;
+}
+
+.load-gauge-done {
+  margin: 0;
+}
+
+.gauge-stages {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gauge-stage {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gauge-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.gauge-count {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.gauge-bar {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--color-surface-2);
+}
+
+.gauge-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.gauge-bar.partial .gauge-fill {
+  background: var(--color-warning);
+}
+
+.gauge-bar.failed .gauge-fill {
+  background: var(--color-danger);
+}
+
+.gauge-bar.indeterminate .gauge-fill {
+  width: 35%;
+  animation: gauge-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes gauge-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gauge-fill {
+    transition: none;
+  }
+
+  /* No motion: a still, striped bar says "in progress" (the text says it too). */
+  .gauge-bar.indeterminate .gauge-fill {
+    width: 100%;
+    animation: none;
+    opacity: 0.45;
+    background: repeating-linear-gradient(90deg, var(--color-accent) 0 8px, transparent 8px 14px);
+  }
+}
+
 /* One compact line under the filters; the reasons fold into "集計の内訳". */
 .analysis-summary {
   min-width: 0;

@@ -11,7 +11,7 @@ import { detailKey, highInKey, reconstructPerson } from './detailService';
 import type { GamesContext } from './gamesLoader';
 
 /**
- * The 個人スタート率 through the reconstruction service, on the stored ATDO 2024 2nd data: real
+ * The ダブルイン成功率 through the reconstruction service, on the stored ATDO 2024 2nd data: real
  * leg details and real high-in records of its doubles slot `rdsi` (19, read 2026-11-15). The
  * season fixture's league id is set to ATDO's (the fixture builder uses a placeholder).
  * Swapped orders, a conflicting high-in record and an old cache are simulated (intentional).
@@ -57,7 +57,7 @@ const ctxOf = (fake: FakeN01, cache = new AnalyticsCache({ memoryOnly: true }), 
 const keyOf = (oid: string) => atdoSeason().players.find((p) => p.oid === oid)!.personKey;
 const wired = (list: RawGameDetail[] = details()) => Object.fromEntries(list.map((d) => [d.gameId, wireDetail(d)]));
 
-describe('個人スタート率 through the reconstruction service', () => {
+describe('ダブルイン成功率 through the reconstruction service', () => {
   it('和田: 5/13 over his three doubles games, adopted because the season matches n01; the high-in records are read once and cached', async () => {
     const fake = new FakeN01(wired());
     const cache = new AnalyticsCache({ memoryOnly: true });

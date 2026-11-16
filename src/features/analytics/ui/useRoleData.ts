@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { seasonsNeedingGames } from '../projection';
 import type { PlayerContributions } from '../reconstruct';
 import type { GameScope } from '../roleGames';
-import { currentContributions, currentResult, detailCoverage, newDetailMemory, reconstructPerson } from '../service/detailService';
+import { currentContributions, currentResult, currentTeamContributions, detailCoverage, newDetailMemory, reconstructPerson, reconstructTeam } from '../service/detailService';
+import type { TeamDetailResult } from '../service/detailService';
+import type { TeamContributions } from '../roleGames';
 import type { DetailMemory } from '../service/detailService';
 import type { PlayerDetailResult } from '../service/detailService';
 import { emptyGamesLoad, GamesSession } from '../service/gamesSession';
@@ -309,4 +311,68 @@ export function usePlayerDetail(services: AnalyticsServices, load: PeriodLoad | 
   }, [state.results, run]);
 
   return { running: state.running, results: shownResults, contributions, partial: state.partial, run, focus, ensure };
+}
+
+export interface TeamDetailState {
+  /** The team read for the current view (`null`: none needed — not the team view, or 01全体 / その他). */
+  key: string | null;
+  running: boolean;
+  /** More parts follow (the read crossed its budget). */
+  partial: boolean;
+  result: TeamDetailResult | null;
+  /** Side figures fed to the projection: only those read against the game lists loaded now. */
+  contributions: TeamContributions;
+  retry: () => void;
+}
+
+/**
+ * The shown team's side figures (First 9, Keep/Break) for the singles / doubles view: the legs of
+ * that team's games of that kind only, read automatically part after part (each part
+ * {@link DETAIL_MAX_REQUESTS} requests, sharing the per-game cache with the player reads). Another
+ * team, kind, period or leaving the view stops the read; its result is never shown for another one.
+ */
+export function useTeamDetail(services: AnalyticsServices, load: PeriodLoad | null, games: GamesLoad | null, role: 'singles' | 'doubles' | null, teams: ReadonlyMap<string, string> | null, reloadToken = 0): TeamDetailState {
+  const reloadAt = useReloadTime(reloadToken);
+  const key = role && teams && teams.size > 0 ? `${role}|${[...teams].map(([t, team]) => `${t}:${team}`).join(',')}` : null;
+  const [held, setHeld] = useState<{ load: PeriodLoad | null; key: string | null; running: boolean; partial: boolean; result: TeamDetailResult | null; coverage: string }>({ load: null, key: null, running: false, partial: false, result: null, coverage: '' });
+  const [attempt, setAttempt] = useState(0);
+  const memory = useRef<DetailMemory>(newDetailMemory());
+  const gamesRef = useRef(games);
+  gamesRef.current = games;
+  // The seasons of the team whose list is complete now: a result made with fewer is read again.
+  const coverage = key && load && games ? load.seasons.filter((s) => teams?.has(s.tournamentId) && games.games.get(s.tournamentId)?.complete).map((s) => s.tournamentId).join(',') : '';
+  useEffect(() => {
+    if (!key || !load || !teams || coverage === '' || !role) return;
+    const c = new AbortController();
+    setHeld((s) => (s.load === load && s.key === key ? { ...s, running: true } : { load, key, running: true, partial: false, result: null, coverage }));
+    void (async () => {
+      let total = 0;
+      try {
+        for (let unit = 0; unit < DETAIL_MAX_UNITS; unit += 1) {
+          const api = roleApi(services, c.signal, DETAIL_MAX_REQUESTS);
+          const result = await reconstructTeam(
+            { api, cache: services.cache, isOnline, now: () => Date.now(), freshAfter: (attempt > 0 ? Date.now() : reloadAt) || undefined, signal: c.signal, sleep: services.sleep },
+            { seasons: load.seasons, games: gamesRef.current?.games ?? new Map(), teams, role, key, memory: memory.current },
+          );
+          if (c.signal.aborted) return;
+          total += result.requestsSent;
+          result.requestsSent = total;
+          const more = result.budgetStopped === true && (result.fetched ?? 0) > 0 && unit + 1 < DETAIL_MAX_UNITS;
+          setHeld({ load, key, running: more, partial: more, result, coverage });
+          if (!more) break;
+          await (services.sleep ?? defaultSleep)(DETAIL_UNIT_PAUSE_MS, c.signal);
+          if (c.signal.aborted) return;
+        }
+      } catch (reason) {
+        if (c.signal.aborted) return;
+        setHeld({ load, key, running: false, partial: false, coverage, result: { key, contributions: new Map(), seasons: [], failures: [`Leg明細を取得できませんでした（${describeN01Error(reason)}）`], requestsSent: 0, versions: {} } });
+      }
+    })();
+    return () => c.abort();
+    // `teams` is represented by `key`.
+  }, [services, load, key, coverage, reloadAt, attempt]);
+  const mine = held.load === load && held.key === key ? held : null;
+  const contributions = useMemo(() => (mine?.result && load ? currentTeamContributions(mine.result, games?.games ?? null, load.seasons) : new Map()), [mine?.result, games, load]);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  return { key, running: mine?.running ?? key !== null, partial: mine?.partial ?? false, result: mine?.result ?? null, contributions, retry };
 }
