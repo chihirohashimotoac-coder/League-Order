@@ -13,6 +13,7 @@ import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './ra
 import { n01Avg3 } from '../../analytics/n01Figures';
 import { ListCoverage, listIncomplete } from './ListCoverage';
 import { N01Row } from './BrowseView';
+import { competitionOf, followedGames } from '../followedNow';
 import type { ListCoverageState } from './ListCoverage';
 
 /** Refresh of a competition's games: while a game is on, and while it is running but between games. */
@@ -493,16 +494,14 @@ export function NowView({ factory, onCompetition, onGame }: { factory: MatchesAp
     };
   }, [api]);
   if (!rows) return error ? <p className="small-text">取得エラー: {error}</p> : <p className="muted small-text">n01 の進行中の試合を確認中…</p>;
-  const who = (row: GameRow): string[] =>
-    [...new Set(row.sides.flatMap((side) => [side.name, ...side.members.map((member) => member.name)]).map((name) => name.trim()))].filter((name) => followed.names.has(name));
-  const starred = rows.map((row) => ({ row, names: who(row) })).filter((entry) => entry.names.length > 0);
+  const starred = followedGames(rows, followed.names);
   const needle = filter.trim().toLowerCase();
   const match = (row: GameRow): boolean => !needle || `${row.title} ${row.sides.map((side) => `${side.name} ${side.members.map((m) => m.name).join(' ')}`).join(' ')}`.toLowerCase().includes(needle);
   const competitions = new Map<string, { title: string; rows: GameRow[] }>();
   const singles: GameRow[] = [];
   for (const row of rows.filter(match)) {
-    const tdid = row.tmid?.split('_').slice(0, 3).join('_') ?? null;
-    if (tdid && /^t_[A-Za-z0-9]+_\d+$/u.test(tdid)) {
+    const tdid = competitionOf(row);
+    if (tdid) {
       const entry = competitions.get(tdid) ?? { title: row.title.replace(/\s+\S+$/u, '') || tdid, rows: [] };
       entry.rows.push(row);
       competitions.set(tdid, entry);

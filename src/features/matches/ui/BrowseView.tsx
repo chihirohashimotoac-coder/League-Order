@@ -565,8 +565,18 @@ export function BrowseView({
   );
 }
 
-/** 観戦の各画面から 3 つの一覧へ (公式メニューと同じ順)。 */
-export function BrowseLinks({ onBrowse, label = 'n01 の一覧から探す' }: { onBrowse: (category: BrowseCategory) => void; label?: string }): React.JSX.Element {
+/** 3 つの一覧の直後に置く補助の入口: 注目選手の試合 (登録した人数つき)。 */
+export function FollowedChip({ count, onClick }: { count: number; onClick: () => void }): React.JSX.Element {
+  return (
+    <button type="button" className="chip followed-chip" onClick={onClick} data-testid="followed-entry">
+      <span aria-hidden="true">★</span> 注目選手の試合 ({count} 人)
+    </button>
+  );
+}
+
+/** 観戦の各画面から 3 つの一覧へ (公式メニューと同じ順)。注目選手がいれば、その直後に注目選手の試合。 */
+export function BrowseLinks({ onBrowse, onFollowed, label = 'n01 の一覧から探す' }: { onBrowse: (category: BrowseCategory) => void; onFollowed?: () => void; label?: string }): React.JSX.Element {
+  const followedCount = useFollowed().names.size;
   return (
     <nav className="browse-links" aria-label={label}>
       <span className="muted small-text browse-links-label">{label}</span>
@@ -576,6 +586,7 @@ export function BrowseLinks({ onBrowse, label = 'n01 の一覧から探す' }: {
             {entry.label}
           </button>
         ))}
+        {onFollowed && followedCount > 0 ? <FollowedChip count={followedCount} onClick={onFollowed} /> : null}
       </span>
     </nav>
   );

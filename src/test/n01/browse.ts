@@ -155,3 +155,54 @@ export function browseReply(operation: string, params: Record<string, string>, o
   if (operation === 'match/throws' && params.mid === ONLINE_MID) return { result: 0, changed: 1, mid: ONLINE_MID, match_type: '01', end_match: 0, updateTime: NOW_MS - 3_000, leg_data: [] };
   return undefined;
 }
+
+// ---------------------------------------------------------------------------
+// 注目選手の試合 (n01 で進行中の試合を横断)
+// ---------------------------------------------------------------------------
+
+/** 注目選手として登録する選手 (e2e は観戦のスタッツから登録する)。 */
+export const FOLLOWED_NAME = '青木 一郎';
+export const FOLLOWED_TOURNAMENT_MID = 'jdo_1';
+export const FOLLOWED_LEAGUE_MID = 'Lgf0Demo_1799999960000';
+export const FOLLOWED_SINGLE_MID = 'Sgf0Demo_1799999950000';
+
+/**
+ * `match/list?live=1` (条件なし、開始の新しい順 100 試合) の行: 大会 (`tdid`・`tmid`)・リーグ
+ * (`<tdid>_lg_…`、注目選手はダブルスのメンバー)・個別の試合に注目選手が 1 試合ずつ。登録していない選手の
+ * 大会の試合と個別の試合も混ぜる (一覧から除かれる)。
+ */
+export function followedNowRows(leagueTdid: string, eventTdid: string): Record<string, unknown>[] {
+  const base = 1_799_999_990;
+  return [
+    { mid: 'Oth0Demo_1799999990000', match_type: '01', startTime: base, endMatch: 0, updateTime: NOW_MS - 1_000, statsData: [side('他人 一号', 1), side('他人 二号', 0)] },
+    {
+      mid: FOLLOWED_TOURNAMENT_MID,
+      tdid: eventTdid,
+      tmid: `${eventTdid}_t_0_p1_p2`,
+      schid: '',
+      match_type: '01',
+      title: 'Sample Open 1回戦',
+      startTime: base - 20,
+      endMatch: 0,
+      updateTime: NOW_MS - 2_000,
+      statsData: [{ ...side(FOLLOWED_NAME, 2), tpid: 'p1' }, { ...side('田中 花子', 1), tpid: 'p2' }],
+    },
+    {
+      mid: FOLLOWED_LEAGUE_MID,
+      tdid: leagueTdid,
+      tmid: `${leagueTdid}_lg_0_c009_AAAA_BBBB`,
+      schid: 'db01',
+      match_type: '01',
+      title: 'Test League A Division ダブルス1',
+      startTime: base - 30,
+      endMatch: 0,
+      updateTime: NOW_MS - 3_000,
+      statsData: [
+        { ...side('Arrows', 1), tpid: 'AAAA', order: [{ oid: 'a1', oname: FOLLOWED_NAME }, { oid: 'a9', oname: '相田 二郎' }] },
+        { ...side('Bulls', 0), tpid: 'BBBB', order: [{ oid: 'b1', oname: '佐藤 B1' }, { oid: 'b2', oname: '鈴木 B2' }] },
+      ],
+    },
+    { mid: 'Oth1Demo_1799999940000', tdid: 't_Oth0_0001', tmid: 't_Oth0_0001_t_0_x1_x2', match_type: '01', title: 'Other Cup 1回戦', startTime: base - 40, endMatch: 0, updateTime: NOW_MS - 4_000, statsData: [{ ...side('他人 三号', 0), tpid: 'x1' }, { ...side('他人 四号', 0), tpid: 'x2' }] },
+    { mid: FOLLOWED_SINGLE_MID, match_type: 'cricket', startTime: base - 50, endMatch: 0, updateTime: NOW_MS - 5_000, statsData: [side('Guest Player', 0), side(FOLLOWED_NAME, 1)] },
+  ];
+}

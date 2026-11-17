@@ -32,6 +32,8 @@ export interface WatchLink {
    * 「n01リーグ」。`online` と `mid` の組み合わせは、その一覧から開いた試合 (戻ると一覧)。
    */
   browse?: 'online' | 'tournament' | 'league';
+  /** `1`: 注目選手の試合 (登録した選手が出場中の試合)。`mid` と組み合わせると、そこから開いた試合。 */
+  followed?: string;
 }
 
 const PREFIX = '#/watch';
@@ -45,6 +47,7 @@ const KEYS: [keyof WatchLink, string][] = [
   ['mid', 'm'],
   ['now', 'n'],
   ['browse', 'b'],
+  ['followed', 'f'],
 ];
 const BROWSE_VALUES = new Set(['online', 'tournament', 'league']);
 
@@ -65,6 +68,7 @@ export function parseWatchLink(hash: string): WatchLink | null {
   // A game of the online list only; the list itself names nothing else.
   if (link.browse && link.browse !== 'online') delete link.mid;
   if (link.browse && (link.league || link.tournament || link.now)) delete link.browse;
+  if (link.followed !== '1' || link.league || link.tournament || link.now || link.browse) delete link.followed;
   return link;
 }
 

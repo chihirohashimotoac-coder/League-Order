@@ -6,6 +6,8 @@ import type { WatchSettings } from '../../../domain/types';
 import { useMatchesApiFactory } from '../environment';
 import { parseCompetitionReference } from '../competition';
 import type { BrowseCategory } from '../browse';
+import { useFollowed } from './useMatchContext';
+import { FollowedChip } from './BrowseView';
 import { BROWSE_CATEGORIES } from '../browse';
 
 /**
@@ -31,6 +33,7 @@ export function LeaguePicker({
   onPick,
   onMatch,
   onBrowse,
+  onFollowed,
   current,
 }: {
   onPick: (target: WatchSettings) => void;
@@ -38,9 +41,12 @@ export function LeaguePicker({
   onMatch?: (mid: string) => void;
   /** n01 公式メニューの一覧 (n01オンライン → n01トーナメント → n01リーグ) を開く。 */
   onBrowse?: (category: BrowseCategory) => void;
+  /** 注目選手の試合を開く (注目選手が登録されているときだけ表示)。 */
+  onFollowed?: () => void;
   current?: string | null;
 }): React.JSX.Element {
   const environment = useN01Environment();
+  const followedCount = useFollowed().names.size;
   const factory = useMatchesApiFactory();
   const [query, setQuery] = useState('');
   const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'error'; message: string } | { kind: 'hits'; hits: Hit[] }>({ kind: 'idle' });
@@ -110,6 +116,7 @@ export function LeaguePicker({
                 {entry.label}
               </button>
             ))}
+            {onFollowed && followedCount > 0 ? <FollowedChip count={followedCount} onClick={onFollowed} /> : null}
           </span>
         </div>
       ) : null}

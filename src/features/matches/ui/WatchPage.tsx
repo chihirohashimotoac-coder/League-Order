@@ -31,6 +31,7 @@ import { PlayerCard } from './PlayerCard';
 import { shortSlot } from './CardTrail';
 import { ListCoverage } from './ListCoverage';
 import { BrowseLinks, BrowseView, startBrowse } from './BrowseView';
+import { FollowedView } from './FollowedView';
 import type { BrowseCategory } from '../browse';
 import { browseLabel } from '../browse';
 
@@ -125,6 +126,8 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   }, [link?.now]);
   // n01 公式メニューの一覧 (n01オンライン・n01トーナメント・n01リーグ): アドレスの `b`。
   const browse = link?.browse ?? null;
+  // 注目選手の試合: アドレスの `f=1` (そこから開いた試合は `f=1&m=…`)。
+  const followedList = link?.followed === '1';
   // 一覧から開いた大会・リーグ: その画面から一覧に戻れる (戻ると一覧の状態を復元する)。
   // `depth`: the history entry the competition opened on (cards and games may be pushed on top).
   const [fromBrowse, setFromBrowse] = useState<{ category: BrowseCategory; id: string; depth: number } | null>(null);
@@ -172,6 +175,17 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   const nowPage = now && gameMid && link?.now === '1';
   // A game opened from n01オンライン: the same page, back to that list.
   const browseGame = browse === 'online' && gameMid !== null;
+  const followedGame = followedList && gameMid !== null;
+  const openFollowed = (): void => {
+    setPicking(false);
+    setNow(false);
+    pushWatchLink({ followed: '1' });
+  };
+  const openFollowedGame = (mid: string, title?: string): void => {
+    if (title) titles.current.set(mid, title);
+    if (!gameMid) remember();
+    pushWatchLink({ followed: '1', mid });
+  };
   const openBrowseGame = (mid: string, title?: string): void => {
     if (title) titles.current.set(mid, title);
     if (!gameMid) remember();
@@ -218,10 +232,10 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   // a page of its own, the same everywhere (SetMatchPage) — never a sheet, never beside a list.
   // What it was opened from stays mounted underneath, hidden, so its tab, chosen round and scroll
   // position are there again on the way back.
-  const matchPage = gameMid !== null && !nowPage && !browseGame;
+  const matchPage = gameMid !== null && !nowPage && !browseGame && !followedGame;
   // A game's page over a list (kept underneath, hidden): it opens at its top with the keyboard
   // focus on it; the way back lands where the list was left, focus on what opened the game.
-  const pageOpen = matchPage || !!nowPage || browseGame;
+  const pageOpen = matchPage || !!nowPage || browseGame || followedGame;
   const hubScroll = useRef(0);
   const opener = useRef<HTMLElement | null>(null);
   const remember = (): void => {
@@ -261,9 +275,32 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
           openGame(mid);
         }}
         onBrowse={openBrowse}
+        onFollowed={openFollowed}
       />
     </Sheet>
   ) : null;
+
+  if (followedList) {
+    return (
+      <div className="watch" data-testid="watch-page">
+        {followedGame && gameMid ? (
+          <SetMatchPage
+            mid={gameMid}
+            factory={factory}
+            onBack={() => closeWatchLink({ followed: '1' })}
+            onShown={(mid) => replaceWatchLink({ followed: '1', mid })}
+            backLabel="注目選手の試合に戻る"
+            shareUrl={(mid) => watchLinkUrl({ followed: '1', mid })}
+          />
+        ) : null}
+        <div className="watch-keep" hidden={pageOpen}>
+          <WatchShown shown={!pageOpen}>
+            <FollowedView factory={factory} backLabel={target ? `${target.title} に戻る` : '戻る'} onBack={() => closeWatchLink(null)} onGame={openFollowedGame} />
+          </WatchShown>
+        </div>
+      </div>
+    );
+  }
 
   if (browse) {
     return (
@@ -322,12 +359,12 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
         ) : null}
         {now ? (
           <>
-            <BrowseLinks onBrowse={openBrowse} />
+            <BrowseLinks onBrowse={openBrowse} onFollowed={openFollowed} />
             <NowView factory={factory} onCompetition={(id, title) => pick({ kind: 'tournament', id, title })} onGame={openNowGame} />
           </>
         ) : (
           <Card kicker="WATCH" title="見るリーグ・大会を選んでください">
-            <LeaguePicker onPick={pick} onMatch={(mid) => openGame(mid)} onBrowse={openBrowse} />
+            <LeaguePicker onPick={pick} onMatch={(mid) => openGame(mid)} onBrowse={openBrowse} onFollowed={openFollowed} />
           </Card>
         )}
         </WatchShown>
@@ -417,7 +454,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
             onMatches={(matches, labels) => setHubMatches({ matches, labels })}
           />
         </div>
-        <BrowseLinks onBrowse={openBrowse} />
+        <BrowseLinks onBrowse={openBrowse} onFollowed={openFollowed} />
         </WatchShown>
         </div>
         {pickerSheet}
@@ -491,7 +528,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
           </>
         ) : null}
       </div>
-      <BrowseLinks onBrowse={openBrowse} />
+      <BrowseLinks onBrowse={openBrowse} onFollowed={openFollowed} />
       </WatchShown>
       </div>
       {pickerSheet}

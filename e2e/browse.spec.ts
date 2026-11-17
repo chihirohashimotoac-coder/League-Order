@@ -1,10 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import { serveNight } from './liveNight';
-import { serveBrowse } from './browseWorld';
+import { serveBrowse, serveFollowedNow } from './browseWorld';
 import type { BrowseControl } from './browseWorld';
 import { serveNowCompetition } from './setMatchWorld';
 import { expectNoAxeViolations } from './axe';
-import { BROWSE_ATDO, BROWSE_JDO_EVENT, ONLINE_MID, browseLeagueRows, browseTournamentRows } from '../src/test/n01/browse';
+import { BROWSE_ATDO, BROWSE_JDO_EVENT, FOLLOWED_LEAGUE_MID, FOLLOWED_NAME, FOLLOWED_SINGLE_MID, FOLLOWED_TOURNAMENT_MID, ONLINE_MID, browseLeagueRows, browseTournamentRows } from '../src/test/n01/browse';
+import { JDO_EVENT } from './liveNight';
+import { TDID } from '../src/features/matches/testFixtures';
 
 /**
  * 観戦の「n01オンライン → n01トーナメント → n01リーグ」(公式メニューと同じ順) を、通信なしの n01 で。
@@ -267,3 +269,125 @@ test('axe: 3 つの一覧と以前の一覧に WCAG 2.1 AA の違反がない', 
   await expect(page.getByTestId('now-view')).toBeVisible();
   await expectNoAxeViolations(page, testInfo);
 });
+
+// ---------------------------------------------------------------------------
+// 注目選手の試合: 大会・リーグ・個別の試合を横断して、登録した選手が出場中の試合
+// ---------------------------------------------------------------------------
+
+async function followFromStats(page: Page): Promise<{ log: string[]; fail?: boolean; leagueTdid: string; eventTdid: string }> {
+  const control = { log: [] as string[], fail: false, leagueTdid: TDID, eventTdid: JDO_EVENT };
+  await serveNight(page);
+  await serveNowCompetition(page);
+  await serveBrowse(page, { log: [] });
+  await serveFollowedNow(page, control);
+  await page.goto('/#/watch');
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  // 注目選手の登録前は入口を出さない。
+  await expect(page.getByTestId('followed-entry')).toHaveCount(0);
+  // 通常の画面 (スタッツ → 選手のカード) で注目選手に登録する。
+  await page.getByRole('tab', { name: 'スタッツ' }).click();
+  await page.getByTestId('stats-tab').getByRole('button', { name: FOLLOWED_NAME, exact: true }).click();
+  await page.getByTestId('player-card').getByRole('button', { name: /注目選手に追加/ }).click();
+  await page.getByRole('button', { name: '閉じる' }).click();
+  return control;
+}
+
+test('注目選手の試合: 3 入口の直後から開き、大会・リーグ・個別の試合を横断して出場中の試合だけを並べる', async ({ page }) => {
+  const control = await followFromStats(page);
+  // 観戦画面の下: 3 入口の順のまま、その直後に注目選手の試合。
+  const links = page.getByRole('navigation', { name: 'n01 の一覧から探す' });
+  await expect(links.getByRole('button')).toHaveText(['n01オンライン', 'n01トーナメント', 'n01リーグ', '★ 注目選手の試合 (1 人)']);
+  // 見るものを変更 (シート) にも。
+  await page.getByRole('button', { name: /見るものを変更/ }).click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByRole('group', { name: 'n01 の一覧から探す' }).getByRole('button')).toHaveText(['n01オンライン', 'n01トーナメント', 'n01リーグ', '★ 注目選手の試合 (1 人)']);
+  await page.getByRole('button', { name: '閉じる' }).click();
+  // 開く前は読まない。
+  expect(control.log).toEqual([]);
+  await links.getByTestId('followed-entry').click();
+  const view = page.getByTestId('followed-view');
+  await expect(view).toBeVisible();
+  expect(page.url()).toContain('f=1');
+  const rows = page.getByTestId('followed-game');
+  await expect(rows).toHaveCount(3);
+  expect(control.log).toHaveLength(1);
+  expect(await page.getByTestId('followed-list').locator('[data-browse-key]').evaluateAll((items) => items.map((item) => item.getAttribute('data-browse-key')))).toEqual([
+    FOLLOWED_TOURNAMENT_MID,
+    FOLLOWED_LEAGUE_MID,
+    FOLLOWED_SINGLE_MID,
+  ]);
+  await expect(rows.nth(0)).toContainText('大会');
+  await expect(rows.nth(0)).toContainText('Sample Open 1回戦');
+  await expect(rows.nth(1)).toContainText('リーグ'); // ダブルスのメンバー名で照合
+  await expect(rows.nth(1)).toContainText('Arrows 1 - 0 Bulls');
+  await expect(rows.nth(2)).toContainText('個別の試合');
+  await expect(view).not.toContainText('他人');
+  await expect(page.getByTestId('followed-count')).toHaveText('出場中 3 試合');
+  // 再読み込み (共有リンク #/watch?f=1 を直接開いたのと同じ): 注目選手の設定が読み込まれてから一覧を読む。
+  await page.reload();
+  await expect(rows).toHaveCount(3);
+  expect(control.log).toHaveLength(2);
+
+  // 大会の試合を開き、戻ると同じ行にフォーカス。
+  await rows.nth(0).click();
+  await expect(page.getByTestId('set-page')).toBeVisible();
+  await expect(page.getByTestId('set-page-title')).toContainText('Sample Open');
+  expect(page.url()).toContain(`m=${FOLLOWED_TOURNAMENT_MID}`);
+  await expect(view).toBeHidden();
+  await page.getByTestId('set-page-back').click();
+  await expect(view).toBeVisible();
+  await expect(rows.nth(0)).toBeFocused();
+  // ブラウザの戻るでも同じ。
+  await rows.nth(0).click();
+  await expect(page.getByTestId('set-page')).toBeVisible();
+  await page.goBack();
+  await expect(rows.nth(0)).toBeFocused();
+  expect(control.log).toHaveLength(2); // 一覧は下に残り、詳細から戻っても読み直さない
+
+  // 元の観戦画面へ。
+  await page.getByTestId('followed-back').click();
+  await expect(page.getByTestId('followed-view')).toHaveCount(0);
+  // 開く前の ATDO の観戦画面 (タブの選択は再読み込みで最初のタブに戻る、既存の仕様)。
+  await expect(page.getByRole('button', { name: '見るものを変更 (現在 ATDO)' })).toBeVisible();
+});
+
+test('注目選手の試合: キーボードで開閉でき、取得失敗は再試行できる (該当なしと区別)', async ({ page }) => {
+  const control = await followFromStats(page);
+  control.fail = true;
+  const entry = page.getByRole('navigation', { name: 'n01 の一覧から探す' }).getByTestId('followed-entry');
+  await entry.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('followed-error')).toContainText('進行中の試合を取得できませんでした');
+  await expect(page.getByTestId('followed-empty')).toHaveCount(0);
+  control.fail = false;
+  await page.getByTestId('followed-error').getByRole('button', { name: '再試行' }).click();
+  await expect(page.getByTestId('followed-game')).toHaveCount(3);
+  // 行をキーボードで開き、詳細の「戻る」もキーボードで。
+  await page.getByTestId('followed-game').nth(0).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('set-page')).toBeVisible();
+  await page.getByTestId('set-page-back').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('followed-game').nth(0)).toBeFocused();
+  await page.getByTestId('followed-back').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('followed-view')).toHaveCount(0);
+});
+
+for (const width of [360, 820, 1280]) {
+  test(`注目選手の試合 ${width}px: 入口と一覧が読め、横にはみ出さない`, async ({ page }, testInfo) => {
+    await followFromStats(page);
+    await page.setViewportSize({ width, height: 900 });
+    const entry = page.getByRole('navigation', { name: 'n01 の一覧から探す' }).getByTestId('followed-entry');
+    await expect(entry).toBeVisible();
+    await noSidewaysScroll(page);
+    await entry.click();
+    await expect(page.getByTestId('followed-game')).toHaveCount(3);
+    await noSidewaysScroll(page);
+    for (const row of await page.getByTestId('followed-game').all()) {
+      const box = (await row.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+    }
+    if (width === 360) await expectNoAxeViolations(page, testInfo);
+  });
+}
