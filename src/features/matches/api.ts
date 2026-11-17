@@ -16,6 +16,8 @@ import { RequestGovernor, sharedGovernor } from './governor';
 import type { LiveTarget } from './livePoller';
 import type { CompetitionDoc, CompetitionSummary, StandingGroup } from './competition';
 import { parseAllStandings, parseCompetition, parseCompetitionList } from './competition';
+import type { BrowsePage, LeagueItem, OnlinePage, TournamentItem } from './browse';
+import { LEAGUE_LIST_PARAMS, ONLINE_LIST_PARAMS, TOURNAMENT_LIST_PARAMS, parseLeaguePage, parseOnlinePage, parseTournamentPage } from './browse';
 
 /**
  * Read adapter of MATCH RESULTS and LIVE MATCH.
@@ -117,6 +119,15 @@ function tiedAtBoundary(previous: readonly GameRow[], next: readonly GameRow[]):
   const last = previous[previous.length - 1]?.startTime ?? null;
   const first = next.find((game) => !seen.has(game.mid))?.startTime ?? null;
   return last !== null && first !== null && last === first;
+}
+
+/** A browse list's fixed conditions plus the search word and the page (`skip`). */
+function withPaging(base: Readonly<Record<string, string>>, options: { keyword?: string; skip?: number }): Record<string, string> {
+  const params: Record<string, string> = { ...base };
+  const keyword = options.keyword?.trim();
+  if (keyword) params.keyword = keyword;
+  if (options.skip && options.skip > 0) params.skip = String(Math.floor(options.skip));
+  return params;
 }
 
 /** Fields of a game row the match screens read (`fields` selects exactly these). */
@@ -414,6 +425,27 @@ export class MatchesApi {
     // Sorting the whole of n01 by updateTime is refused as too slow (-54); the default order is start time, newest first.
     const params = { live: '1', endMatch: '0', count: String(MATCH_ROWS_PAGE), fields: GAME_FIELDS };
     return (await this.read('match/list', this.fresh('match/list', params, signal), parseGameRows)).games;
+  }
+
+  /**
+   * n01トーナメントの一覧 1 ページ (公式の初期表示と同じ対象・更新の新しい順)。`keyword` で名称検索。
+   * 応答の並びのまま返す (並べ替えない)。
+   */
+  browseTournaments(options: { keyword?: string; skip?: number; signal?: AbortSignal } = {}): Promise<BrowsePage<TournamentItem>> {
+    const params = withPaging(TOURNAMENT_LIST_PARAMS, options);
+    return this.read('tournament/list', this.fresh('tournament/list', params, options.signal), parseTournamentPage);
+  }
+
+  /** n01リーグの一覧 1 ページ (リーグ団体単位・更新の新しい順)。 */
+  browseLeagues(options: { keyword?: string; skip?: number; signal?: AbortSignal } = {}): Promise<BrowsePage<LeagueItem>> {
+    const params = withPaging(LEAGUE_LIST_PARAMS, options);
+    return this.read('league/list', this.fresh('league/list', params, options.signal), parseLeaguePage);
+  }
+
+  /** 観戦できる公開試合 (どの大会・リーグ・中継にも属さない進行中の試合) 1 ページ、開始の新しい順。 */
+  browseOnline(options: { skip?: number; signal?: AbortSignal } = {}): Promise<OnlinePage> {
+    const params = withPaging({ ...ONLINE_LIST_PARAMS, fields: `${GAME_FIELDS},relayMode` }, options);
+    return this.read('match/list', this.fresh('match/list', params, options.signal), parseOnlinePage);
   }
 
   /** One game's row (names, legs) by its id. */

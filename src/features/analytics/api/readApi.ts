@@ -33,6 +33,8 @@ export const ANALYTICS_OPERATIONS = [
   'match/throws',
   'team/order/list',
   'tournament/list',
+  // 観戦の n01リーグ一覧 (features/matches/browse.ts): 公開の一覧 API の GET。
+  'league/list',
 ] as const;
 
 export type AnalyticsOperation = (typeof ANALYTICS_OPERATIONS)[number];
