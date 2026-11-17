@@ -13,7 +13,7 @@ import { useMatchesApiFactory } from '../environment';
 import type { MatchesApiFactory } from '../environment';
 import { shortTitles } from '../titles';
 import type { WatchLink } from '../watchLink';
-import { closeWatchLink, pushWatchLink, replaceWatchLink, takeRequestedWatchTab, useWatchLink, watchLinkUrl } from '../watchLink';
+import { closeWatchLink, currentWatchDepth, pushWatchLink, replaceWatchLink, returnToWatchEntry, takeRequestedWatchTab, useWatchLink, watchLinkUrl } from '../watchLink';
 import type { SeasonData } from './useMatchContext';
 import { formatClock, formatRate, seasonStatsSource, usePlayerStats, useRegisteredTeamMap, useSeasonData, useSeasons } from './useMatchContext';
 import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './rankingList';
@@ -30,6 +30,10 @@ import type { CompetitionMatch } from '../competition';
 import { PlayerCard } from './PlayerCard';
 import { shortSlot } from './CardTrail';
 import { ListCoverage } from './ListCoverage';
+import { BrowseLinks, BrowseView, startBrowse } from './BrowseView';
+import { FollowedView } from './FollowedView';
+import type { BrowseCategory } from '../browse';
+import { browseLabel } from '../browse';
 
 /**
  * 観戦 (WATCH): one page for any n01 league, with or without a team. Four tabs —
@@ -120,6 +124,13 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   useEffect(() => {
     if (link?.now === '1') setNow(true);
   }, [link?.now]);
+  // n01 公式メニューの一覧 (n01オンライン・n01トーナメント・n01リーグ): アドレスの `b`。
+  const browse = link?.browse ?? null;
+  // 注目選手の試合: アドレスの `f=1` (そこから開いた試合は `f=1&m=…`)。
+  const followedList = link?.followed === '1';
+  // 一覧から開いた大会・リーグ: その画面から一覧に戻れる (戻ると一覧の状態を復元する)。
+  // `depth`: the history entry the competition opened on (cards and games may be pushed on top).
+  const [fromBrowse, setFromBrowse] = useState<{ category: BrowseCategory; id: string; depth: number } | null>(null);
   const [team, setTeam] = useState<string | null>(null);
   const [statsView, setStatsView] = useState<StatsView>(STATS_VIEW);
   const season = data.kind === 'ready' ? data.value.season : null;
@@ -162,6 +173,44 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   };
   const closeNowGame = (): void => closeWatchLink({ now: '1' });
   const nowPage = now && gameMid && link?.now === '1';
+  // A game opened from n01オンライン: the same page, back to that list.
+  const browseGame = browse === 'online' && gameMid !== null;
+  const followedGame = followedList && gameMid !== null;
+  const openFollowed = (): void => {
+    setPicking(false);
+    setNow(false);
+    pushWatchLink({ followed: '1' });
+  };
+  const openFollowedGame = (mid: string, title?: string): void => {
+    if (title) titles.current.set(mid, title);
+    if (!gameMid) remember();
+    pushWatchLink({ followed: '1', mid });
+  };
+  const openBrowseGame = (mid: string, title?: string): void => {
+    if (title) titles.current.set(mid, title);
+    if (!gameMid) remember();
+    pushWatchLink({ browse: 'online', mid });
+  };
+  const openBrowse = (category: BrowseCategory): void => {
+    setPicking(false);
+    setNow(false);
+    startBrowse(category);
+    pushWatchLink({ browse: category });
+  };
+  const pickFromBrowse = (next: WatchSettings, category: BrowseCategory): void => {
+    store.updateSettings({ watch: next });
+    if (next.kind === 'tournament') setHubTitle({ id: next.id, title: next.title });
+    setNow(false);
+    // A new history entry: the browser's back (and the button) returns to the list.
+    pushWatchLink(next.kind === 'league' ? { league: next.id } : { tournament: next.id });
+    setFromBrowse({ category, id: next.id, depth: currentWatchDepth() });
+  };
+  const backToBrowse =
+    fromBrowse && target && fromBrowse.id === target.id && !now && !browse ? (
+      <button type="button" className="btn ghost small" onClick={() => returnToWatchEntry(fromBrowse.depth, { browse: fromBrowse.category })} data-testid="back-to-browse">
+        <Icon name="chevronLeft" size={16} /> {browseLabel(fromBrowse.category)} の一覧に戻る
+      </button>
+    ) : null;
   const closeGame = (): void => closeWatchLink(link?.card ? { ...base, card: link.card, ...(link.game ? { game: link.game } : {}) } : Object.keys(base).length ? base : null);
 
   const setTab = (next: WatchTab): void => {
@@ -183,10 +232,10 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   // a page of its own, the same everywhere (SetMatchPage) — never a sheet, never beside a list.
   // What it was opened from stays mounted underneath, hidden, so its tab, chosen round and scroll
   // position are there again on the way back.
-  const matchPage = gameMid !== null && !nowPage;
+  const matchPage = gameMid !== null && !nowPage && !browseGame && !followedGame;
   // A game's page over a list (kept underneath, hidden): it opens at its top with the keyboard
   // focus on it; the way back lands where the list was left, focus on what opened the game.
-  const pageOpen = matchPage || !!nowPage;
+  const pageOpen = matchPage || !!nowPage || browseGame || followedGame;
   const hubScroll = useRef(0);
   const opener = useRef<HTMLElement | null>(null);
   const remember = (): void => {
@@ -225,13 +274,66 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
           setPicking(false);
           openGame(mid);
         }}
-        onNow={() => {
-          setPicking(false);
-          setNow(true);
-        }}
+        onBrowse={openBrowse}
+        onFollowed={openFollowed}
       />
     </Sheet>
   ) : null;
+
+  if (followedList) {
+    return (
+      <div className="watch" data-testid="watch-page">
+        {followedGame && gameMid ? (
+          <SetMatchPage
+            mid={gameMid}
+            factory={factory}
+            onBack={() => closeWatchLink({ followed: '1' })}
+            onShown={(mid) => replaceWatchLink({ followed: '1', mid })}
+            backLabel="注目選手の試合に戻る"
+            shareUrl={(mid) => watchLinkUrl({ followed: '1', mid })}
+          />
+        ) : null}
+        <div className="watch-keep" hidden={pageOpen}>
+          <WatchShown shown={!pageOpen}>
+            <FollowedView factory={factory} backLabel={target ? `${target.title} に戻る` : '戻る'} onBack={() => closeWatchLink(null)} onGame={openFollowedGame} />
+          </WatchShown>
+        </div>
+      </div>
+    );
+  }
+
+  if (browse) {
+    return (
+      <div className="watch" data-testid="watch-page">
+        {browseGame && gameMid ? (
+          <SetMatchPage
+            mid={gameMid}
+            factory={factory}
+            onBack={() => closeWatchLink({ browse: 'online' })}
+            onShown={(mid) => replaceWatchLink({ browse: 'online', mid })}
+            backLabel={`${browseLabel('online')} の一覧に戻る`}
+            shareUrl={(mid) => watchLinkUrl({ browse: 'online', mid })}
+          />
+        ) : null}
+        <div className="watch-keep" hidden={pageOpen}>
+          <WatchShown shown={!pageOpen}>
+            <BrowseView
+              category={browse}
+              factory={factory}
+              current={target?.id ?? null}
+              backLabel={target ? `${target.title} に戻る` : '戻る'}
+              onBack={() => closeWatchLink(null)}
+              onCategory={(next) => replaceWatchLink({ browse: next })}
+              onTournament={(item) => pickFromBrowse({ kind: 'tournament', id: item.tdid, title: item.title || item.tdid }, 'tournament')}
+              onLeague={(item) => pickFromBrowse({ kind: 'league', id: item.lgid, title: item.title || item.lgid }, 'league')}
+              onGame={openBrowseGame}
+            />
+          </WatchShown>
+        </div>
+        {pickerSheet}
+      </div>
+    );
+  }
 
   if (!target || now) {
     return (
@@ -256,10 +358,13 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
           </button>
         ) : null}
         {now ? (
-          <NowView factory={factory} onCompetition={(id, title) => pick({ kind: 'tournament', id, title })} onGame={openNowGame} />
+          <>
+            <BrowseLinks onBrowse={openBrowse} onFollowed={openFollowed} />
+            <NowView factory={factory} onCompetition={(id, title) => pick({ kind: 'tournament', id, title })} onGame={openNowGame} />
+          </>
         ) : (
           <Card kicker="WATCH" title="見るリーグ・大会を選んでください">
-            <LeaguePicker onPick={pick} onMatch={(mid) => openGame(mid)} onNow={() => setNow(true)} />
+            <LeaguePicker onPick={pick} onMatch={(mid) => openGame(mid)} onBrowse={openBrowse} onFollowed={openFollowed} />
           </Card>
         )}
         </WatchShown>
@@ -333,6 +438,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
         {gamePage}
         <div className="watch-keep" hidden={matchPage}>
         <WatchShown shown={!matchPage}>
+        {backToBrowse}
         {bar}
         {tabs}
         <div {...panel}>
@@ -348,9 +454,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
             onMatches={(matches, labels) => setHubMatches({ matches, labels })}
           />
         </div>
-        <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
-          いま n01 で進行中の試合を見る
-        </button>
+        <BrowseLinks onBrowse={openBrowse} onFollowed={openFollowed} />
         </WatchShown>
         </div>
         {pickerSheet}
@@ -363,6 +467,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
       {gamePage}
       <div className="watch-keep" hidden={matchPage}>
       <WatchShown shown={!matchPage}>
+      {backToBrowse}
       {bar}
       {tabs}
       <div {...panel}>
@@ -423,9 +528,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
           </>
         ) : null}
       </div>
-      <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
-        いま n01 で進行中の試合を見る (大会・個別の試合)
-      </button>
+      <BrowseLinks onBrowse={openBrowse} onFollowed={openFollowed} />
       </WatchShown>
       </div>
       {pickerSheet}

@@ -27,6 +27,13 @@ export interface WatchLink {
    * it on a page of its own (its whole match followed by `scid`).
    */
   now?: string;
+  /**
+   * n01 公式メニューの一覧 (`online` / `tournament` / `league`): 観戦の「n01オンライン」「n01トーナメント」
+   * 「n01リーグ」。`online` と `mid` の組み合わせは、その一覧から開いた試合 (戻ると一覧)。
+   */
+  browse?: 'online' | 'tournament' | 'league';
+  /** `1`: 注目選手の試合 (登録した選手が出場中の試合)。`mid` と組み合わせると、そこから開いた試合。 */
+  followed?: string;
 }
 
 const PREFIX = '#/watch';
@@ -39,7 +46,10 @@ const KEYS: [keyof WatchLink, string][] = [
   ['game', 'g'],
   ['mid', 'm'],
   ['now', 'n'],
+  ['browse', 'b'],
+  ['followed', 'f'],
 ];
+const BROWSE_VALUES = new Set(['online', 'tournament', 'league']);
 
 /** The link in a URL fragment, or `null` when the fragment is not a watch link. Unknown or malformed values are dropped. */
 export function parseWatchLink(hash: string): WatchLink | null {
@@ -48,12 +58,17 @@ export function parseWatchLink(hash: string): WatchLink | null {
   const link: WatchLink = {};
   for (const [key, param] of KEYS) {
     const value = params.get(param);
-    if (value && TOKEN.test(value)) link[key] = value;
+    if (value && TOKEN.test(value)) (link as Record<string, string>)[key] = value;
   }
   // A card or a game needs its season; a game needs its card.
   if (!link.season) delete link.card;
   if (!link.card) delete link.game;
   if (link.now !== '1') delete link.now;
+  if (!link.browse || !BROWSE_VALUES.has(link.browse)) delete link.browse;
+  // A game of the online list only; the list itself names nothing else.
+  if (link.browse && link.browse !== 'online') delete link.mid;
+  if (link.browse && (link.league || link.tournament || link.now)) delete link.browse;
+  if (link.followed !== '1' || link.league || link.tournament || link.now || link.browse) delete link.followed;
   return link;
 }
 
@@ -129,6 +144,23 @@ export function replaceWatchLink(link: WatchLink | null): void {
  */
 export function closeWatchLink(fallback: WatchLink | null): void {
   if (depth() > 0) window.history.back();
+  else replaceWatchLink(fallback);
+}
+
+/** How many entries this app has pushed under the current one (0 = opened directly). */
+export function currentWatchDepth(): number {
+  return depth();
+}
+
+/**
+ * Back to a list several entries down: the entry just under `openedAt` (the depth of the entry the
+ * list opened, e.g. a league chosen from n01リーグ), however many entries were pushed on top of it
+ * since (a card, a game). Without those entries (a reload, a link opened directly) the current
+ * entry is rewritten to `fallback`, as `closeWatchLink` does.
+ */
+export function returnToWatchEntry(openedAt: number, fallback: WatchLink | null): void {
+  const steps = depth() - openedAt + 1;
+  if (openedAt > 0 && steps > 0 && steps <= depth()) window.history.go(-steps);
   else replaceWatchLink(fallback);
 }
 
