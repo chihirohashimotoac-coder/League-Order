@@ -1,11 +1,10 @@
 import type { Page } from '@playwright/test';
 
 /**
- * A stand-in for the Screen Wake Lock API (`navigator.wakeLock`) and for the page being hidden,
- * installed before the app loads. Headless Chromium has no screen to keep on, so what the app
- * asks for is recorded instead: how many locks are held now, the most held at once, how many were
- * asked for and released. `mode: 'deny'` refuses every request (NotAllowedError), `'none'` leaves
- * the API out (an older browser).
+ * Screen Wake Lock API (`navigator.wakeLock`) とページの非表示の代役。アプリの読み込み前に入れる。
+ * ヘッドレスの Chromium には点灯を保つ画面がないため、アプリの要求を記録する: いま持っている
+ * ロックの数、同時に持った最大数、要求と解除の回数。`mode: 'deny'` はすべての要求を拒否し
+ * (NotAllowedError)、`'none'` は API を無くす (古いブラウザ)。
  */
 export interface WakeRecord {
   active: number;
@@ -62,10 +61,10 @@ export async function fakeWakeLock(page: Page, mode: 'grant' | 'deny' | 'none' =
 }
 
 export const wakeRecord = (page: Page): Promise<WakeRecord> => page.evaluate(() => (window as unknown as { __wake: WakeRecord }).__wake);
-/** How many screen locks the app holds now. */
+/** アプリがいま持っている画面のロックの数。 */
 export const wakeHeld = async (page: Page): Promise<number> => (await wakeRecord(page)).active;
 
-/** The tab hidden (another app, the screen off) or shown again. */
+/** タブを非表示にする (別のアプリ・画面オフ)、または表示に戻す。 */
 export async function setPageHidden(page: Page, hidden: boolean): Promise<void> {
   await page.evaluate((value) => {
     (window as unknown as { __wakeControl: { hidden: boolean } }).__wakeControl.hidden = value;

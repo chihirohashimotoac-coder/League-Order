@@ -437,9 +437,9 @@ function FocusCard({
       poller.stop();
     };
   }, [card.tmid, card.finished, liveApi]);
-  // The screen stays awake while the card is on (the poller's end: `end_schedule`, or the end of a
-  // card of one game) — between games too, and on the last state seen while a read is retried;
-  // not once the poller stopped at its request cap (`budget`).
+  // 対戦が進行中の間、画面の自動スリープを防ぐ (終了はポーラーの判定: `end_schedule`、または
+  // 1 ゲームの対戦の終了)。ゲームの合間も保持し、再試行中は最後に確認した状態に従う。
+  // ポーラーが取得上限 (`budget`) で止まったら解除する。
   useScreenWake(!card.finished && status.kind !== 'finished' && status.kind !== 'budget' && !(live && (live.cardEnded || (!live.isSchedule && live.gameEnded))));
 
   // Who plays which game: read once, again every 2 minutes while the card runs.

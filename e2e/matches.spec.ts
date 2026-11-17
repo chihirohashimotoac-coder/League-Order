@@ -220,7 +220,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await expect(focus.getByTestId('live-status')).toContainText('自動更新中');
     await expect.poll(() => wakeHeld(page)).toBe(1);
 
-    stage = 'failing'; // n01 unreachable for a while: the card is still on as last seen
+    stage = 'failing'; // n01 に一時的につながらない: 最後に確認した状態 (進行中) のまま
     await expect(focus.getByTestId('live-status')).toContainText('取得エラー');
     expect(await wakeHeld(page)).toBe(1);
     stage = 'on';
@@ -233,13 +233,13 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await setPageHidden(page, false);
     await expect.poll(() => wakeHeld(page)).toBe(1);
 
-    await page.getByRole('tab', { name: '順位', exact: true }).click(); // another tab of the screen
+    await page.getByRole('tab', { name: '順位', exact: true }).click(); // 同じ画面の別のタブ
     await expect.poll(() => wakeHeld(page)).toBe(0);
     await page.getByRole('tab', { name: 'ライブ', exact: true }).click();
     await expect(focus.getByTestId('live-status')).toContainText('自動更新中');
     await expect.poll(() => wakeHeld(page)).toBe(1);
 
-    stage = 'ended'; // end_schedule: the card is over
+    stage = 'ended'; // end_schedule: 対戦の終了
     await expect(focus.getByTestId('live-status')).toContainText('終了しました');
     await expect.poll(() => wakeHeld(page)).toBe(0);
     expect((await wakeRecord(page)).max).toBe(1);

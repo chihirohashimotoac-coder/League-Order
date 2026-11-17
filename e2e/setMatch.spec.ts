@@ -368,7 +368,7 @@ test('日程・結果: a slot replayed — a late end of the old game neither en
 // 観戦中は画面を自動スリープさせない (Screen Wake Lock)
 // ---------------------------------------------------------------------------
 
-/** `match/live` answers 503 while `failing()` (n01 unreachable for a while), layered over the other canned servers. */
+/** `failing()` の間、`match/live` に 503 を返す (n01 に一時的につながらない)。ほかの固定データのサーバーの上に重ねる。 */
 async function failLiveWhile(page: Page, failing: () => boolean): Promise<void> {
   await page.route(`${N01_API_BASE_URL}/**`, async (route) => {
     if (failing() && new URL(route.request().url()).pathname.endsWith('/match/live')) return route.fulfill({ status: 503, body: '{}', headers: { 'access-control-allow-origin': '*' } });
@@ -382,45 +382,45 @@ test('wake lock: a set-format match keeps the screen on through the next set, an
   let failing = false;
   await openNow(page, control);
   await failLiveWhile(page, () => failing);
-  await expect.poll(() => wakeHeld(page)).toBe(0); // the list of games in progress is no live view
+  await expect.poll(() => wakeHeld(page)).toBe(0); // 進行中の試合の一覧はライブ観戦ではない
   await page.getByTestId('now-single').filter({ hasText: 'Alpha 選手1-1' }).click();
   await expect(page.getByTestId('live-leg')).toBeVisible();
   await expect.poll(() => wakeHeld(page)).toBe(1);
 
-  control.phase = 1; // シングルス1 over, the next set not begun: the match is still on
+  control.phase = 1; // シングルス1 が終了し、次のセットはまだ: 対戦は進行中
   await expect(page.getByTestId('set-wait')).toBeVisible();
   expect(await wakeHeld(page)).toBe(1);
-  control.phase = 2; // ダブルス1 began: switched on its own, still held
+  control.phase = 2; // ダブルス1 が開始: 自動で切り替わり、保持したまま
   await expect(shown(page)).toContainText('ダブルス1');
   expect(await wakeHeld(page)).toBe(1);
 
-  await page.getByTestId('set-item').first().click(); // an earlier set, while the match goes on
+  await page.getByTestId('set-item').first().click(); // 対戦が進む間に、過去のセットを表示
   await expect(shown(page)).toContainText('シングルス1');
-  await page.getByTestId('leg-chips').getByRole('tab').first().click(); // and an earlier leg of it
+  await page.getByTestId('leg-chips').getByRole('tab').first().click(); // さらに、そのセットの過去のレッグを表示
   await expect(page.getByTestId('leg-sheet')).toContainText('Leg 1');
   expect(await wakeHeld(page)).toBe(1);
 
-  failing = true; // n01 unreachable for a while: the last state seen (in progress) stands
+  failing = true; // n01 に一時的につながらない: 最後に確認した状態 (進行中) のまま
   await expect(page.getByTestId('set-page-status')).toContainText('取得失敗');
   expect(await wakeHeld(page)).toBe(1);
   failing = false;
   await expect(page.getByTestId('set-page-status')).toContainText('自動更新中', { timeout: 20_000 });
   expect(await wakeHeld(page)).toBe(1);
 
-  await setPageHidden(page, true); // another app, the screen off
+  await setPageHidden(page, true); // 別のアプリに切り替え・画面オフ
   await expect.poll(() => wakeHeld(page)).toBe(0);
   await setPageHidden(page, false);
   await expect.poll(() => wakeHeld(page)).toBe(1);
 
-  control.phase = 7; // the match is over (end_schedule)
+  control.phase = 7; // 対戦の終了 (end_schedule)
   await expect(page.getByTestId('set-page-status')).toContainText('終了');
   await expect.poll(() => wakeHeld(page)).toBe(0);
   const record = await wakeRecord(page);
-  expect(record.max).toBe(1); // never two locks at once
+  expect(record.max).toBe(1); // ロックを同時に 2 つ持たない
   await setPageHidden(page, true);
   await setPageHidden(page, false);
   await page.waitForTimeout(500);
-  expect((await wakeRecord(page)).requests).toBe(record.requests); // over: not asked again
+  expect((await wakeRecord(page)).requests).toBe(record.requests); // 終了後: 再要求しない
 });
 
 test('wake lock: let go when the page is left (back, the browser’s back), taken again on the way back; a finished match takes none', async ({ page }) => {
@@ -438,14 +438,14 @@ test('wake lock: let go when the page is left (back, the browser’s back), take
   await page.goBack();
   await expect(page.getByTestId('now-view')).toBeVisible();
   await expect.poll(() => wakeHeld(page)).toBe(0);
-  // To another screen of the app altogether.
+  // アプリの別の画面へ移る。
   await page.getByTestId('now-single').first().click();
   await expect.poll(() => wakeHeld(page)).toBe(1);
   await tab(page, 'ホーム').click();
   await expect(page.getByTestId('set-page')).toHaveCount(0);
   await expect.poll(() => wakeHeld(page)).toBe(0);
 
-  // A match that is over, opened from a link: its results, no lock.
+  // 終了した対戦をリンクから開く: 結果の表示のみで、ロックは取らない。
   control.phase = 7;
   await page.goto(`/#/watch?m=${setMid(2)}`);
   await expect(page.getByTestId('set-page-status')).toContainText('終了');
@@ -465,7 +465,7 @@ test('wake lock: a game outside any set (followed by mid) keeps the screen on un
     const q = url.searchParams;
     const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body), headers: { 'access-control-allow-origin': '*' } });
     const phase = over ? 1 : 0;
-    // シングルス1 of the canned match, without its scid: one game on its own (end_match ends it).
+    // 固定データのシングルス1 から scid を除いたもの: 単独の試合 (end_match で終了)。
     const strip = (body: Record<string, unknown>): Record<string, unknown> => ({ ...body, scid: '', end_schedule: 0, currentSet: undefined, current_set: undefined });
     if (operation === 'match/list' && q.get('mid') === solo) return json({ result: 0, list: (q.get('live') === '1') === !over ? [strip(setRow(0, phase))] : [] });
     if (operation === 'match/live' && q.get('mid') === solo) return json(strip(setLive(0, phase)));
@@ -473,7 +473,7 @@ test('wake lock: a game outside any set (followed by mid) keeps the screen on un
   });
   await page.goto(`/#/watch?m=${solo}`);
   await expect(page.getByTestId('live-leg')).toBeVisible();
-  await expect(page.getByTestId('set-list')).toHaveCount(0); // no sets: one game
+  await expect(page.getByTestId('set-list')).toHaveCount(0); // セットなし: 単独の試合
   await expect.poll(() => wakeHeld(page)).toBe(1);
   over = true;
   await expect(page.getByTestId('set-page-status')).toContainText('終了');
@@ -483,17 +483,17 @@ test('wake lock: a game outside any set (followed by mid) keeps the screen on un
 test('wake lock: the live tab kept hidden under a match page holds nothing; back to it, it holds again', async ({ page }) => {
   await fakeWakeLock(page);
   await serveNight(page);
-  await serveSetMatch(page, { phase: 7, log: [] }); // the match opened over the live tab is over
+  await serveSetMatch(page, { phase: 7, log: [] }); // ライブタブの上に開く対戦は終了済み
   await page.goto('/');
   await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
   await expect(page.getByTestId('live-board')).toBeVisible();
-  await expect.poll(() => wakeHeld(page)).toBe(1); // card c003 in progress, on the live tab
+  await expect.poll(() => wakeHeld(page)).toBe(1); // ライブタブで c003 の対戦が進行中
   await page.evaluate((hash) => {
     window.location.hash = hash;
   }, `#/watch?l=lg_l3hI_3397&t=t_Test_0001&m=${setMid(3)}`);
   await expect(page.getByTestId('set-page')).toBeVisible();
   await expect(page.getByTestId('set-page-status')).toContainText('終了');
-  await expect(page.getByTestId('live-hub')).toBeHidden(); // kept underneath, still mounted
+  await expect(page.getByTestId('live-hub')).toBeHidden(); // 下に隠して保持 (マウントされたまま)
   await expect.poll(() => wakeHeld(page)).toBe(0);
   await page.getByTestId('set-page-back').click();
   await expect(page.getByTestId('live-hub')).toBeVisible();
@@ -509,17 +509,17 @@ test('wake lock: 日程・結果 — a card in progress keeps the screen on, als
   await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
   await page.getByRole('tab', { name: '日程・結果' }).click();
   await expect(page.getByTestId('results-tab')).toBeVisible();
-  await expect.poll(() => wakeHeld(page)).toBe(0); // the list of cards is no live view
+  await expect.poll(() => wakeHeld(page)).toBe(0); // 対戦カードの一覧はライブ観戦ではない
   await page.getByTestId('match-card').filter({ hasText: 'Corks' }).filter({ hasText: '進行中' }).first().click();
   const detail = page.getByTestId('match-detail');
   await expect(detail.getByTestId('live-leg')).toBeVisible();
   await expect.poll(() => wakeHeld(page)).toBe(1);
-  await detail.getByTestId('game-tab').nth(1).click(); // an earlier game
+  await detail.getByTestId('game-tab').nth(1).click(); // 過去のゲームを表示
   await expect(detail.getByTestId('game-panel')).toContainText('ダブルス1');
-  phase = 1; // the next game
+  phase = 1; // 次のゲームが開始
   await expect(detail.getByTestId('back-to-live')).toBeVisible();
   expect(await wakeHeld(page)).toBe(1);
-  phase = 2; // the card is over (end_schedule)
+  phase = 2; // 対戦の終了 (end_schedule)
   await expect(detail.getByTestId('back-to-live')).toHaveCount(0);
   await expect.poll(() => wakeHeld(page)).toBe(0);
   await page.getByRole('button', { name: '一覧に戻る' }).click();
@@ -544,7 +544,7 @@ for (const mode of ['deny', 'none'] as const) {
     expect(record.active).toBe(0);
     if (mode === 'deny') {
       expect(record.denied).toBeGreaterThan(0);
-      // Refused: not asked again and again while the page stays shown.
+      // 拒否された場合: 表示が続いている間、繰り返し要求しない。
       const asked = record.requests;
       await page.waitForTimeout(3000);
       expect((await wakeRecord(page)).requests).toBe(asked);

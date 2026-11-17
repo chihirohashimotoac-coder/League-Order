@@ -6,8 +6,8 @@ import type { WakeSentinel } from '../screenWake';
 import { WatchShown, useScreenWake } from './useScreenWake';
 
 /**
- * The hook the live views use: held while the view is on and shown, under React Strict Mode (its
- * effects run twice), with two views at once, and under a list kept hidden below a match page.
+ * ライブ観戦のビューが使うフック: 進行中で表示されている間だけ保持する。React Strict Mode
+ * (effect が 2 回実行される)、2 つのビューの同時表示、試合ページの下に隠して保持する一覧で確かめる。
  */
 
 function fakeWake() {

@@ -29,7 +29,7 @@ import { ResultsTab } from './ResultsTab';
 const POLL_LIMIT = 4;
 const POLL_INTERVAL_MS = 100;
 
-// vi.mock is hoisted above the constants: the same numbers (POLL_LIMIT, POLL_INTERVAL_MS) are written out.
+// vi.mock は定数より前に巻き上げられるため、同じ値 (POLL_LIMIT・POLL_INTERVAL_MS) を直接書く。
 vi.mock('../livePoller', async (importOriginal) => {
   const actual = await importOriginal<typeof LivePollerModule>();
   class SmallLivePoller extends actual.LivePoller {
@@ -121,7 +121,7 @@ function apiOf(handler: Handler, failing: () => boolean) {
  * 対戦は最後まで進行中のまま (終了判定では解除されない)。
  */
 async function retryThenBudget(view: { status: () => string }, lives: string[], failing: { on: boolean }): Promise<void> {
-  await flush(1); // the poller's first read is scheduled at 0 ms
+  await flush(1); // ポーラーの 1 回目の取得は 0 ms 後に予約される
   await flush();
   expect(lives).toHaveLength(1);
   expect(wake.active).toBe(1);
@@ -159,7 +159,7 @@ describe('screen wake lock follows the poller: held while retrying, let go at th
     const failing = { on: false };
     const { factory, lives } = apiOf((operation, params) => setMatchReply(operation, params, 2) ?? { result: -1, error: 'not found' }, () => failing.on);
     render(<SetMatchPage mid={setMid(1)} factory={factory} onBack={() => undefined} onShown={() => undefined} />);
-    await flush(); // the game is read first; the match is followed once it is known
+    await flush(); // 先に試合を読み、わかってから対戦を追う
     await flush();
     expect(lives).toHaveLength(0);
     await retryThenBudget({ status: () => screen.getByTestId('set-page-status').textContent ?? '' }, lives, failing);
@@ -214,7 +214,7 @@ describe('screen wake lock follows the poller: held while retrying, let go at th
         <ResultsTab data={data} registered={[]} api={api} onTeam={() => undefined} link={{ season: TDID, card: card!.key }} base={{ season: TDID }} />
       </AppStoreProvider>,
     );
-    // The live state is shown in the game's own status line; the poller's status is read from it.
+    // ライブの状態はゲームの状態行に表示される。ポーラーの状態はそこから読む。
     await retryThenBudget({ status: () => screen.getByTestId('match-detail').textContent ?? '' }, lives, failing);
     expect(screen.getByTestId('match-detail').textContent).toContain('Corks');
   });

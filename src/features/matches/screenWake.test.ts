@@ -92,8 +92,8 @@ describe('screenWake', () => {
     expect(sentinels[0].released).toBe(true);
     expect(sentinels[0].listening).toBe(0);
     expect(wake.snapshot).toEqual({ holders: 0, held: false, pending: false });
-    expect(visibility.size).toBe(0); // no listener left behind
-    leave(); // twice: nothing more
+    expect(visibility.size).toBe(0); // リスナーが残らない
+    leave(); // 2 回目: 何もしない
     expect(wake.snapshot.holders).toBe(0);
   });
 
@@ -106,7 +106,7 @@ describe('screenWake', () => {
     setVisible(false);
     expect(sentinels[0].released).toBe(true);
     expect(wake.snapshot.held).toBe(false);
-    expect(asked).toHaveLength(1); // nothing asked while hidden
+    expect(asked).toHaveLength(1); // 非表示の間は要求しない
 
     setVisible(true);
     expect(asked).toHaveLength(2);
@@ -194,7 +194,7 @@ describe('screenWake', () => {
     setVisible(false);
     asked[0].reject();
     await settle();
-    expect(asked).toHaveLength(1); // still hidden
+    expect(asked).toHaveLength(1); // まだ非表示
     setVisible(true);
     expect(asked).toHaveLength(2);
     leave();
@@ -205,13 +205,13 @@ describe('screenWake', () => {
     const leave = wake.acquire();
     setVisible(false);
     setVisible(true);
-    expect(asked).toHaveLength(1); // the request still on: nothing asked twice at once
+    expect(asked).toHaveLength(1); // 要求中: 同時に 2 件は要求しない
     asked[0].reject();
     await settle();
     expect(asked).toHaveLength(2);
     asked[1].reject();
     await settle();
-    expect(asked).toHaveLength(2); // the same chance: no loop
+    expect(asked).toHaveLength(2); // 同じ機会: 繰り返さない
     expect(wake.snapshot).toEqual({ holders: 1, held: false, pending: false });
     leave();
     expect(visibility.size).toBe(0);
@@ -223,12 +223,12 @@ describe('screenWake', () => {
     asked[0].reject();
     await settle();
     expect(wake.snapshot).toEqual({ holders: 1, held: false, pending: false });
-    const other = wake.acquire(); // another view, same chance: no new request
+    const other = wake.acquire(); // 別のビュー・同じ機会: 新たに要求しない
     expect(asked).toHaveLength(1);
     other();
     leave();
     expect(visibility.size).toBe(0);
-    // A view opened later is a new chance.
+    // あとで開いたビューは新しい機会。
     const later = wake.acquire();
     expect(asked).toHaveLength(2);
     later();

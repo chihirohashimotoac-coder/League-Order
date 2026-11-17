@@ -244,8 +244,8 @@ function MatchCenter({
   // A late reply of a game whose slot the list shows replayed (another mid, older than the list's
   // row) is dropped by the poller itself: not shown, not used as `since`, not taken as the end.
   const { live: polled, status } = useCardLive(api, listed.state === 'live' ? listed.tmid : null, (state) => !liveSuperseded(listed, state));
-  // The screen stays awake while the card is on (as on the live tab: the poller's end of the card,
-  // and not once the poller stopped at its request cap, `budget`).
+  // 対戦が進行中の間、画面の自動スリープを防ぐ (ライブタブと同じく、終了はポーラーの判定に従う。
+  // ポーラーが取得上限 `budget` で止まったら解除する)。
   useScreenWake(listed.state === 'live' && status.kind !== 'finished' && status.kind !== 'budget' && !(polled && (polled.cardEnded || (!polled.isSchedule && polled.gameEnded))));
   const [states, setStates] = useState<ReadonlyMap<string, LiveState>>(() => new Map());
   const [statesFrom, setStatesFrom] = useState<LiveState | null>(null);
