@@ -1,7 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { onRadioGroupKeyDown, rovingTabIndex } from '../../../components/ui';
-import { Icon } from '../../../components/icons';
-import { SPLIT_QUERY, useMediaQuery } from '../../../components/useMediaQuery';
 import { describeN01Error } from '../../../integrations/n01/client';
 import type { MatchesApi } from '../api';
 import type { MatchesApiFactory } from '../environment';
@@ -13,6 +10,8 @@ import type { MatchSet } from '../matchSets';
 import { GameView } from './GameView';
 import { LiveSheet } from './LiveSheet';
 import { liveStatusText } from './MatchSheet';
+import { LiveReturn, MatchBar, MatchHead, UnitChips, UnitHead, shortUnit } from './MatchParts';
+import type { MatchUnit } from './MatchParts';
 
 /**
  * One n01 match opened from 「いま n01 で進行中」 (個別の試合・注目選手), on a page of its own — the
@@ -164,64 +163,10 @@ function useFollowedMatch(mid: string, factory: MatchesApiFactory): Followed {
 
 const legsText = (set: MatchSet): string => (set.legs ? `${set.legs[0]} - ${set.legs[1]}` : '— - —');
 
-function resultText(set: MatchSet): string {
-  if (!set.finished) return set.live ? '進行中' : '未終了';
-  if (set.winner === -1) return '引き分け';
-  if (set.winner === null) return '終了';
-  return `${set.names[set.winner]} の勝ち`;
-}
 
-function SetList({ sets, shownMid, onPick, loading, error, onRetry }: { sets: MatchSet[]; shownMid: string; onPick: (mid: string) => void; loading: boolean; error: string | null; onRetry: () => void }): React.JSX.Element {
-  const any = sets.some((set) => set.mid === shownMid);
-  return (
-    <nav className="set-nav" aria-label="セット">
-      <div className="set-list" role="radiogroup" aria-label="セットを選ぶ" onKeyDown={onRadioGroupKeyDown} data-testid="set-list">
-        {sets.map((set, index) => {
-          const chosen = set.mid === shownMid;
-          return (
-            <button
-              key={set.mid}
-              type="button"
-              role="radio"
-              aria-checked={chosen}
-              tabIndex={rovingTabIndex(chosen, index, any)}
-              className={`set-item${chosen ? ' is-chosen' : ''}${set.live && !set.finished ? ' is-live' : ''}`}
-              onClick={() => onPick(set.mid)}
-              data-testid="set-item"
-              data-mid={set.mid}
-            >
-              <span className="set-item-name">
-                {set.live && !set.finished ? <span className="tag state-live">LIVE</span> : null}
-                {set.label}
-              </span>
-              <span className="set-item-score" aria-label={`Leg ${legsText(set)}`}>
-                {legsText(set)}
-              </span>
-              <span className="set-item-result muted small-text">{resultText(set)}</span>
-            </button>
-          );
-        })}
-      </div>
-      {error ? (
-        <p className="small-text" role="alert" data-testid="sets-error">
-          {error}。取得できたセットは表示しています。最新のスコアは更新を続けています。{' '}
-          <button type="button" className="btn small" onClick={onRetry}>
-            再取得
-          </button>
-        </p>
-      ) : loading && sets.length === 0 ? (
-        <p className="muted small-text" role="status">
-          セット一覧を読み込み中…
-        </p>
-      ) : null}
-    </nav>
-  );
-}
-
-function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, backLabel }: { initialMid: string; requestedMid: string; factory: MatchesApiFactory; onBack: () => void; onShown: (mid: string) => void; knownMids: React.MutableRefObject<Set<string>>; backLabel: string }): React.JSX.Element {
+function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, backLabel, shareUrl }: { initialMid: string; requestedMid: string; factory: MatchesApiFactory; onBack: () => void; onShown: (mid: string) => void; knownMids: React.MutableRefObject<Set<string>>; backLabel: string; shareUrl?: (mid: string) => string }): React.JSX.Element {
   const followed = useFollowedMatch(initialMid, factory);
   const { api, row, rowError, live, status, sets, setsError, setsLoading, retrySets } = followed;
-  const wide = useMediaQuery(SPLIT_QUERY);
   /**
    * The set chosen by the viewer; `null` = the live set (followed as the match moves on);
    * `undefined` until the first live state says whether the page was opened on the set in play.
@@ -303,15 +248,11 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
   const statusLine = liveStatusText(status, ended);
   const names: [string, string] = shown?.names ?? (row ? [row.sides[0].members.map((m) => m.name).join(' / ') || row.sides[0].name, row.sides[1].members.map((m) => m.name).join(' / ') || row.sides[1].name] : ['—', '—']);
 
-  const back = (
-    <button type="button" className="btn ghost small set-page-back" onClick={onBack} data-testid="set-page-back">
-      <Icon name="chevronLeft" size={16} /> {backLabel}
-    </button>
-  );
+  const bar = <MatchBar backLabel={backLabel} onBack={onBack} link={shareUrl?.(shownMid)} backTestId="set-page-back" />;
   if (rowError) {
     return (
-      <div className="set-page" data-testid="set-page">
-        {back}
+      <div className="set-page match-center" data-testid="set-page">
+        {bar}
         <p className="small-text" role="alert">
           取得エラー: {rowError}
         </p>
@@ -320,8 +261,8 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
   }
   if (!row) {
     return (
-      <div className="set-page" data-testid="set-page">
-        {back}
+      <div className="set-page match-center" data-testid="set-page">
+        {bar}
         <p className="muted small-text" role="status">
           読み込み中…
         </p>
@@ -331,65 +272,81 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
 
   const showSetList = scid !== null && view.sets.length > 0;
   const backToLive = chosen != null && latest !== null && chosen !== latest.mid;
-  const score = (
-    <section className="set-score" aria-label={shown ? `${shown.label} のスコア` : 'スコア'} data-testid="set-score">
-      <header className="set-score-head">
-        <h3 className="set-score-title" data-testid="shown-set">
-          {scid ? (shown?.label ?? '—') : (live?.title ?? row.title)}
-          {shown && !following && shown.finished ? <span className="muted small-text"> ・ {resultText(shown)}</span> : null}
-        </h3>
-        {backToLive ? (
-          <button type="button" className="btn small primary" onClick={() => setChosen(null)} data-testid="back-to-live">
-            {ended ? '最後のセットへ' : 'ライブに戻る'}
-          </button>
-        ) : null}
-      </header>
-      {betweenSets && following ? (
-        <p className="set-wait small-text" role="status" data-testid="set-wait">
-          このセットは終了しました。次のセットの開始を待っています (始まると自動で切り替わります)。
-        </p>
-      ) : null}
-      {/* The live scoreboard names the players and the legs itself: said once, not twice. */}
-      <div className={`focus-head${following && live && !live.gameEnded ? ' visually-hidden' : ''}`}>
-        <span>{names[0]}</span>
-        <strong data-testid="set-legs">{shown ? legsText(shown) : `${row.sides[0].legsWon ?? 0} - ${row.sides[1].legsWon ?? 0}`}</strong>
-        <span>{names[1]}</span>
-      </div>
-      {following && live && !live.gameEnded ? (
-        <LiveSheet key={live.mid} api={api} live={live} status={{ ...statusLine, updated }} />
-      ) : (
-        <GameView key={shownMid} api={api} mid={shownMid} cricket={shown?.cricket ?? row.matchType === 'cricket'} finished={shown?.finished ?? row.finished} names={names} flip={false} openPlayedLeg />
-      )}
-    </section>
-  );
+  const liveOn = following && live !== null && !live.gameEnded;
+  // The match's two sides (teams, or the players of a single game) and its score: sets won for a
+  // set-format match, legs for a single game.
+  const teams: [string, string] = scid ? [live?.sides[0].name ?? row.sides[0].name, live?.sides[1].name ?? row.sides[1].name] : names;
+  const total = scid ? (view.setsWon ? `${view.setsWon[0]} - ${view.setsWon[1]}` : 'vs') : shown ? legsText(shown) : `${row.sides[0].legsWon ?? 0} - ${row.sides[1].legsWon ?? 0}`;
+  const units: MatchUnit[] = view.sets.map((set) => ({ key: set.mid, label: set.label, short: shortUnit(set.label), legs: set.legs, winner: set.winner, live: set.live && !set.finished, playable: true }));
 
   return (
-    <div className={`set-page${wide && showSetList ? ' is-split' : ''}`} data-testid="set-page">
-      <div className="set-page-top">
-        {back}
-        <div className="set-page-heading">
-          <h2 className="set-page-title" data-testid="set-page-title">
-            {scid ? view.matchTitle : (live?.title ?? row.title)}
-          </h2>
-          <p className={`small-text live-status ${status.kind}`} role="status" data-testid="set-page-status">
-            {statusLine.text}
-            {updated ? ` ・ n01 更新 ${updated}` : ''}
-            {status.kind === 'retrying' ? ` ・ ${status.message}` : ''}
-          </p>
-        </div>
-        {scid && view.setsWon ? (
-          <p className="set-total" data-testid="sets-won">
-            <span className="muted small-text">獲得セット (通算)</span>
-            <strong>
-              {view.setsWon[0]} - {view.setsWon[1]}
-            </strong>
+    <div className="set-page match-center" data-testid="set-page">
+      {bar}
+      <MatchHead
+        sides={teams}
+        score={total}
+        scoreLabel={scid ? `獲得セット (通算) ${total}` : `Leg ${total}`}
+        scoreTestId={scid ? 'sets-won' : 'set-legs'}
+        note={
+          <>
+            <span data-testid="set-page-title">{scid ? view.matchTitle : (live?.title ?? row.title)}</span>
+            {' ・ '}
+            <span className={`live-status ${status.kind}`} role="status" data-testid="set-page-status">
+              {statusLine.text}
+              {updated ? ` ・ n01 更新 ${updated}` : ''}
+              {status.kind === 'retrying' ? ` ・ ${status.message}` : ''}
+            </span>
+          </>
+        }
+      />
+      {showSetList ? (
+        <>
+          <UnitChips label="セット" names={teams} selected={shownMid} onPick={pick} units={units} testId="set-list" itemTestId="set-item" />
+          {setsError ? (
+            <p className="small-text" role="alert" data-testid="sets-error">
+              {setsError}。取得できたセットは表示しています。最新のスコアは更新を続けています。{' '}
+              <button type="button" className="btn small" onClick={retrySets}>
+                再取得
+              </button>
+            </p>
+          ) : setsLoading && view.sets.length <= 1 ? (
+            <p className="muted small-text" role="status">
+              セット一覧を読み込み中…
+            </p>
+          ) : null}
+        </>
+      ) : null}
+      {backToLive && liveSet && !liveSet.finished && live ? (
+        <LiveReturn onReturn={() => setChosen(null)} text={`${liveSet.label} ・ Leg ${(live.leg?.index ?? live.currentLeg ?? 0) + 1} ・ ${live.legs[0]}-${live.legs[1]}`} />
+      ) : backToLive ? (
+        <button type="button" className="btn small" onClick={() => setChosen(null)} data-testid="back-to-live">
+          最後のセットへ
+        </button>
+      ) : null}
+      <section className="set-score game-panel" aria-label={shown ? `${shown.label} のスコア` : 'スコア'} data-testid="set-score">
+        {scid && shown ? (
+          <UnitHead
+            label={shown.label}
+            state={shown.live && !shown.finished ? 'live' : betweenSets && following ? 'waiting' : 'finished'}
+            sides={shown.names}
+            legs={shown.legs}
+            winner={shown.winner}
+            testId="shown-set"
+            legsTestId="set-legs"
+            hidden={liveOn}
+          />
+        ) : null}
+        {betweenSets && following ? (
+          <p className="set-wait small-text" role="status" data-testid="set-wait">
+            このセットは終了しました。次のセットの開始を待っています (始まると自動で切り替わります)。
           </p>
         ) : null}
-      </div>
-      <div className="set-page-body">
-        {showSetList ? <SetList sets={view.sets} shownMid={shownMid} onPick={pick} loading={setsLoading} error={setsError} onRetry={retrySets} /> : null}
-        {score}
-      </div>
+        {liveOn && live ? (
+          <LiveSheet key={live.mid} api={api} live={live} title={scid && shown ? shown.label : undefined} status={{ ...statusLine, updated }} />
+        ) : (
+          <GameView key={shownMid} api={api} mid={shownMid} cricket={shown?.cricket ?? row.matchType === 'cricket'} finished={shown?.finished ?? row.finished} names={names} flip={false} openPlayedLeg />
+        )}
+      </section>
     </div>
   );
 }
@@ -399,7 +356,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
  * (back / forward, a pasted link): another set of the same match is shown in place; any other
  * game starts the page afresh.
  */
-export function SetMatchPage({ mid, factory, onBack, onShown, backLabel = '進行中の試合一覧に戻る' }: { mid: string; factory: MatchesApiFactory; onBack: () => void; onShown: (mid: string) => void; backLabel?: string }): React.JSX.Element {
+export function SetMatchPage({ mid, factory, onBack, onShown, backLabel = '進行中の試合一覧に戻る', shareUrl }: { mid: string; factory: MatchesApiFactory; onBack: () => void; onShown: (mid: string) => void; backLabel?: string; /** The link of a game shown here (リンクをコピー). */ shareUrl?: (mid: string) => string }): React.JSX.Element {
   const [root, setRoot] = useState(mid);
   const knownMids = useRef<Set<string>>(new Set([mid]));
   useEffect(() => {
@@ -408,5 +365,5 @@ export function SetMatchPage({ mid, factory, onBack, onShown, backLabel = '進�
       setRoot(mid);
     }
   }, [mid, root]);
-  return <Inner key={root} initialMid={root} requestedMid={mid} factory={factory} onBack={onBack} onShown={onShown} knownMids={knownMids} backLabel={backLabel} />;
+  return <Inner key={root} initialMid={root} requestedMid={mid} factory={factory} onBack={onBack} onShown={onShown} knownMids={knownMids} backLabel={backLabel} shareUrl={shareUrl} />;
 }

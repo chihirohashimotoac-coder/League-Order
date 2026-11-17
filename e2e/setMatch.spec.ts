@@ -81,9 +81,9 @@ test('opened mid-match: the earlier sets from the first screen, each with its ow
   const items = page.getByTestId('set-item');
   await expect(items).toHaveCount(3);
   await expect(items.nth(0)).toContainText('シングルス1');
-  await expect(items.nth(0)).toContainText('2 - 0');
+  await expect(items.nth(0)).toContainText('2-0');
   await expect(items.nth(1)).toContainText('ダブルス1');
-  await expect(items.nth(1)).toContainText('1 - 2');
+  await expect(items.nth(1)).toContainText('1-2');
   await expect(items.nth(2)).toContainText('LIVE');
 
   await items.nth(1).click();
@@ -137,25 +137,19 @@ test('back (on the page, and the browser’s) returns to the list; a reload and 
   await expect(shown(page)).toContainText('シングルス1');
 });
 
-test('the page fills the screen: sets above the score on a phone, beside it on a PC', async ({ page, isMobile }) => {
+test('the page fills the screen: the sets above the score, on a phone and on a PC alike', async ({ page, isMobile }) => {
   const control: SetMatchControl = { phase: 4, log: [] };
   await openNow(page, control);
   await page.getByTestId('now-single').first().click();
   await expect(page.getByTestId('set-item')).toHaveCount(3);
   await expect(page.getByTestId('live-leg')).toBeVisible();
-  if (!isMobile) await expect(page.locator('.set-page.is-split')).toBeVisible();
-  const nav = (await page.locator('.set-nav').boundingBox())!;
+  const chips = (await page.getByTestId('set-list').boundingBox())!;
   const score = (await page.getByTestId('set-score').boundingBox())!;
   const main = (await page.locator('.app-main').boundingBox())!;
-  if (isMobile) {
-    expect(nav.y + nav.height).toBeLessThanOrEqual(score.y + 1);
-    // As wide as the page, not a sheet with margins.
-    expect(score.width).toBeGreaterThan(main.width - 40);
-  } else {
-    expect(nav.x + nav.width).toBeLessThanOrEqual(score.x);
-    expect(Math.abs(nav.y - score.y)).toBeLessThan(40);
-    expect(score.width).toBeGreaterThan(600);
-  }
+  // The same order as every match view: the units, then the score under them.
+  expect(chips.y + chips.height).toBeLessThanOrEqual(score.y + 1);
+  // As wide as the page, not a sheet with margins.
+  expect(score.width).toBeGreaterThan(main.width - (isMobile ? 40 : 80));
   await noSidewaysScroll(page);
   await page.setViewportSize({ width: 320, height: 640 });
   await expect(page.getByTestId('set-item').first()).toBeVisible();
@@ -182,15 +176,18 @@ test('a followed player’s match (注目選手) opens the same page', async ({ 
   await expect(page.getByTestId('set-item')).toHaveCount(2);
 });
 
-test('an existing game link (#/watch?m=…) still opens that game, as before', async ({ page }) => {
+test('an existing game link (#/watch?m=…) still opens that game — on the same page as every game', async ({ page }) => {
   const control: SetMatchControl = { phase: 4, log: [] };
   await serveNight(page);
   await serveSetMatch(page, control);
   await page.goto(`/#/watch?m=${setMid(1)}`);
-  const sheet = page.getByTestId('match-sheet');
-  await expect(sheet).toBeVisible();
-  await expect(sheet).toContainText('Alpha 選手2-1');
-  await expect(sheet.getByTestId('score-sheet')).toBeVisible();
+  const setPage = page.getByTestId('set-page');
+  await expect(setPage).toBeVisible();
+  await expect(page.getByTestId('match-sheet')).toHaveCount(0);
+  await expect(page.getByTestId('shown-set')).toContainText('ダブルス1');
+  await expect(setPage.getByTestId('score-sheet')).toBeVisible();
+  await page.getByTestId('set-page-back').click();
+  await expect(page.getByTestId('set-page')).toHaveCount(0);
 });
 
 test('a finished set opens on its last leg played; with the live list failing, the 11 published sets stay listed', async ({ page }) => {

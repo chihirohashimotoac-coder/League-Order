@@ -13,7 +13,7 @@ import { useMatchesApiFactory } from '../environment';
 import type { MatchesApiFactory } from '../environment';
 import { shortTitles } from '../titles';
 import type { WatchLink } from '../watchLink';
-import { closeWatchLink, pushWatchLink, replaceWatchLink, takeRequestedWatchTab, useWatchLink } from '../watchLink';
+import { closeWatchLink, pushWatchLink, replaceWatchLink, takeRequestedWatchTab, useWatchLink, watchLinkUrl } from '../watchLink';
 import type { SeasonData } from './useMatchContext';
 import { formatClock, formatRate, seasonStatsSource, usePlayerStats, useRegisteredTeamMap, useSeasonData, useSeasons } from './useMatchContext';
 import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './rankingList';
@@ -23,7 +23,6 @@ import { LeaguePicker } from './LeaguePicker';
 import { LiveTab } from './LiveTab';
 import type { PlayerRef } from './LiveTab';
 import { ResultsTab } from './ResultsTab';
-import { MatchSheet } from './MatchSheet';
 import { SetMatchPage } from './SetMatchPage';
 import { NowView, TournamentHub } from './CompetitionViews';
 import { PlayerCard } from './PlayerCard';
@@ -144,10 +143,6 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     () => (now || !target ? {} : league ? { league: league.id, ...(tdid ? { season: tdid } : {}) } : { tournament: target.id }),
     [now, target, league, tdid],
   );
-  const wide = useMediaQuery(SPLIT_QUERY);
-  const hubShown = !now && target !== null && (target.kind === 'tournament' || bracketEvent !== null);
-  // On a large screen a tournament's chosen match is shown beside the rounds, not in a sheet.
-  const inlineMatch = wide && hubShown && tab === 'results';
   const titles = useRef(new Map<string, string>());
   const gameMid = link?.mid ?? null;
   const openGame = (mid: string, title?: string): void => {
@@ -168,7 +163,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
 
   const setTab = (next: WatchTab): void => {
     // The chosen match belongs to the tab it was opened on.
-    if (gameMid && inlineMatch) replaceWatchLink(base);
+    if (gameMid) replaceWatchLink(base);
     setTabState(next);
   };
   const pick = (next: WatchSettings): void => {
@@ -181,22 +176,31 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     if (link) replaceWatchLink(league ? { league: league.id, season: next } : null);
     setTournamentId(next);
   };
-  // A game opened from a competition (大会・リーグ, and a league's knockout event): a page of its
-  // own, as from 「いま n01 で進行中」 — except where the results are shown beside the chosen match
-  // (a large screen, 試合 tab). The competition stays mounted underneath, hidden, so its tab,
-  // chosen round and scroll position are there again on the way back.
-  const hubPage = hubShown && gameMid !== null && !inlineMatch && !nowPage;
-  // The page opens at its top; the way back lands where the competition was left.
+  // A game, from wherever it is opened (a league's results, a competition, a link, the search):
+  // a page of its own, the same everywhere (SetMatchPage) — never a sheet, never beside a list.
+  // What it was opened from stays mounted underneath, hidden, so its tab, chosen round and scroll
+  // position are there again on the way back.
+  const matchPage = gameMid !== null && !nowPage;
+  // The page opens at its top; the way back lands where the list was left.
   const hubScroll = useRef(0);
-  const wasHubPage = useRef(hubPage);
+  const wasMatchPage = useRef(matchPage);
   useLayoutEffect(() => {
-    if (wasHubPage.current === hubPage) return;
-    wasHubPage.current = hubPage;
+    if (wasMatchPage.current === matchPage) return;
+    wasMatchPage.current = matchPage;
     if (typeof window.scrollTo !== 'function') return;
-    if (hubPage) window.scrollTo(0, 0);
+    if (matchPage) window.scrollTo(0, 0);
     else window.scrollTo(0, hubScroll.current);
-  }, [hubPage]);
-  const sheet = gameMid && !inlineMatch && !nowPage && !hubPage ? <MatchSheet key={gameMid} mid={gameMid} title={titles.current.get(gameMid)} factory={factory} onClose={closeGame} /> : null;
+  }, [matchPage]);
+  const gamePage = matchPage ? (
+    <SetMatchPage
+      mid={gameMid}
+      factory={factory}
+      onBack={closeGame}
+      onShown={(mid) => replaceWatchLink({ ...base, mid })}
+      backLabel={target ? `${target.title} に戻る` : '観戦に戻る'}
+      shareUrl={(mid) => watchLinkUrl({ ...base, mid })}
+    />
+  ) : null;
   const pickerSheet = picking ? (
     <Sheet title="見るリーグ・大会" onClose={() => setPicking(false)}>
       <LeaguePicker
@@ -217,7 +221,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   if (now && nowPage) {
     return (
       <div className="watch" data-testid="watch-page">
-        <SetMatchPage mid={gameMid} factory={factory} onBack={closeNowGame} onShown={(mid) => replaceWatchLink({ now: '1', mid })} />
+        <SetMatchPage mid={gameMid} factory={factory} onBack={closeNowGame} onShown={(mid) => replaceWatchLink({ now: '1', mid })} shareUrl={(mid) => watchLinkUrl({ now: '1', mid })} />
       </div>
     );
   }
@@ -225,6 +229,8 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   if (!target || now) {
     return (
       <div className="watch" data-testid="watch-page">
+        {gamePage}
+        <div className="watch-keep" hidden={matchPage}>
         {target ? (
           <button
             type="button"
@@ -244,7 +250,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
             <LeaguePicker onPick={pick} onMatch={(mid) => openGame(mid)} onNow={() => setNow(true)} />
           </Card>
         )}
-        {sheet}
+        </div>
       </div>
     );
   }
@@ -307,15 +313,12 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   );
   const panel = { role: 'tabpanel', id: 'watch-panel', 'aria-labelledby': `watch-tab-${tab}`, className: 'watch-panel' } as const;
 
-  const gamePage = hubPage ? (
-    <SetMatchPage mid={gameMid} factory={factory} onBack={closeGame} onShown={(mid) => replaceWatchLink({ ...base, mid })} backLabel={`${target.title} に戻る`} />
-  ) : null;
 
   if (target.kind === 'tournament') {
     return (
       <div className="watch" data-testid="watch-page">
         {gamePage}
-        <div className="watch-keep" hidden={hubPage}>
+        <div className="watch-keep" hidden={matchPage}>
         {bar}
         {tabs}
         <div {...panel}>
@@ -326,9 +329,6 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
             tdid={target.id}
             tab={tab}
             onGame={openGame}
-            selectedMid={inlineMatch ? gameMid : null}
-            inline={inlineMatch}
-            onCloseMatch={closeGame}
             link={{ tournament: target.id }}
             onTitle={(title) => setHubTitle((held) => (held?.id === target.id && held.title === title ? held : { id: target.id, title }))}
           />
@@ -337,7 +337,6 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
           いま n01 で進行中の試合を見る
         </button>
         </div>
-        {sheet}
         {pickerSheet}
       </div>
     );
@@ -346,7 +345,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   return (
     <div className="watch" data-testid="watch-page">
       {gamePage}
-      <div className="watch-keep" hidden={hubPage}>
+      <div className="watch-keep" hidden={matchPage}>
       {bar}
       {tabs}
       <div {...panel}>
@@ -365,9 +364,6 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
             tdid={bracketEvent.tournamentId}
             tab={tab}
             onGame={openGame}
-            selectedMid={inlineMatch ? gameMid : null}
-            inline={inlineMatch}
-            onCloseMatch={closeGame}
             link={base}
           />
         ) : data.kind === 'ready' ? (
@@ -413,7 +409,6 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
         いま n01 で進行中の試合を見る (大会・個別の試合)
       </button>
       </div>
-      {sheet}
       {pickerSheet}
     </div>
   );

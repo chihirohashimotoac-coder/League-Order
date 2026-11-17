@@ -45,7 +45,8 @@ function open(w: ReturnType<typeof world>, mid: string, onShown = vi.fn()) {
 }
 
 const items = () => screen.getAllByTestId('set-item');
-const labels = () => items().map((item) => item.querySelector('.set-item-name')?.textContent);
+// A chip: its set's name (its title), LIVE first while it is being played.
+const labels = () => items().map((item) => `${item.classList.contains('is-live') ? 'LIVE' : ''}${item.getAttribute('title')}`);
 
 describe('SetMatchPage', () => {
   it('follows the match across sets without reopening, and stops at the end of the match', async () => {
@@ -97,7 +98,7 @@ describe('SetMatchPage', () => {
     expect(screen.getByTestId('shown-set').textContent).toContain('シングルス1');
     expect(screen.getByTestId('set-legs').textContent).toBe('2 - 0');
     expect(screen.getByTestId('set-score').textContent).toContain('Alpha 選手1-1');
-    expect(items()[0].getAttribute('aria-checked')).toBe('true');
+    expect(items()[0].getAttribute('aria-pressed')).toBe('true');
 
     w.options.phase = 6; // シングルス2 began meanwhile: the choice is kept, the list moves on
     await flush(1600);
@@ -144,8 +145,8 @@ describe('SetMatchPage', () => {
     const w = world({ phase: 4 });
     open(w, setMid(2));
     await flush(10);
-    const group = screen.getByRole('radiogroup', { name: 'セットを選ぶ' });
-    const live = within(group).getByRole('radio', { checked: true });
+    const group = screen.getByRole('list', { name: 'セット' });
+    const live = within(group).getByRole('button', { pressed: true });
     expect(live.getAttribute('tabindex')).toBe('0');
     live.focus();
     fireEvent.keyDown(group, { key: 'Home' });
@@ -230,9 +231,9 @@ describe('SetMatchPage', () => {
     w.options.phase = 4; // ダブルス2 began
     await flush(1600);
     await flush(10);
-    const doubles1 = items().find((item) => item.getAttribute('data-mid') === setMid(1))!;
-    expect(doubles1.textContent).toContain('1 - 2');
-    expect(doubles1.textContent).toContain('Bravo 選手2-1 / Bravo 選手2-2 の勝ち');
+    const doubles1 = items().find((item) => item.getAttribute('data-key') === setMid(1))!;
+    expect(doubles1.textContent).toContain('1-2');
+    expect(doubles1.textContent).toContain('Bravo Arrows 勝ち');
     expect(doubles1.textContent).not.toContain('進行中');
   });
 
@@ -277,7 +278,7 @@ describe('SetMatchPage', () => {
     expect(retried).toHaveLength(1);
     expect(retried[0]).toContain('live=1');
     expect(screen.queryByTestId('sets-error')).toBeNull();
-    expect(new Set(items().map((item) => item.getAttribute('data-mid'))).size).toBe(11);
+    expect(new Set(items().map((item) => item.getAttribute('data-key'))).size).toBe(11);
   });
 
   it('the archive failing after a good read keeps the sets it brought; an empty live list is not a failure', async () => {

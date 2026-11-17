@@ -219,7 +219,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await cards.filter({ hasText: '結果確定' }).first().click();
     const detail = page.getByTestId('match-detail');
     await expect(detail).toContainText('公式結果 (n01)');
-    await detail.locator('.game-row').nth(3).click();
+    await detail.getByTestId('game-tab').nth(3).click();
     const view = detail.getByTestId('game-view');
     await expect(view).toContainText('180');
     await expect(view).toContainText('High Out');
@@ -255,7 +255,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     expect(log.every((entry) => /^(league\/tournament\/list|tournament\/(get|standings|stats)|league\/schedule\/get|match\/(list|get|live|throws)|team\/(order|player)\/list)\?/u.test(entry))).toBe(true);
   });
 
-  test('a tournament by id: matches by stage, a game on its own page (beside the rounds on a PC), round-robin standings', async ({ page, isMobile }) => {
+  test('a tournament by id: matches by stage, a game on its own page, round-robin standings', async ({ page }) => {
     await serveN01Canned(page);
     await watchWithoutTeam(page);
     await page.getByRole('button', { name: /見るものを変更/ }).click();
@@ -268,20 +268,14 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await expect(hub).toContainText('ラウンドロビン Group A');
     await expect(hub.getByTestId('competition-match')).toHaveCount(2);
     await hub.getByTestId('competition-match').filter({ hasText: '終了' }).click();
-    if (isMobile) {
-      // A page of its own, no sheet; back returns to the rounds as they were left.
-      const setPage = page.getByTestId('set-page');
-      await expect(setPage.getByTestId('score-sheet')).toBeVisible();
-      await expect(page.getByTestId('match-sheet')).toHaveCount(0);
-      await expect(hub).toBeHidden();
-      await page.getByTestId('set-page-back').click();
-      await expect(hub).toBeVisible();
-      await expect(hub.getByTestId('competition-match')).toHaveCount(2);
-    } else {
-      // A large screen keeps the chosen match beside the rounds (試合 tab).
-      await expect(page.getByTestId('match-sheet').getByTestId('score-sheet')).toBeVisible();
-      await expect(page.getByTestId('set-page')).toHaveCount(0);
-    }
+    // A page of its own (phone and PC alike), no sheet; back returns to the rounds as they were left.
+    const setPage = page.getByTestId('set-page');
+    await expect(setPage.getByTestId('score-sheet')).toBeVisible();
+    await expect(page.getByTestId('match-sheet')).toHaveCount(0);
+    await expect(hub).toBeHidden();
+    await page.getByTestId('set-page-back').click();
+    await expect(hub).toBeVisible();
+    await expect(hub.getByTestId('competition-match')).toHaveCount(2);
     await page.getByRole('tab', { name: '順位' }).click();
     await expect(hub).toContainText('Ann');
     await noSidewaysScroll(page);
