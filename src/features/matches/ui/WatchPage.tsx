@@ -13,7 +13,7 @@ import { useMatchesApiFactory } from '../environment';
 import type { MatchesApiFactory } from '../environment';
 import { shortTitles } from '../titles';
 import type { WatchLink } from '../watchLink';
-import { closeWatchLink, pushWatchLink, replaceWatchLink, takeRequestedWatchTab, useWatchLink, watchLinkUrl } from '../watchLink';
+import { closeWatchLink, currentWatchDepth, pushWatchLink, replaceWatchLink, returnToWatchEntry, takeRequestedWatchTab, useWatchLink, watchLinkUrl } from '../watchLink';
 import type { SeasonData } from './useMatchContext';
 import { formatClock, formatRate, seasonStatsSource, usePlayerStats, useRegisteredTeamMap, useSeasonData, useSeasons } from './useMatchContext';
 import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './rankingList';
@@ -126,7 +126,8 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   // n01 公式メニューの一覧 (n01オンライン・n01トーナメント・n01リーグ): アドレスの `b`。
   const browse = link?.browse ?? null;
   // 一覧から開いた大会・リーグ: その画面から一覧に戻れる (戻ると一覧の状態を復元する)。
-  const [fromBrowse, setFromBrowse] = useState<{ category: BrowseCategory; id: string } | null>(null);
+  // `depth`: the history entry the competition opened on (cards and games may be pushed on top).
+  const [fromBrowse, setFromBrowse] = useState<{ category: BrowseCategory; id: string; depth: number } | null>(null);
   const [team, setTeam] = useState<string | null>(null);
   const [statsView, setStatsView] = useState<StatsView>(STATS_VIEW);
   const season = data.kind === 'ready' ? data.value.season : null;
@@ -184,15 +185,15 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   };
   const pickFromBrowse = (next: WatchSettings, category: BrowseCategory): void => {
     store.updateSettings({ watch: next });
-    setFromBrowse({ category, id: next.id });
     if (next.kind === 'tournament') setHubTitle({ id: next.id, title: next.title });
     setNow(false);
     // A new history entry: the browser's back (and the button) returns to the list.
     pushWatchLink(next.kind === 'league' ? { league: next.id } : { tournament: next.id });
+    setFromBrowse({ category, id: next.id, depth: currentWatchDepth() });
   };
   const backToBrowse =
     fromBrowse && target && fromBrowse.id === target.id && !now && !browse ? (
-      <button type="button" className="btn ghost small" onClick={() => closeWatchLink({ browse: fromBrowse.category })} data-testid="back-to-browse">
+      <button type="button" className="btn ghost small" onClick={() => returnToWatchEntry(fromBrowse.depth, { browse: fromBrowse.category })} data-testid="back-to-browse">
         <Icon name="chevronLeft" size={16} /> {browseLabel(fromBrowse.category)} の一覧に戻る
       </button>
     ) : null;

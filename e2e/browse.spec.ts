@@ -153,6 +153,10 @@ test('n01リーグ: 公式と同じ団体単位で並び、選んだリーグの
   expect(page.url()).toContain(`l=${BROWSE_ATDO}`);
   await expect(page.getByTestId('live-board')).toBeVisible();
   await expect(page.getByLabel('シーズン')).toBeVisible();
+  // 「日程・結果」で対戦カードを開いた (履歴が 1 つ増えた) 状態からでも、一覧へ戻る。
+  await page.getByRole('tab', { name: '日程・結果' }).click();
+  await page.getByTestId('match-card').first().click();
+  await expect.poll(() => page.url()).toContain('c=');
   await page.getByTestId('back-to-browse').click();
   await expect(page.getByTestId('browse-league')).toHaveCount(35);
   await expect(page.getByTestId('browse-league').first()).toBeFocused();

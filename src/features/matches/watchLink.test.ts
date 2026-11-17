@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { closeWatchLink, formatWatchLink, parseWatchLink, pushWatchLink, readWatchLink, replaceWatchLink } from './watchLink';
+import { closeWatchLink, currentWatchDepth, formatWatchLink, parseWatchLink, pushWatchLink, readWatchLink, replaceWatchLink, returnToWatchEntry } from './watchLink';
 import { shortTitles } from './titles';
 
 describe('watch links', () => {
@@ -56,5 +56,37 @@ describe('watch link: a game opened from 「いま n01 で進行中」', () => {
     expect(parseWatchLink('#/watch?n=2&m=abc')).toEqual({ mid: 'abc' });
     // An existing game link (without the flag) is unchanged.
     expect(parseWatchLink('#/watch?m=abc')).toEqual({ mid: 'abc' });
+  });
+});
+
+describe('watch link: n01 の一覧 (b=)', () => {
+  afterEach(() => window.history.replaceState(null, '', '/'));
+
+  it('一覧のカテゴリを読み、試合はオンラインの一覧とだけ組み合わせる', () => {
+    expect(parseWatchLink('#/watch?b=tournament')).toEqual({ browse: 'tournament' });
+    expect(parseWatchLink('#/watch?b=online&m=abc')).toEqual({ browse: 'online', mid: 'abc' });
+    expect(parseWatchLink('#/watch?b=league&m=abc')).toEqual({ browse: 'league' });
+    expect(parseWatchLink('#/watch?b=other')).toEqual({});
+    // 既存のリンク (大会・以前の一覧) が優先。
+    expect(parseWatchLink('#/watch?b=league&k=t_a_1')).toEqual({ tournament: 't_a_1' });
+    expect(parseWatchLink('#/watch?b=online&n=1')).toEqual({ now: '1' });
+  });
+
+  it('一覧から開いたリーグの上にカードを開いていても、一覧の履歴まで戻る', async () => {
+    window.history.replaceState(null, '', '/');
+    pushWatchLink({ browse: 'league' });
+    pushWatchLink({ league: 'lg_a_1' });
+    const openedAt = currentWatchDepth();
+    pushWatchLink({ league: 'lg_a_1', season: 't_a_1', card: '0_ls1' });
+    const moved = new Promise<void>((resolve) => window.addEventListener('popstate', () => resolve(), { once: true }));
+    returnToWatchEntry(openedAt, { browse: 'league' });
+    await moved;
+    expect(readWatchLink()).toEqual({ browse: 'league' });
+  });
+
+  it('開いた履歴が無い (再読み込み・直接開いた) ときは、今の履歴を一覧に書き換える', () => {
+    window.history.replaceState(null, '', '/#/watch?l=lg_a_1');
+    returnToWatchEntry(0, { browse: 'league' });
+    expect(readWatchLink()).toEqual({ browse: 'league' });
   });
 });

@@ -143,6 +143,23 @@ export function closeWatchLink(fallback: WatchLink | null): void {
   else replaceWatchLink(fallback);
 }
 
+/** How many entries this app has pushed under the current one (0 = opened directly). */
+export function currentWatchDepth(): number {
+  return depth();
+}
+
+/**
+ * Back to a list several entries down: the entry just under `openedAt` (the depth of the entry the
+ * list opened, e.g. a league chosen from n01リーグ), however many entries were pushed on top of it
+ * since (a card, a game). Without those entries (a reload, a link opened directly) the current
+ * entry is rewritten to `fallback`, as `closeWatchLink` does.
+ */
+export function returnToWatchEntry(openedAt: number, fallback: WatchLink | null): void {
+  const steps = depth() - openedAt + 1;
+  if (openedAt > 0 && steps > 0 && steps <= depth()) window.history.go(-steps);
+  else replaceWatchLink(fallback);
+}
+
 /** A tab another screen asks 観戦 to open on (分析 → スタッツ). Read once by the next 観戦 screen. */
 let requestedTab: 'live' | 'results' | 'standings' | 'stats' | null = null;
 export function requestWatchTab(tab: 'live' | 'results' | 'standings' | 'stats'): void {
