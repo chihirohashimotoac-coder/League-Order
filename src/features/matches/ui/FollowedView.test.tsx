@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { useEffect } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { MatchesApi } from '../api';
 import type { AnalyticsTransport } from '../../analytics/api/readApi';
 import { RequestGovernor } from '../governor';
@@ -92,6 +92,31 @@ describe('FollowedView', () => {
     expect(screen.getAllByTestId('followed-game')).toHaveLength(3);
     fireEvent.click(screen.getAllByTestId('followed-game')[1]);
     expect(onGame).toHaveBeenCalledWith(FOLLOWED_LEAGUE_MID, 'Arrows vs Bulls');
+  });
+});
+
+describe('FollowedView (StrictMode)', () => {
+  it('Effect が再実行されても (開発時の StrictMode)、中止した読み込みのあとに読み直して一覧を出す', async () => {
+    const transport: AnalyticsTransport = {
+      request: (_operation, _params, signal) =>
+        new Promise((resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+          setTimeout(() => resolve({ result: 0, list: followedNowRows('t_Test_0001', 't_Jdo0_0001') }), 0);
+        }),
+    };
+    const api = new MatchesApi({ transport, governor: new RequestGovernor(100_000), pollPerMinute: 100_000 });
+    render(
+      <StrictMode>
+        <AppStoreProvider>
+          <Followed names={[FOLLOWED_NAME]}>
+            <FollowedView factory={() => api} backLabel="戻る" onBack={vi.fn()} onGame={vi.fn()} />
+          </Followed>
+        </AppStoreProvider>
+      </StrictMode>,
+    );
+    await screen.findAllByTestId('followed-game');
+    expect(screen.getAllByTestId('followed-game')).toHaveLength(3);
+    expect(screen.queryByTestId('followed-error')).toBeNull();
   });
 });
 

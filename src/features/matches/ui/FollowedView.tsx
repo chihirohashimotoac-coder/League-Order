@@ -43,16 +43,15 @@ export function FollowedView({ factory, backLabel, onBack, onGame }: { factory: 
     );
   };
 
-  // 開いたときに 1 回だけ読む。注目選手の設定がまだ読み込まれていない (直接開いた・再読み込み) ときは、
-  // 登録がそろった時点で読む。以後は「更新」と「再試行」で読む。
+  // 開いたときに読む。注目選手の設定がまだ読み込まれていない (直接開いた・再読み込み) ときは、登録が
+  // そろった時点で読む。開始と中止を同じ Effect で扱うので、Effect が再実行されても (StrictMode) 読み直す
+  // (中止した読み込みの応答は番号で捨てる)。以後は「更新」と「再試行」で読む。
   const hasFollowed = followed.names.size > 0;
-  const started = useRef(false);
   useEffect(() => {
-    if (!hasFollowed || started.current) return;
-    started.current = true;
+    if (!hasFollowed) return;
     load();
+    return () => controller.current?.abort();
   }, [api, hasFollowed]);
-  useEffect(() => () => controller.current?.abort(), []);
 
   const games = state.rows ? followedGames(state.rows, followed.names) : [];
   const registered = [...followed.names];
