@@ -149,6 +149,7 @@ export function UnitHead({
   testId,
   legsTestId = 'unit-legs',
   hidden = false,
+  showResult = false,
 }: {
   label: string;
   /** A note after the name (「Doubles 501」). */
@@ -161,7 +162,41 @@ export function UnitHead({
   legsTestId?: string;
   /** Said by the live scoreboard itself while the unit is played: kept for screen readers only. */
   hidden?: boolean;
+  /**
+   * An ended unit looked back at (opt-in, the set page's history): the winner is also said in
+   * words next to the name and its leg count is the boldest number; a draw says so between the
+   * two. Without a recorded result nothing is emphasised.
+   */
+  showResult?: boolean;
 }): React.JSX.Element {
+  if (showResult && state !== 'live') {
+    const said = (side: 0 | 1): React.ReactNode => (winner === side ? <span className="won-tag">勝ち</span> : null);
+    return (
+      <header className={`unit-head is-result${hidden ? ' visually-hidden' : ''}`}>
+        <h3 className="game-block-head" data-testid={testId}>
+          {label}
+          {kind ? <span className="muted small-text">{kind}</span> : null}
+          <span className="tag state-official">{state === 'waiting' ? '終了 ・ 次を待っています' : '終了'}</span>
+        </h3>
+        <p className="unit-duel">
+          <span className={winner === 0 ? 'won' : ''}>
+            {said(0)}
+            {sides[0]}
+          </span>
+          <strong data-testid={legsTestId}>
+            <span className={winner === 0 ? 'win' : undefined}>{legs ? (legs[0] ?? '—') : '—'}</span>
+            {' - '}
+            <span className={winner === 1 ? 'win' : undefined}>{legs ? (legs[1] ?? '—') : '—'}</span>
+          </strong>
+          <span className={winner === 1 ? 'won' : ''}>
+            {said(1)}
+            {sides[1]}
+          </span>
+        </p>
+        {winner === -1 ? <p className="unit-draw small-text">引き分け</p> : null}
+      </header>
+    );
+  }
   return (
     <header className={`unit-head${hidden ? ' visually-hidden' : ''}`}>
       <h3 className="game-block-head" data-testid={testId}>

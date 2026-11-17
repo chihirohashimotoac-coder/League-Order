@@ -10,14 +10,21 @@ import type { LiveLeg, LiveThrow } from '../parse';
  *   so the cell keeps its size and the number its font size;
  * - the finishing visit shows the darts used at the double, `x1` / `x2` / `x3`, in the Scored
  *   cell with the To Go cell blank (n01 never writes 0 there) and no circle;
- * - League Order adds what n01 does not: 100+ bold, 140+ in the accent colour, 180 in red.
+ * - League Order adds what n01 does not: the Scored of 100–139 bold in blue, 140–179 bold in
+ *   blue-green, exactly 180 heavier in deep red (01 only: the colours are set on `.zero-one`, so
+ *   the Cricket grid, which shares `t140`, keeps its own colour). To Go, the darts in the middle,
+ *   the waiting cell, blank cells and the finish `x1` / `x2` / `x3` are never coloured;
+ * - `history` (an ended leg looked back at): each column role gets its own surface and type
+ *   step — Scored on the light surface and a step larger and bolder, To Go on a faint blue-grey
+ *   at normal weight, the darts on a neutral surface a step smaller — and the finishing cell a
+ *   faint accent surface (`out`). The leg in progress keeps the live look.
  *
  * `order` maps the two columns to n01's sides (the card's left team first).
  */
 
 /**
- * League Order's own marking on top of n01's circle: 100+ bold, 140+ bold in the accent
- * colour, 180 heavier in red (n01 draws every score in one colour).
+ * League Order's own marking on top of n01's circle (n01 draws every score in one colour):
+ * 100–139 `t100`, 140–179 `t140`, exactly 180 `t180`. The finish never gets one.
  */
 const tone = (score: number): string => (score === 180 ? ' ton t180' : score >= 140 ? ' ton t140' : score >= 100 ? ' ton t100' : '');
 
@@ -41,6 +48,7 @@ export function ZeroOneGrid({
   spare = 0,
   label,
   mark = null,
+  history = false,
 }: {
   leg: Pick<LiveLeg, 'throws' | 'start' | 'first'>;
   startScore?: number | null;
@@ -55,6 +63,8 @@ export function ZeroOneGrid({
   label?: string;
   /** A visit to point at (n01 side and round), e.g. from a highlight. */
   mark?: Mark | null;
+  /** An ended leg looked back at: the history surfaces and type steps (never the leg in progress). */
+  history?: boolean;
 }): React.JSX.Element {
   const rounds = new Map<number, [Visit | null, Visit | null]>();
   for (const entry of leg.throws) {
@@ -92,7 +102,7 @@ export function ZeroOneGrid({
 
   const firstCol = leg.first === null ? null : leg.first === order[0] ? 0 : 1;
   return (
-    <table className="ns-table" data-testid="score-sheet" aria-label={label}>
+    <table className={`ns-table zero-one${history ? ' is-history' : ''}`} data-testid="score-sheet" aria-label={label}>
       <colgroup>
         <col className="c-side" />
         <col className="c-side" />

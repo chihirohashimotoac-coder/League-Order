@@ -58,6 +58,15 @@
   --color-lock: #6a45bf;
   --color-season: #2d62a3;
 
+  /* 01 score steps (ScoreGrid) and the ended-leg score sheet's surfaces. */
+  --color-score-100: #24568f;
+  --color-score-140: #00717f;
+  --color-score-180: #a52136;
+  --color-history-head: #e2e8ec;
+  --color-history-togo: #eef3f7;
+  --color-history-mid: #f3f3f1;
+  --color-history-out: #dcefef;
+
   --shadow-float: 0 8px 24px rgb(23 32 38 / 12%);
   --shadow-bar: 0 -1px 0 var(--color-border), 0 -6px 16px rgb(23 32 38 / 6%);
 
@@ -7187,9 +7196,22 @@ tr.own th,
   font-weight: 700;
 }
 
-.leg-tab[aria-pressed='true'] {
+.leg-tab[aria-pressed='true'],
+.leg-tab[aria-selected='true'] {
   background: var(--color-accent-tint);
   box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+/* The chosen leg: ringed (above) and its number heavier; the winner is said by name, in the
+   text colour and bold, so neither depends on colour and the two never read as one. */
+.leg-tab[aria-pressed='true'] .l,
+.leg-tab[aria-selected='true'] .l {
+  font-weight: 800;
+}
+
+.leg-tab .w .who {
+  font-weight: 700;
+  color: var(--color-text);
 }
 
 .leg-tab:disabled {
@@ -7269,6 +7291,30 @@ tr.own th,
 .compare td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* The game's figures in three groups (GameView): a quiet heading row and a stronger rule
+   between groups; the names over the columns wrap rather than widen the table. */
+.gv-compare thead th {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.gv-compare tr.gv-group-head th {
+  padding: 10px 6px 3px;
+  border-bottom: 1px solid var(--color-border-strong);
+  font-size: 0.85em;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+
+.gv-compare tbody.gv-group:first-of-type tr.gv-group-head th {
+  padding-top: 6px;
+}
+
+.gv-compare tbody.gv-group tr:last-child > * {
+  border-bottom: 2px solid var(--color-border-strong);
 }
 
 .compare th.center,
@@ -7594,6 +7640,93 @@ ul.plain {
 .ns-table td.t180 {
   font-weight: 800;
   color: var(--color-danger);
+}
+
+/* 01 Scored only (the Cricket grid shares t140 and keeps the accent above). Three steps, each
+   checked against the white cell it is drawn on (live and history): 100–139 blue 7.5:1,
+   140–179 blue-green 5.7:1, exactly 180 deep red 7.3:1. To Go, the darts, the waiting cell and
+   the finish x1 / x2 / x3 carry no t-class, so they are never coloured. */
+.ns-table.zero-one td.sc.t100 {
+  color: var(--color-score-100);
+}
+
+.ns-table.zero-one td.sc.t140 {
+  color: var(--color-score-140);
+}
+
+.ns-table.zero-one td.sc.t180 {
+  color: var(--color-score-180);
+}
+
+/* An ended 01 leg looked back at (ZeroOneGrid `history`): the past leg of the live board and the
+   finished game / set history. Each column role has its own surface and type step; the leg in
+   progress keeps the plain look. Only colours and font size / weight change: column widths are
+   fixed (table-layout) and every row's height is set by its Scored cells, which every row has.
+   Contrast (text on its surface): Scored 16.5:1 on white, To Go 6.1:1, darts 6.1:1,
+   column labels 5.5:1, finish 13.9:1. Backgrounds are set as colours only, so n01's circle
+   (a background image) stays. */
+.ns-table.is-history thead th {
+  background-color: var(--color-history-head);
+  color: var(--color-text-secondary);
+  font-size: 0.78em;
+  font-weight: 600;
+}
+
+.ns-table.is-history thead tr.names th {
+  color: var(--color-text);
+  font-size: 0.9em;
+  font-weight: 700;
+}
+
+.ns-table.is-history td.sc {
+  background-color: var(--color-surface-1);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.ns-table.is-history td.sc.t100,
+.ns-table.is-history td.sc.t140 {
+  font-weight: 700;
+}
+
+.ns-table.is-history td.sc.t180 {
+  font-weight: 800;
+}
+
+.ns-table.is-history td.tg {
+  background-color: var(--color-history-togo);
+  color: var(--color-text-secondary);
+  font-weight: 400;
+  font-size: 1.3em;
+}
+
+.ns-table.is-history td.mid {
+  background-color: var(--color-history-mid);
+  color: var(--color-text-secondary);
+  font-size: 1em;
+}
+
+/* The finish: a faint accent surface and a bar along its foot (not a colour of its own, so it
+   never reads as one of the three score steps), in the text colour, heaviest. */
+.ns-table.is-history td.sc.out {
+  background-color: var(--color-history-out);
+  box-shadow: inset 0 -3px 0 var(--color-accent);
+  color: var(--color-text);
+  font-weight: 800;
+}
+
+.ns-table.is-history td.sc.out.mark {
+  box-shadow:
+    inset 0 0 0 3px var(--color-warning-fill),
+    inset 0 -6px 0 var(--color-accent);
+}
+
+.ns-grid-wrap .ns-table.is-history td.tg {
+  font-size: 1.05em;
+}
+
+.ns-grid-wrap .ns-table.is-history td.mid {
+  font-size: 0.85em;
 }
 
 .ns-table col.c-side {
@@ -8630,9 +8763,13 @@ ul.plain {
 .leg-chips {
   flex-wrap: nowrap;
   overflow-x: auto;
-  padding-bottom: 2px;
+  gap: 6px;
+  /* Room for the focus ring inside the scrolling row. */
+  padding: 3px;
+  margin: -3px;
 }
-.leg-chips .chip {
+.leg-chips .chip,
+.leg-chips .leg-tab {
   flex: none;
 }
 
@@ -9445,6 +9582,49 @@ ul.plain {
 
 .unit-duel .won {
   font-weight: 800;
+}
+
+/* An ended set looked back at (UnitHead showResult): its last leg score is the strongest figure
+   of the heading, the winner's count heaviest, and the winner also said in words. */
+.unit-head.is-result .unit-duel strong {
+  font-size: 1.6em;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.unit-head.is-result .unit-duel strong .win {
+  font-weight: 900;
+  color: var(--color-text);
+}
+
+.unit-head.is-result .unit-duel > span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.unit-head.is-result .won-tag {
+  display: block;
+  width: fit-content;
+  margin: 0 0 2px;
+  padding: 0 6px;
+  border: 1px solid var(--color-text);
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* The winner's tag sits on its own line over the name, at the outer edge of its side. */
+.unit-head.is-result .unit-duel > :last-child .won-tag {
+  margin-left: auto;
+}
+
+.unit-draw {
+  margin: 0;
+  text-align: center;
+  font-weight: 700;
 }
 
 .unit-duel .rate {

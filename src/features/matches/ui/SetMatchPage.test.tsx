@@ -281,6 +281,14 @@ describe('SetMatchPage', () => {
     const chips = within(screen.getByTestId('leg-chips')).getAllByRole('tab');
     expect(chips).toHaveLength(4);
     expect(screen.getByTestId('leg-sheet').textContent).toContain('Leg 3 のスコア表');
+    // Each chip reads leg number → winner's name → darts; the chosen one is selected, the leg never begun says so.
+    expect(chips[2].textContent).toMatch(/^Leg 3\S+ \d+本$/u);
+    expect(chips[2].getAttribute('aria-selected')).toBe('true');
+    expect(chips[3].textContent).toBe('Leg 4未決着');
+    // The ended set's heading says who won it in words, next to the legs.
+    expect(screen.getByTestId('shown-set').closest('header')?.querySelectorAll('.won-tag')).toHaveLength(1);
+    // The ended leg's 01 sheet is drawn as history.
+    expect(screen.getByTestId('leg-sheet').querySelector('table.is-history')).not.toBeNull();
     // The viewer's own choice of leg still works.
     fireEvent.click(chips[0]);
     await flush(10);
