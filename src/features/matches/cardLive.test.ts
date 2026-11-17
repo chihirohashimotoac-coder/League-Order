@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCards, cardScore, cardWithLive } from './cards';
+import { buildCards, cardScore, cardWithLive, liveSuperseded } from './cards';
 import { parseFixtures, parseGameRows, parseLive, parseSeasonDocument } from './parse';
 import type { LiveState } from './parse';
 import { TDID, fixtures, gameRow, list, liveBody, side, tournamentDoc } from './testFixtures';
@@ -65,5 +65,26 @@ describe('a card in progress, as its live states say it is now', () => {
     const behind = live({ mid: 'c003_sg01', schid: 'sg01', legs: [0, 0], updateTime: 1_800_000_000_000 });
     const same = cardWithLive(base, new Map([['sg01', behind]]), behind);
     expect(same.games.find((game) => game.slot.schid === 'sg01')).toMatchObject({ state: 'live', legs: [1, 1] });
+  });
+
+  it('the slot replayed: a late live state of the old game decides nothing — the new game keeps its mid, stays in progress with its own legs, and the card’s state and score stay the list’s', () => {
+    // The list: シングルス1 replayed as c003_sg01_new, in progress at 1-1, newer than the old game's live state.
+    const rows = [
+      gameRow('c003', 'AAAA', 'CCCC', 'tm01', [side('AAAA', [['a1', 'A1']], 1, 1001, 60), side('CCCC', [['c1', 'C1']], 0, 900, 60)]),
+      gameRow('c003', 'AAAA', 'CCCC', 'sg01', [side('AAAA', [['a1', 'A1']], 1, 400, 30), side('CCCC', [['c1', 'C1']], 1, 300, 30)], { finished: false, start: 1_800_000_900, mid: 'c003_sg01_new' }),
+    ];
+    const base = buildCards(parseSeasonDocument(tournamentDoc(), TDID), parseFixtures(fixtures()), parseGameRows(list(rows)).games).find((card) => card.lsid === 'c003')!;
+    const old = live({ mid: 'c003_sg01', schid: 'sg01', legs: [0, 2], sets: [0, 5], end_match: 1, end_schedule: 1, updateTime: 1_800_000_100_000 });
+    const card = cardWithLive(base, new Map([['sg01', old]]), old);
+    const singles1 = card.games.find((game) => game.slot.schid === 'sg01')!;
+    expect(singles1.game?.mid).toBe('c003_sg01_new');
+    expect(singles1.state).toBe('live');
+    expect(singles1.game?.finished).toBe(false);
+    expect(singles1.legs).toEqual([1, 1]);
+    expect(card.state).toBe('live');
+    expect(cardScore(card)).toEqual(cardScore(base));
+    expect(liveSuperseded(base, old)).toBe(true);
+    // The live state of the new game is current again.
+    expect(liveSuperseded(base, live({ mid: 'c003_sg01_new', schid: 'sg01', updateTime: 1_800_000_950_000 }))).toBe(false);
   });
 });

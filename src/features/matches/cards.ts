@@ -156,6 +156,9 @@ export function buildCards(season: SeasonDocument, fixtures: readonly Fixture[],
  */
 export function cardWithLive(card: MatchCard, states: ReadonlyMap<string, LiveState>, latest: LiveState | null): MatchCard {
   if (!latest || card.official) return card;
+  // A live state the list has gone past (its slot replayed as a newer game) says nothing of the
+  // card now: not that a game ended, nor the card, nor its score.
+  const current = liveSuperseded(card, latest) ? null : latest;
   const games = card.games.map((entry): CardGame => {
     const state = states.get(entry.slot.schid);
     const row = entry.game;
@@ -166,7 +169,7 @@ export function cardWithLive(card: MatchCard, states: ReadonlyMap<string, LiveSt
       state !== undefined &&
       (!row || row.updateTime === null || state.updateTime > row.updateTime || (row.mid === state.mid && state.gameEnded && !row.finished));
     // Over: n01 said so, or it has moved on from this game, or the card is over.
-    const over = (mid: string): boolean => latest.cardEnded || latest.mid !== mid;
+    const over = (mid: string): boolean => current !== null && (current.cardEnded || current.mid !== mid);
     if (!ahead || !state) {
       return entry.state === 'live' && row && over(row.mid) ? { ...entry, state: 'finished', game: { ...row, finished: true } } : entry;
     }
@@ -189,10 +192,20 @@ export function cardWithLive(card: MatchCard, states: ReadonlyMap<string, LiveSt
   });
   const counted: [number, number] = [0, 0];
   for (const game of games) if (game.winner !== null) counted[game.winner] += 1;
-  const latestFlip = latest.sides[0].teamId === card.teams[1].id;
-  const won: [number, number] = latest.isSchedule ? (latestFlip ? [latest.sets[1], latest.sets[0]] : [latest.sets[0], latest.sets[1]]) : counted;
-  const state: CardState = latest.cardEnded ? 'unrecorded' : 'live';
-  return { ...card, games, counted: won, state, updatedAt: Math.max(card.updatedAt ?? 0, latest.updateTime) };
+  if (!current) return { ...card, games, counted };
+  const latestFlip = current.sides[0].teamId === card.teams[1].id;
+  const won: [number, number] = current.isSchedule ? (latestFlip ? [current.sets[1], current.sets[0]] : [current.sets[0], current.sets[1]]) : counted;
+  const state: CardState = current.cardEnded ? 'unrecorded' : 'live';
+  return { ...card, games, counted: won, state, updatedAt: Math.max(card.updatedAt ?? 0, current.updateTime) };
+}
+
+/**
+ * The live state is of an older game than the one the list holds for the same slot of the same
+ * card (the slot replayed): another `mid`, and the list's row updated after it.
+ */
+export function liveSuperseded(card: MatchCard, latest: LiveState): boolean {
+  const row = card.games.find((entry) => entry.slot.schid === latest.schid)?.game;
+  return row !== null && row !== undefined && row.mid !== latest.mid && row.updateTime !== null && row.updateTime > latest.updateTime;
 }
 
 /** The score to show and whose it is: n01's official score, else League Order's count. */

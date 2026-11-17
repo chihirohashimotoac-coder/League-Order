@@ -3,7 +3,7 @@ import { Icon } from '../../../components/icons';
 import { useAppStore } from '../../../state/appStore';
 import type { MatchesApi } from '../api';
 import type { CardGame, MatchCard } from '../cards';
-import { CARD_STATE_LABELS, cardScore, cardWithLive, slotKindLabel } from '../cards';
+import { CARD_STATE_LABELS, cardScore, cardWithLive, liveSuperseded, slotKindLabel } from '../cards';
 import type { LiveState } from '../parse';
 import { fixtureDate, slotsFor } from '../parse';
 import { checkReproduction, projectStandings } from '../standings';
@@ -240,14 +240,17 @@ function MatchCenter({
   // shows its live scoreboard, and an earlier game opened meanwhile offers ライブに戻る. What the
   // live states say (the next game, a game or the card ending, n01's score) is laid over the
   // season's list, which is read less often: the card never goes back to the list's older state.
-  const { live, status } = useCardLive(api, listed.state === 'live' ? listed.tmid : null);
+  const { live: polled, status } = useCardLive(api, listed.state === 'live' ? listed.tmid : null);
   const [states, setStates] = useState<ReadonlyMap<string, LiveState>>(() => new Map());
   const [statesFrom, setStatesFrom] = useState<LiveState | null>(null);
-  if (live !== statesFrom) {
-    setStatesFrom(live);
-    if (live?.schid) setStates((map) => (map.get(live.schid!) === live ? map : new Map(map).set(live.schid!, live)));
+  if (polled !== statesFrom) {
+    setStatesFrom(polled);
+    if (polled?.schid) setStates((map) => (map.get(polled.schid!) === polled ? map : new Map(map).set(polled.schid!, polled)));
   }
-  const card = useMemo(() => cardWithLive(listed, states, live), [listed, states, live]);
+  const card = useMemo(() => cardWithLive(listed, states, polled), [listed, states, polled]);
+  // A late live state of a game the list has gone past (its slot replayed) is neither shown nor
+  // followed: the list's newer game is.
+  const live = polled && !liveSuperseded(listed, polled) ? polled : null;
   // The same view as every other match (MatchParts): the games as chips on top, the chosen game
   // under them — on a phone and on a PC alike. Opened on the game a link names, else the game
   // being played, else the last one played.

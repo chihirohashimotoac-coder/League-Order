@@ -321,3 +321,23 @@ test('日程・結果: an earlier game chosen stays chosen through the next game
   await expect(detail.getByTestId('game-panel')).toContainText('シングルス2');
   await expect(detail.getByTestId('game-panel')).toContainText('終了');
 });
+
+test('日程・結果: a slot replayed — a late live answer of the old game neither ends the new one nor the card', async ({ page }) => {
+  await serveNight(page, { replayed: true });
+  await page.goto('/');
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  await page.getByRole('tab', { name: '日程・結果' }).click();
+  await page.getByTestId('match-card').filter({ hasText: 'Corks' }).filter({ hasText: '進行中' }).first().click();
+  const detail = page.getByTestId('match-detail');
+  const chips = detail.getByTestId('game-tab');
+  // The new game: in progress, with its own legs (1-1), and the card in progress with the list's score.
+  await expect(chips.nth(3)).toContainText('LIVE');
+  await expect(detail.getByTestId('game-panel')).toContainText('シングルス1');
+  await expect(detail.getByTestId('game-panel')).toContainText('進行中');
+  await expect(detail.getByTestId('game-panel')).toContainText('1 - 1');
+  await expect(detail.locator('.match-note')).toContainText('進行中');
+  await expect(detail.locator('.focus-head strong')).toHaveText('2 - 1');
+  // Nothing of the old game's answer is shown: no live board of it, no 0-5.
+  await expect(detail.getByTestId('live-leg')).toHaveCount(0);
+  await expect(detail.locator('.focus-head strong')).not.toHaveText('0 - 5');
+});
