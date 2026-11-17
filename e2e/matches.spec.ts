@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01 } from './n01Server';
 import { N01_API_BASE_URL } from '../src/integrations/n01/endpoints';
+import { fakeWakeLock, setPageHidden, wakeHeld, wakeRecord } from './wakeLockFake';
 import { LGID, TDID, c001Rows as rawC001Rows, fixtures, gameRow, list, liveBody, side, tournamentDoc } from '../src/features/matches/testFixtures';
 
 /**
@@ -209,6 +210,41 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await noSidewaysScroll(page);
   });
 
+  test('live: the screen stays on while a card is followed — through a failed read, not while hidden or on another tab — and lets go when the card ends', async ({ page }) => {
+    await fakeWakeLock(page);
+    let stage: 'on' | 'failing' | 'ended' = 'on';
+    const body = liveBody({ mid: 'c003_db01', schid: 'db01', title: 'Test League A Division ダブルス1', sets: [1, 0] });
+    await serveN01Canned(page, () => (stage === 'failing' ? { result: -51, error: 'temporarily unavailable' } : stage === 'ended' ? { ...body, updateTime: 1_800_000_020_000, end_match: 1, end_schedule: 1, sets: [3, 2] } : body));
+    await watchWithoutTeam(page);
+    const focus = page.getByTestId('focus-card');
+    await expect(focus.getByTestId('live-status')).toContainText('自動更新中');
+    await expect.poll(() => wakeHeld(page)).toBe(1);
+
+    stage = 'failing'; // n01 unreachable for a while: the card is still on as last seen
+    await expect(focus.getByTestId('live-status')).toContainText('取得エラー');
+    expect(await wakeHeld(page)).toBe(1);
+    stage = 'on';
+    await expect(focus.getByTestId('live-status')).toContainText('自動更新中', { timeout: 20_000 });
+    expect(await wakeHeld(page)).toBe(1);
+
+    await setPageHidden(page, true);
+    await expect(focus.getByTestId('live-status')).toContainText('一時停止中');
+    expect(await wakeHeld(page)).toBe(0);
+    await setPageHidden(page, false);
+    await expect.poll(() => wakeHeld(page)).toBe(1);
+
+    await page.getByRole('tab', { name: '順位', exact: true }).click(); // another tab of the screen
+    await expect.poll(() => wakeHeld(page)).toBe(0);
+    await page.getByRole('tab', { name: 'ライブ', exact: true }).click();
+    await expect(focus.getByTestId('live-status')).toContainText('自動更新中');
+    await expect.poll(() => wakeHeld(page)).toBe(1);
+
+    stage = 'ended'; // end_schedule: the card is over
+    await expect(focus.getByTestId('live-status')).toContainText('終了しました');
+    await expect.poll(() => wakeHeld(page)).toBe(0);
+    expect((await wakeRecord(page)).max).toBe(1);
+  });
+
   test('results → match center → a game’s Details and score sheet; standings with the round robin; stats', async ({ page }) => {
     const log = await serveN01Canned(page);
     await watchWithoutTeam(page);
@@ -289,12 +325,12 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await page.getByTestId('player-card').getByRole('button', { name: /注目選手に追加/ }).click();
     await expect(page.getByTestId('player-card').getByRole('button', { name: /注目選手から外す/ })).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('button', { name: '閉じる' }).click();
-    await page.getByRole('tab', { name: 'ライブ' }).click();
+    await page.getByRole('tab', { name: 'ライブ', exact: true }).click();
     const followed = page.getByTestId('followed-now');
     await expect(followed).toContainText('A1');
     await expect(followed).toContainText('ダブルス1 出場中');
     await page.reload();
-    await page.getByRole('tab', { name: 'ライブ' }).click();
+    await page.getByRole('tab', { name: 'ライブ', exact: true }).click();
     await expect(page.getByTestId('followed-now')).toContainText('A1');
     await noSidewaysScroll(page);
   });
