@@ -81,7 +81,8 @@ function useBrowseList<T>(category: BrowseCategory, load: PageLoader<T>, id: (it
     const reusable = ready && saved.state.fetchedAt !== null && Date.now() - saved.state.fetchedAt < REUSE_MS;
     return { saved: restoring || reusable ? saved : undefined, restoring };
   });
-  const [state, setState] = useState<ListState<T>>(() => (boot.saved ? (boot.saved.state as ListState<T>) : initial<T>('')));
+  // 離れたときに続きを読み込み中だった一覧は、その読み込みを中止しているので、押せる状態で戻す。
+  const [state, setState] = useState<ListState<T>>(() => (boot.saved ? { ...(boot.saved.state as ListState<T>), loadingMore: false } : initial<T>('')));
   const [draft, setDraft] = useState(() => boot.saved?.draft ?? '');
   const current = useRef(state);
   current.current = state;

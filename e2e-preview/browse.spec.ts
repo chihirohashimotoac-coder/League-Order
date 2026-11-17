@@ -29,7 +29,8 @@ test('preview: 観戦の 3 つの一覧を公式メニューの順に開き、�
   await page.getByRole('button', { name: 'サンプルで試す' }).click();
   await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1, exact: true })).toBeVisible();
   await tab(page, '観戦').click();
-  const links = page.getByRole('navigation', { name: 'n01 の一覧から探す' });
+  // サンプルチームは観戦するリーグを持たない: 選択画面の 3 入口から。
+  const links = page.getByRole('group', { name: 'n01 の一覧から探す' });
   await expect(links.getByRole('button')).toHaveText(['n01オンライン', 'n01トーナメント', 'n01リーグ']);
 
   await links.getByRole('button', { name: 'n01トーナメント' }).click();
