@@ -29,8 +29,14 @@ export interface LiveSample {
   ageMs: number;
 }
 
+/**
+ * What is followed: a league card (`tmid`), a set-format match (`scid`: n01 moves it to the next
+ * set by itself, manual §2) or one game (`mid`).
+ */
+export type LiveTarget = { tmid: string } | { scid: string } | { mid: string };
+
 export interface LiveSource {
-  live(target: { tmid: string } | { mid: string }, since: number | null, signal?: AbortSignal): Promise<LiveResponse>;
+  live(target: LiveTarget, since: number | null, signal?: AbortSignal): Promise<LiveResponse>;
 }
 
 export interface LivePollerOptions {
@@ -70,7 +76,7 @@ export class LivePoller {
 
   constructor(
     private readonly source: LiveSource,
-    private readonly target: { tmid: string } | { mid: string },
+    private readonly target: LiveTarget,
     private readonly options: LivePollerOptions,
   ) {
     this.interval = options.intervalMs ?? LIVE_INTERVAL_MS;
@@ -152,13 +158,17 @@ export class LivePoller {
       if (this.stopped) return;
       this.failures = 0;
       this.lastOkAt = this.now();
+      let again = this.interval;
       if (reply.changed) this.apply(reply, this.now() - sentAt);
-      // "Unchanged" about another game: the card moved on — read it whole next time.
-      else if (reply.mid && this.state && reply.mid !== this.state.mid) this.since = null;
+      // "Unchanged" about another game: the card (the match) moved on, and the reply left out
+      // what the next game is — read it whole, at once (manual §2: 最初から取り直してください).
+      else if (reply.mid && this.state && reply.mid !== this.state.mid && this.since !== null) {
+        this.since = null;
+        again = 0;
+      }
       this.options.onStatus({ kind: 'polling', lastOkAt: this.lastOkAt });
-      const done = this.state && ('tmid' in this.target ? this.state.cardEnded || (!this.state.isSchedule && this.state.gameEnded) : this.state.gameEnded);
-      if (done) this.finish();
-      else this.schedule(this.interval);
+      if (this.done()) this.finish();
+      else this.schedule(again);
     } catch (error) {
       if (this.stopped) return;
       this.failures += 1;
@@ -177,15 +187,35 @@ export class LivePoller {
     }
   }
 
+  /**
+   * Whether nothing more will change. A card ends with `end_schedule`; so does a set-format match
+   * (`end_match` is only the end of one set) — except a match of one set, which n01 does not
+   * show as sets (`show_sets` 0) and which ends with its only game. One game ends with `end_match`.
+   */
+  private done(): boolean {
+    const state = this.state;
+    if (!state) return false;
+    if ('mid' in this.target) return state.gameEnded;
+    return state.cardEnded || (!state.isSchedule && !('scid' in this.target && state.showSets) && state.gameEnded);
+  }
+
   private apply(next: LiveState, rttMs: number): void {
     const previous = this.state;
     // A reply about the same game that is older than what is shown is stale: drop it.
     if (previous && previous.mid === next.mid && next.updateTime < previous.updateTime) return;
+    // A late reply about an earlier set of the match (a replica behind): never shown as the latest.
+    if (previous && previous.mid !== next.mid && 'scid' in this.target && earlierSet(next, previous)) return;
     this.state = next;
     this.since = next.updateTime;
     this.options.onState(next);
     this.options.onSample?.({ rttMs, ageMs: Math.max(0, this.now() - next.updateTime) });
   }
+}
+
+/** True when `next` is a set before `shown` in the same match (n01's set position, else the update time). */
+function earlierSet(next: LiveState, shown: LiveState): boolean {
+  if (next.currentSet !== null && shown.currentSet !== null && next.currentSet !== shown.currentSet) return next.currentSet < shown.currentSet;
+  return next.updateTime < shown.updateTime;
 }
 
 /** The median of the last samples, `null` with fewer than 3. */

@@ -24,6 +24,7 @@ import { LiveTab } from './LiveTab';
 import type { PlayerRef } from './LiveTab';
 import { ResultsTab } from './ResultsTab';
 import { MatchSheet } from './MatchSheet';
+import { SetMatchPage } from './SetMatchPage';
 import { NowView, TournamentHub } from './CompetitionViews';
 import { PlayerCard } from './PlayerCard';
 import { shortSlot } from './CardTrail';
@@ -113,7 +114,11 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     if (link?.card) setTabState('results');
   }, [link?.card]);
   const [picking, setPicking] = useState(false);
-  const [now, setNow] = useState(false);
+  // 「いま n01 で進行中」: also in the address while a game opened from it is shown (`now`).
+  const [now, setNow] = useState(link?.now === '1');
+  useEffect(() => {
+    if (link?.now === '1') setNow(true);
+  }, [link?.now]);
   const [team, setTeam] = useState<string | null>(null);
   const [statsView, setStatsView] = useState<StatsView>(STATS_VIEW);
   const season = data.kind === 'ready' ? data.value.season : null;
@@ -151,6 +156,13 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     if (gameMid) replaceWatchLink(next);
     else pushWatchLink(next);
   };
+  // A game opened from 「いま n01 で進行中」 (個別の試合・注目選手): a page of its own, its match followed by `scid`.
+  const openNowGame = (mid: string, title?: string): void => {
+    if (title) titles.current.set(mid, title);
+    pushWatchLink({ now: '1', mid });
+  };
+  const closeNowGame = (): void => closeWatchLink({ now: '1' });
+  const nowPage = now && gameMid && link?.now === '1';
   const closeGame = (): void => closeWatchLink(link?.card ? { ...base, card: link.card, ...(link.game ? { game: link.game } : {}) } : Object.keys(base).length ? base : null);
 
   const setTab = (next: WatchTab): void => {
@@ -168,7 +180,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     if (link) replaceWatchLink(league ? { league: league.id, season: next } : null);
     setTournamentId(next);
   };
-  const sheet = gameMid && !inlineMatch ? <MatchSheet key={gameMid} mid={gameMid} title={titles.current.get(gameMid)} factory={factory} onClose={closeGame} /> : null;
+  const sheet = gameMid && !inlineMatch && !nowPage ? <MatchSheet key={gameMid} mid={gameMid} title={titles.current.get(gameMid)} factory={factory} onClose={closeGame} /> : null;
   const pickerSheet = picking ? (
     <Sheet title="見るリーグ・大会" onClose={() => setPicking(false)}>
       <LeaguePicker
@@ -186,16 +198,31 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     </Sheet>
   ) : null;
 
+  if (now && nowPage) {
+    return (
+      <div className="watch" data-testid="watch-page">
+        <SetMatchPage mid={gameMid} factory={factory} onBack={closeNowGame} onShown={(mid) => replaceWatchLink({ now: '1', mid })} />
+      </div>
+    );
+  }
+
   if (!target || now) {
     return (
       <div className="watch" data-testid="watch-page">
         {target ? (
-          <button type="button" className="btn ghost small" onClick={() => setNow(false)}>
+          <button
+            type="button"
+            className="btn ghost small"
+            onClick={() => {
+              if (link?.now) replaceWatchLink(null);
+              setNow(false);
+            }}
+          >
             <Icon name="chevronLeft" size={16} /> {target.title} に戻る
           </button>
         ) : null}
         {now ? (
-          <NowView factory={factory} onCompetition={(id, title) => pick({ kind: 'tournament', id, title })} onGame={openGame} />
+          <NowView factory={factory} onCompetition={(id, title) => pick({ kind: 'tournament', id, title })} onGame={openNowGame} />
         ) : (
           <Card kicker="WATCH" title="見るリーグ・大会を選んでください">
             <LeaguePicker onPick={pick} onMatch={(mid) => openGame(mid)} onNow={() => setNow(true)} />

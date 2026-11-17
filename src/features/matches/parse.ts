@@ -287,6 +287,11 @@ export interface GameRow {
   updateTime: number | null;
   finished: boolean;
   cardFinished: boolean;
+  /**
+   * The set's position in its `scid` (0-based, `currentSet` of `match/list`), `undefined` when the
+   * row was read without it. Orders the sets of one match; never a count of sets won.
+   */
+  currentSet?: number | null;
   sides: [GameSide, GameSide];
 }
 
@@ -340,6 +345,7 @@ export function parseGameRows(raw: unknown): { games: GameRow[]; rows: number; u
       updateTime: num(row.updateTime),
       finished: num(row.endMatch) === 1,
       cardFinished: num(row.endSchedule) === 1,
+      ...(row.currentSet !== undefined ? { currentSet: num(row.currentSet) } : {}),
       sides: sides as [GameSide, GameSide],
     });
   }
