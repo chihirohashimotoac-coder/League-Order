@@ -163,9 +163,8 @@ export function UnitHead({
   /** Said by the live scoreboard itself while the unit is played: kept for screen readers only. */
   hidden?: boolean;
   /**
-   * An ended unit looked back at (opt-in, the set page's history): the winner is also said in
-   * words next to the name and its leg count is the boldest number; a draw says so between the
-   * two. Without a recorded result nothing is emphasised.
+   * 終了したユニットを見返すとき (指定時のみ。セットページの履歴): 勝者の名前に「勝ち」を添え、
+   * その Leg 数を最も太くする。引き分けは文字で示す。結果の記録がなければ何も強調しない。
    */
   showResult?: boolean;
 }): React.JSX.Element {

@@ -18,8 +18,8 @@ import { legDarts, shortName } from './legLabel';
  * game for), then the comparison table. On a wide container the two sit side by side.
  *
  * - The comparison table is computed from the throws (`gameStats`), in card order.
- * - Leg chips: the leg number, then the winner's name and darts (bull-decided legs marked), the
- *   leg in progress with its own label; the chosen one is ringed and bold.
+ * - Leg チップ: Leg 番号 → 勝者名 → 本数の順 (ブル決着は印付き)。進行中の Leg は既存の
+ *   「進行中」ラベル、選択中は輪郭と太字で示す。
  * - The score sheet of the chosen leg in n01's grid (`ScoreGrid`): 01 Scored / To Go with the
  *   darts in the middle, 100+ circled and marked (bold / colour), the finish as x1 / x2 / x3;
  *   Cricket hits / marks.
@@ -96,8 +96,8 @@ export function GameView({
   }
 
   type Row = [string, string, string];
-  // Three groups, read apart by spacing, a rule and a quiet heading: legs and averages, how the
-  // points were scored (Cricket: the mark visits), then the finish, best leg and breaks.
+  // 余白・罫線・控えめな見出しで3つに区切る: Leg 勝数と平均、得点の内訳 (Cricket はマーク数)、
+  // 上がり・Best Leg・Break。
   const groups: { title: string; rows: Row[] }[] = [
     {
       title: cricket ? 'Leg 勝数と MPR' : 'Leg 勝数と平均',
@@ -130,7 +130,7 @@ export function GameView({
           {all.length > 0 ? (
             <div className="chip-row leg-chips" role="tablist" aria-label="Leg" onKeyDown={onTabListKeyDown} data-testid="leg-chips">
               {all.map((entry) => {
-                // Card order (the column the winner is shown in), and n01's side for the darts.
+                // 勝者を表示する列はカードの並び、本数は n01 側の番号で数える。
                 const n01Winner = entry.winner === 0 || entry.winner === 1 ? entry.winner : null;
                 const winner = n01Winner === null ? null : at(n01Winner);
                 const darts = n01Winner === null ? null : legDarts(entry, n01Winner);

@@ -10,21 +10,20 @@ import type { LiveLeg, LiveThrow } from '../parse';
  *   so the cell keeps its size and the number its font size;
  * - the finishing visit shows the darts used at the double, `x1` / `x2` / `x3`, in the Scored
  *   cell with the To Go cell blank (n01 never writes 0 there) and no circle;
- * - League Order adds what n01 does not: the Scored of 100–139 bold in blue, 140–179 bold in
- *   blue-green, exactly 180 heavier in deep red (01 only: the colours are set on `.zero-one`, so
- *   the Cricket grid, which shares `t140`, keeps its own colour). To Go, the darts in the middle,
- *   the waiting cell, blank cells and the finish `x1` / `x2` / `x3` are never coloured;
- * - `history` (an ended leg looked back at): each column role gets its own surface and type
- *   step — Scored on the light surface and a step larger and bolder, To Go on a faint blue-grey
- *   at normal weight, the darts on a neutral surface a step smaller — and the finishing cell a
- *   faint accent surface (`out`). The leg in progress keeps the live look.
+ * - League Order 独自の表示: Scored の 100–139 は太字の青、140–179 は太字の青緑、180 ちょうどは
+ *   さらに太い深い赤 (01 のみ。色は `.zero-one` に付けるので、`t140` を共有する Cricket の表は
+ *   従来の色のまま)。To Go・中央のダーツ数・投擲中のセル・空欄・上がりの `x1` / `x2` / `x3` には
+ *   色を付けない。
+ * - `history` (終了した Leg を見返すとき): 列の役割ごとに背景と文字の段階を変える。Scored は明るい
+ *   面で一段大きく太く、To Go は薄い青灰の面で標準ウェイト、ダーツ数はニュートラルな面で一段小さく、
+ *   上がりのセルは淡いアクセント面 (`out`)。進行中の Leg はライブの見た目のまま。
  *
  * `order` maps the two columns to n01's sides (the card's left team first).
  */
 
 /**
- * League Order's own marking on top of n01's circle (n01 draws every score in one colour):
- * 100–139 `t100`, 140–179 `t140`, exactly 180 `t180`. The finish never gets one.
+ * n01 の丸囲みに重ねる League Order 独自の分類 (n01 はすべて同じ色で描く):
+ * 100–139 は `t100`、140–179 は `t140`、180 ちょうどは `t180`。上がりには付けない。
  */
 const tone = (score: number): string => (score === 180 ? ' ton t180' : score >= 140 ? ' ton t140' : score >= 100 ? ' ton t100' : '');
 
@@ -63,7 +62,7 @@ export function ZeroOneGrid({
   label?: string;
   /** A visit to point at (n01 side and round), e.g. from a highlight. */
   mark?: Mark | null;
-  /** An ended leg looked back at: the history surfaces and type steps (never the leg in progress). */
+  /** 終了した Leg を見返すとき: 履歴用の背景と文字の段階 (進行中の Leg には使わない)。 */
   history?: boolean;
 }): React.JSX.Element {
   const rounds = new Map<number, [Visit | null, Visit | null]>();

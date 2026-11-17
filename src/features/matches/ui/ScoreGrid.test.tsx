@@ -83,9 +83,9 @@ describe('ZeroOneGrid (n01 score sheet)', () => {
       return ['t100', 't140', 't180'].find((name) => cell.classList.contains(name)) ?? 'none';
     };
     expect(scores.map((score) => step(String(score)))).toEqual(['none', 't100', 't100', 't140', 't140', 't180']);
-    // To Go never carries a step, whatever is left.
+    // To Go には残り点に関係なく得点の段階を付けない。
     expect(container.querySelectorAll('td.tg.t100, td.tg.t140, td.tg.t180, td.mid.ton')).toHaveLength(0);
-    // The steps are coloured on the 01 sheet only.
+    // 段階の色は 01 の表だけに付く。
     expect(container.querySelector('table')?.classList.contains('zero-one')).toBe(true);
   });
 
@@ -100,7 +100,7 @@ describe('ZeroOneGrid (n01 score sheet)', () => {
   it('history: the ended leg gets the history sheet, the leg in progress and the waiting cell keep the live one', () => {
     const ended = render(<ZeroOneGrid leg={leg} history />);
     expect(ended.container.querySelector('table')?.className).toBe('ns-table zero-one is-history');
-    // Same five columns and rows as without it: only the look changes.
+    // 列と行は history なしと同じ。変わるのは見た目だけ。
     expect(rows(ended.container)).toEqual(rows(render(<ZeroOneGrid leg={leg} />).container));
     cleanup();
     const live = render(<ZeroOneGrid leg={{ ...leg, throws: leg.throws.slice(0, 3) }} thrower={1} minRows={4} spare={1} />);
