@@ -58,6 +58,15 @@
   --color-lock: #6a45bf;
   --color-season: #2d62a3;
 
+  /* 01 の得点の段階 (ScoreGrid) と、終了した Leg のスコア表の背景。 */
+  --color-score-100: #24568f;
+  --color-score-140: #00717f;
+  --color-score-180: #a52136;
+  --color-history-head: #e2e8ec;
+  --color-history-togo: #eef3f7;
+  --color-history-mid: #f3f3f1;
+  --color-history-out: #dcefef;
+
   --shadow-float: 0 8px 24px rgb(23 32 38 / 12%);
   --shadow-bar: 0 -1px 0 var(--color-border), 0 -6px 16px rgb(23 32 38 / 6%);
 
@@ -7187,9 +7196,22 @@ tr.own th,
   font-weight: 700;
 }
 
-.leg-tab[aria-pressed='true'] {
+.leg-tab[aria-pressed='true'],
+.leg-tab[aria-selected='true'] {
   background: var(--color-accent-tint);
   box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+/* 選択中の Leg: 輪郭 (上) と番号の太字。勝者は名前を本文色の太字で示す。どちらも色だけに
+   頼らず、選択と勝者が同じ表現に見えないようにする。 */
+.leg-tab[aria-pressed='true'] .l,
+.leg-tab[aria-selected='true'] .l {
+  font-weight: 800;
+}
+
+.leg-tab .w .who {
+  font-weight: 700;
+  color: var(--color-text);
 }
 
 .leg-tab:disabled {
@@ -7269,6 +7291,30 @@ tr.own th,
 .compare td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* ゲームの統計を3つに区切る (GameView): 控えめな見出し行と、区切りごとの太めの罫線。
+   列の上の名前は表を広げずに折り返す。 */
+.gv-compare thead th {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.gv-compare tr.gv-group-head th {
+  padding: 10px 6px 3px;
+  border-bottom: 1px solid var(--color-border-strong);
+  font-size: 0.85em;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+
+.gv-compare tbody.gv-group:first-of-type tr.gv-group-head th {
+  padding-top: 6px;
+}
+
+.gv-compare tbody.gv-group tr:last-child > * {
+  border-bottom: 2px solid var(--color-border-strong);
 }
 
 .compare th.center,
@@ -7594,6 +7640,92 @@ ul.plain {
 .ns-table td.t180 {
   font-weight: 800;
   color: var(--color-danger);
+}
+
+/* 01 の Scored だけ (Cricket の表は t140 を共有し、上のアクセント色のまま)。3段階とも、描かれる
+   白いセル (ライブ・履歴) に対して確認済み: 100–139 青 7.5:1、140–179 青緑 5.7:1、180 ちょうど
+   深い赤 7.3:1。To Go・ダーツ数・投擲中のセル・上がり x1 / x2 / x3 には t クラスが付かないので
+   色は付かない。 */
+.ns-table.zero-one td.sc.t100 {
+  color: var(--color-score-100);
+}
+
+.ns-table.zero-one td.sc.t140 {
+  color: var(--color-score-140);
+}
+
+.ns-table.zero-one td.sc.t180 {
+  color: var(--color-score-180);
+}
+
+/* 終了した 01 の Leg を見返すとき (ZeroOneGrid の `history`): ライブ画面の過去 Leg と、終了した
+   ゲーム・セットの履歴。列の役割ごとに背景と文字の段階を変え、進行中の Leg は従来のまま。
+   変えるのは色とフォントのサイズ・太さだけ: 列幅は固定 (table-layout)、行の高さはどの行にもある
+   Scored のセルで決まる。コントラスト (文字と背景): Scored 16.5:1 (白)、To Go 6.1:1、
+   ダーツ数 6.1:1、列ラベル 5.5:1、上がり 13.9:1。背景は色だけを指定し、n01 の丸囲み
+   (背景画像) を消さない。 */
+.ns-table.is-history thead th {
+  background-color: var(--color-history-head);
+  color: var(--color-text-secondary);
+  font-size: 0.78em;
+  font-weight: 600;
+}
+
+.ns-table.is-history thead tr.names th {
+  color: var(--color-text);
+  font-size: 0.9em;
+  font-weight: 700;
+}
+
+.ns-table.is-history td.sc {
+  background-color: var(--color-surface-1);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.ns-table.is-history td.sc.t100,
+.ns-table.is-history td.sc.t140 {
+  font-weight: 700;
+}
+
+.ns-table.is-history td.sc.t180 {
+  font-weight: 800;
+}
+
+.ns-table.is-history td.tg {
+  background-color: var(--color-history-togo);
+  color: var(--color-text-secondary);
+  font-weight: 400;
+  font-size: 1.3em;
+}
+
+.ns-table.is-history td.mid {
+  background-color: var(--color-history-mid);
+  color: var(--color-text-secondary);
+  font-size: 1em;
+}
+
+/* 上がり: 淡いアクセント面と下端のバー (独自の文字色は使わず、3段階の得点色と見分けられる
+   ようにする)。本文色で最も太く。 */
+.ns-table.is-history td.sc.out {
+  background-color: var(--color-history-out);
+  box-shadow: inset 0 -3px 0 var(--color-accent);
+  color: var(--color-text);
+  font-weight: 800;
+}
+
+.ns-table.is-history td.sc.out.mark {
+  box-shadow:
+    inset 0 0 0 3px var(--color-warning-fill),
+    inset 0 -6px 0 var(--color-accent);
+}
+
+.ns-grid-wrap .ns-table.is-history td.tg {
+  font-size: 1.05em;
+}
+
+.ns-grid-wrap .ns-table.is-history td.mid {
+  font-size: 0.85em;
 }
 
 .ns-table col.c-side {
@@ -8374,7 +8506,8 @@ ul.plain {
 
 .gv-body,
 .gv-figures,
-.gv-legs {
+.gv-legs,
+.gv-chart {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -8410,8 +8543,26 @@ ul.plain {
   .gv-body {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    /* 2 行目 (チャート) が残りの高さを受け持ち、チャートはスコア表のすぐ下に置かれる。 */
+    grid-template-rows: auto 1fr;
     gap: 12px 20px;
     align-items: start;
+  }
+
+  /* 左列: Leg 選択とスコア表、その下にチャート。右列: 統計と上がり圏 (2 行にまたがる)。 */
+  .gv-body > .gv-legs {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .gv-body > .gv-figures {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .gv-body > .gv-chart {
+    grid-column: 1;
+    grid-row: 2;
   }
 }
 
@@ -8630,9 +8781,13 @@ ul.plain {
 .leg-chips {
   flex-wrap: nowrap;
   overflow-x: auto;
-  padding-bottom: 2px;
+  gap: 6px;
+  /* スクロールする行の中でフォーカスリングが欠けないための余白。 */
+  padding: 3px;
+  margin: -3px;
 }
-.leg-chips .chip {
+.leg-chips .chip,
+.leg-chips .leg-tab {
   flex: none;
 }
 
@@ -9445,6 +9600,49 @@ ul.plain {
 
 .unit-duel .won {
   font-weight: 800;
+}
+
+/* 終了したセットを見返すとき (UnitHead の showResult): 最終 Leg スコアを見出しで最も強い数字に
+   し、勝者の数字を最も太く、勝者は文字でも示す。 */
+.unit-head.is-result .unit-duel strong {
+  font-size: 1.6em;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.unit-head.is-result .unit-duel strong .win {
+  font-weight: 900;
+  color: var(--color-text);
+}
+
+.unit-head.is-result .unit-duel > span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.unit-head.is-result .won-tag {
+  display: block;
+  width: fit-content;
+  margin: 0 0 2px;
+  padding: 0 6px;
+  border: 1px solid var(--color-text);
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* 勝者のタグは名前の上の行に、その側の外寄せで置く。 */
+.unit-head.is-result .unit-duel > :last-child .won-tag {
+  margin-left: auto;
+}
+
+.unit-draw {
+  margin: 0;
+  text-align: center;
+  font-weight: 700;
 }
 
 .unit-duel .rate {
