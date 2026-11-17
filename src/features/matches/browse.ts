@@ -13,7 +13,7 @@ import type { GameRow } from './parse';
  * - オンライン: `match/list` の進行中 (`live=1&endMatch=0`) のうち、大会 (`tdid`) と現地中継
  *   (`relayMode`) を持たない試合を、開始の新しい順に 100 件ずつ。マニュアルの `__exists` は `0|1`
  *   で、`false` を渡すと条件として効かず大会の試合が返る (2026-11-17 確認) ため `0` を使う。
- *   応答の各行も、大会・リーグ・カード・セット・中継の識別子が無いことを確かめてから掲載する。
+ *   応答の各行も、大会・リーグ・カード・中継の識別子が無いことを確かめてから掲載する。
  *
  * どの一覧も n01 の応答順を保つ。ページを重ねたときに同じ ID が再び来た行は、最初の位置に残す。
  */
@@ -144,12 +144,16 @@ export function parseLeaguePage(raw: unknown): BrowsePage<LeagueItem> {
   return { items, rows: list.length, unreadable };
 }
 
-/** 大会・リーグ・カード・セット・現地中継のどれかに属すると読める識別子。 */
-const AFFILIATION_FIELDS = ['tdid', 'lgid', 'tmid', 'scid', 'schid'] as const;
+/**
+ * 大会・リーグ (リーグのイベントも `tdid` を持つ)・対戦カード・カード内のゲームに属すると読める識別子。
+ * `scid` (セットをまとめる ID) は含めない: 2026-11-17 の実データで、`tdid`・`relayMode` の無い個人どうしの
+ * セット戦 (n01 Online) が `scid` だけを持っていた。観戦詳細は `scid` で次のセットへ切り替わる。
+ */
+const AFFILIATION_FIELDS = ['tdid', 'lgid', 'tmid', 'schid'] as const;
 
 /**
  * 単独の試合 (どの大会・リーグ・中継にも属さない) と確かめられた行だけを残す。`relayMode` は値に
- * かかわらず、フィールドがあれば中継として除く (`relayMode__exists=0` と同じ扱い)。
+ * かかわらず、フィールドがあれば中継として除く (`relayMode__exists=0` と同じ扱い。中継は `scid` も持つ)。
  */
 export function isStandaloneRow(row: unknown): boolean {
   if (!isRec(row)) return false;

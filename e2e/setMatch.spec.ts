@@ -561,3 +561,26 @@ for (const mode of ['deny', 'none'] as const) {
     } else expect(record.requests).toBe(0);
   });
 }
+
+test('n01オンライン (新しい一覧) から開いたセット戦も、次のセットへ自動で切り替わり、戻ると一覧', async ({ page }) => {
+  const control: SetMatchControl = { phase: 0, log: [] };
+  await serveNight(page);
+  await serveSetMatch(page, control);
+  await page.goto('/#/watch');
+  await page.getByRole('group', { name: 'n01 の一覧から探す' }).getByRole('button', { name: 'n01オンライン' }).click();
+  const row = page.getByTestId('browse-online').filter({ hasText: 'Alpha 選手1-1' });
+  await expect(row).toHaveCount(1);
+  // 公開 Read GET の条件 (大会・中継を除く) で読んでいる。
+  expect(control.log.some((entry) => entry.startsWith('match/list?') && entry.includes('tdid__exists=0') && entry.includes('relayMode__exists=0'))).toBe(true);
+  await row.click();
+  await expect(page.getByTestId('set-page')).toBeVisible();
+  await expect(shown(page)).toContainText('シングルス1');
+  expect(page.url()).toContain('b=online');
+  control.phase = 2; // ダブルス1 began
+  await expect(shown(page)).toContainText('ダブルス1');
+  await expect.poll(() => page.url()).toContain(`m=${setMid(1)}`);
+  expect(page.url()).toContain('b=online');
+  await page.goBack();
+  await expect(page.getByTestId('browse-view')).toBeVisible();
+  await expect(page.getByTestId('browse-online').filter({ hasText: 'Alpha' }).first()).toBeFocused();
+});

@@ -45,7 +45,7 @@ describe('取得条件', () => {
     expect(calls[0].operation).toBe('match/list');
     expect(calls[0].params).toMatchObject({ live: '1', endMatch: '0', tdid__exists: '0', relayMode__exists: '0', sort: 'startTime', order: 'desc', count: '100', skip: '100' });
     // 応答の行を確かめるため、識別子と relayMode を返させる。
-    expect(calls[0].params.fields.split(',')).toEqual(expect.arrayContaining(['tdid', 'tmid', 'scid', 'schid', 'relayMode']));
+    expect(calls[0].params.fields.split(',')).toEqual(expect.arrayContaining(['tdid', 'tmid', 'schid', 'relayMode']));
   });
 
   it('n01 のエラー (result < 0) は取得失敗として伝わる (0 件にしない)', async () => {
@@ -76,7 +76,7 @@ describe('応答の読み取り', () => {
     expect(page.items.map((item) => item.title)).toEqual(['ATDO', 'Žemberovce 2026', '新潟DOリーグ', '東京ダーツオーガニゼイション【TDO / Tokyo Darts Organization】', 'ONLINE BATTLE', 'ЗАДХ, ОНЧ ДАРТС клуб, Анхдугаар ДАРТС ЛИГ I тэмцээн']);
   });
 
-  it('オンライン: 大会・リーグ・カード・セット・中継の識別子がある行は掲載しない', () => {
+  it('オンライン: 大会・リーグ・カード・中継の識別子がある行は掲載しない', () => {
     const page = parseOnlinePage({ result: 0, list: browseOnlineRows() });
     expect(page.items.map((row) => row.mid)).toEqual(['Onl0Demo_1799999990000', 'Onl1Demo_1799999900000', 'Onl2Demo_1799999600000', 'Onl3Demo_1799999500000']);
     expect(page.excluded).toBe(2);
@@ -87,7 +87,10 @@ describe('応答の読み取り', () => {
   it('単独の試合の判定: 空の識別子は無いのと同じ、relayMode は値にかかわらず中継', () => {
     expect(isStandaloneRow({ mid: 'a', schid: '', tmid: null })).toBe(true);
     expect(isStandaloneRow({ mid: 'a', relayMode: 0 })).toBe(false);
-    expect(isStandaloneRow({ mid: 'a', scid: 'scid_x' })).toBe(false);
+    // セット戦 (scid だけ) は単独の試合。中継は relayMode で除く。
+    expect(isStandaloneRow({ mid: 'a', scid: 'scid_x' })).toBe(true);
+    expect(isStandaloneRow({ mid: 'a', scid: 'scid_x', relayMode: 1 })).toBe(false);
+    expect(isStandaloneRow({ mid: 'a', tmid: 't_x_1_t_0_a_b' })).toBe(false);
     expect(isStandaloneRow({ mid: 'a', lgid: 'lg_x_1' })).toBe(false);
     expect(isStandaloneRow({ mid: 'a', tdid: 't_x_1' })).toBe(false);
     expect(isStandaloneRow(null)).toBe(false);

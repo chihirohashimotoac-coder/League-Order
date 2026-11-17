@@ -198,7 +198,7 @@ function Meta({ state, noun, order, onReload }: { state: ListState<unknown>; nou
 function Notes({ state }: { state: ListState<unknown> }): React.JSX.Element | null {
   if (state.status !== 'ready') return null;
   const parts: string[] = [];
-  if (state.excluded > 0) parts.push(`大会・リーグ・中継との区別を確認できない ${state.excluded} 行は掲載していません`);
+  if (state.excluded > 0) parts.push(`大会・リーグ・中継の試合と読める ${state.excluded} 行は掲載していません`);
   if (state.unreadable > 0) parts.push(`読み取れない ${state.unreadable} 行を除きました`);
   if (!parts.length) return null;
   return (
