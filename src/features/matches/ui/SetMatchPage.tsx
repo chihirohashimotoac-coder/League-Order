@@ -162,8 +162,9 @@ function useFollowedMatch(mid: string, factory: MatchesApiFactory): Followed {
   const retrySets = (): void => readSources(failed.length ? failed : ['archive', 'live']);
   // The screen stays awake while the match as a whole is on (the poller's own end: `end_schedule`
   // for a set-format match, `end_match` for a game alone). Between sets, on an earlier set, or
-  // while a read fails and is retried, the last state seen says whether it is still on.
-  const on = follow && status.kind !== 'finished' && status.kind !== 'budget' && (live ? !(scid ? live.cardEnded : live.gameEnded) : !row.finished);
+  // while a read fails and is retried, the last state seen says whether it is still on (the poller
+  // stopped at its request cap — `budget` — is no end of the match either).
+  const on = follow && status.kind !== 'finished' && (live ? !(scid ? live.cardEnded : live.gameEnded) : !row.finished);
   useScreenWake(on);
   return { api, row, rowError, live, status, sets, setsError, setsLoading: archive.loading || liveList.loading, retrySets };
 }

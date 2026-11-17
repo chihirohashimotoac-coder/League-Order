@@ -200,6 +200,23 @@ describe('screenWake', () => {
     leave();
   });
 
+  it('hidden and shown again while asked, then refused: asked once more (the new chance), not again after that', async () => {
+    const { asked, visibility, setVisible, wake } = world();
+    const leave = wake.acquire();
+    setVisible(false);
+    setVisible(true);
+    expect(asked).toHaveLength(1); // the request still on: nothing asked twice at once
+    asked[0].reject();
+    await settle();
+    expect(asked).toHaveLength(2);
+    asked[1].reject();
+    await settle();
+    expect(asked).toHaveLength(2); // the same chance: no loop
+    expect(wake.snapshot).toEqual({ holders: 1, held: false, pending: false });
+    leave();
+    expect(visibility.size).toBe(0);
+  });
+
   it('refused (permission, low battery): watching goes on, and it is not asked again in a loop', async () => {
     const { asked, visibility, wake } = world();
     const leave = wake.acquire();
