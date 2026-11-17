@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { serveNight } from './liveNight';
-import { serveSetMatch } from './setMatchWorld';
+import { serveNowCompetition, serveSetMatch } from './setMatchWorld';
 import type { SetMatchControl } from './setMatchWorld';
 import { setMid } from '../src/test/n01/setMatch';
 
@@ -210,4 +210,29 @@ test('a finished set opens on its last leg played; with the live list failing, t
   await expect(page.getByTestId('set-legs')).toHaveText('2 - 1');
   await expect(items).toHaveCount(11);
   await expect(page.getByTestId('set-page-title')).toHaveText('【デモリーグ】R3 Alpha Darts vs Bravo Arrows');
+});
+
+test('大会・リーグ: a game of a competition opens on the same page; back (on the page, and the browser’s) returns to the competition', async ({ page }) => {
+  await serveNight(page);
+  await serveSetMatch(page, { phase: 4, log: [] });
+  await serveNowCompetition(page);
+  await page.goto('/');
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  await page.getByRole('button', { name: /いま n01 で進行中の試合を見る/ }).click();
+  await page.getByTestId('now-view').getByRole('button', { name: /Sample Open/ }).click();
+  const hub = page.getByTestId('tournament-hub');
+  await expect(hub.getByTestId('competition-match').first()).toBeVisible();
+  await hub.getByTestId('competition-match').first().click();
+  await expect(page.getByTestId('set-page')).toBeVisible();
+  await expect(page.getByTestId('set-page-title')).toContainText('Sample Open');
+  await expect(page.getByTestId('match-sheet')).toHaveCount(0);
+  await expect(page.getByTestId('set-page-back')).toContainText('に戻る');
+  await expect(hub).toBeHidden();
+  await noSidewaysScroll(page);
+  await page.goBack();
+  await expect(hub).toBeVisible();
+  await expect(page.getByTestId('set-page')).toHaveCount(0);
+  await hub.getByTestId('competition-match').first().click();
+  await page.getByTestId('set-page-back').click();
+  await expect(hub).toBeVisible();
 });

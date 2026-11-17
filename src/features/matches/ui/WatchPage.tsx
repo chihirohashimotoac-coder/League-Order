@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Card, Sheet, onTabListKeyDown } from '../../../components/ui';
 import { Icon } from '../../../components/icons';
 import { SPLIT_QUERY, useMediaQuery } from '../../../components/useMediaQuery';
@@ -152,6 +152,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   const gameMid = link?.mid ?? null;
   const openGame = (mid: string, title?: string): void => {
     if (title) titles.current.set(mid, title);
+    if (!gameMid) hubScroll.current = window.scrollY;
     const next: WatchLink = { ...base, ...(link?.card ? { card: link.card, ...(link.game ? { game: link.game } : {}) } : {}), mid };
     if (gameMid) replaceWatchLink(next);
     else pushWatchLink(next);
@@ -180,7 +181,22 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     if (link) replaceWatchLink(league ? { league: league.id, season: next } : null);
     setTournamentId(next);
   };
-  const sheet = gameMid && !inlineMatch && !nowPage ? <MatchSheet key={gameMid} mid={gameMid} title={titles.current.get(gameMid)} factory={factory} onClose={closeGame} /> : null;
+  // A game opened from a competition (大会・リーグ, and a league's knockout event): a page of its
+  // own, as from 「いま n01 で進行中」 — except where the results are shown beside the chosen match
+  // (a large screen, 試合 tab). The competition stays mounted underneath, hidden, so its tab,
+  // chosen round and scroll position are there again on the way back.
+  const hubPage = hubShown && gameMid !== null && !inlineMatch && !nowPage;
+  // The page opens at its top; the way back lands where the competition was left.
+  const hubScroll = useRef(0);
+  const wasHubPage = useRef(hubPage);
+  useLayoutEffect(() => {
+    if (wasHubPage.current === hubPage) return;
+    wasHubPage.current = hubPage;
+    if (typeof window.scrollTo !== 'function') return;
+    if (hubPage) window.scrollTo(0, 0);
+    else window.scrollTo(0, hubScroll.current);
+  }, [hubPage]);
+  const sheet = gameMid && !inlineMatch && !nowPage && !hubPage ? <MatchSheet key={gameMid} mid={gameMid} title={titles.current.get(gameMid)} factory={factory} onClose={closeGame} /> : null;
   const pickerSheet = picking ? (
     <Sheet title="見るリーグ・大会" onClose={() => setPicking(false)}>
       <LeaguePicker
@@ -291,9 +307,15 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   );
   const panel = { role: 'tabpanel', id: 'watch-panel', 'aria-labelledby': `watch-tab-${tab}`, className: 'watch-panel' } as const;
 
+  const gamePage = hubPage ? (
+    <SetMatchPage mid={gameMid} factory={factory} onBack={closeGame} onShown={(mid) => replaceWatchLink({ ...base, mid })} backLabel={`${target.title} に戻る`} />
+  ) : null;
+
   if (target.kind === 'tournament') {
     return (
       <div className="watch" data-testid="watch-page">
+        {gamePage}
+        <div className="watch-keep" hidden={hubPage}>
         {bar}
         {tabs}
         <div {...panel}>
@@ -314,6 +336,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
         <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
           いま n01 で進行中の試合を見る
         </button>
+        </div>
         {sheet}
         {pickerSheet}
       </div>
@@ -322,6 +345,8 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
 
   return (
     <div className="watch" data-testid="watch-page">
+      {gamePage}
+      <div className="watch-keep" hidden={hubPage}>
       {bar}
       {tabs}
       <div {...panel}>
@@ -387,6 +412,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
       <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
         いま n01 で進行中の試合を見る (大会・個別の試合)
       </button>
+      </div>
       {sheet}
       {pickerSheet}
     </div>

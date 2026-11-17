@@ -9676,3 +9676,12 @@ ul.plain {
     max-width: none;
   }
 }
+
+/* The competition under a game opened on its own page: kept (state, scroll), not shown. */
+.watch-keep {
+  display: contents;
+}
+
+.watch-keep[hidden] {
+  display: none;
+}
