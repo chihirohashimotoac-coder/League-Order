@@ -198,11 +198,35 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
 
   // The game the page was opened on stays in the list even while the list lags behind (or
   // has not been read): what is shown for it always comes from its own mid.
+  // The last live state of each set the poller has left (a set seen ending stays ended while
+  // the list lags or fails). Kept per page, one entry per set.
+  const [held, setHeld] = useState<ReadonlyMap<string, LiveState>>(() => new Map());
+  const [heldFrom, setHeldFrom] = useState<LiveState | null>(null);
+  if (live !== heldFrom) {
+    setHeldFrom(live);
+    if (live && row?.scid) setHeld((map) => (map.get(live.mid) === live ? map : new Map(map).set(live.mid, live)));
+  }
   const view = useMemo(() => {
     const listed = sets ?? [];
     const rows = row && !listed.some((entry) => entry.mid === row.mid) ? [...listed, row] : listed;
-    return matchSetsView(rows, live, row?.title ?? '');
-  }, [sets, row, live]);
+    // A held set the list does not hold at all is shown from what was seen of it.
+    const seenOnly = [...held.values()].filter((state) => state.mid !== live?.mid && !rows.some((entry) => entry.mid === state.mid));
+    const extra: GameRow[] = seenOnly.map((state) => ({
+      mid: state.mid,
+      tmid: state.tmid,
+      schid: state.schid,
+      scid: state.scid,
+      matchType: state.matchType,
+      title: state.title,
+      startTime: null,
+      updateTime: null,
+      finished: state.gameEnded,
+      cardFinished: state.cardEnded,
+      currentSet: state.currentSet,
+      sides: [0, 1].map((i) => ({ teamId: state.sides[i].teamId ?? '', name: state.sides[i].name, members: state.sides[i].members.map((name) => ({ oid: null, opid: null, name })), legsWon: state.legs[i], setsWon: null, score: null, darts: null, marks: null })) as GameRow['sides'],
+    }));
+    return matchSetsView([...rows, ...extra], live, row?.title ?? '', held);
+  }, [sets, row, live, held]);
   useEffect(() => {
     knownMids.current = new Set(view.sets.map((set) => set.mid));
   }, [view, knownMids]);

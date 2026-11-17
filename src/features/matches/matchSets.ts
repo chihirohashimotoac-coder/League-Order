@@ -91,7 +91,12 @@ function winnerOf(legs: [number, number] | null, finished: boolean): 0 | 1 | -1 
 const legsOf = (row: GameRow): [number, number] | null =>
   row.sides[0].legsWon !== null && row.sides[1].legsWon !== null ? [row.sides[0].legsWon, row.sides[1].legsWon] : null;
 
-export function matchSetsView(rows: readonly GameRow[], live: LiveState | null, fallbackTitle = ''): MatchSetsView {
+/**
+ * `held`: the last live state seen of each earlier set (the poller moved on from it). Until the
+ * list holds a set as far on as that state, the set is shown from it — a set seen ending never
+ * goes back to the list's older 「未終了」.
+ */
+export function matchSetsView(rows: readonly GameRow[], live: LiveState | null, fallbackTitle = '', held: ReadonlyMap<string, LiveState> = new Map()): MatchSetsView {
   const ordered = orderSets(rows);
   const titles = [...ordered.map((row) => row.title), ...(live ? [live.title] : [])];
   const shared = sharedTitle(titles);
@@ -101,19 +106,23 @@ export function matchSetsView(rows: readonly GameRow[], live: LiveState | null, 
   };
   const sets: MatchSet[] = ordered.map((row, index) => {
     const isLive = live !== null && live.mid === row.mid;
-    if (isLive) {
-      const legs: [number, number] = [live.legs[0], live.legs[1]];
+    const seen = held.get(row.mid);
+    // An earlier set's last live state, while the list is behind it (older, or not over yet).
+    const kept = !isLive && seen && (!row.finished || row.updateTime === null || seen.updateTime > row.updateTime) ? seen : null;
+    const state = isLive ? live : kept;
+    if (state) {
+      const legs: [number, number] = [state.legs[0], state.legs[1]];
       return {
         mid: row.mid,
-        position: live.currentSet ?? row.currentSet ?? null,
-        label: label(live.title || row.title, live.currentSet ?? row.currentSet ?? null, index),
-        title: live.title || row.title,
-        names: [sideName(live.sides[0]), sideName(live.sides[1])],
+        position: state.currentSet ?? row.currentSet ?? null,
+        label: label(state.title || row.title, state.currentSet ?? row.currentSet ?? null, index),
+        title: state.title || row.title,
+        names: [sideName(state.sides[0]), sideName(state.sides[1])],
         legs,
-        winner: winnerOf(legs, live.gameEnded),
-        finished: live.gameEnded,
-        live: true,
-        cricket: live.matchType === 'cricket',
+        winner: winnerOf(legs, state.gameEnded),
+        finished: state.gameEnded,
+        live: isLive,
+        cricket: state.matchType === 'cricket',
         fromLive: false,
       };
     }

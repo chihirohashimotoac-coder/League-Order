@@ -218,4 +218,21 @@ describe('SetMatchPage', () => {
     await flush(10);
     expect(screen.getByTestId('shown-set').textContent).toContain('シングルス1');
   });
+
+  it('a set seen ending keeps its result after the next set begins, while the list fails or lags', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const w = world({ phase: 2, listFails: true });
+    open(w, setMid(1));
+    await flush(10);
+    await flush(10);
+    w.options.phase = 3; // ダブルス1 over, 1 - 2
+    await flush(1600);
+    w.options.phase = 4; // ダブルス2 began
+    await flush(1600);
+    await flush(10);
+    const doubles1 = items().find((item) => item.getAttribute('data-mid') === setMid(1))!;
+    expect(doubles1.textContent).toContain('1 - 2');
+    expect(doubles1.textContent).toContain('Bravo 選手2-1 / Bravo 選手2-2 の勝ち');
+    expect(doubles1.textContent).not.toContain('進行中');
+  });
 });
