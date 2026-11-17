@@ -188,15 +188,17 @@ export class LivePoller {
   }
 
   /**
-   * Whether nothing more will change. A card ends with `end_schedule`; so does a set-format match
-   * (`end_match` is only the end of one set) — except a match of one set, which n01 does not
-   * show as sets (`show_sets` 0) and which ends with its only game. One game ends with `end_match`.
+   * Whether nothing more will change. A card and a set-format match end with `end_schedule`
+   * (`end_match` is only the end of one game / set; a game outside any set has an empty `scid`
+   * and is followed by `mid`, checked on n01 2026-11-17). One game ends with `end_match`; a
+   * card that is no schedule (one game) ends with it too.
    */
   private done(): boolean {
     const state = this.state;
     if (!state) return false;
     if ('mid' in this.target) return state.gameEnded;
-    return state.cardEnded || (!state.isSchedule && !('scid' in this.target && state.showSets) && state.gameEnded);
+    if ('scid' in this.target) return state.cardEnded;
+    return state.cardEnded || (!state.isSchedule && state.gameEnded);
   }
 
   private apply(next: LiveState, rttMs: number): void {

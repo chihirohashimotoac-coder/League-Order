@@ -175,4 +175,47 @@ describe('SetMatchPage', () => {
     expect(plain.calls.some((call) => call.startsWith('match/live') && call.includes(`mid=${setMid(1)}`))).toBe(true);
     expect(plain.calls.some((call) => call.includes(`scid=${SET_SCID}`))).toBe(false);
   });
+
+  it('a linked set the lagging list leaves out keeps its own name, players and legs', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const transport: AnalyticsTransport = {
+      request: async (operation, params) => {
+        const reply = setMatchReply(operation, params, 4) as { list?: { mid: string }[] } | undefined;
+        if (reply === undefined) return { result: -1, error: 'not found' };
+        // The list by scid does not hold シングルス1 (yet).
+        if (params.scid && reply.list) return { ...reply, list: reply.list.filter((row) => row.mid !== setMid(0)) };
+        return reply;
+      },
+    };
+    const factory: MatchesApiFactory = (opts) => new MatchesApi({ transport, governor: new RequestGovernor(100_000), pollPerMinute: 100_000, ...opts });
+    render(<SetMatchPage mid={setMid(0)} factory={factory} onBack={() => undefined} onShown={() => undefined} />);
+    await flush(10);
+    await flush(1600);
+    expect(screen.getByTestId('shown-set').textContent).toContain('シングルス1');
+    expect(screen.getByTestId('shown-set').textContent).not.toContain('ダブルス2');
+    expect(screen.getByTestId('set-legs').textContent).toBe('2 - 0');
+    expect(screen.getByTestId('set-score').textContent).toContain('Alpha 選手1-1');
+    expect(screen.getByTestId('set-score').textContent).not.toContain('Alpha 選手3-1');
+  });
+
+  it('the address and the set shown stay together through the browser’s back and forward', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const w = world({ phase: 4 });
+    const onShown = vi.fn();
+    const props = { factory: w.factory, onBack: () => undefined, onShown };
+    const view = render(<SetMatchPage mid={setMid(2)} {...props} />);
+    await flush(10);
+    await flush(10);
+    fireEvent.click(items()[0]); // A = シングルス1, written to the address
+    await flush(10);
+    expect(onShown).toHaveBeenLastCalledWith(setMid(0));
+    view.rerender(<SetMatchPage mid={setMid(0)} {...props} />);
+    await flush(10);
+    view.rerender(<SetMatchPage mid={setMid(1)} {...props} />); // B from the browser
+    await flush(10);
+    expect(screen.getByTestId('shown-set').textContent).toContain('ダブルス1');
+    view.rerender(<SetMatchPage mid={setMid(0)} {...props} />); // back to A
+    await flush(10);
+    expect(screen.getByTestId('shown-set').textContent).toContain('シングルス1');
+  });
 });

@@ -196,7 +196,13 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
     setChosen(live && live.mid !== row.mid && row.finished ? row.mid : null);
   }
 
-  const view = useMemo(() => matchSetsView(sets ?? (row ? [row] : []), live, row?.title ?? ''), [sets, row, live]);
+  // The game the page was opened on stays in the list even while the list lags behind (or
+  // has not been read): what is shown for it always comes from its own mid.
+  const view = useMemo(() => {
+    const listed = sets ?? [];
+    const rows = row && !listed.some((entry) => entry.mid === row.mid) ? [...listed, row] : listed;
+    return matchSetsView(rows, live, row?.title ?? '');
+  }, [sets, row, live]);
   useEffect(() => {
     knownMids.current = new Set(view.sets.map((set) => set.mid));
   }, [view, knownMids]);
@@ -207,7 +213,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
   const shown = view.sets.find((set) => set.mid === shownMid) ?? null;
 
   // The address follows what is shown (a reload or a copied link opens the same set).
-  const written = useRef(requestedMid);
+  const written = useRef<string | null>(null);
   useEffect(() => {
     if (shownMid === requestedMid) return;
     written.current = shownMid;
@@ -215,7 +221,13 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
   }, [shownMid]);
   // Back / forward to another set of this match: show it.
   useEffect(() => {
-    if (requestedMid === shownMid || requestedMid === written.current || !knownMids.current.has(requestedMid)) return;
+    // The address this page just wrote, coming back: nothing to do (once — a later visit to the
+    // same set by the browser's back / forward is the viewer's).
+    if (requestedMid === written.current) {
+      written.current = null;
+      return;
+    }
+    if (requestedMid === shownMid || !knownMids.current.has(requestedMid)) return;
     setChosen(requestedMid === liveSet?.mid ? null : requestedMid);
   }, [requestedMid]);
 
@@ -260,7 +272,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
     <section className="set-score" aria-label={shown ? `${shown.label} のスコア` : 'スコア'} data-testid="set-score">
       <header className="set-score-head">
         <h3 className="set-score-title" data-testid="shown-set">
-          {scid && shown ? shown.label : (live?.title ?? row.title)}
+          {scid ? (shown?.label ?? '—') : (live?.title ?? row.title)}
           {shown && !following && shown.finished ? <span className="muted small-text"> ・ {resultText(shown)}</span> : null}
         </h3>
         {backToLive ? (

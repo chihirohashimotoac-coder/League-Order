@@ -9644,31 +9644,35 @@ ul.plain {
   background: var(--color-surface-3);
 }
 
-/* Wide: the sets in a column beside the score, the score as wide as it can be. */
-.set-page.is-split .set-page-body {
-  display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
+/* Wide: the sets in a column beside the score, the score as wide as it can be. The class says
+   the page has sets; the width (SPLIT_MIN_WIDTH) is checked here too, so a resize never leaves
+   the two columns on a narrow screen for a frame. */
+@media (min-width: 1100px) {
+  .set-page.is-split .set-page-body {
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
 
-.set-page.is-split .set-nav {
-  position: sticky;
-  top: calc(var(--safe-top) + 72px);
-  max-height: calc(100dvh - var(--safe-top) - 96px);
-  overflow-y: auto;
-}
+  .set-page.is-split .set-nav {
+    position: sticky;
+    top: calc(var(--safe-top) + 72px);
+    max-height: calc(100dvh - var(--safe-top) - 96px);
+    overflow-y: auto;
+  }
 
-.set-page.is-split .set-list {
-  flex-direction: column;
-  overflow-x: visible;
-  scroll-snap-type: none;
-}
+  .set-page.is-split .set-list {
+    flex-direction: column;
+    overflow-x: visible;
+    scroll-snap-type: none;
+  }
 
-.set-page.is-split .set-item {
-  min-width: 0;
-}
+  .set-page.is-split .set-item {
+    min-width: 0;
+  }
 
-.set-page.is-split .set-item-result {
-  max-width: none;
+  .set-page.is-split .set-item-result {
+    max-width: none;
+  }
 }

@@ -141,4 +141,15 @@ describe('LIVE MATCH: following a set-format match by scid', () => {
     await h.step();
     expect(h.states.map((state) => state.mid)).toEqual([setMid(1)]);
   });
+
+  it('a set match whose sets n01 does not show (show_sets 0) still ends only at end_schedule', async () => {
+    const body = { ...setLive(0, 1), show_sets: 0 };
+    const h = harness(() => body);
+    h.poller.start();
+    await h.step();
+    await h.step();
+    expect(h.states.at(-1)).toMatchObject({ gameEnded: true, cardEnded: false, showSets: false });
+    expect(h.statuses.at(-1)).toMatchObject({ kind: 'polling' });
+    expect(h.timers).toHaveLength(1);
+  });
 });
