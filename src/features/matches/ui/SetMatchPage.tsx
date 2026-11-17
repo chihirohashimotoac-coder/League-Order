@@ -13,6 +13,7 @@ import { LiveSheet } from './LiveSheet';
 import { liveStatusText } from './MatchSheet';
 import { LiveReturn, MatchBar, MatchHead, UnitChips, UnitHead, shortUnit } from './MatchParts';
 import type { MatchUnit } from './MatchParts';
+import { useScreenWake } from './useScreenWake';
 
 /**
  * One n01 match opened from 「いま n01 で進行中」 (個別の試合・注目選手), on a page of its own — the
@@ -159,6 +160,12 @@ function useFollowedMatch(mid: string, factory: MatchesApiFactory): Followed {
   const setsError = failed.length ? `${failed.map((source) => (source === 'archive' ? '終了したセット' : '進行中のセット')).join('・')}の一覧を取得できませんでした (${(archive.error ?? liveList.error)!})` : null;
   // Again: only what failed (both when nothing did).
   const retrySets = (): void => readSources(failed.length ? failed : ['archive', 'live']);
+  // 対戦全体が進行中の間、画面の自動スリープを防ぐ (終了はポーラーの判定: セット制は
+  // `end_schedule`、単独の試合は `end_match`)。セットの合間、過去のセットの表示中、取得の失敗と
+  // 再試行の間は、最後に確認した状態で判断する。取得上限 (`budget`) ではポーラーが止まり、
+  // 画面が更新されなくなるので解除する。
+  const on = follow && status.kind !== 'finished' && status.kind !== 'budget' && (live ? !(scid ? live.cardEnded : live.gameEnded) : !row.finished);
+  useScreenWake(on);
   return { api, row, rowError, live, status, sets, setsError, setsLoading: archive.loading || liveList.loading, retrySets };
 }
 

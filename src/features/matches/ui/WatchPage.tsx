@@ -24,6 +24,7 @@ import { LiveTab } from './LiveTab';
 import type { PlayerRef } from './LiveTab';
 import { ResultsTab } from './ResultsTab';
 import { SetMatchPage } from './SetMatchPage';
+import { WatchShown } from './useScreenWake';
 import { BracketPath, NowView, TournamentHub } from './CompetitionViews';
 import type { CompetitionMatch } from '../competition';
 import { PlayerCard } from './PlayerCard';
@@ -241,6 +242,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
           gamePage
         )}
         <div className="watch-keep" hidden={pageOpen}>
+        <WatchShown shown={!pageOpen}>
         {target ? (
           <button
             type="button"
@@ -260,6 +262,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
             <LeaguePicker onPick={pick} onMatch={(mid) => openGame(mid)} onNow={() => setNow(true)} />
           </Card>
         )}
+        </WatchShown>
         </div>
       </div>
     );
@@ -329,6 +332,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
       <div className="watch" data-testid="watch-page">
         {gamePage}
         <div className="watch-keep" hidden={matchPage}>
+        <WatchShown shown={!matchPage}>
         {bar}
         {tabs}
         <div {...panel}>
@@ -347,6 +351,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
         <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
           いま n01 で進行中の試合を見る
         </button>
+        </WatchShown>
         </div>
         {pickerSheet}
       </div>
@@ -357,6 +362,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     <div className="watch" data-testid="watch-page">
       {gamePage}
       <div className="watch-keep" hidden={matchPage}>
+      <WatchShown shown={!matchPage}>
       {bar}
       {tabs}
       <div {...panel}>
@@ -420,6 +426,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
       <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
         いま n01 で進行中の試合を見る (大会・個別の試合)
       </button>
+      </WatchShown>
       </div>
       {pickerSheet}
     </div>
