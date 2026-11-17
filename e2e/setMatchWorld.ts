@@ -12,6 +12,7 @@ export interface SetMatchControl extends SetMatchOptions {
   phase: number;
   /** In the list of games in progress, the left player's name is replaced by this (注目選手). */
   followedName?: string;
+  liveReadFails?: boolean;
   log: string[];
 }
 
@@ -29,6 +30,7 @@ export async function serveSetMatch(page: Page, control: SetMatchControl): Promi
     }
     if (body === undefined) return route.fallback();
     control.log.push(`${operation}?${url.searchParams.toString()}`);
+    if (control.liveReadFails && operation === 'match/live') return route.fulfill({ status: 503, body: '{}', headers });
     if (control.followedName && operation === 'match/list' && params.live === '1' && !params.scid && !params.mid) {
       const rows = (body as { list: { statsData: { name: string }[] }[] }).list;
       body = { result: 0, list: rows.map((row) => ({ ...row, statsData: [{ ...row.statsData[0], name: control.followedName }, row.statsData[1]] })) };

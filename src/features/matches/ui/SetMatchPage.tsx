@@ -13,6 +13,7 @@ import { LiveSheet } from './LiveSheet';
 import { liveStatusText } from './MatchSheet';
 import { LiveReturn, MatchBar, MatchHead, UnitChips, UnitHead, shortUnit } from './MatchParts';
 import type { MatchUnit } from './MatchParts';
+import { useScreenWakeLock } from './useScreenWakeLock';
 
 /**
  * One n01 match opened from 「いま n01 で進行中」 (個別の試合・注目選手), on a page of its own — the
@@ -232,6 +233,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
   const following = live !== null && live.mid === shownMid;
   const betweenSets = scid !== null && live !== null && live.gameEnded && !live.cardEnded && status.kind !== 'finished';
   const ended = status.kind === 'finished' || (live?.cardEnded ?? false) || (!scid && (row?.finished ?? false));
+  useScreenWakeLock(!ended && (live !== null || (row !== null && !row.finished)));
   const updated = live ? new Date(live.updateTime).toLocaleTimeString('ja-JP') : null;
   const statusLine = liveStatusText(status, ended);
   const names: [string, string] = shown?.names ?? (row ? [row.sides[0].members.map((m) => m.name).join(' / ') || row.sides[0].name, row.sides[1].members.map((m) => m.name).join(' / ') || row.sides[1].name] : ['—', '—']);

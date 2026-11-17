@@ -22,6 +22,7 @@ import { Highlights } from './Highlights';
 import { CardTrail } from './CardTrail';
 import { outlookTrail, slotChances } from '../cardTrail';
 import type { HighlightFocus } from './Highlights';
+import { useScreenWakeLock } from './useScreenWakeLock';
 
 /**
  * 日程・結果. The next round to be played comes first (the cards still to come are one tap away,
@@ -49,6 +50,7 @@ export function ResultsTab({
   onTeam,
   link = null,
   base = {},
+  visible = true,
 }: {
   data: SeasonData;
   registered: string[];
@@ -58,6 +60,7 @@ export function ResultsTab({
   link?: WatchLink | null;
   /** The league and season every link made here starts from. */
   base?: WatchLink;
+  visible?: boolean;
 }): React.JSX.Element {
   const [filter, setFilter] = useState<Filter>(registered.length ? 'registered' : 'all');
   const openKey = link?.card ?? null;
@@ -107,7 +110,7 @@ export function ResultsTab({
   };
   const back = (): void => closeWatchLink(Object.keys(base).length ? base : null);
 
-  if (card) return <MatchCenter key={card.key} card={card} data={data} registered={registered} api={api} onBack={back} onTeam={onTeam} link={link} base={base} />;
+  if (card) return <MatchCenter key={card.key} card={card} data={data} registered={registered} api={api} onBack={back} onTeam={onTeam} link={link} base={base} visible={visible} />;
 
   const section = (round: Round, id?: string): React.JSX.Element => (
     <section key={round.title} className="round" id={id}>
@@ -226,6 +229,7 @@ function MatchCenter({
   onTeam,
   link,
   base,
+  visible,
 }: {
   card: MatchCard;
   data: SeasonData;
@@ -235,6 +239,7 @@ function MatchCenter({
   onTeam: (teamId: string) => void;
   link: WatchLink | null;
   base: WatchLink;
+  visible: boolean;
 }): React.JSX.Element {
   // A card in progress is followed as on the live tab (match/live by tmid): the game being played
   // shows its live scoreboard, and an earlier game opened meanwhile offers ライブに戻る. What the
@@ -253,6 +258,7 @@ function MatchCenter({
   // A late live state of a game the list has gone past (its slot replayed) is neither shown nor
   // followed: the list's newer game is.
   const live = polled && !liveSuperseded(listed, polled) ? polled : null;
+  useScreenWakeLock(visible && card.state === 'live' && (live === null || status.kind !== 'finished'));
   // The same view as every other match (MatchParts): the games as chips on top, the chosen game
   // under them — on a phone and on a PC alike. Opened on the game a link names, else the game
   // being played, else the last one played.

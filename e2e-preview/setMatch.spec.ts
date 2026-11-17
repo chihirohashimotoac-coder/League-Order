@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { tab } from '../e2e/nav';
+import { mockScreenWakeLock } from '../e2e/wakeLock';
 import { N01_API_BASE_URL } from '../src/integrations/n01/endpoints';
 import { setMatchReply } from '../src/test/n01/setMatch';
 
@@ -28,6 +29,7 @@ async function canned(page: Page): Promise<{ phase: number }> {
 }
 
 test('preview: the set-format match moves to the next set on its own, and an earlier set opens', async ({ page }) => {
+  const wakeLock = await mockScreenWakeLock(page);
   const control = DEMO ? null : await canned(page);
   if (DEMO) await page.clock.install();
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -36,18 +38,24 @@ test('preview: the set-format match moves to the next set on its own, and an ear
   await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1, exact: true })).toBeVisible();
   await tab(page, '観戦').click();
   await page.getByRole('button', { name: /^いま n01 で進行中/ }).first().click();
+  expect(await wakeLock()).toEqual({ requests: 0, releases: 0 });
   await page.getByTestId('now-single').filter({ hasText: 'Alpha 選手1-1' }).click();
   const shown = page.getByTestId('shown-set');
   await expect(shown).toContainText('シングルス1');
+  await expect.poll(wakeLock).toEqual({ requests: 1, releases: 0 });
   // Two phases on: シングルス1 over, ダブルス1 under way.
   if (control) control.phase = 2;
   else await page.clock.runFor(51_000);
   await expect(shown).toContainText('ダブルス1');
+  expect(await wakeLock()).toEqual({ requests: 1, releases: 0 });
   await expect(page.getByTestId('set-item')).toHaveCount(2);
   await page.getByTestId('set-item').first().click();
   await expect(shown).toContainText('シングルス1');
   await expect(page.getByTestId('set-score').getByTestId('score-sheet')).toBeVisible();
+  expect(await wakeLock()).toEqual({ requests: 1, releases: 0 });
   await page.getByTestId('back-to-live').click();
   await expect(shown).toContainText('ダブルス1');
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await page.getByTestId('set-page-back').click();
+  await expect.poll(wakeLock).toEqual({ requests: 1, releases: 1 });
 });

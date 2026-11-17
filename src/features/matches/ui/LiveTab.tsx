@@ -13,6 +13,7 @@ import { checkReproduction, projectMany } from '../standings';
 import type { SeasonData } from './useMatchContext';
 import { formatClock, seasonStatsSource, useFollowed, useTodayBoard } from './useMatchContext';
 import { GameView } from './GameView';
+import { useScreenWakeLock } from './useScreenWakeLock';
 import { CardTrail, shortSlot } from './CardTrail';
 import { LiveSheet } from './LiveSheet';
 import { LiveReturn, UnitChips, UnitHead } from './MatchParts';
@@ -121,6 +122,7 @@ export function LiveTab({
   api,
   factory,
   onPlayer,
+  visible = true,
 }: {
   data: SeasonData;
   registered: string[];
@@ -128,6 +130,7 @@ export function LiveTab({
   factory: MatchesApiFactory;
   /** Opens a player's card (season figures, results). */
   onPlayer?: (player: PlayerRef) => void;
+  visible?: boolean;
 }): React.JSX.Element {
   const board = useTodayBoard(api, data.season.tournamentId, true);
   const cards = useMemo(() => (board.games ? boardCards(data.season, board.games) : []), [board.games, data.season]);
@@ -309,11 +312,11 @@ export function LiveTab({
       </ul>
       {pair && focus && right ? (
         <div className="focus-pair" data-testid="focus-pair">
-          <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} pane="left" />
-          <FocusCard key={right.tmid} card={right} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} pane="right" />
+          <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} visible={visible} pane="left" />
+          <FocusCard key={right.tmid} card={right} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} visible={visible} pane="right" />
         </div>
       ) : focus ? (
-        <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} />
+        <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} visible={visible} />
       ) : null}
     </div>
   );
@@ -372,6 +375,7 @@ function FocusCard({
   factory,
   api,
   onPlayer,
+  visible,
   pane,
 }: {
   /** Side by side: which pane this card is in. */
@@ -383,10 +387,12 @@ function FocusCard({
   factory: MatchesApiFactory;
   api: MatchesApi;
   onPlayer?: (player: PlayerRef) => void;
+  visible: boolean;
 }): React.JSX.Element {
   const liveApi = useMemo(() => factory({ maxRequests: 100_000 }), [factory]);
   const [live, setLive] = useState<LiveState | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ kind: 'idle' });
+  useScreenWakeLock(visible && !card.finished && status.kind !== 'finished');
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [lag, setLag] = useState<number | null>(null);
   const [orders, setOrders] = useState<CardOrder[] | null>(null);

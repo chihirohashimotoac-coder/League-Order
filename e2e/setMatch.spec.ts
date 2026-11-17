@@ -3,6 +3,9 @@ import { serveNight } from './liveNight';
 import { serveNowCompetition, serveSetMatch } from './setMatchWorld';
 import type { SetMatchControl } from './setMatchWorld';
 import { setMid } from '../src/test/n01/setMatch';
+import { N01_API_BASE_URL } from '../src/integrations/n01/endpoints';
+import { liveBody } from '../src/features/matches/testFixtures';
+import { mockScreenWakeLock } from './wakeLock';
 
 /**
  * 「観戦 → いま n01 で進行中 → 個別の試合」 (and 注目選手) on canned n01, in a real browser: a
@@ -31,9 +34,45 @@ async function openNow(page: Page, control: SetMatchControl): Promise<void> {
 
 const shown = (page: Page) => page.getByTestId('shown-set');
 
+test('a single game releases on end_match, and opening its result does not acquire a lock', async ({ page }) => {
+  const wakeLock = await mockScreenWakeLock(page);
+  const mid = 'single_game';
+  let ended = false;
+  await serveNight(page);
+  await page.route(`${N01_API_BASE_URL}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('mid') !== mid) return route.fallback();
+    if (!url.pathname.endsWith('/match/list') && !url.pathname.endsWith('/match/live')) return route.fallback();
+    const listed = ended || url.searchParams.get('live') === '1';
+    const row = {
+      mid, title: '個別試合', startTime: 1_800_000_000, endMatch: Number(ended), match_type: '01',
+      statsData: [{ name: 'Arrows' }, { name: 'Corks' }],
+    };
+    const body = url.pathname.endsWith('/match/live')
+      ? liveBody({ mid, scid: '', end_match: Number(ended), end_schedule: 0, updateTime: ended ? 1_800_000_020_000 : 1_800_000_010_000 })
+      : { result: 0, list: listed ? [row] : [] };
+    await route.fulfill({ json: body, headers: { 'access-control-allow-origin': '*' } });
+  });
+
+  await page.goto(`/#/watch?m=${mid}&n=1`);
+  await expect(page.getByTestId('live-leg')).toBeVisible();
+  await expect.poll(wakeLock).toEqual({ requests: 1, releases: 0 });
+  ended = true;
+  await expect(page.getByTestId('set-page-status')).toContainText('終了');
+  await expect.poll(wakeLock).toEqual({ requests: 1, releases: 1 });
+
+  await page.reload();
+  await expect(page.getByTestId('set-page-status')).toContainText('終了');
+  expect(await wakeLock()).toEqual({ requests: 0, releases: 0 });
+});
+
 test('a set ends, the next begins, the match ends — followed on one page, without reopening', async ({ page }) => {
+  const wakeLock = await mockScreenWakeLock(page);
   const control: SetMatchControl = { phase: 0, log: [] };
   await openNow(page, control);
+  const beforeMatch = await wakeLock();
+  expect(beforeMatch.releases).toBe(beforeMatch.requests);
+  const locked = { requests: beforeMatch.requests + 1, releases: beforeMatch.releases };
   await page.getByTestId('now-single').filter({ hasText: 'Alpha 選手1-1' }).click();
   const setPage = page.getByTestId('set-page');
   await expect(setPage).toBeVisible();
@@ -42,12 +81,19 @@ test('a set ends, the next begins, the match ends — followed on one page, with
   await expect(shown(page)).toContainText('シングルス1');
   await expect(page.getByTestId('set-page-title')).toHaveText('【デモリーグ】R3 Alpha Darts vs Bravo Arrows');
   await expect(page.getByTestId('live-leg')).toBeVisible();
+  await expect.poll(wakeLock).toEqual(locked);
   expect(page.url()).toContain(`m=${setMid(0)}`);
+
+  control.liveReadFails = true;
+  await expect(page.getByTestId('set-page-status')).toContainText('取得失敗');
+  expect(await wakeLock()).toEqual(locked);
+  control.liveReadFails = false;
 
   control.phase = 1; // シングルス1 over: waiting for the next set, not the end
   await expect(page.getByTestId('set-wait')).toBeVisible();
   await expect(page.getByTestId('set-legs')).toHaveText('2 - 0');
   await expect(page.getByTestId('set-page-status')).not.toContainText('終了');
+  expect(await wakeLock()).toEqual(locked);
 
   control.phase = 2; // ダブルス1 began
   await expect(shown(page)).toContainText('ダブルス1');
@@ -64,6 +110,7 @@ test('a set ends, the next begins, the match ends — followed on one page, with
 
   control.phase = 7; // the match is over
   await expect(page.getByTestId('set-page-status')).toContainText('終了');
+  await expect.poll(wakeLock).toEqual({ requests: locked.requests, releases: locked.releases + 1 });
   await expect(page.getByTestId('set-item')).toHaveCount(4);
   await expect(page.getByTestId('sets-won')).toContainText('2 - 2');
   const polled = control.log.filter((entry) => entry.startsWith('match/live')).length;
@@ -298,25 +345,32 @@ test('日程・結果: the card followed to its end while the season list stays 
 });
 
 test('日程・結果: an earlier game chosen stays chosen through the next game and the end, and the last game can still be opened', async ({ page }) => {
+  const wakeLock = await mockScreenWakeLock(page);
   let phase = 0;
   await serveNight(page, { nextGameStarted: () => phase >= 1, cardEnded: () => phase >= 2 });
   await page.goto('/');
   await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
   await page.getByRole('tab', { name: '日程・結果' }).click();
+  const beforeCard = await wakeLock();
+  expect(beforeCard.releases).toBe(beforeCard.requests);
   await page.getByTestId('match-card').filter({ hasText: 'Corks' }).filter({ hasText: '進行中' }).first().click();
   const detail = page.getByTestId('match-detail');
   const chips = detail.getByTestId('game-tab');
   await expect(detail.getByTestId('live-leg')).toBeVisible();
+  const locked = { requests: beforeCard.requests + 1, releases: beforeCard.releases };
+  await expect.poll(wakeLock).toEqual(locked);
   await chips.nth(1).click();
   await expect(detail.getByTestId('game-panel')).toContainText('ダブルス1');
   phase = 1;
   await expect(chips.nth(4)).toContainText('LIVE');
   await expect(detail.getByTestId('back-to-live')).toBeVisible();
   await expect(detail.getByTestId('game-panel')).toContainText('ダブルス1');
+  expect(await wakeLock()).toEqual(locked);
   phase = 2;
   await expect(chips.nth(4)).toContainText('1-2');
   await expect(detail.getByTestId('back-to-live')).toHaveCount(0);
   await expect(detail.getByTestId('game-panel')).toContainText('ダブルス1');
+  await expect.poll(wakeLock).toEqual({ requests: locked.requests, releases: locked.releases + 1 });
   await chips.nth(4).click();
   await expect(detail.getByTestId('game-panel')).toContainText('シングルス2');
   await expect(detail.getByTestId('game-panel')).toContainText('終了');

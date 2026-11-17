@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { pinFixtureClock, serveN01 } from './n01Server';
+import { mockScreenWakeLock } from './wakeLock';
 import { N01_API_BASE_URL } from '../src/integrations/n01/endpoints';
 import { LGID, TDID, c001Rows as rawC001Rows, fixtures, gameRow, list, liveBody, side, tournamentDoc } from '../src/features/matches/testFixtures';
 
@@ -172,6 +173,7 @@ test.describe('player card (選手カード)', () => {
 
 test.describe('watching without a team (リーグ・大会を見る)', () => {
   test('live: today’s cards, the card’s flow, scoreboard, estimate, upcoming lineup; it stops when the card ends', async ({ page }) => {
+    const wakeLock = await mockScreenWakeLock(page);
     let n = 0;
     const log = await serveN01Canned(page, () => {
       n += 1;
@@ -184,6 +186,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await expect(page.getByTestId('board-tile')).toContainText('Arrows');
     await expect(page.getByTestId('board-tile')).toContainText('1-0');
     const focus = page.getByTestId('focus-card');
+    await expect.poll(wakeLock).toEqual({ requests: 1, releases: 0 });
     await expect(focus.getByTestId('game-tab')).toHaveCount(5);
     await expect(focus.getByTestId('estimate')).toContainText('予測');
     await focus.getByTestId('estimate').click();
@@ -200,6 +203,7 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await expect(board.getByTestId('league-order-plus')).toBeVisible();
     await expect(board.getByTestId('leg-chance')).toContainText('%');
     await expect(focus.getByTestId('live-status')).toContainText('終了しました', { timeout: 15_000 });
+    await expect.poll(wakeLock).toEqual({ requests: 1, releases: 1 });
     await expect(focus.locator('.focus-head')).toContainText('3 - 2');
     const lives = log.filter((entry) => entry.startsWith('match/live'));
     expect(lives.slice(1).every((entry) => entry.includes('since='))).toBe(true);

@@ -387,8 +387,8 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
               </p>
             ) : null}
             <ListCoverage state={{ truncated: data.value.truncated, unreadable: data.value.unreadableGames, unsure: data.value.unsureGames }} kind="season" />
-            {tab === 'live' ? <LiveTab data={data.value} registered={registered} api={api} factory={factory} onPlayer={openPlayer} /> : null}
-            {tab === 'results' ? <ResultsTab data={data.value} registered={registered} api={api} onTeam={setTeam} link={link} base={base} /> : null}
+            {tab === 'live' ? <LiveTab data={data.value} registered={registered} api={api} factory={factory} onPlayer={openPlayer} visible={!matchPage} /> : null}
+            {tab === 'results' ? <ResultsTab data={data.value} registered={registered} api={api} onTeam={setTeam} link={link} base={base} visible={!matchPage} /> : null}
             {tab === 'standings' ? <StandingsTab data={data.value} registered={registered} onTeam={setTeam} /> : null}
             {tab === 'stats' ? <StatsTab data={data.value} registered={registered} api={api} onTeam={setTeam} onPlayer={openPlayer} view={statsView} onView={setStatsView} /> : null}
             {team ? <TeamSheet teamId={team} data={data.value} registered={registered} factory={factory} onClose={() => setTeam(null)} onPlayer={openPlayer} /> : null}
