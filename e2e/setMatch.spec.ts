@@ -37,7 +37,7 @@ test('a set ends, the next begins, the match ends — followed on one page, with
   await page.getByTestId('now-single').filter({ hasText: 'Alpha 選手1-1' }).click();
   const setPage = page.getByTestId('set-page');
   await expect(setPage).toBeVisible();
-  await expect(page.getByTestId('now-view')).toHaveCount(0);
+  await expect(page.getByTestId('now-view')).toBeHidden(); // kept underneath, for the way back
   await expect(page.getByTestId('match-sheet')).toHaveCount(0);
   await expect(shown(page)).toContainText('シングルス1');
   await expect(page.getByTestId('set-page-title')).toHaveText('【デモリーグ】R3 Alpha Darts vs Bravo Arrows');
