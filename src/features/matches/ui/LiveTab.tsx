@@ -608,6 +608,7 @@ function FocusCard({
             names={names}
             flip={flipOf(selectedGame)}
             liveLeg={live && live.mid === selectedGame.mid && !live.gameEnded ? live.leg : null}
+            openPlayedLeg
           />
         </section>
       ) : null}

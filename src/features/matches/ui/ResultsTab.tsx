@@ -11,7 +11,9 @@ import type { WatchLink } from '../watchLink';
 import { closeWatchLink, pushWatchLink, replaceWatchLink, watchLinkUrl } from '../watchLink';
 import type { SeasonData } from './useMatchContext';
 import { formatClock, formatRate } from './useMatchContext';
-import { MatchBar, MatchHead, UnitChips, UnitHead } from './MatchParts';
+import { LiveReturn, MatchBar, MatchHead, UnitChips, UnitHead, useCardLive } from './MatchParts';
+import { LiveSheet } from './LiveSheet';
+import { liveStatusText } from './MatchSheet';
 import type { MatchUnit } from './MatchParts';
 import { shortSlot } from './CardTrail';
 import { GameView } from './GameView';
@@ -209,6 +211,11 @@ function CardRow({ card, registered, onOpen }: { card: MatchCard; registered: st
   );
 }
 
+/** The name of a card's game by its slot id (「シングルス1」), the id itself when unknown. */
+function slotLabelOf(card: MatchCard, schid: string | null): string {
+  return card.games.find((entry) => entry.slot.schid === schid)?.slot.label ?? schid ?? '';
+}
+
 function MatchCenter({
   card,
   data,
@@ -233,7 +240,11 @@ function MatchCenter({
   // being played, else the last one played.
   const playable = card.games.filter((entry) => entry.game);
   const linked = link?.game && playable.some((entry) => entry.slot.schid === link.game) ? link.game : null;
-  const fallback = (playable.find((entry) => entry.state === 'live') ?? playable[playable.length - 1])?.slot.schid ?? null;
+  // A card in progress is followed as on the live tab (match/live by tmid): the game being played
+  // shows its live scoreboard, and an earlier game opened meanwhile offers ライブに戻る.
+  const { live, status } = useCardLive(api, card.state === 'live' ? card.tmid : null);
+  const liveSchid = live && !live.gameEnded ? live.schid : null;
+  const fallback = liveSchid ?? (playable.find((entry) => entry.state === 'live') ?? playable[playable.length - 1])?.slot.schid ?? null;
   const game = linked ?? fallback;
   const [focus, setFocus] = useState<HighlightFocus | null>(null);
   const names: [string, string] = [card.teams[0].name, card.teams[1].name];
@@ -254,6 +265,7 @@ function MatchCenter({
   };
   const score = cardScore(card);
   const chosen = game ? (playable.find((entry) => entry.slot.schid === game) ?? null) : null;
+  const showsLive = live !== null && !live.gameEnded && game === liveSchid;
   const side = (entry: CardGame, index: 0 | 1): React.JSX.Element => (
     <>
       {entry.members[index].join(' / ') || names[index]}
@@ -294,7 +306,8 @@ function MatchCenter({
         selected={game}
         onPick={(schid) => {
           setFocus(null);
-          setGame(schid);
+          // The game being played is followed (no game in the link), as on the live tab.
+          setGame(schid === liveSchid ? null : schid);
         }}
         units={card.games.map((entry): MatchUnit => ({
           key: entry.slot.schid,
@@ -302,11 +315,24 @@ function MatchCenter({
           short: shortSlot(entry.slot.label),
           legs: entry.state === 'notPlayed' ? null : entry.legs,
           winner: entry.winner,
-          live: entry.state === 'live',
-          playable: !!entry.game,
+          live: liveSchid !== null ? entry.slot.schid === liveSchid : entry.state === 'live',
+          playable: !!entry.game || entry.slot.schid === liveSchid,
         }))}
       />
-      {chosen ? (
+      {live && liveSchid && !showsLive ? (
+        <LiveReturn
+          onReturn={() => {
+            setFocus(null);
+            setGame(null);
+          }}
+          text={`${slotLabelOf(card, liveSchid)} ・ Leg ${(live.leg?.index ?? live.currentLeg ?? 0) + 1} ・ ${live.legs[0]}-${live.legs[1]}${live.leg?.left ? ` ・ 残り ${live.leg.left[0]} / ${live.leg.left[1]}` : ''}`}
+        />
+      ) : null}
+      {showsLive && live ? (
+        <section className="game-panel" aria-label={`${slotLabelOf(card, live.schid)} の詳細`} data-testid="game-panel">
+          <LiveSheet key={live.mid} api={api} live={live} title={slotLabelOf(card, live.schid)} status={{ ...liveStatusText(status, card.state !== 'live'), updated: new Date(live.updateTime).toLocaleTimeString('ja-JP') }} />
+        </section>
+      ) : chosen ? (
         <section className="game-panel" id={`game-${chosen.slot.schid}`} aria-label={`${chosen.slot.label} の詳細`} data-testid="game-panel">
           <UnitHead label={chosen.slot.label} kind={slotKindLabel(chosen.slot)} state={chosen.state === 'live' ? 'live' : 'finished'} sides={[side(chosen, 0), side(chosen, 1)]} legs={chosen.legs} winner={chosen.winner} />
           <GameView

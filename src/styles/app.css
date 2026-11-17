@@ -9455,3 +9455,8 @@ ul.plain {
 .match-note {
   margin: 0;
 }
+
+/* A game's page takes the keyboard focus when it opens (SetMatchPage): no ring around the page. */
+.match-page:focus {
+  outline: none;
+}

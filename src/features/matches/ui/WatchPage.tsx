@@ -24,7 +24,8 @@ import { LiveTab } from './LiveTab';
 import type { PlayerRef } from './LiveTab';
 import { ResultsTab } from './ResultsTab';
 import { SetMatchPage } from './SetMatchPage';
-import { NowView, TournamentHub } from './CompetitionViews';
+import { BracketPath, NowView, TournamentHub } from './CompetitionViews';
+import type { CompetitionMatch } from '../competition';
 import { PlayerCard } from './PlayerCard';
 import { shortSlot } from './CardTrail';
 import { ListCoverage } from './ListCoverage';
@@ -147,7 +148,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   const gameMid = link?.mid ?? null;
   const openGame = (mid: string, title?: string): void => {
     if (title) titles.current.set(mid, title);
-    if (!gameMid) hubScroll.current = window.scrollY;
+    if (!gameMid) remember();
     const next: WatchLink = { ...base, ...(link?.card ? { card: link.card, ...(link.game ? { game: link.game } : {}) } : {}), mid };
     if (gameMid) replaceWatchLink(next);
     else pushWatchLink(next);
@@ -155,6 +156,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   // A game opened from 「いま n01 で進行中」 (個別の試合・注目選手): a page of its own, its match followed by `scid`.
   const openNowGame = (mid: string, title?: string): void => {
     if (title) titles.current.set(mid, title);
+    if (!gameMid) remember();
     pushWatchLink({ now: '1', mid });
   };
   const closeNowGame = (): void => closeWatchLink({ now: '1' });
@@ -181,16 +183,27 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
   // What it was opened from stays mounted underneath, hidden, so its tab, chosen round and scroll
   // position are there again on the way back.
   const matchPage = gameMid !== null && !nowPage;
-  // The page opens at its top; the way back lands where the list was left.
+  // A game's page over a list (kept underneath, hidden): it opens at its top with the keyboard
+  // focus on it; the way back lands where the list was left, focus on what opened the game.
+  const pageOpen = matchPage || !!nowPage;
   const hubScroll = useRef(0);
-  const wasMatchPage = useRef(matchPage);
+  const opener = useRef<HTMLElement | null>(null);
+  const remember = (): void => {
+    hubScroll.current = window.scrollY;
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  };
+  const wasPageOpen = useRef(pageOpen);
   useLayoutEffect(() => {
-    if (wasMatchPage.current === matchPage) return;
-    wasMatchPage.current = matchPage;
-    if (typeof window.scrollTo !== 'function') return;
-    if (matchPage) window.scrollTo(0, 0);
-    else window.scrollTo(0, hubScroll.current);
-  }, [matchPage]);
+    if (wasPageOpen.current === pageOpen) return;
+    wasPageOpen.current = pageOpen;
+    if (typeof window.scrollTo === 'function') window.scrollTo(0, pageOpen ? 0 : hubScroll.current);
+    if (!pageOpen && opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+  }, [pageOpen]);
+  const [hubMatches, setHubMatches] = useState<{ matches: readonly CompetitionMatch[]; labels: ReadonlyMap<string, string> } | null>(null);
+  const bracket =
+    matchPage && gameMid && hubMatches ? (
+      <BracketPath matches={hubMatches.matches} labels={hubMatches.labels} mid={gameMid} onOpen={(match) => openGame(match.games[0].mid, `${match.names[0]} vs ${match.names[1]}`)} />
+    ) : null;
   const gamePage = matchPage ? (
     <SetMatchPage
       mid={gameMid}
@@ -199,6 +212,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
       onShown={(mid) => replaceWatchLink({ ...base, mid })}
       backLabel={target ? `${target.title} に戻る` : '観戦に戻る'}
       shareUrl={(mid) => watchLinkUrl({ ...base, mid })}
+      extra={bracket}
     />
   ) : null;
   const pickerSheet = picking ? (
@@ -218,19 +232,15 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
     </Sheet>
   ) : null;
 
-  if (now && nowPage) {
-    return (
-      <div className="watch" data-testid="watch-page">
-        <SetMatchPage mid={gameMid} factory={factory} onBack={closeNowGame} onShown={(mid) => replaceWatchLink({ now: '1', mid })} shareUrl={(mid) => watchLinkUrl({ now: '1', mid })} />
-      </div>
-    );
-  }
-
   if (!target || now) {
     return (
       <div className="watch" data-testid="watch-page">
-        {gamePage}
-        <div className="watch-keep" hidden={matchPage}>
+        {nowPage && gameMid ? (
+          <SetMatchPage mid={gameMid} factory={factory} onBack={closeNowGame} onShown={(mid) => replaceWatchLink({ now: '1', mid })} shareUrl={(mid) => watchLinkUrl({ now: '1', mid })} />
+        ) : (
+          gamePage
+        )}
+        <div className="watch-keep" hidden={pageOpen}>
         {target ? (
           <button
             type="button"
@@ -331,6 +341,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
             onGame={openGame}
             link={{ tournament: target.id }}
             onTitle={(title) => setHubTitle((held) => (held?.id === target.id && held.title === title ? held : { id: target.id, title }))}
+            onMatches={(matches, labels) => setHubMatches({ matches, labels })}
           />
         </div>
         <button type="button" className="btn ghost small" onClick={() => setNow(true)}>
@@ -365,6 +376,7 @@ export default function WatchPage({ initialTab, onNavigate }: { initialTab: Watc
             tab={tab}
             onGame={openGame}
             link={base}
+            onMatches={(matches, labels) => setHubMatches({ matches, labels })}
           />
         ) : data.kind === 'ready' ? (
           <>

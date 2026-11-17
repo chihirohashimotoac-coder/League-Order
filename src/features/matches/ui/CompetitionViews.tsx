@@ -3,7 +3,7 @@ import { onRadioGroupKeyDown, rovingTabIndex } from '../../../components/ui';
 import { describeN01Error } from '../../../integrations/n01/client';
 import type { MatchesApi } from '../api';
 import type { CompetitionDoc, CompetitionMatch, StandingGroup } from '../competition';
-import { TTYPE_LABELS, groupMatches, matchesOfPlayer, stageLabel } from '../competition';
+import { TTYPE_LABELS, bracketLinks, groupMatches, matchesOfPlayer, stageLabel } from '../competition';
 import type { WatchLink } from '../watchLink';
 import type { GameRow } from '../parse';
 import type { MatchesApiFactory } from '../environment';
@@ -95,6 +95,7 @@ export function TournamentHub({
   tab,
   onGame,
   onTitle,
+  onMatches,
 }: {
   api: MatchesApi;
   /** Accepted for the call sites; a match now always opens on its own page. */
@@ -106,6 +107,8 @@ export function TournamentHub({
   link?: WatchLink;
   /** Reports the competition's title once it is read. */
   onTitle?: (title: string) => void;
+  /** Reports the competition's matches and their round names (for a match's page: 勝ち上がり). */
+  onMatches?: (matches: readonly CompetitionMatch[], labels: ReadonlyMap<string, string>) => void;
 }): React.JSX.Element {
   const [doc, setDoc] = useState<CompetitionDoc | null>(null);
   const [rows, setRows] = useState<GameRow[] | null>(null);
@@ -180,6 +183,13 @@ export function TournamentHub({
   }, [api, tdid]);
 
   const matches = useMemo(() => (rows && doc ? groupMatches(rows, doc.entries, doc.tdid) : []), [rows, doc]);
+  const reportMatches = useRef(onMatches);
+  reportMatches.current = onMatches;
+  useEffect(() => {
+    if (!doc) return;
+    const labels = new Map(matches.map((match) => [match.key, match.place ? stageLabel(match.place, { rrGroups: doc.rrGroups, divisions: doc.divisions, rounds: doc.rounds }) : 'その他']));
+    reportMatches.current?.(matches, labels);
+  }, [matches, doc]);
   const source = useMemo<StatsSource | null>(() => (doc ? (doc.teamGames ? { teamGames: true } : { teamGames: false, entries: doc.entries }) : null), [doc]);
   const stats = usePlayerStats(api, tdid, tab === 'stats', source);
 
@@ -564,5 +574,36 @@ export function NowView({ factory, onCompetition, onGame }: { factory: MatchesAp
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * 勝ち上がり: the matches before and after a bracket match (the same entry one round before /
+ * after, n01's public data), shown on the match's page; a tap opens that match.
+ */
+export function BracketPath({ matches, labels, mid, onOpen }: { matches: readonly CompetitionMatch[]; labels: ReadonlyMap<string, string>; mid: string; onOpen: (match: CompetitionMatch) => void }): React.JSX.Element | null {
+  const match = matches.find((entry) => entry.games.some((game) => game.mid === mid)) ?? null;
+  const links = match ? bracketLinks(match, matches) : null;
+  if (!match || !links || (!links.before.some(Boolean) && !links.after)) return null;
+  const row = (label: string, other: CompetitionMatch): React.JSX.Element => (
+    <li key={`${label}:${other.key}`}>
+      <button type="button" className="path-row" onClick={() => onOpen(other)}>
+        <span className="path-label">{label}</span>
+        <span className="path-match">
+          {other.names[0]} <strong>{other.score[0]} - {other.score[1]}</strong> {other.names[1]}
+        </span>
+        <span className="muted small-text">{labels.get(other.key) ?? ''}</span>
+      </button>
+    </li>
+  );
+  return (
+    <section className="bracket-path" aria-label="勝ち上がり" data-testid="bracket-path">
+      <h3 className="section-mini">勝ち上がり (この試合の前後)</h3>
+      <ul className="plain">
+        {links.before.map((before, side) => (before ? row(`${match.names[side]} の前の試合`, before) : null))}
+        {links.after ? row('勝者の次の試合', links.after) : null}
+      </ul>
+      <p className="muted small-text">同じエントリー ID が前後のラウンドに 1 試合だけある場合に表示します (n01 の公開データ)。</p>
+    </section>
   );
 }

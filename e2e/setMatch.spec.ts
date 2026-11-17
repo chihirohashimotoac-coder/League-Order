@@ -219,6 +219,14 @@ test('大会・リーグ: a game of a competition opens on the same page; back (
   await page.getByTestId('now-view').getByRole('button', { name: /Sample Open/ }).click();
   const hub = page.getByTestId('tournament-hub');
   await expect(hub.getByTestId('competition-match').first()).toBeVisible();
+  // By keyboard: the page takes the focus (the list under it is hidden), and back returns it.
+  await hub.getByTestId('competition-match').first().focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('set-page')).toBeVisible();
+  await expect(page.locator('.match-page')).toBeFocused();
+  await page.getByTestId('set-page-back').focus();
+  await page.keyboard.press('Enter');
+  await expect(hub.getByTestId('competition-match').first()).toBeFocused();
   await hub.getByTestId('competition-match').first().click();
   await expect(page.getByTestId('set-page')).toBeVisible();
   await expect(page.getByTestId('set-page-title')).toContainText('Sample Open');
@@ -232,4 +240,21 @@ test('大会・リーグ: a game of a competition opens on the same page; back (
   await hub.getByTestId('competition-match').first().click();
   await page.getByTestId('set-page-back').click();
   await expect(hub).toBeVisible();
+});
+
+test('日程・結果: a card in progress is followed live, as on the live tab, with ライブに戻る from an earlier game', async ({ page }) => {
+  await serveNight(page);
+  await page.goto('/');
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  await page.getByRole('tab', { name: '日程・結果' }).click();
+  await page.getByTestId('match-card').filter({ hasText: 'Corks' }).filter({ hasText: '進行中' }).first().click();
+  const detail = page.getByTestId('match-detail');
+  // The game being played: the live scoreboard, the same as on the live tab.
+  await expect(detail.getByTestId('live-leg')).toContainText('Leg 3 進行中');
+  await expect(detail.getByTestId('game-tab').nth(3)).toContainText('LIVE');
+  await detail.getByTestId('game-tab').nth(1).click();
+  await expect(detail.getByTestId('game-panel')).toContainText('ダブルス1');
+  await detail.getByTestId('back-to-live').click();
+  await expect(detail.getByTestId('live-leg')).toBeVisible();
+  await expect(detail.getByTestId('back-to-live')).toHaveCount(0);
 });

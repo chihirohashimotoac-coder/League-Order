@@ -1,4 +1,9 @@
+import { useEffect, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
+import type { MatchesApi } from '../api';
+import type { LiveState } from '../parse';
+import { LivePoller } from '../livePoller';
+import type { LiveStatus } from '../livePoller';
 import { Icon } from '../../../components/icons';
 import { CopyLink } from './CopyLink';
 
@@ -199,4 +204,27 @@ export function MatchBar({ backLabel, onBack, link, backTestId }: { backLabel: s
       {link ? <CopyLink url={link} label="リンクをコピー" /> : null}
     </div>
   );
+}
+
+/**
+ * A league card followed as it is played (`match/live` by `tmid`, the live poller: 1.5 s, paused
+ * while the page is hidden, stopped at the end of the card). `tmid` `null` = nothing to follow.
+ */
+export function useCardLive(api: MatchesApi, tmid: string | null): { live: LiveState | null; status: LiveStatus } {
+  const [live, setLive] = useState<LiveState | null>(null);
+  const [status, setStatus] = useState<LiveStatus>({ kind: 'idle' });
+  useEffect(() => {
+    setLive(null);
+    if (!tmid) return;
+    const poller = new LivePoller(api, { tmid }, { maxRequests: 20_000, onState: setLive, onStatus: setStatus });
+    const onVisibility = (): void => poller.setHidden(document.visibilityState === 'hidden');
+    document.addEventListener('visibilitychange', onVisibility);
+    poller.setHidden(document.visibilityState === 'hidden');
+    poller.start();
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      poller.stop();
+    };
+  }, [api, tmid]);
+  return { live, status };
 }

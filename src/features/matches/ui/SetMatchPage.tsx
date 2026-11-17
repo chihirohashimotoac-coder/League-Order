@@ -164,7 +164,7 @@ function useFollowedMatch(mid: string, factory: MatchesApiFactory): Followed {
 const legsText = (set: MatchSet): string => (set.legs ? `${set.legs[0]} - ${set.legs[1]}` : '— - —');
 
 
-function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, backLabel, shareUrl }: { initialMid: string; requestedMid: string; factory: MatchesApiFactory; onBack: () => void; onShown: (mid: string) => void; knownMids: React.MutableRefObject<Set<string>>; backLabel: string; shareUrl?: (mid: string) => string }): React.JSX.Element {
+function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, backLabel, shareUrl, extra }: { initialMid: string; requestedMid: string; factory: MatchesApiFactory; onBack: () => void; onShown: (mid: string) => void; knownMids: React.MutableRefObject<Set<string>>; backLabel: string; shareUrl?: (mid: string) => string; extra?: React.ReactNode }): React.JSX.Element {
   const followed = useFollowedMatch(initialMid, factory);
   const { api, row, rowError, live, status, sets, setsError, setsLoading, retrySets } = followed;
   /**
@@ -347,6 +347,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
           <GameView key={shownMid} api={api} mid={shownMid} cricket={shown?.cricket ?? row.matchType === 'cricket'} finished={shown?.finished ?? row.finished} names={names} flip={false} openPlayedLeg />
         )}
       </section>
+      {extra}
     </div>
   );
 }
@@ -356,14 +357,23 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
  * (back / forward, a pasted link): another set of the same match is shown in place; any other
  * game starts the page afresh.
  */
-export function SetMatchPage({ mid, factory, onBack, onShown, backLabel = '進行中の試合一覧に戻る', shareUrl }: { mid: string; factory: MatchesApiFactory; onBack: () => void; onShown: (mid: string) => void; backLabel?: string; /** The link of a game shown here (リンクをコピー). */ shareUrl?: (mid: string) => string }): React.JSX.Element {
+export function SetMatchPage({ mid, factory, onBack, onShown, backLabel = '進行中の試合一覧に戻る', shareUrl, extra }: { mid: string; factory: MatchesApiFactory; onBack: () => void; onShown: (mid: string) => void; backLabel?: string; /** The link of a game shown here (リンクをコピー). */ shareUrl?: (mid: string) => string; /** Shown under the score (a competition's 勝ち上がり). */ extra?: React.ReactNode }): React.JSX.Element {
   const [root, setRoot] = useState(mid);
   const knownMids = useRef<Set<string>>(new Set([mid]));
+  // Opened over a list that is now hidden: the keyboard focus comes to the page (not to the body).
+  const page = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    page.current?.focus({ preventScroll: true });
+  }, [root]);
   useEffect(() => {
     if (mid !== root && !knownMids.current.has(mid)) {
       knownMids.current = new Set([mid]);
       setRoot(mid);
     }
   }, [mid, root]);
-  return <Inner key={root} initialMid={root} requestedMid={mid} factory={factory} onBack={onBack} onShown={onShown} knownMids={knownMids} backLabel={backLabel} shareUrl={shareUrl} />;
+  return (
+    <div ref={page} tabIndex={-1} className="match-page">
+      <Inner key={root} initialMid={root} requestedMid={mid} factory={factory} onBack={onBack} onShown={onShown} knownMids={knownMids} backLabel={backLabel} shareUrl={shareUrl} extra={extra} />
+    </div>
+  );
 }
