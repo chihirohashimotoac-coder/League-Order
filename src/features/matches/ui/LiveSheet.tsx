@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MatchesApi } from '../api';
-import type { LiveState, LiveThrow, ThrowLeg } from '../parse';
+import type { LiveState, LiveThrow } from '../parse';
 import { withLiveLeg } from '../parse';
 import { gameStats } from '../gameStats';
 import { checkoutRoute, freshLegChance, legChance, liveEstimateScope, shrunkAverage } from '../checkout';
@@ -10,6 +10,7 @@ import { raceChance } from '../probability';
 import { CricketGrid, ZeroOneGrid } from './ScoreGrid';
 import { FinishChances, RaceChart } from './LegCharts';
 import { useFollowLatest } from './useFollowLatest';
+import { legDarts, shortName } from './legLabel';
 
 /**
  * The live game the way a darts scoreboard shows it — the layout spectators know from n01's
@@ -48,17 +49,6 @@ export interface PlayerLevel {
   average: number | null;
   legs: number | null;
   legsWon: number | null;
-}
-
-/** The first word of a name, for a chip: 「青木 一郎 / 井上 次郎」 → 「青木」. */
-const shortName = (name: string): string => {
-  const first = name.split('/')[0].trim().split(/\s+/u)[0] ?? name;
-  return first.length > 7 ? `${first.slice(0, 6)}…` : first;
-};
-
-function legDarts(entry: ThrowLeg, winner: 0 | 1): number | null {
-  const total = entry.dartsTotal?.[winner] ?? entry.throws.filter((t) => t.side === winner).reduce((sum, t) => sum + (t.kind === '01' ? t.darts : 3), 0);
-  return total > 0 ? total : null;
 }
 
 export interface LiveSheetStatus {
@@ -217,9 +207,17 @@ export function LiveSheet({
                           <span className="live-dot" aria-hidden="true" /> 進行中
                         </>
                       ) : winner !== null ? (
-                        `${shortName(names[winner])}${darts ? ` ${darts}本` : ''}${entry?.bull ? ' (ブル)' : ''}`
+                        <>
+                          <b className="who" title={names[winner]}>
+                            {shortName(names[winner])}
+                          </b>
+                          {darts ? ` ${darts}本` : ''}
+                          {entry?.bull ? ' (ブル)' : ''}
+                        </>
+                      ) : entry?.winner === -1 ? (
+                        '引き分け'
                       ) : usable ? (
-                        '終了'
+                        '勝者不明'
                       ) : (
                         '取得中…'
                       )}
@@ -241,7 +239,7 @@ export function LiveSheet({
                 </button>
               </p>
               <div className="ns-scroll" tabIndex={0} role="region" aria-label={`Leg ${past.index + 1} のスコア表`}>
-                {cricket ? <CricketGrid leg={past} names={names} label={`Leg ${past.index + 1} のスコアシート`} /> : <ZeroOneGrid leg={past} startScore={live.startScore} label={`Leg ${past.index + 1} のスコアシート`} />}
+                {cricket ? <CricketGrid leg={past} names={names} label={`Leg ${past.index + 1} のスコアシート`} /> : <ZeroOneGrid leg={past} startScore={live.startScore} label={`Leg ${past.index + 1} のスコアシート`} history />}
               </div>
             </div>
           ) : null}

@@ -23,9 +23,15 @@ function step(max: number, wanted: number): number {
   return 1000;
 }
 
-export function RaceChart({ leg, startScore, order = [0, 1], names }: { leg: LegLike; startScore: number | null; order?: [0 | 1, 0 | 1]; names: [string, string] }): React.JSX.Element | null {
+/** RaceChart が描かれるか (投擲の記録がなく線が引けない Leg では描かない)。見出しを添える側が使う。 */
+export function hasRaceChart(leg: LegLike, startScore: number | null): boolean {
   const series = raceSeries(leg, startScore);
-  if (series[0].length + series[1].length <= 2) return null;
+  return series[0].length + series[1].length > 2;
+}
+
+export function RaceChart({ leg, startScore, order = [0, 1], names }: { leg: LegLike; startScore: number | null; order?: [0 | 1, 0 | 1]; names: [string, string] }): React.JSX.Element | null {
+  if (!hasRaceChart(leg, startScore)) return null;
+  const series = raceSeries(leg, startScore);
   const columns = [series[order[0]], series[order[1]]] as const;
   const maxDarts = Math.max(15, ...columns.map((points) => points[points.length - 1].darts));
   const xMax = Math.ceil(maxDarts / 3) * 3;

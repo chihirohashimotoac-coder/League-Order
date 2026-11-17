@@ -329,6 +329,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
             testId="shown-set"
             legsTestId="set-legs"
             hidden={liveOn}
+            showResult={!(shown.live && !shown.finished)}
           />
         ) : null}
         {betweenSets && following ? (

@@ -7,8 +7,9 @@ import { useGameLegs } from './useGameLegs';
 import { gameStats } from '../gameStats';
 import type { SideStats } from '../gameStats';
 import { CricketGrid, ZeroOneGrid } from './ScoreGrid';
-import { FinishChances, RaceChart } from './LegCharts';
+import { FinishChances, RaceChart, hasRaceChart } from './LegCharts';
 import { LegsStatusLine } from './LegsStatusLine';
+import { legDarts, shortName } from './legLabel';
 
 /**
  * One game, the way n01's match Details and score sheet show it — and side by side.
@@ -17,7 +18,8 @@ import { LegsStatusLine } from './LegsStatusLine';
  * game for), then the comparison table. On a wide container the two sit side by side.
  *
  * - The comparison table is computed from the throws (`gameStats`), in card order.
- * - Leg chips: winner, darts, who threw first, bull-decided legs marked.
+ * - Leg チップ: Leg 番号 → 勝者名 → 本数の順 (ブル決着は印付き)。進行中の Leg は既存の
+ *   「進行中」ラベル、選択中は輪郭と太字で示す。
  * - The score sheet of the chosen leg in n01's grid (`ScoreGrid`): 01 Scored / To Go with the
  *   darts in the middle, 100+ circled and marked (bold / colour), the finish as x1 / x2 / x3;
  *   Cricket hits / marks.
@@ -79,6 +81,17 @@ export function GameView({
   const lastHeld = all.length ? all[all.length - 1].index : null;
   const shown = chosen ?? (openPlayedLeg && finished ? (lastPlayedLeg(all) ?? lastHeld) : lastHeld);
   const leg = all.find((entry) => entry.index === shown) ?? null;
+  // 終了したゲームで、最後にプレイされた Leg より後に n01 が残している投擲のない Leg は「未実施」。
+  const lastPlayed = finished ? lastPlayedLeg(all) : null;
+  // 推移チャートは1つだけ。線が引ける Leg (RaceChart の描画条件) のときだけ、見出しと一緒に描く。
+  const chart =
+    !cricket && leg && hasRaceChart(leg, null) ? (
+      <>
+        <h4 className="gv-sheet-title">Leg {leg.index + 1} の残り点の推移</h4>
+        <RaceChart leg={leg} startScore={null} order={[at(0), at(1)]} names={names} />
+      </>
+    ) : null;
+  const unplayed = (entry: ThrowLeg): boolean => finished && !entry.ended && entry.throws.length === 0 && (lastPlayed === null || entry.index > lastPlayed);
 
   // Figures are computed from the whole game only: until it is read, none are shown.
   if (state === 'loading') return <p className="muted small-text" role="status">記録を読み込み中…</p>;
@@ -93,22 +106,32 @@ export function GameView({
     );
   }
 
-  const rows: [string, string, string][] = [
-    ['Legs', String(a.legsWon), String(b.legsWon)],
-    [cricket ? 'MPR' : '平均 (3投)', fmt(a.rate), fmt(b.rate)],
-    ...(!cricket
-      ? ([
-          ['First 9', fmt(a.first9), fmt(b.first9)],
-          ['100+', String(a.ton), String(b.ton)],
-          ['140+', String(a.ton40), String(b.ton40)],
-          ['180', String(a.ton80), String(b.ton80)],
-          ['High Out', a.highOut === null ? '—' : String(a.highOut), b.highOut === null ? '—' : String(b.highOut)],
-        ] as [string, string, string][])
-      : ([9, 8, 7, 6, 5]
-          .filter((marks) => a.markVisits[marks] + b.markVisits[marks] > 0)
-          .map((marks) => [`${marks} Mark`, String(a.markVisits[marks]), String(b.markVisits[marks])]) as [string, string, string][])),
-    ['Best Leg', a.bestLeg === null ? '—' : `${a.bestLeg} 本`, b.bestLeg === null ? '—' : `${b.bestLeg} 本`],
-    ['Break (後攻で取った Leg)', `${a.breaks} / ${a.secondLegs}`, `${b.breaks} / ${b.secondLegs}`],
+  type Row = [string, string, string];
+  // 余白・罫線・控えめな見出しで3つに区切る: Leg 勝数と平均、得点の内訳 (Cricket はマーク数)、
+  // 上がり・Best Leg・Break。
+  const groups: { title: string; rows: Row[] }[] = [
+    {
+      title: cricket ? 'Leg 勝数と MPR' : 'Leg 勝数と平均',
+      rows: [['Legs', String(a.legsWon), String(b.legsWon)], [cricket ? 'MPR' : '平均 (3投)', fmt(a.rate), fmt(b.rate)], ...(!cricket ? ([['First 9', fmt(a.first9), fmt(b.first9)]] as Row[]) : [])],
+    },
+    {
+      title: cricket ? 'マーク数の内訳' : '得点の内訳',
+      rows: !cricket
+        ? [
+            ['100+', String(a.ton), String(b.ton)],
+            ['140+', String(a.ton40), String(b.ton40)],
+            ['180', String(a.ton80), String(b.ton80)],
+          ]
+        : [9, 8, 7, 6, 5].filter((marks) => a.markVisits[marks] + b.markVisits[marks] > 0).map((marks): Row => [`${marks} Mark`, String(a.markVisits[marks]), String(b.markVisits[marks])]),
+    },
+    {
+      title: cricket ? 'Best Leg・Break' : '上がり・Best Leg・Break',
+      rows: [
+        ...(!cricket ? ([['High Out', a.highOut === null ? '—' : String(a.highOut), b.highOut === null ? '—' : String(b.highOut)]] as Row[]) : []),
+        ['Best Leg', a.bestLeg === null ? '—' : `${a.bestLeg} 本`, b.bestLeg === null ? '—' : `${b.bestLeg} 本`],
+        ['Break (後攻で取った Leg)', `${a.breaks} / ${a.secondLegs}`, `${b.breaks} / ${b.secondLegs}`],
+      ],
+    },
   ];
 
   return (
@@ -118,20 +141,45 @@ export function GameView({
           {all.length > 0 ? (
             <div className="chip-row leg-chips" role="tablist" aria-label="Leg" onKeyDown={onTabListKeyDown} data-testid="leg-chips">
               {all.map((entry) => {
-                const winner = entry.winner === 0 || entry.winner === 1 ? (flip ? 1 - entry.winner : entry.winner) : null;
+                // 勝者を表示する列はカードの並び、本数は n01 側の番号で数える。
+                const n01Winner = entry.winner === 0 || entry.winner === 1 ? entry.winner : null;
+                const winner = n01Winner === null ? null : at(n01Winner);
+                const darts = n01Winner === null ? null : legDarts(entry, n01Winner);
+                const isLive = liveIndex !== null && entry.index === liveIndex && !entry.ended;
                 return (
                   <button
                     key={entry.index}
                     type="button"
                     role="tab"
-                    className="chip"
+                    className={`leg-tab${isLive ? ' is-live' : ''}`}
                     aria-selected={entry.index === shown}
-                    aria-pressed={entry.index === shown}
                     tabIndex={entry.index === shown ? 0 : -1}
                     onClick={() => setChosen(entry.index)}
                   >
-                    L{entry.index + 1} {winner === null ? '…' : winner === 0 ? '◀' : '▶'}
-                    {entry.bull ? ' (ブル)' : ''}
+                    <span className="l">Leg {entry.index + 1}</span>
+                    <span className="w">
+                      {isLive ? (
+                        <>
+                          <span className="live-dot" aria-hidden="true" /> 進行中
+                        </>
+                      ) : winner !== null ? (
+                        <>
+                          <b className="who" title={names[winner]}>
+                            {shortName(names[winner])}
+                          </b>
+                          {darts ? ` ${darts}本` : ''}
+                          {entry.bull ? ' (ブル)' : ''}
+                        </>
+                      ) : entry.winner === -1 ? (
+                        '引き分け'
+                      ) : entry.ended ? (
+                        '勝者不明'
+                      ) : unplayed(entry) ? (
+                        '未実施'
+                      ) : (
+                        '未決着'
+                      )}
+                    </span>
                   </button>
                 );
               })}
@@ -140,12 +188,14 @@ export function GameView({
             <p className="muted small-text">まだ投げた記録がありません。</p>
           )}
           {leg ? <ScoreSheet leg={leg} cricket={cricket} names={names} at={at} mark={focus && focus.leg === leg.index ? { side: focus.n01Side, round: focus.round } : null} /> : null}
+          {/* 進行中のゲーム: チャートはスコア表の直後。 */}
+          {!finished ? chart : null}
         </div>
         <div className="gv-figures">
           {!history.complete ? <LegsStatusLine history={history} /> : null}
           {history.complete ? (
             <div className="table-scroll">
-              <table className="compare small-text" aria-label="ゲームの詳細">
+              <table className="compare gv-compare small-text" aria-label="ゲームの詳細">
                 <thead>
                   <tr>
                     <th scope="col">{names[0]}</th>
@@ -153,17 +203,26 @@ export function GameView({
                     <th scope="col">{names[1]}</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {rows.map(([label, left, right]) => (
-                    <tr key={label}>
-                      <td className="num">{left}</td>
-                      <th scope="row" className="center">
-                        {label}
-                      </th>
-                      <td className="num">{right}</td>
-                    </tr>
+                {groups
+                  .filter((group) => group.rows.length > 0)
+                  .map((group) => (
+                    <tbody key={group.title} className="gv-group">
+                      <tr className="gv-group-head">
+                        <th scope="rowgroup" colSpan={3}>
+                          {group.title}
+                        </th>
+                      </tr>
+                      {group.rows.map(([label, left, right]) => (
+                        <tr key={label}>
+                          <td className="num">{left}</td>
+                          <th scope="row" className="center">
+                            {label}
+                          </th>
+                          <td className="num">{right}</td>
+                        </tr>
+                      ))}
+                    </tbody>
                   ))}
-                </tbody>
               </table>
             </div>
           ) : null}
@@ -174,6 +233,8 @@ export function GameView({
           ) : null}
           {!cricket && history.complete ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
         </div>
+        {/* 終了したゲーム: チャートは統計・上がり圏の後 (スマホの表示順・読み上げ順。PC はグリッドで左列へ)。 */}
+        {finished && chart ? <div className="gv-chart">{chart}</div> : null}
       </div>
     </div>
   );
@@ -198,13 +259,12 @@ function ScoreSheet({
   return (
     <div className="ns-grid-wrap" data-testid="leg-sheet">
       <h4 className="gv-sheet-title">Leg {leg.index + 1} のスコア表</h4>
-      {cricket ? <CricketGrid leg={leg} order={order} names={names} label={label} mark={mark} /> : <ZeroOneGrid leg={leg} order={order} names={names} label={label} mark={mark} />}
+      {cricket ? <CricketGrid leg={leg} order={order} names={names} label={label} mark={mark} /> : <ZeroOneGrid leg={leg} order={order} names={names} label={label} mark={mark} history={leg.ended} />}
       {cricket && leg.marks && leg.numbers ? (
         <p className="small-text muted">
           {leg.numbers.map((number, index) => `${number === 25 ? 'BULL' : number}: ${leg.marks![order[0]][index]}-${leg.marks![order[1]][index]}`).join(' ・ ')}
         </p>
       ) : null}
-      {!cricket ? <RaceChart leg={leg} startScore={null} order={order} names={names} /> : null}
     </div>
   );
 }
