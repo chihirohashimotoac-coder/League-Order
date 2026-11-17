@@ -237,6 +237,38 @@ describe('SetMatchPage', () => {
     expect(doubles1.textContent).not.toContain('進行中');
   });
 
+  it('both lists failing from the first set: the sets followed live stay in n01’s order, and the lists coming back add no duplicate nor move the choice', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    // 「いま n01 で進行中」 → シングルス1: read by `mid` without `currentSet` (not in the fields asked for).
+    const w = world({ phase: 0, archiveFails: true, liveListFails: true });
+    open(w, setMid(0));
+    await flush(10);
+    await flush(10);
+    expect(w.calls.some((call) => call.startsWith('match/list?mid=') && !call.includes('currentSet'))).toBe(true);
+    w.options.phase = 1; // シングルス1 over
+    await flush(1600);
+    w.options.phase = 2; // ダブルス1 in play
+    await flush(1600);
+    await flush(10);
+    expect(labels()).toEqual(['シングルス1', 'LIVEダブルス1']);
+    w.options.phase = 4; // ダブルス2 in play
+    await flush(1600);
+    await flush(10);
+    expect(labels()).toEqual(['シングルス1', 'ダブルス1', 'LIVEダブルス2']);
+    expect(screen.getByTestId('sets-error')).toBeTruthy();
+
+    // An earlier set chosen, then both lists come back.
+    fireEvent.click(items()[1]);
+    expect(screen.getByTestId('shown-set').textContent).toContain('ダブルス1');
+    w.options.archiveFails = false;
+    w.options.liveListFails = false;
+    await flush(SETS_REFRESH_MS + 100);
+    await flush(10);
+    expect(screen.queryByTestId('sets-error')).toBeNull();
+    expect(labels()).toEqual(['シングルス1', 'ダブルス1', 'LIVEダブルス2']);
+    expect(screen.getByTestId('shown-set').textContent).toContain('ダブルス1');
+  });
+
   it('a finished set opens on its last leg played, even with an unstarted leg held after it', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const w = world({ phase: 4, unstartedLegAfterEnd: true });

@@ -557,6 +557,27 @@ export interface LiveState {
   leg: LiveLeg | null;
 }
 
+/**
+ * A game row standing for what a live state says of its game, for a game no list holds yet (the
+ * list lags behind the live game, or failed). No start time, figures or update time of its own.
+ */
+export function gameRowOfLive(state: LiveState): GameRow {
+  return {
+    mid: state.mid,
+    tmid: state.tmid,
+    schid: state.schid,
+    scid: state.scid,
+    matchType: state.matchType,
+    title: state.title,
+    startTime: null,
+    updateTime: null,
+    finished: state.gameEnded,
+    cardFinished: state.cardEnded,
+    currentSet: state.currentSet,
+    sides: [0, 1].map((i) => ({ teamId: state.sides[i].teamId ?? '', name: state.sides[i].name, members: state.sides[i].members.map((name) => ({ oid: null, opid: null, name })), legsWon: state.legs[i], setsWon: null, score: null, darts: null, marks: null })) as GameRow['sides'],
+  };
+}
+
 export type LiveResponse = LiveState | { changed: false; mid: string | null; updateTime: number | null };
 
 const pair = (value: unknown): [number, number] | null =>

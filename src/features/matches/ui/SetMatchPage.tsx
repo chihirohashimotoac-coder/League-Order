@@ -3,6 +3,7 @@ import { describeN01Error } from '../../../integrations/n01/client';
 import type { MatchesApi } from '../api';
 import type { MatchesApiFactory } from '../environment';
 import type { GameRow, LiveState } from '../parse';
+import { gameRowOfLive } from '../parse';
 import { LivePoller } from '../livePoller';
 import type { LiveStatus, LiveTarget } from '../livePoller';
 import { matchSetsView } from '../matchSets';
@@ -195,20 +196,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
     const rows = row && !listed.some((entry) => entry.mid === row.mid) ? [...listed, row] : listed;
     // A held set the list does not hold at all is shown from what was seen of it.
     const seenOnly = [...held.values()].filter((state) => state.mid !== live?.mid && !rows.some((entry) => entry.mid === state.mid));
-    const extra: GameRow[] = seenOnly.map((state) => ({
-      mid: state.mid,
-      tmid: state.tmid,
-      schid: state.schid,
-      scid: state.scid,
-      matchType: state.matchType,
-      title: state.title,
-      startTime: null,
-      updateTime: null,
-      finished: state.gameEnded,
-      cardFinished: state.cardEnded,
-      currentSet: state.currentSet,
-      sides: [0, 1].map((i) => ({ teamId: state.sides[i].teamId ?? '', name: state.sides[i].name, members: state.sides[i].members.map((name) => ({ oid: null, opid: null, name })), legsWon: state.legs[i], setsWon: null, score: null, darts: null, marks: null })) as GameRow['sides'],
-    }));
+    const extra: GameRow[] = seenOnly.map(gameRowOfLive);
     return matchSetsView([...rows, ...extra], live, row?.title ?? '', held);
   }, [sets, row, live, held]);
   useEffect(() => {

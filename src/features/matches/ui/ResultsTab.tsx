@@ -3,7 +3,8 @@ import { Icon } from '../../../components/icons';
 import { useAppStore } from '../../../state/appStore';
 import type { MatchesApi } from '../api';
 import type { CardGame, MatchCard } from '../cards';
-import { CARD_STATE_LABELS, cardScore, slotKindLabel } from '../cards';
+import { CARD_STATE_LABELS, cardScore, cardWithLive, slotKindLabel } from '../cards';
+import type { LiveState } from '../parse';
 import { fixtureDate, slotsFor } from '../parse';
 import { checkReproduction, projectStandings } from '../standings';
 import { headToHead, linkOrder, percent, teamProfile } from '../insights';
@@ -106,7 +107,7 @@ export function ResultsTab({
   };
   const back = (): void => closeWatchLink(Object.keys(base).length ? base : null);
 
-  if (card) return <MatchCenter card={card} data={data} registered={registered} api={api} onBack={back} onTeam={onTeam} link={link} base={base} />;
+  if (card) return <MatchCenter key={card.key} card={card} data={data} registered={registered} api={api} onBack={back} onTeam={onTeam} link={link} base={base} />;
 
   const section = (round: Round, id?: string): React.JSX.Element => (
     <section key={round.title} className="round" id={id}>
@@ -217,7 +218,7 @@ function slotLabelOf(card: MatchCard, schid: string | null): string {
 }
 
 function MatchCenter({
-  card,
+  card: listed,
   data,
   registered,
   api,
@@ -235,16 +236,28 @@ function MatchCenter({
   link: WatchLink | null;
   base: WatchLink;
 }): React.JSX.Element {
+  // A card in progress is followed as on the live tab (match/live by tmid): the game being played
+  // shows its live scoreboard, and an earlier game opened meanwhile offers ライブに戻る. What the
+  // live states say (the next game, a game or the card ending, n01's score) is laid over the
+  // season's list, which is read less often: the card never goes back to the list's older state.
+  const { live, status } = useCardLive(api, listed.state === 'live' ? listed.tmid : null);
+  const [states, setStates] = useState<ReadonlyMap<string, LiveState>>(() => new Map());
+  const [statesFrom, setStatesFrom] = useState<LiveState | null>(null);
+  if (live !== statesFrom) {
+    setStatesFrom(live);
+    if (live?.schid) setStates((map) => (map.get(live.schid!) === live ? map : new Map(map).set(live.schid!, live)));
+  }
+  const card = useMemo(() => cardWithLive(listed, states, live), [listed, states, live]);
   // The same view as every other match (MatchParts): the games as chips on top, the chosen game
   // under them — on a phone and on a PC alike. Opened on the game a link names, else the game
   // being played, else the last one played.
   const playable = card.games.filter((entry) => entry.game);
   const linked = link?.game && playable.some((entry) => entry.slot.schid === link.game) ? link.game : null;
-  // A card in progress is followed as on the live tab (match/live by tmid): the game being played
-  // shows its live scoreboard, and an earlier game opened meanwhile offers ライブに戻る.
-  const { live, status } = useCardLive(api, card.state === 'live' ? card.tmid : null);
-  const liveSchid = live && !live.gameEnded ? live.schid : null;
-  const fallback = liveSchid ?? (playable.find((entry) => entry.state === 'live') ?? playable[playable.length - 1])?.slot.schid ?? null;
+  const liveSchid = live && !live.gameEnded && !live.cardEnded ? live.schid : null;
+  // Followed (no game in the link): the game the live state is about — being played, or the last
+  // one played once it is over — else the game the list has in progress, else the last played.
+  const followed = live?.schid && playable.some((entry) => entry.slot.schid === live.schid) ? live.schid : null;
+  const fallback = liveSchid ?? followed ?? (playable.find((entry) => entry.state === 'live') ?? playable[playable.length - 1])?.slot.schid ?? null;
   const game = linked ?? fallback;
   const [focus, setFocus] = useState<HighlightFocus | null>(null);
   const names: [string, string] = [card.teams[0].name, card.teams[1].name];

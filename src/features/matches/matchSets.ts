@@ -43,14 +43,18 @@ export interface MatchSetsView {
 
 const sideName = (side: { name: string; members: string[] }): string => side.members.join(' / ') || side.name;
 
-/** n01's order: the set position, then the start time, then the id (never the list's order). */
+/**
+ * n01's order: the set position, then the start time, then the id (never the list's order). A set
+ * with no start time (known from the live state only) comes after the sets that have one: it is
+ * the one n01 moved on to.
+ */
 export function orderSets(rows: readonly GameRow[]): GameRow[] {
   return [...rows].sort((a, b) => {
     const pa = a.currentSet ?? null;
     const pb = b.currentSet ?? null;
     if (pa !== null && pb !== null && pa !== pb) return pa - pb;
-    const sa = a.startTime ?? 0;
-    const sb = b.startTime ?? 0;
+    const sa = a.startTime ?? Number.POSITIVE_INFINITY;
+    const sb = b.startTime ?? Number.POSITIVE_INFINITY;
     if (sa !== sb) return sa - sb;
     return a.mid < b.mid ? -1 : a.mid > b.mid ? 1 : 0;
   });
@@ -104,7 +108,11 @@ const legsOf = (row: GameRow): [number, number] | null =>
  * goes back to the list's older 「未終了」.
  */
 export function matchSetsView(rows: readonly GameRow[], live: LiveState | null, fallbackTitle = '', held: ReadonlyMap<string, LiveState> = new Map()): MatchSetsView {
-  const ordered = orderSets(rows);
+  // A row read without `currentSet` (`match/list` by `mid`) takes the position the live state of
+  // the same set gave, before the sets are ordered (n01's position first, the start time only
+  // when neither has one).
+  const positionOf = (mid: string): number | null => (live?.mid === mid ? live.currentSet : null) ?? held.get(mid)?.currentSet ?? null;
+  const ordered = orderSets(rows.map((row) => (row.currentSet == null && positionOf(row.mid) !== null ? { ...row, currentSet: positionOf(row.mid) } : row)));
   const titles = [...ordered.map((row) => row.title), ...(live ? [live.title] : [])];
   const shared = sharedTitle(titles);
   const label = (title: string, position: number | null, index: number): string => {

@@ -19,6 +19,16 @@ describe('sets of one match (scid)', () => {
     expect(orderSets(list).map((row) => row.mid)).toEqual([setMid(0), setMid(1), setMid(2)]);
   });
 
+  it('a row without currentSet takes the position of its own live state before ordering; one with no start time comes last', () => {
+    // シングルス1 read by mid (no currentSet), ダブルス1 / ダブルス2 known from live states only.
+    const first = { ...rows(4, [0])[0], currentSet: undefined };
+    const fromLive = { ...first, mid: setMid(1), startTime: null, currentSet: 1 };
+    expect(orderSets([fromLive, first]).map((row) => row.mid)).toEqual([setMid(0), setMid(1)]);
+    const held = new Map([[setMid(0), live(0, 1)], [setMid(1), live(1, 3)]]);
+    const view = matchSetsView([first, { ...fromLive, currentSet: undefined }], live(2, 4), '', held);
+    expect(view.sets.map((set) => set.mid)).toEqual([setMid(0), setMid(1), setMid(2)]);
+  });
+
   it('names each set by the part of the title that differs', () => {
     expect(sharedTitle(['A vs B ダブルス1', 'A vs B ダブルス2'])).toBe('A vs B ');
     expect(sharedTitle(['only one'])).toBe('');

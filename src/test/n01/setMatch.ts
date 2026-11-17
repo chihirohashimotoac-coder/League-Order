@@ -197,6 +197,13 @@ export function setThrows(set: number, phase: number, unstartedLegAfterEnd = fal
   return { result: 0, changed: 1, mid: setMid(set), match_type: '01', updateTime: updateTimeOf(set, phase), end_match: state === 'ended' ? 1 : 0, current_leg: legs.length - 1, leg_count: legs.length, legs: legsWon(set, phase), leg_data: legs };
 }
 
+/** A `match/list` row cut to the `fields` the read asked for (n01 sends only those). */
+function onlyFields(row: Record<string, unknown>, fields: string | undefined): Record<string, unknown> {
+  if (!fields) return row;
+  const wanted = new Set(fields.split(','));
+  return Object.fromEntries(Object.entries(row).filter(([key]) => wanted.has(key)));
+}
+
 const setOfMid = (mid: string | undefined, count: number): number => (mid ? Array.from({ length: count }, (_, set) => set).find((set) => setMid(set) === mid) ?? -1 : -1);
 
 /**
@@ -212,7 +219,7 @@ export function setMatchReply(operation: string, params: Record<string, string>,
       const seen = Math.max(0, phase - (options.listLag ?? 0));
       const rows = Array.from({ length: count }, (_, set) => set).filter((set) => setStateAt(set, seen) !== 'future').map((set) => setRow(set, seen, count));
       // The archive holds a set once it is over; a set in play is in the live list only.
-      return { result: 0, list: rows.filter((row) => (params.live === '1' ? row.endMatch === 0 : row.endMatch === 1)) };
+      return { result: 0, list: rows.filter((row) => (params.live === '1' ? row.endMatch === 0 : row.endMatch === 1)).map((row) => onlyFields(row, params.fields)) };
     }
     if (params.mid) {
       const set = setOfMid(params.mid, count);
@@ -220,10 +227,10 @@ export function setMatchReply(operation: string, params: Record<string, string>,
       const state = setStateAt(set, phase);
       if (state === 'future') return { result: 0, list: [] };
       const row = setRow(set, phase, count);
-      return { result: 0, list: (params.live === '1') === (state === 'playing') ? [row] : [] };
+      return { result: 0, list: (params.live === '1') === (state === 'playing') ? [onlyFields(row, params.fields)] : [] };
     }
     if (params.live === '1' && !params.tdid) {
-      return { result: 0, list: setStateAt(latest, phase) === 'playing' ? [setRow(latest, phase, count)] : [] };
+      return { result: 0, list: setStateAt(latest, phase) === 'playing' ? [onlyFields(setRow(latest, phase, count), params.fields)] : [] };
     }
     return undefined;
   }

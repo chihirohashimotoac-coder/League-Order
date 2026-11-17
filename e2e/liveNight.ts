@@ -40,6 +40,8 @@ const GAMES: Record<string, ReturnType<typeof leg>[]> = {
   c003_tm01: [leg(0, 0, [[100, 85, 140, 60, 100, 95, 121, 100, 60, 100, 40], [60, 60, 81, 100, 45, 60, 100, 85, 41, 60]], 0, 1001)],
   c003_db01: [leg(0, 0, [[60, 45, 81, 60, 100], [100, 100, 81, 140, 48, 32]], 1), leg(1, 1, [[100, 140, 100, 121, 40], [60, 60, 45, 100]], 0), leg(2, 0, [[45, 60, 60, 81, 60], [100, 60, 140, 100, 61, 40]], 1)],
   c003_sg01: SG01,
+  // Singles 2, once the card is over (cardEnded): Corks 2-1.
+  c003_sg02: [leg(0, 0, [[60, 100, 140, 81, 80, 40], [85, 60, 100, 45]], 0), leg(1, 1, [[45, 60, 85, 41, 100], [140, 100, 95, 100, 34, 32]], 1), leg(2, 0, [[60, 45, 81, 60, 100], [100, 100, 81, 140, 48, 32]], 1)],
   c004_tm01: [leg(0, 1, [[60, 60, 81, 100, 45, 60, 100, 85, 41, 60], [100, 85, 140, 60, 100, 95, 121, 100, 60, 100, 40]], 1, 1001)],
 };
 
@@ -59,6 +61,11 @@ export interface NightOptions {
    * for a few seconds it still calls Singles 1 unfinished and does not hold Singles 2.
    */
   nextGameStarted?: () => boolean;
+  /**
+   * True once Singles 2 — the card's last game — has ended, and the card with it (`end_match`
+   * and `end_schedule`), as `match/live` says it. The game list is still left as it was.
+   */
+  cardEnded?: () => boolean;
   /** A third card today (c006, Corks – Bulls): its team game played, the next not started. */
   thirdCard?: boolean;
 }
@@ -98,7 +105,21 @@ export async function serveNight(page: Page, options: NightOptions = {}): Promis
       const mid = q.get('mid') ?? '';
       const live = mid === 'c003_sg01';
       body = { result: 0, changed: 1, mid, match_type: mid.endsWith('db02') ? 'cricket' : '01', end_match: live ? 0 : 1, current_leg: live ? 2 : undefined, updateTime: 1_800_000_500_000, leg_data: live ? [...SG01, SG01_LIVE] : (GAMES[mid] ?? []) };
-    } else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.nextGameStarted?.())
+    } else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.cardEnded?.())
+      body = liveBody({
+        mid: 'c003_sg02',
+        schid: 'sg02',
+        title: 'Test League A Division シングルス2',
+        updateTime: 1_800_000_030_000,
+        end_match: 1,
+        end_schedule: 1,
+        sets: [3, 2],
+        legs: [1, 2],
+        current_leg: 2,
+        players: [{ name: 'Arrows', tpid: 'AAAA', order: [{ oid: 'a2', name: '井上 次郎' }] }, { name: 'Corks', tpid: 'CCCC', order: [{ oid: 'c2', name: '木村 守' }] }],
+        leg: { ...GAMES.c003_sg02[2], thrower: 1, round: 6, member: { oid: 'c2', name: '木村 守' } },
+      });
+    else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.nextGameStarted?.())
       body = liveBody({
         mid: 'c003_sg02',
         schid: 'sg02',

@@ -258,3 +258,66 @@ test('日程・結果: a card in progress is followed live, as on the live tab, 
   await expect(detail.getByTestId('live-leg')).toBeVisible();
   await expect(detail.getByTestId('back-to-live')).toHaveCount(0);
 });
+
+test('日程・結果: the card followed to its end while the season list stays behind — the last game, its chip, the end and n01’s score agree, and polling stops', async ({ page }) => {
+  let phase = 0; // 0: シングルス1 in play, 1: シングルス2 in play, 2: the card over
+  const log = await serveNight(page, { nextGameStarted: () => phase >= 1, cardEnded: () => phase >= 2 });
+  await page.goto('/');
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  await page.getByRole('tab', { name: '日程・結果' }).click();
+  await page.getByTestId('match-card').filter({ hasText: 'Corks' }).filter({ hasText: '進行中' }).first().click();
+  const detail = page.getByTestId('match-detail');
+  const chips = detail.getByTestId('game-tab');
+  await expect(detail.getByTestId('live-leg')).toContainText('Leg 3 進行中');
+  await expect(chips.nth(3)).toContainText('LIVE');
+
+  phase = 1;
+  await expect(chips.nth(4)).toContainText('LIVE');
+  await expect(chips.nth(3)).not.toContainText('LIVE');
+  await expect(detail.getByTestId('game-panel')).toContainText('シングルス2');
+
+  phase = 2;
+  // The last game, over: its own legs on its chip and in the panel, the card over, n01's score.
+  await expect(chips.nth(4)).toContainText('1-2');
+  await expect(chips.nth(4)).not.toContainText('LIVE');
+  await expect(chips.nth(4)).toBeEnabled();
+  await expect(detail.getByTestId('live-leg')).toHaveCount(0);
+  await expect(detail.getByTestId('game-panel')).toContainText('シングルス2');
+  await expect(detail.getByTestId('game-panel')).toContainText('終了');
+  await expect(detail.getByTestId('game-panel')).not.toContainText('進行中');
+  await expect(detail.locator('.focus-head strong')).toHaveText('3 - 2');
+  await expect(detail.locator('.match-note')).not.toContainText('進行中');
+  await expect(detail.getByTestId('game-tab').filter({ hasText: 'LIVE' })).toHaveCount(0);
+  // No more live reads once the card is over, and nothing goes back while the list stays behind.
+  const reads = (): number => log.filter((entry) => entry.startsWith('match/live')).length;
+  const before = reads();
+  await page.waitForTimeout(4_000);
+  expect(reads()).toBe(before);
+  await expect(detail.getByTestId('game-panel')).toContainText('シングルス2');
+  await expect(chips.nth(4)).toContainText('1-2');
+});
+
+test('日程・結果: an earlier game chosen stays chosen through the next game and the end, and the last game can still be opened', async ({ page }) => {
+  let phase = 0;
+  await serveNight(page, { nextGameStarted: () => phase >= 1, cardEnded: () => phase >= 2 });
+  await page.goto('/');
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  await page.getByRole('tab', { name: '日程・結果' }).click();
+  await page.getByTestId('match-card').filter({ hasText: 'Corks' }).filter({ hasText: '進行中' }).first().click();
+  const detail = page.getByTestId('match-detail');
+  const chips = detail.getByTestId('game-tab');
+  await expect(detail.getByTestId('live-leg')).toBeVisible();
+  await chips.nth(1).click();
+  await expect(detail.getByTestId('game-panel')).toContainText('ダブルス1');
+  phase = 1;
+  await expect(chips.nth(4)).toContainText('LIVE');
+  await expect(detail.getByTestId('back-to-live')).toBeVisible();
+  await expect(detail.getByTestId('game-panel')).toContainText('ダブルス1');
+  phase = 2;
+  await expect(chips.nth(4)).toContainText('1-2');
+  await expect(detail.getByTestId('back-to-live')).toHaveCount(0);
+  await expect(detail.getByTestId('game-panel')).toContainText('ダブルス1');
+  await chips.nth(4).click();
+  await expect(detail.getByTestId('game-panel')).toContainText('シングルス2');
+  await expect(detail.getByTestId('game-panel')).toContainText('終了');
+});
