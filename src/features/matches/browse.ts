@@ -146,6 +146,8 @@ export function parseLeaguePage(raw: unknown): BrowsePage<LeagueItem> {
 
 /**
  * 大会・リーグ (リーグのイベントも `tdid` を持つ)・対戦カード・カード内のゲームに属すると読める識別子。
+ * `lgid` は `match/list` の `fields` に指定できず (-51、2026-11-18 確認)、リーグの試合はリーグ配下のイベントの
+ * `tdid` を持つので `tdid` で除かれる。`lgid` の検査は、応答に含まれた場合の備え。
  * `scid` (セットをまとめる ID) は含めない: 2026-11-17 の実データで、`tdid`・`relayMode` の無い個人どうしの
  * セット戦 (n01 Online) が `scid` だけを持っていた。観戦詳細は `scid` で次のセットへ切り替わる。
  */
