@@ -26,7 +26,7 @@ async function noSidewaysScroll(page: Page): Promise<void> {
 test.describe('appearance-count questions (出場回数の確認)', () => {
   test('asks only the kinds played twice, generates nothing unanswered, and keeps the answer', async ({ page }) => {
     await openSample(page);
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     // 標準6ゲーム: Singles ×3, Doubles ×2, Trios ×1.
     await expect(page.getByTestId('rule-conditions-pending')).toContainText('ダブルス・シングルス');
     await page.getByRole('button', { name: 'オーダーを生成' }).click();
@@ -47,7 +47,7 @@ test.describe('appearance-count questions (出場回数の確認)', () => {
 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     await expect(page.getByTestId('rule-conditions-pending')).toHaveCount(0);
     await expect(page.getByTestId('rule-conditions-own')).toContainText('ダブルス: 1人1回まで');
     await expect(page.getByTestId('rule-conditions-own')).toContainText('シングルス: 1人2回まで');

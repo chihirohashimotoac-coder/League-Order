@@ -50,7 +50,7 @@ test('every main screen passes the WCAG AA audit', async ({ page }) => {
   await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });
 
   await tab(page, 'ホーム').click();
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await audit(page, 'SETUP');
 

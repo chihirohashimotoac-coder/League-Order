@@ -1,94 +1,104 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ParticipantConfig, Player, Team } from '../../domain/types';
+import type { Team } from '../../domain/types';
 import { DEFAULT_N01_SETTINGS } from '../../domain/types';
 import type { N01MatchIntelligenceSnapshot, N01NextMatch } from '../../domain/n01/intelligence';
 import { describeChanges, hasImportantChanges } from '../../domain/n01/changes';
 import { formatSyncTime, freshness, isLatest } from '../../domain/n01/freshness';
-import { buildNextMatchOrder, eligiblePlayers, previousAvailability, type NextMatchOrder } from '../../domain/n01/nextMatch';
 import { CONFIDENCE_LABELS } from '../../domain/prediction/confidence';
-import { formatStrengthLine } from '../ui';
-import { withEffectivePpr } from '../../domain/n01/effectivePpr';
 import { describeN01Error } from '../../integrations/n01/client';
 import type { N01SyncStep, N01TeamSelection } from '../../integrations/n01/sync';
 import { N01_SYNC_STEPS } from '../../integrations/n01/sync';
 import { useAppStore } from '../../state/appStore';
 import { useN01Environment } from '../../state/n01Environment';
 import { useN01FreshSync, useN01LinkResolution, type FreshSyncResult } from '../../state/useN01FreshSync';
-import { createId } from '../../utils/id';
-import { finalizeMember, isGuest, newGuest, newMember } from '../../domain/players/newPlayer';
-import { PlayerEditor } from '../PlayerEditor';
-import { ParticipantDetail, describeRestrictions } from '../ParticipantConditions';
-import { createParticipantConfig } from '../../domain/orders/participants';
-import { needsLeagueStatus } from '../../domain/orders/leagueRules';
-import { resolveOrderRules } from '../../domain/orders/ruleResolution';
 import { PendingLinks } from './PendingLinks';
-import { Sheet, useToast } from '../ui';
+import { useToast } from '../ui';
 import { Icon } from '../icons';
 import { SyncProgress, type SyncProgressState } from './SyncProgress';
 
 /**
- * 「次戦のオーダーを作る」 (MASTER SPEC Phase 5).
+ * 「次戦のオーダーを作る」 (MASTER SPEC Phase 5), inside ORDER SETUP.
  *
  *   fresh sync → (change summary, only when something important changed)
- *   → (next-match picker, only when ambiguous) → today's attendance → generate
+ *   → (next-match picker, only when ambiguous) → the next match's conditions on SETUP
  *
- * When n01 cannot be reached the captain is told when the data on the device was last
- * synced and chooses to continue with it — nothing old is ever presented as current.
+ * The sync runs while SETUP is already on screen: its state is shown at the top of the page
+ * and the conditions below stay locked until the next match is known. When n01 cannot be
+ * reached the captain is told when the data on the device was last synced and chooses to
+ * continue with it — nothing old is ever presented as current.
  */
 type SyncedOk = Extract<FreshSyncResult, { kind: 'ok' }>;
 
-type Phase =
+export type NextMatchPhase =
+  /** Not syncing and nothing chosen (the captain is making another match by hand). */
+  | { kind: 'idle' }
   | { kind: 'syncing' }
   | { kind: 'offline'; message: string }
   | { kind: 'season'; options: { tournamentId: string; title: string; teamTpid: string }[] }
   | { kind: 'notFound' }
-  | { kind: 'links'; result: SyncedOk; then: Phase }
-  | { kind: 'changes'; lines: string[] }
+  | { kind: 'links'; result: SyncedOk; then: NextMatchPhase }
+  | { kind: 'changes'; lines: string[]; then: NextMatchPhase }
   | { kind: 'pickMatch'; options: N01NextMatch[] }
   | { kind: 'noMatch' }
-  | { kind: 'attendance'; fresh: boolean };
+  /**
+   * The next match is known (or there is no opponent data and the order is made as 勝利優先).
+   * `run` names the sync (or the choice to use the data on the device) that got here: the
+   * conditions are built once per `run`.
+   */
+  | { kind: 'ready'; fresh: boolean; run: number };
 
-export function NextMatchFlow({
-  team,
-  currentParticipants,
-  onClose,
-  onGenerate,
-  onRelink,
-  onManual,
-}: {
-  team: Team;
-  /** The attendance being worked on in this session, when it belongs to this team. */
-  currentParticipants: readonly ParticipantConfig[] | null;
-  onClose: () => void;
-  onGenerate: (order: NextMatchOrder) => void;
-  onRelink: () => void;
-  /** Leaves the flow for the ordinary SETUP screen. */
-  onManual: () => void;
-}): React.JSX.Element {
+export interface NextMatchSync {
+  phase: NextMatchPhase;
+  progress: SyncProgressState;
+  /** Saving the answers to 「同じ人ですか？」. */
+  resolving: boolean;
+  /** The analysis on the device (the latest one once a sync has finished). */
+  intel: N01MatchIntelligenceSnapshot | null;
+  /** When the data on the device was last fetched from n01. */
+  lastSyncAt: number | null;
+  /** Syncs, or uses the data on the device, as the settings say (see below). */
+  start: () => void;
+  /** Drops whatever is running: its answer will change nothing on screen. */
+  cancel: () => void;
+  retry: () => void;
+  /** Offline: go on with the data on the device. Only offered when there is some. */
+  continueWithCached: () => void;
+  pickSeason: (option: { tournamentId: string; teamTpid: string }) => void;
+  pickMatch: (matchId: string) => void;
+  skipLinks: () => void;
+  applyLinks: (answers: Map<string, string | null>) => void;
+  confirmChanges: () => void;
+}
+
+/** The analysis cached for a team (opponent data for its next match), or null. */
+function cachedIntel(records: readonly { kind: string }[]): N01MatchIntelligenceSnapshot | null {
+  return (records.find((record) => record.kind === 'intel') as N01MatchIntelligenceSnapshot | undefined) ?? null;
+}
+
+/**
+ * The n01 side of the next match on SETUP. Every answer carries the number of the attempt
+ * that asked for it; an answer from an attempt that is no longer current (cancelled for a
+ * match made by hand, the page left, the team switched) is dropped without touching anything.
+ */
+export function useNextMatchSync(team: Team): NextMatchSync {
   const store = useAppStore();
   const env = useN01Environment();
   const freshSync = useN01FreshSync();
-  const [phase, setPhase] = useState<Phase>({ kind: 'syncing' });
-  const [progress, setProgress] = useState<SyncProgressState>({});
-  // The attendance choices live here, not in the attendance step: a re-sync or a trip
-  // through the change summary must never undo a tick the captain made, and a guest is a
-  // person of this order only — they are held here until the order is generated.
-  const [choices, setChoices] = useState<Map<string, boolean>>(new Map());
-  const [guests, setGuests] = useState<Player[]>([]);
-  const [resolving, setResolving] = useState(false);
   const resolveLinks = useN01LinkResolution();
   const toast = useToast();
+  const [phase, setPhase] = useState<NextMatchPhase>({ kind: 'idle' });
+  const [progress, setProgress] = useState<SyncProgressState>({});
+  const [resolving, setResolving] = useState(false);
   const run = useRef(0);
   const n01Settings = store.settings.n01 ?? DEFAULT_N01_SETTINGS;
-
   const cache = store.n01CacheFor(team.id);
-  const intel = cache.find((record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel') ?? null;
-  const lastSync = cache.find((record) => record.kind === 'sync');
+  const intel = cachedIntel(cache);
+  const lastSyncAt = cache.find((record) => record.kind === 'sync')?.fetchedAt ?? null;
 
-  const afterIntel = useCallback((snapshot: N01MatchIntelligenceSnapshot | null, fresh: boolean): Phase => {
+  const afterIntel = useCallback((snapshot: N01MatchIntelligenceSnapshot | null, fresh: boolean, attempt: number): NextMatchPhase => {
     if (snapshot?.nextMatchStatus === 'ambiguous') return { kind: 'pickMatch', options: snapshot.nextMatchOptions };
     if (snapshot?.nextMatchStatus === 'none') return { kind: 'noMatch' };
-    return { kind: 'attendance', fresh };
+    return { kind: 'ready', fresh, run: attempt };
   }, []);
 
   const sync = useCallback(
@@ -104,10 +114,10 @@ export function NextMatchFlow({
         if (!result || attempt !== run.current) return;
         if (result.kind === 'seasonAmbiguous') return setPhase({ kind: 'season', options: result.options });
         if (result.kind === 'teamNotFound') return setPhase({ kind: 'notFound' });
-        const next = afterIntel(result.intel, true);
-        const staged: Phase =
-          hasImportantChanges(result.plan.changes) && next.kind === 'attendance'
-            ? { kind: 'changes', lines: describeChanges(result.plan.changes) }
+        const next = afterIntel(result.intel, true, attempt);
+        const staged: NextMatchPhase =
+          hasImportantChanges(result.plan.changes) && next.kind === 'ready'
+            ? { kind: 'changes', lines: describeChanges(result.plan.changes), then: next }
             : next;
         // n01 players who might be members added by hand are confirmed first, never merged
         // or added twice on a guess.
@@ -119,15 +129,25 @@ export function NextMatchFlow({
     [freshSync, team, afterIntel],
   );
 
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    if (n01Settings.autoSync || !intel) void sync();
+  const start = useCallback(() => {
+    if (!team.n01) return;
+    if (n01Settings.autoSync || !intel) {
+      void sync();
+      return;
+    }
     // Without auto sync the cached analysis is used; it is "current" only if it was
     // fetched by a successful sync in this session a moment ago.
-    else setPhase(afterIntel(intel, isLatest(store.n01SessionSyncAt(team.id), env.now())));
-  }, [n01Settings.autoSync, intel, sync, afterIntel, store, team.id, env]);
+    const attempt = ++run.current;
+    setPhase(afterIntel(intel, isLatest(store.n01SessionSyncAt(team.id), env.now()), attempt));
+  }, [team, n01Settings.autoSync, intel, sync, afterIntel, store, env]);
+
+  const cancel = useCallback(() => {
+    run.current += 1;
+    setResolving(false);
+    setPhase({ kind: 'idle' });
+  }, []);
+
+  // Nothing that answers after SETUP is gone may write to it.
   useEffect(
     () => () => {
       run.current += 1;
@@ -135,60 +155,110 @@ export function NextMatchFlow({
     [],
   );
 
-  return (
-    <Sheet title="次戦のオーダーを作る" onClose={onClose} className="next-match-flow">
-      {phase.kind === 'syncing' ? <SyncProgress steps={N01_SYNC_STEPS} state={progress} /> : null}
+  return {
+    phase,
+    progress,
+    resolving,
+    intel,
+    lastSyncAt,
+    start,
+    cancel,
+    retry: () => void sync(),
+    continueWithCached: () => {
+      if (!intel) return;
+      const attempt = ++run.current;
+      setPhase(afterIntel(intel, false, attempt));
+    },
+    pickSeason: (option) => {
+      if (!team.n01) return;
+      void sync({ leagueId: team.n01.leagueId, leagueTitle: team.n01.leagueTitle, tournamentId: option.tournamentId, teamTpid: option.teamTpid });
+    },
+    pickMatch: (matchId) => void sync(undefined, matchId),
+    skipLinks: () => setPhase((current) => (current.kind === 'links' ? current.then : current)),
+    applyLinks: (answers) => {
+      if (phase.kind !== 'links') return;
+      const attempt = run.current;
+      const { result, then } = phase;
+      setResolving(true);
+      resolveLinks(team, result, answers)
+        .then(() => {
+          if (attempt === run.current) setPhase(then);
+        })
+        .catch((error: unknown) => toast.show(`確認内容を保存できませんでした: ${describeN01Error(error)}`, 'error'))
+        .finally(() => {
+          if (attempt === run.current) setResolving(false);
+        });
+    },
+    confirmChanges: () => setPhase((current) => (current.kind === 'changes' ? current.then : current)),
+  };
+}
 
-      {phase.kind === 'offline' ? (
-        <div className="flow-block" role="alert" data-testid="flow-offline">
+/** True while SETUP must not be edited or generated: the next match is not settled yet. */
+export function isNextMatchPending(phase: NextMatchPhase): boolean {
+  return phase.kind !== 'ready' && phase.kind !== 'noMatch';
+}
+
+/**
+ * The n01 state of the next match at the top of SETUP: progress, the questions a sync can
+ * raise (season, 「同じ人ですか？」, an important change, which match), and what the data is.
+ * Every action here is one the state actually needs.
+ */
+export function NextMatchStatus({
+  team,
+  sync,
+  onRelink,
+}: {
+  team: Team;
+  sync: NextMatchSync;
+  onRelink: () => void;
+}): React.JSX.Element | null {
+  const env = useN01Environment();
+  const { phase, intel, lastSyncAt } = sync;
+  switch (phase.kind) {
+    case 'idle':
+      return null;
+    case 'syncing':
+      return (
+        <div className="next-match-status" data-testid="setup-syncing">
+          <SyncProgress steps={N01_SYNC_STEPS} state={sync.progress} title="n01から試合情報を取得中…" />
+        </div>
+      );
+    case 'offline':
+      return (
+        <div className="next-match-status" role="alert" data-testid="flow-offline">
           <p className="notice danger">
             <Icon name="alert" size={18} />
             <span className="small-text">{phase.message}</span>
           </p>
-          {lastSync ? (
+          {lastSyncAt ? (
             <p className="body-text">
-              前回: <strong>{formatSyncTime(lastSync.fetchedAt)}</strong> ({freshness(lastSync.fetchedAt, env.now()).label}) のデータがあります。
+              前回: <strong>{formatSyncTime(lastSyncAt)}</strong> ({freshness(lastSyncAt, env.now()).label}) のデータがあります。
               このデータは最新ではありません。
             </p>
           ) : (
-            <p className="body-text">この端末には前回のデータがありません。</p>
+            <p className="body-text">この端末には前回のデータがありません。「別の試合を作る」で手動で設定できます。</p>
           )}
           <div className="flow-actions">
-            {lastSync && intel ? (
-              <button type="button" className="btn" onClick={() => setPhase(afterIntel(intel, false))}>
+            {lastSyncAt && intel ? (
+              <button type="button" className="btn" onClick={sync.continueWithCached}>
                 前回データで続ける
               </button>
-            ) : (
-              <button type="button" className="btn" onClick={onManual}>
-                手動で作成
-              </button>
-            )}
-            <button type="button" className="btn primary" onClick={() => void sync()}>
+            ) : null}
+            <button type="button" className="btn primary" onClick={sync.retry}>
               <Icon name="refresh" size={18} />
               再試行
             </button>
           </div>
         </div>
-      ) : null}
-
-      {phase.kind === 'season' ? (
-        <div className="flow-block">
+      );
+    case 'season':
+      return (
+        <div className="next-match-status">
           <p className="body-text">このチームは複数の開催中シーズンに登録されています。どのシーズンの試合ですか？</p>
           <ul className="choice-list">
             {phase.options.map((option) => (
               <li key={`${option.tournamentId}:${option.teamTpid}`}>
-                <button
-                  type="button"
-                  className="list-row"
-                  onClick={() =>
-                    void sync({
-                      leagueId: team.n01!.leagueId,
-                      leagueTitle: team.n01!.leagueTitle,
-                      tournamentId: option.tournamentId,
-                      teamTpid: option.teamTpid,
-                    })
-                  }
-                >
+                <button type="button" className="list-row" onClick={() => sync.pickSeason(option)}>
                   <span className="grow title">{option.title}</span>
                   <Icon name="chevronRight" size={18} className="chevron" />
                 </button>
@@ -196,9 +266,9 @@ export function NextMatchFlow({
             ))}
           </ul>
         </div>
-      ) : null}
-
-      {phase.kind === 'notFound' ? (
+      );
+    case 'notFound':
+      return (
         <div className="notice warn" role="alert">
           <Icon name="alert" size={18} />
           <span className="grow small-text">
@@ -208,25 +278,12 @@ export function NextMatchFlow({
             チームを選び直す
           </button>
         </div>
-      ) : null}
-
-      {phase.kind === 'links' ? (
-        <PendingLinks
-          pending={phase.result.plan.roster.pending}
-          busy={resolving}
-          onSkip={() => setPhase(phase.then)}
-          onApply={(answers) => {
-            setResolving(true);
-            resolveLinks(team, phase.result, answers)
-              .then(() => setPhase(phase.then))
-              .catch((error: unknown) => toast.show(`確認内容を保存できませんでした: ${describeN01Error(error)}`, 'error'))
-              .finally(() => setResolving(false));
-          }}
-        />
-      ) : null}
-
-      {phase.kind === 'changes' ? (
-        <div className="flow-block" data-testid="flow-changes">
+      );
+    case 'links':
+      return <PendingLinks pending={phase.result.plan.roster.pending} busy={sync.resolving} onSkip={sync.skipLinks} onApply={sync.applyLinks} />;
+    case 'changes':
+      return (
+        <div className="next-match-status" data-testid="flow-changes">
           <p className="body-text">
             <strong>n01 で変更がありました</strong>
           </p>
@@ -236,20 +293,20 @@ export function NextMatchFlow({
             ))}
           </ul>
           <div className="flow-actions">
-            <button type="button" className="btn primary" onClick={() => setPhase(afterIntel(intel, true))}>
+            <button type="button" className="btn primary" onClick={sync.confirmChanges}>
               確認して続ける
             </button>
           </div>
         </div>
-      ) : null}
-
-      {phase.kind === 'pickMatch' ? (
-        <div className="flow-block">
+      );
+    case 'pickMatch':
+      return (
+        <div className="next-match-status">
           <p className="body-text">次の試合を 1 つに決められませんでした。どの試合のオーダーですか？</p>
           <ul className="choice-list">
             {phase.options.map((option) => (
               <li key={option.matchId}>
-                <button type="button" className="list-row" onClick={() => void sync(undefined, option.matchId)}>
+                <button type="button" className="list-row" onClick={() => sync.pickMatch(option.matchId)}>
                   <span className="grow">
                     <span className="title">vs {option.opponentName}</span>
                     <span className="meta">{option.title}</span>
@@ -260,223 +317,34 @@ export function NextMatchFlow({
             ))}
           </ul>
         </div>
-      ) : null}
-
-      {phase.kind === 'noMatch' ? (
-        <div className="flow-block">
-          <p className="body-text">このシーズンの残り試合は見つかりませんでした。</p>
-          <div className="flow-actions">
-            <button type="button" className="btn primary" onClick={onManual}>
-              手動でオーダーを作る
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {phase.kind === 'attendance' ? (
-        <Attendance
-          team={team}
-          intel={intel}
-          fresh={phase.fresh}
-          currentParticipants={currentParticipants}
-          choices={choices}
-          onChoices={setChoices}
-          guests={guests}
-          onGuests={setGuests}
-          onGenerate={onGenerate}
-        />
-      ) : null}
-    </Sheet>
-  );
-}
-
-function Attendance({
-  team,
-  intel,
-  fresh,
-  currentParticipants,
-  choices,
-  onChoices,
-  guests,
-  onGuests,
-  onGenerate,
-}: {
-  team: Team;
-  intel: N01MatchIntelligenceSnapshot | null;
-  fresh: boolean;
-  currentParticipants: readonly ParticipantConfig[] | null;
-  /** The captain’s own ticks; everything else starts from last time (see below). */
-  choices: ReadonlyMap<string, boolean>;
-  onChoices: (next: Map<string, boolean>) => void;
-  guests: readonly Player[];
-  onGuests: (next: Player[]) => void;
-  onGenerate: (order: NextMatchOrder) => void;
-}): React.JSX.Element {
-  const store = useAppStore();
-  const env = useN01Environment();
-  const players = store.players.filter((player) => player.teamId === team.id);
-  const lastOrder = store.orders.filter((order) => order.teamId === team.id).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
-  // Today’s attendance: what the captain ticked, else what they chose last time (a player
-  // nobody has chosen for yet is here). A member added from this screen is ticked at once.
-  const previous = previousAvailability(players, currentParticipants, lastOrder);
-  const isHere = (id: string): boolean => choices.get(id) ?? previous.get(id) ?? false;
-  const setHere = (id: string, here: boolean): void => onChoices(new Map(choices).set(id, here));
-  const format = store.formats.find((entry) => entry.id === team.n01?.managedFormatId) ?? null;
-  const roster = eligiblePlayers(players);
-  const everyone = [...roster, ...guests];
-  const count = everyone.filter((player) => isHere(player.id)).length;
-  const age = intel ? freshness(intel.generatedAt, env.now()) : null;
-  const [editor, setEditor] = useState<{ kind: 'guest' | 'member'; player: Player } | null>(null);
-  // Day-of conditions (遅刻・早退 …): what was set last time, with today's changes on top. They go
-  // into the order exactly like the conditions set on ORDER SETUP, and are checked the same way.
-  const kept = currentParticipants ?? lastOrder?.input.participants ?? [];
-  const [conditions, setConditions] = useState<Map<string, ParticipantConfig>>(() => new Map());
-  const [conditionFor, setConditionFor] = useState<Player | null>(null);
-  const configOf = (id: string): ParticipantConfig => conditions.get(id) ?? kept.find((config) => config.playerId === id) ?? createParticipantConfig(id);
-  const setAll = (here: boolean): void => onChoices(new Map(everyone.map((player) => [player.id, here])));
-
-  const generate = (): void => {
-    if (!format) return;
-    const order = buildNextMatchOrder({
-      team,
-      players,
-      guests,
-      format,
-      pairs: store.pairs.filter((pair) => pair.teamId === team.id),
-      settings: store.settings,
-      intel,
-      attending: new Set(everyone.filter((player) => isHere(player.id)).map((player) => player.id)),
-      previous: everyone.map((player) => configOf(player.id)),
-    });
-    onGenerate(order);
-  };
-
-  const blank = { name: '', rating: null, ppr: null, skills: {} };
-  const openEditor = (kind: 'guest' | 'member'): void =>
-    setEditor({
-      kind,
-      player:
-        kind === 'guest'
-          ? newGuest(team.id, createId('gst'), blank, Date.now())
-          : newMember(team.id, createId('pl'), blank, Date.now()),
-    });
-
-  return (
-    <div className="flow-block" data-testid="flow-attendance">
-      {intel?.nextMatch ? (
-        <div className="next-match-line">
-          <span className="kicker">NEXT MATCH</span>
-          <strong>vs {intel.nextMatch.opponentName}</strong>
-          {intel.nextMatch.date ? <span> {Number(intel.nextMatch.date.slice(5, 7))}/{Number(intel.nextMatch.date.slice(8, 10))}</span> : null}
-          <span className="next-match-conf small-text secondary">相手データの信頼度: {CONFIDENCE_LABELS[intel.orderConfidence]}</span>
-        </div>
-      ) : (
-        <p className="small-text">次戦の相手データがないため、勝利優先で作成します。</p>
-      )}
-      {!fresh && age ? (
-        <p className={`stale-note level-${age.level}`} data-testid="flow-stale">
-          <Icon name="alert" size={16} /> {age.label} ({intel ? formatSyncTime(intel.generatedAt) : ''}) のデータを使用しています。最新ではありません。
+      );
+    case 'noMatch':
+      return (
+        <p className="notice info small-text" role="status" data-testid="flow-no-match">
+          <Icon name="info" size={18} />
+          <span className="grow">このシーズンの残り試合は見つかりませんでした。対戦相手と試合日を入力して作成できます。</span>
         </p>
-      ) : null}
-      <div className="attendance-head">
-        <p className="attendance-title">
-          本日参加 <span className="badge">{count} / {everyone.length}</span>
-        </p>
-        <span className="row" style={{ gap: 6 }}>
-          <button type="button" className="btn small" onClick={() => setAll(true)} disabled={count === everyone.length}>
-            全員を選択
-          </button>
-          <button type="button" className="btn small" onClick={() => setAll(false)} disabled={count === 0}>
-            すべて解除
-          </button>
-        </span>
-      </div>
-      <ul className="attendance" aria-label="本日の参加者">
-        {everyone.map((player) => (
-          <li key={player.id}>
-            <label>
-              <input type="checkbox" checked={isHere(player.id)} onChange={(event) => setHere(player.id, event.target.checked)} />
-              <span className="grow">
-                {player.name}
-                {isGuest(player) ? <span className="n01-tag guest-tag" data-testid="guest-tag">助っ人 (今回のみ)</span> : null}
-                {!isGuest(player) && !player.n01 ? <span className="n01-tag muted-tag" data-testid="manual-tag">n01 未連携</span> : null}
-              </span>
-              <span className="small-text secondary">{formatStrengthLine(withEffectivePpr(player))}</span>
-            </label>
-            {isHere(player.id) ? (
-              <span className="attendance-cond">
-                <span className={`small-text${describeRestrictions(configOf(player.id), format?.games ?? []).length ? ' has-conditions' : ' secondary'}`} data-testid="attendance-conditions">
-                  {describeRestrictions(configOf(player.id), format?.games ?? []).join(' ・ ') || '条件なし'}
-                </span>
-                <button type="button" className="btn small" onClick={() => setConditionFor(player)} disabled={!format} aria-label={`${player.name} の出場条件`}>
-                  条件
-                </button>
-              </span>
-            ) : null}
-            {isGuest(player) ? (
-              <button
-                type="button"
-                className="btn small"
-                onClick={() => onGuests(guests.filter((entry) => entry.id !== player.id))}
-                aria-label={`助っ人 ${player.name} を外す`}
-              >
-                外す
-              </button>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      <div className="flow-actions add-people">
-        <button type="button" className="btn small" onClick={() => openEditor('guest')}>
-          <Icon name="plus" size={16} strokeWidth={2.6} />
-          今回だけ助っ人を追加
-        </button>
-        <button type="button" className="btn small" onClick={() => openEditor('member')}>
-          <Icon name="plus" size={16} strokeWidth={2.6} />
-          次回から参加するメンバーを追加
-        </button>
-      </div>
-      {!format ? <p className="notice warn small-text">n01 のフォーマットがありません。n01 を再同期してください。</p> : null}
-      <div className="flow-actions sticky">
-        <button type="button" className="btn primary grow" onClick={generate} disabled={!format || count === 0}>
-          <Icon name="target" size={18} />
-          このメンバーで作成
-        </button>
-      </div>
-
-      {conditionFor && format ? (
-        <ParticipantDetail
-          player={conditionFor}
-          config={configOf(conditionFor.id)}
-          games={format.games}
-          defaultMaxConsecutive={store.settings.optimizer.defaultMaxConsecutive}
-          statusRequired={needsLeagueStatus(resolveOrderRules(format, store.settings.ruleAnswers).rules)}
-          onChange={(change) => setConditions((held) => new Map(held).set(conditionFor.id, { ...configOf(conditionFor.id), ...change }))}
-          onClose={() => setConditionFor(null)}
-        />
-      ) : null}
-
-      {editor ? (
-        <PlayerEditor
-          player={editor.player}
-          isNew
-          mode={editor.kind}
-          title={editor.kind === 'guest' ? '今回だけ助っ人を追加' : '次回から参加するメンバーを追加'}
-          saveLabel={editor.kind === 'guest' ? '助っ人として追加' : 'メンバーに追加'}
-          existingNames={everyone.map((entry) => entry.name)}
-          onClose={() => setEditor(null)}
-          onSave={(saved) => {
-            if (editor.kind === 'guest') {
-              onGuests([...guests, saved]);
-            } else {
-              // An ordinary roster player from now on, whether or not n01 knows them yet.
-              store.savePlayer(finalizeMember(saved));
-            }
-            setHere(saved.id, true);
-            setEditor(null);
-          }}
-        />
-      ) : null}
-    </div>
-  );
+      );
+    case 'ready': {
+      const age = intel ? freshness(intel.generatedAt, env.now()) : null;
+      return (
+        <div className="next-match-status" data-testid="flow-ready">
+          {phase.fresh ? (
+            <p className="n01-fresh" role="status">
+              <Icon name="checkCircle" size={16} /> n01 ✓ 最新
+            </p>
+          ) : age ? (
+            <p className={`stale-note level-${age.level}`} role="status" data-testid="flow-stale">
+              <Icon name="alert" size={16} /> {age.label} ({intel ? formatSyncTime(intel.generatedAt) : ''}) のデータを使用しています。最新ではありません。
+            </p>
+          ) : null}
+          {intel?.nextMatch ? (
+            <p className="small-text secondary next-match-conf">相手データの信頼度: {CONFIDENCE_LABELS[intel.orderConfidence]}</p>
+          ) : (
+            <p className="small-text" data-testid="flow-no-opponent">次戦の相手データがないため、勝利優先で作成します。</p>
+          )}
+        </div>
+      );
+    }
+  }
 }

@@ -160,7 +160,7 @@ test.describe('PLAYER ANALYTICS', () => {
     // Back to the app and generate an order as usual.
     n01.offline = false;
     await page.locator('.tab-bar').getByRole('button', { name: 'ホーム', exact: true }).click();
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
     await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 60_000 });

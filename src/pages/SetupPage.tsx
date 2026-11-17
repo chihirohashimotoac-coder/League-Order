@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SPLIT_QUERY, useMediaQuery } from '../components/useMediaQuery';
 import type {
   FormatId,
@@ -8,8 +8,9 @@ import type {
   ParticipantConfig,
   Player,
   PresetKey,
+  Team,
 } from '../domain/types';
-import { PRESET_KEYS, PRESET_LABELS, formatDiscipline } from '../domain/types';
+import { PRESET_KEYS, PRESET_LABELS, createMatchInfo, formatDiscipline } from '../domain/types';
 import { leagueStatusOf, needsLeagueStatus } from '../domain/orders/leagueRules';
 import { resolveOrderRules, structureCounts, withAnswers } from '../domain/orders/ruleResolution';
 import type { AskableKind } from '../domain/orders/ruleResolution';
@@ -17,8 +18,11 @@ import { RuleConditionsCard, RuleQuestionSheet } from '../components/RuleConditi
 import { LeagueRulesSummary } from '../components/LeagueRules';
 import { scopeForPreset, weightsForPreset } from '../domain/orders/presets';
 import { formatStructureIssues, totalSlots } from '../domain/games/format';
-import { createParticipantConfig } from '../domain/orders/participants';
-import { newGuest } from '../domain/players/newPlayer';
+import { createParticipantConfig, syncParticipants } from '../domain/orders/participants';
+import { buildNextMatchOrder, previousAvailability } from '../domain/n01/nextMatch';
+import { NextMatchStatus, isNextMatchPending, useNextMatchSync } from '../components/n01/NextMatchFlow';
+import { N01TeamWizard } from '../components/n01/N01TeamWizard';
+import { finalizeMember, newGuest, newMember } from '../domain/players/newPlayer';
 import { createId } from '../utils/id';
 import { PlayerEditor } from '../components/PlayerEditor';
 import { StrengthBasisPanel } from '../components/StrengthBasisPanel';
@@ -105,6 +109,9 @@ export function SetupPage({
   editing,
   onDetach,
   onNavigate,
+  opponentIntel,
+  locked = false,
+  memberAdd = false,
 }: {
   draft: SetupDraft;
   onDraftChange: (next: SetupDraft) => void;
@@ -117,6 +124,19 @@ export function SetupPage({
   /** Detaches from the saved order so the next generation starts a new one. */
   onDetach: () => void;
   onNavigate: (page: Page) => void;
+  /**
+   * The analysis whose next match this order is for. Omitted: the active team's latest one.
+   * `null`: none — another match made by hand, which must never pick up the n01 next match's
+   * opponent implicitly.
+   */
+  opponentIntel?: N01MatchIntelligenceSnapshot | null;
+  /** The conditions are not settled yet (the next match is still being fetched): no edits, no generation. */
+  locked?: boolean;
+  /**
+   * Offers 「次回から参加するメンバーを追加」 next to the helper (the new-order SETUP): a member
+   * saved to the team, here today and a candidate from now on.
+   */
+  memberAdd?: boolean;
 }): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
@@ -125,6 +145,7 @@ export function SetupPage({
   const wide = useMediaQuery(SPLIT_QUERY);
   const [showPolicy, setShowPolicy] = useState(false);
   const [guestDraft, setGuestDraft] = useState<Player | null>(null);
+  const [memberDraft, setMemberDraft] = useState<Player | null>(null);
   // `generate`: the questions were opened by the generate button, so confirming generates.
   const [asking, setAsking] = useState<null | 'edit' | 'generate'>(null);
 
@@ -149,6 +170,7 @@ export function SetupPage({
   // format chosen here and travels inside the order, so the saved order can always be
   // re-evaluated exactly as it was generated.
   const intel = activeIntel(store);
+  const opponentSource = opponentIntel === undefined ? intel : opponentIntel;
   // n01-linked players carry their PPR from n01 — this season's, or the estimate over the
   // seasons the last analysis returned — or the manual fallback: the order input snapshots
   // that value and where it came from, so a saved order keeps the PPR it was made with.
@@ -162,17 +184,17 @@ export function SetupPage({
   );
   const opponent = useMemo(
     () =>
-      intel && format
-        ? buildOpponentContext({ snapshot: intel, games: format.games, players: effectivePlayers, discipline: formatDiscipline(format) })
+      opponentSource && format
+        ? buildOpponentContext({ snapshot: opponentSource, games: format.games, players: effectivePlayers, discipline: formatDiscipline(format) })
         : null,
-    [intel, format, effectivePlayers],
+    [opponentSource, format, effectivePlayers],
   );
   // The role evidence behind each player's strength per kind of game (docs/THROW_ORDER_MODEL.md §4).
   const roleStrength = useMemo(() => buildRoleStrengthContext(effectivePlayers, intel), [effectivePlayers, intel]);
   const n01Team = !!store.activeTeam?.n01;
   // No opponent at all → the preset is not offered. An opponent whose data cannot be
   // used here → offered, labelled 対戦データ不足, and generated as 勝利優先.
-  const hasOpponent = hasNextOpponent(intel);
+  const hasOpponent = hasNextOpponent(opponentSource);
   const visiblePresets = PRESET_KEYS.filter(
     (key) => key !== 'OPPONENT_OPTIMIZED' || hasOpponent || draft.preset === 'OPPONENT_OPTIMIZED',
   );
@@ -332,7 +354,10 @@ export function SetupPage({
         </div>
       ) : null}
 
-      <div className={`setup-layout${wide ? ' is-split' : ''}`} data-testid="setup-layout">
+      <div className={`setup-layout${wide ? ' is-split' : ''}${locked ? ' is-locked' : ''}`} data-testid="setup-layout">
+      {/* A box-less fieldset: while locked every control below is disabled at once, and the
+          layout (a grid on a large screen) is untouched. */}
+      <fieldset className="setup-lock" disabled={locked}>
       <div className="setup-main">
       <SectionHeader index={1} kicker="FORMAT" title="フォーマット" />
       <Card>
@@ -465,6 +490,9 @@ export function SetupPage({
                   <span className="p-name">
                     <strong>{player.name}</strong>
                     {player.guest ? <span className="n01-tag guest-tag" data-testid="guest-tag">助っ人 (今回のみ)</span> : null}
+                    {memberAdd && n01Team && !player.guest && !player.n01 ? (
+                      <span className="n01-tag muted-tag" data-testid="manual-tag">n01 未連携</span>
+                    ) : null}
                     {statusRequired && config.include ? <LeagueStatusTag status={leagueStatusOf(config)} /> : null}
                     <span
                       className={
@@ -509,6 +537,18 @@ export function SetupPage({
         <Icon name="plus" size={16} strokeWidth={2.6} />
         今回だけ助っ人を追加
       </button>
+      {memberAdd ? (
+        <button
+          type="button"
+          className="btn small add-guest"
+          onClick={() =>
+            setMemberDraft(newMember(store.activeTeamId ?? '', createId('pl'), { name: '', rating: null, ppr: null, skills: {} }, Date.now()))
+          }
+        >
+          <Icon name="plus" size={16} strokeWidth={2.6} />
+          次回から参加するメンバーを追加
+        </button>
+      ) : null}
       </div>
 
       <div className="setup-side">
@@ -557,7 +597,7 @@ export function SetupPage({
                 <span className="basis-title">次戦: vs {opponent.opponentName}{opponent.matchDate ? ` (${Number(opponent.matchDate.slice(5, 7))}/${Number(opponent.matchDate.slice(8, 10))})` : ''}</span>
                 <span className="basis-note">
                   相手の出場予測を使えます ・ データの信頼度 {CONFIDENCE_LABELS[opponent.confidence]}
-                  {intel ? ` ・ ${freshness(intel.generatedAt, Date.now()).label}のデータ` : ''}
+                  {opponentSource ? ` ・ ${freshness(opponentSource.generatedAt, Date.now()).label}のデータ` : ''}
                 </span>
               </>
             ) : (
@@ -629,13 +669,14 @@ export function SetupPage({
         <Icon name="chevronRight" size={18} className="chevron" />
       </button>
       </div>
+      </fieldset>
       </div>
 
       <div className="action-bar">
         <button
           type="button"
           className="btn primary"
-          disabled={generating}
+          disabled={generating || locked}
           onClick={() => {
             const input = build();
             if (input) onGenerate(input);
@@ -713,6 +754,24 @@ export function SetupPage({
         />
       ) : null}
 
+      {memberDraft ? (
+        <PlayerEditor
+          player={memberDraft}
+          isNew
+          mode="member"
+          title="次回から参加するメンバーを追加"
+          saveLabel="メンバーに追加"
+          existingNames={everyone.map((entry) => entry.name)}
+          onClose={() => setMemberDraft(null)}
+          onSave={(saved) => {
+            // An ordinary roster player from now on, whether or not n01 knows them yet; the
+            // roster sync adds them to this order as here today.
+            store.savePlayer(finalizeMember(saved));
+            setMemberDraft(null);
+          }}
+        />
+      ) : null}
+
       {showPolicy ? (
         <Sheet title="詳細条件" onClose={() => setShowPolicy(false)}>
           <RadioCards
@@ -773,3 +832,317 @@ export function SetupPage({
   );
 }
 
+
+/** One of the two matches the new-order SETUP can be for, each with conditions of its own. */
+interface MatchSetup {
+  draft: SetupDraft;
+  match: MatchInfo;
+}
+
+type NewOrderMode = 'next' | 'manual';
+
+/** The draft kept in step with the roster and the formats, as the shell keeps its own. */
+function resyncSetup(setup: MatchSetup, players: readonly Player[], formatIds: readonly string[]): MatchSetup {
+  const formatId = formatIds.includes(setup.draft.formatId) ? setup.draft.formatId : (formatIds[0] ?? '');
+  const participants = syncParticipants(setup.draft.participants, players, setup.draft.guests);
+  return { ...setup, draft: { ...setup.draft, formatId, participants } };
+}
+
+/**
+ * ORDER SETUP for a new order, opened from HOME's one button (「次戦のオーダーを作る」 /
+ * 「オーダーを作る」).
+ *
+ * The page opens at once. For an n01 team with a next match the match is fetched here — its
+ * state shown at the top — and its opponent, date, managed format, today's attendance and
+ * day-of conditions fill the same SETUP fields the captain then edits. 「別の試合を作る」
+ * switches the same page to a match set by hand, with conditions of its own: the next
+ * match's opponent, date, opponent data, attendance changes and helpers never leak into it,
+ * and 「n01の次戦を使う」 returns to the next match as it was left.
+ *
+ * Nothing is generated until 「オーダーを生成」, and the work already open in this session is
+ * left as it is until then: generating asks first when that work is unsaved (`onGenerate`).
+ */
+export function NewOrderSetup({
+  baseDraft,
+  currentParticipants,
+  working,
+  onResume,
+  onGenerate,
+  generating,
+  onNavigate,
+}: {
+  /** The shell's SETUP draft: a match made by hand starts from it, without its helpers. */
+  baseDraft: SetupDraft | null;
+  /** The attendance being worked on in this session (the next match starts from it). */
+  currentParticipants: readonly ParticipantConfig[] | null;
+  /** The order open in this session, if any (offered to resume, never replaced here). */
+  working: { label: string } | null;
+  onResume: () => void;
+  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft) => void;
+  generating: boolean;
+  onNavigate: (page: Page) => void;
+}): React.JSX.Element | null {
+  const store = useAppStore();
+  const team = store.activeTeam;
+  if (!team) return null;
+  return (
+    <NewOrderSetupFor
+      team={team}
+      baseDraft={baseDraft}
+      currentParticipants={currentParticipants}
+      working={working}
+      onResume={onResume}
+      onGenerate={onGenerate}
+      generating={generating}
+      onNavigate={onNavigate}
+    />
+  );
+}
+
+function NewOrderSetupFor({
+  team,
+  baseDraft,
+  currentParticipants,
+  working,
+  onResume,
+  onGenerate,
+  generating,
+  onNavigate,
+}: {
+  team: Team;
+  baseDraft: SetupDraft | null;
+  currentParticipants: readonly ParticipantConfig[] | null;
+  working: { label: string } | null;
+  onResume: () => void;
+  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft) => void;
+  generating: boolean;
+  onNavigate: (page: Page) => void;
+}): React.JSX.Element {
+  const store = useAppStore();
+  const sync = useNextMatchSync(team);
+  const linked = !!team.n01;
+  const intel = activeIntel(store);
+  // n01 says there is no match left: the page opens for a match set by hand. Otherwise an
+  // n01 team starts from its next match, fetched here if it is not known yet.
+  const [mode, setMode] = useState<NewOrderMode>(() => (linked && intel?.nextMatchStatus !== 'none' ? 'next' : 'manual'));
+  const [wizard, setWizard] = useState(false);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const formatIds = useMemo(() => store.teamFormats.map((format) => format.id), [store.teamFormats]);
+
+  const [manual, setManual] = useState<MatchSetup>(() => {
+    const base: SetupDraft = baseDraft ?? {
+      formatId: store.teamFormats[0]?.id ?? '',
+      participants: [],
+      guests: [],
+      preset: store.settings.lastPreset,
+      settings: store.settings.optimizer,
+    };
+    // Without the next match there is no opponent to optimise against.
+    const preset = base.preset === 'OPPONENT_OPTIMIZED' ? 'WIN_FIRST' : base.preset;
+    const gone = new Set(base.guests.map((guest) => guest.id));
+    const draft: SetupDraft = {
+      ...base,
+      // A helper plays one order: a new one starts without them.
+      guests: [],
+      participants: base.participants.filter((config) => !gone.has(config.playerId)),
+      preset,
+      settings: { ...base.settings, fairnessScope: scopeForPreset(preset, base.settings.fairnessScope) },
+    };
+    const leagueName = team.leagueName?.trim() || team.n01?.leagueTitle || '';
+    return resyncSetup({ draft, match: createMatchInfo(team.name, leagueName) }, store.teamPlayers, formatIds);
+  });
+  const [next, setNext] = useState<MatchSetup | null>(null);
+  const builtFor = useRef<number | null>(null);
+
+  /** The next match's conditions, exactly as 「次戦のオーダーを作る」 always set them up. */
+  const buildNext = useCallback(
+    (snapshot: N01MatchIntelligenceSnapshot | null): MatchSetup | null => {
+      const format = store.teamFormats.find((entry) => entry.id === team.n01?.managedFormatId) ?? store.teamFormats[0];
+      if (!format) return null;
+      const players = store.teamPlayers;
+      const lastOrder = [...store.teamOrders].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+      const here = previousAvailability(players, currentParticipants, lastOrder);
+      const order = buildNextMatchOrder({
+        team,
+        players,
+        format,
+        pairs: store.teamPairs,
+        settings: store.settings,
+        intel: snapshot,
+        attending: new Set([...here].filter(([, present]) => present).map(([id]) => id)),
+        // Day-of conditions (遅刻・早退 …) carry over from last time, as on ORDER SETUP.
+        previous: currentParticipants ?? lastOrder?.input.participants ?? [],
+      });
+      return resyncSetup(
+        {
+          draft: {
+            formatId: order.input.formatId,
+            participants: order.input.participants,
+            guests: [],
+            preset: order.input.preset,
+            settings: order.input.settings,
+          },
+          match: order.match,
+        },
+        players,
+        formatIds,
+      );
+    },
+    [store, team, currentParticipants, formatIds],
+  );
+
+  // Starts once per page: the sync (or the data on the device) for the next match. Later
+  // starts are the captain's: switching back, 再試行, or the team linked again (`relinked`).
+  const startSync = useRef(sync.start);
+  startSync.current = sync.start;
+  const [relinked, setRelinked] = useState(0);
+  const opening = useRef(mode);
+  useEffect(() => {
+    if (relinked > 0 || opening.current === 'next') startSync.current();
+  }, [relinked]);
+
+  // The next match is settled: its conditions are built once per sync that settled it.
+  useEffect(() => {
+    if (sync.phase.kind !== 'ready' || builtFor.current === sync.phase.run) return;
+    builtFor.current = sync.phase.run;
+    setNext(buildNext(sync.intel));
+  }, [sync.phase, sync.intel, buildNext]);
+
+  // n01 has no match left: the same page, set by hand.
+  useEffect(() => {
+    if (sync.phase.kind === 'noMatch') setMode('manual');
+  }, [sync.phase.kind]);
+
+  // Roster or formats changed (a sync adds members, the managed format arrives …).
+  useEffect(() => {
+    setManual((current) => resyncSetup(current, store.teamPlayers, formatIds));
+    setNext((current) => (current ? resyncSetup(current, store.teamPlayers, formatIds) : current));
+  }, [store.teamPlayers, formatIds]);
+
+  // A step answered from the status area removes the button that was pressed: focus moves to
+  // the match title rather than being lost to the page.
+  useEffect(() => {
+    if (document.activeElement === document.body || document.activeElement === null) titleRef.current?.focus({ preventScroll: true });
+  }, [sync.phase.kind, mode]);
+
+  const pending = isNextMatchPending(sync.phase);
+  const locked = mode === 'next' && (pending || next === null);
+  // Until the next match is settled the page shows what is known from the device, locked.
+  const provisional = useMemo(
+    () => (mode === 'next' && next === null ? buildNext(intel?.nextMatchStatus === 'resolved' ? intel : null) : null),
+    [mode, next, buildNext, intel],
+  );
+  const shown: MatchSetup = mode === 'manual' ? manual : (next ?? provisional ?? manual);
+
+  const toManual = (): void => {
+    // A fetch still running would answer into a page that is no longer about it.
+    if (pending) sync.cancel();
+    setMode('manual');
+  };
+  const toNext = (): void => {
+    setMode('next');
+    if (sync.phase.kind === 'idle') sync.start();
+  };
+  const canUseNext = linked && sync.phase.kind !== 'noMatch' && !(sync.phase.kind === 'idle' && intel?.nextMatchStatus === 'none');
+
+  const update = (change: Partial<MatchSetup>): void => {
+    if (mode === 'manual') setManual((current) => ({ ...current, ...change }));
+    else setNext((current) => (current ? { ...current, ...change } : current));
+  };
+
+  const nextMatch = next?.match.opponentName
+    ? { opponentName: next.match.opponentName, date: next.match.matchDate }
+    : intel?.nextMatchStatus === 'resolved' && intel.nextMatch
+      ? { opponentName: intel.nextMatch.opponentName, date: intel.nextMatch.date ?? '' }
+      : null;
+  const sourceTitle =
+    mode === 'manual'
+      ? '手動で設定'
+      : nextMatch
+        ? `vs ${nextMatch.opponentName}`
+        : sync.phase.kind === 'pickMatch'
+          ? '次戦の候補が複数あります'
+          : sync.phase.kind === 'ready'
+            ? '次戦の相手データなし'
+            : '次戦: 未取得';
+
+  return (
+    <>
+      <section className="card match-source" aria-labelledby="match-source-title" data-testid="match-source">
+        <div className="match-source-top">
+          <div className="grow" style={{ minWidth: 0 }}>
+            <span className="kicker">{mode === 'next' ? 'n01 の次戦' : '作成する試合'}</span>
+            <h2 className="match-source-name" id="match-source-title" tabIndex={-1} ref={titleRef}>
+              {sourceTitle}
+              {mode === 'next' && nextMatch?.date ? (
+                <span className="match-source-date">
+                  {' '}
+                  {Number(nextMatch.date.slice(5, 7))}/{Number(nextMatch.date.slice(8, 10))}
+                </span>
+              ) : null}
+            </h2>
+          </div>
+          {mode === 'next' ? (
+            <button type="button" className="btn small" onClick={toManual}>
+              別の試合を作る
+            </button>
+          ) : canUseNext ? (
+            <button type="button" className="btn small" onClick={toNext}>
+              n01の次戦を使う
+            </button>
+          ) : null}
+        </div>
+        {mode === 'next' || sync.phase.kind === 'noMatch' ? (
+          <NextMatchStatus team={team} sync={sync} onRelink={() => setWizard(true)} />
+        ) : null}
+        {mode === 'next' && !store.teamFormats.some((format) => format.id === team.n01?.managedFormatId) ? (
+          <p className="notice warn small-text">n01 のフォーマットがありません。n01 を再同期してください。</p>
+        ) : null}
+      </section>
+
+      {working ? (
+        <button type="button" className="resume-card setup-resume" onClick={onResume}>
+          <Icon name="target" />
+          <span className="grow">
+            <span className="title">作業中のオーダーを開く</span>
+            <span className="meta">{working.label}</span>
+          </span>
+          <Icon name="chevronRight" size={18} className="chevron" />
+        </button>
+      ) : null}
+
+      <SetupPage
+        // Each match has its own conditions; a sheet left open on one never edits the other.
+        key={mode}
+        draft={shown.draft}
+        onDraftChange={(draft) => update({ draft })}
+        match={shown.match}
+        onMatchChange={(match) => update({ match })}
+        onGenerate={(input) => {
+          if (!locked) onGenerate(input, shown.match, shown.draft);
+        }}
+        generating={generating}
+        editing={null}
+        onDetach={() => undefined}
+        onNavigate={onNavigate}
+        // A match set by hand never takes the next match's opponent data.
+        opponentIntel={mode === 'next' ? intel : null}
+        locked={locked}
+        memberAdd
+      />
+
+      {wizard ? (
+        <N01TeamWizard
+          mode={{ kind: 'link', team }}
+          onClose={() => setWizard(false)}
+          onDone={() => {
+            setWizard(false);
+            // The team is linked again: fetch its next match with the new link.
+            setMode('next');
+            setRelinked((count) => count + 1);
+          }}
+        />
+      ) : null}
+    </>
+  );
+}

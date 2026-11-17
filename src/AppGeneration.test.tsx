@@ -56,17 +56,20 @@ type User = ReturnType<typeof userEvent.setup>;
 
 const nav = (): HTMLElement => screen.getByRole('navigation', { name: 'メインナビゲーション' });
 
-/** HOME → 新しいオーダーを作る → オーダーを生成: leaves one request open in the runner. */
+/**
+ * HOME → オーダーを作る → オーダーを生成: leaves one request open in the runner. Unsaved work is
+ * confirmed when the new order is generated (not when SETUP opens).
+ */
 async function startGeneration(user: User): Promise<PendingRequest> {
   const before = runner.pending.length;
   await user.click(within(nav()).getByRole('button', { name: 'ホーム' }));
-  await user.click(await screen.findByRole('button', { name: '新しいオーダーを作る' }));
-  const discard = screen.queryByRole('dialog', { name: '新しいオーダーを作る' });
-  if (discard) await user.click(within(discard).getByRole('button', { name: '破棄して作成' }));
+  await user.click(await screen.findByRole('button', { name: 'オーダーを作る' }));
   await screen.findByRole('heading', { name: 'オーダー設定' });
   const generate = screen.getByRole('button', { name: /オーダーを生成|生成中/ });
   await waitFor(() => expect(generate).toBeEnabled());
   await user.click(generate);
+  const discard = screen.queryByRole('dialog', { name: '新しいオーダーを作る' });
+  if (discard) await user.click(within(discard).getByRole('button', { name: '破棄して作成' }));
   await waitFor(() => expect(runner.pending.length).toBe(before + 1));
   return runner.pending[runner.pending.length - 1];
 }
@@ -261,7 +264,7 @@ describe('a re-generation from other conditions', () => {
 
     // GEN-1 with Aさん4 out.
     await user.click(within(nav()).getByRole('button', { name: 'ホーム' }));
-    await user.click(await screen.findByRole('button', { name: '新しいオーダーを作る' }));
+    await user.click(await screen.findByRole('button', { name: 'オーダーを作る' }));
     await screen.findByRole('heading', { name: 'オーダー設定' });
     await user.click(screen.getByRole('checkbox', { name: 'Aさん4 を参加者に含める' }));
     const first = await generateHere(user);

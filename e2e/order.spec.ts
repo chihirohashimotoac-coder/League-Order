@@ -29,7 +29,7 @@ async function openFresh(page: Page): Promise<void> {
 /** Taps a bottom-tab-bar entry. Scoped so the name cannot collide with page content. */
 
 async function generate(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -151,7 +151,7 @@ test.describe('order generation workflow', () => {
 
   test('explains why an impossible configuration cannot be generated (spec §31)', async ({ page }) => {
     await openFresh(page);
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
 
     // Leave only two players available: Trios then becomes impossible.
     await page.getByRole('button', { name: '解除' }).click();
@@ -166,7 +166,7 @@ test.describe('order generation workflow', () => {
 
   test('restricts a late arrival to the second half', async ({ page }) => {
     await openFresh(page);
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
 
     // Open 遠藤's conditions and limit them to the second half.
     const row = page.locator('li').filter({ hasText: '遠藤' }).first();
@@ -311,7 +311,7 @@ test.describe('first run (§50-§53)', () => {
 test.describe('participant rows (§18, §57)', () => {
   test('tapping anywhere on a row toggles participation; 条件 does not', async ({ page }) => {
     await openFresh(page);
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
 
     const checkbox = page.getByLabel('土井 を参加者に含める');
     const row = page.locator('li.participant').filter({ has: checkbox });

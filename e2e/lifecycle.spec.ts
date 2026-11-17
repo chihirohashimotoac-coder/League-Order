@@ -20,7 +20,7 @@ async function openApp(page: Page): Promise<void> {
 
 
 async function generate(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -473,7 +473,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
 
   test('opening an order from history restores its setup conditions', async ({ page }) => {
     await openApp(page);
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     await page.getByLabel('遠藤 を参加者に含める').uncheck();
     await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -481,7 +481,7 @@ test.describe('editing a saved order from SETUP (§64)', () => {
 
     // Start something else, so the setup draft no longer matches that order…
     await tab(page, 'ホーム').click();
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     await page.getByLabel('遠藤 を参加者に含める').check();
 
     // …then reopen it: SETUP shows the conditions it was generated with.
@@ -582,21 +582,28 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await changeFirstSlot(page);
     await expect(stateBanner(page)).toContainText('再確定が必要');
 
-    // Edited since the last save: the captain is asked first, and cancelling keeps it.
+    // Edited since the last save: SETUP for a new order opens with the work kept; generating
+    // asks first, and cancelling keeps it.
     await tab(page, 'ホーム').click();
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
+    await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
     const dialog = page.getByRole('dialog', { name: '新しいオーダーを作る' });
     await expect(dialog).toContainText('保存されていない変更');
     await dialog.getByRole('button', { name: 'キャンセル' }).click();
+    await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
     await page.getByRole('button', { name: '作業中のオーダーを開く' }).click();
     await expect(stateBanner(page)).toContainText('再確定が必要');
 
     // Once re-finalized, nothing is pending and no question is asked.
     await finalize(page);
     await tab(page, 'ホーム').click();
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await clickGenerate(page);
+    await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '新しいオーダーを作る' })).toHaveCount(0);
   });
 
   test('asks before discarding an unsaved change to the match header', async ({ page }) => {
@@ -612,7 +619,8 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await expect(stateBanner(page)).toContainText('再確定が必要');
 
     await tab(page, 'ホーム').click();
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
     await expect(page.getByRole('dialog', { name: '新しいオーダーを作る' })).toContainText('保存されていない変更');
   });
 
@@ -663,7 +671,8 @@ test.describe('editing a saved order from SETUP (§64)', () => {
     await page.getByRole('button', { name: '閉じる' }).click();
 
     await tab(page, 'ホーム').click();
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
+    await page.getByRole('button', { name: 'オーダーを生成' }).click();
     await expect(page.getByRole('dialog', { name: '新しいオーダーを作る' })).toContainText('保存されていない変更');
   });
 

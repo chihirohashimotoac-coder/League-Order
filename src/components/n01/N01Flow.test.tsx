@@ -1,6 +1,6 @@
 import { openScreen } from '../../test/appHarness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { IDBFactory } from 'fake-indexeddb';
 import 'fake-indexeddb/auto';
@@ -30,6 +30,8 @@ let failRequests = false;
 let failOpponent = false;
 /** Extra roster entries served for kalavinka on later syncs (simulates an n01 change). */
 let extraRoster: { opid: string; oid: string; tpid: string; oname: string }[] = [];
+/** While set, every n01 request waits for it: a slow venue connection. */
+let gate: Promise<void> | null = null;
 
 beforeEach(() => {
   window.scrollTo = vi.fn() as never;
@@ -38,12 +40,33 @@ beforeEach(() => {
   failRequests = false;
   failOpponent = false;
   extraRoster = [];
+  gate = null;
 });
+
+async function flush(): Promise<void> {
+  for (let i = 0; i < 20; i += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+}
+
+/** Holds every n01 request until `release` is called. */
+function holdN01(): () => void {
+  let release!: () => void;
+  gate = new Promise<void>((resolve) => {
+    release = () => {
+      gate = null;
+      resolve();
+    };
+  });
+  return release;
+}
 
 const env: N01Environment = {
   createClient: () =>
     new N01Client(
-      createFixtureTransport({
+      gated(createFixtureTransport({
         override: (request) => {
           if (failRequests) return FAIL;
           if (failOpponent && request.operation === 'team/player/list' && request.params.tpid === '68wv') return FAIL;
@@ -53,11 +76,20 @@ const env: N01Environment = {
           }
           return undefined;
         },
-      }),
+      })),
       { now: () => FIXTURE_NOW },
     ),
   now: () => FIXTURE_NOW,
 };
+
+function gated(transport: ReturnType<typeof createFixtureTransport>): ReturnType<typeof createFixtureTransport> {
+  return {
+    async request(request, signal) {
+      if (gate) await gate;
+      return transport.request(request, signal);
+    },
+  };
+}
 
 function renderApp(): void {
   render(
@@ -226,8 +258,9 @@ describe('opponent-optimised order (Phase 4)', () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
-    await user.click(screen.getByRole('button', { name: '新しいオーダーを作る' }));
+    await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
     await screen.findByRole('heading', { name: 'オーダー設定' });
+    await screen.findByTestId('flow-ready', {}, { timeout: 10_000 });
     expect(screen.getByTestId('setup-opponent')).toHaveTextContent('次戦: vs スピンコブラ (10/8)');
     await user.click(screen.getByRole('radio', { name: /対戦相手最適化/ }));
     await user.click(screen.getByRole('button', { name: 'オーダーを生成' }));
@@ -247,13 +280,17 @@ describe('opponent-optimised order (Phase 4)', () => {
   }, 30_000);
 });
 
-describe('next match order in one flow (Phase 5)', () => {
+describe('next match order on ORDER SETUP (Phase 5)', () => {
+  /** HOME → 次戦のオーダーを作る: SETUP opens at once; resolves once n01 has answered. */
   async function startNextMatch(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
     await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
-    return screen.findByRole('dialog', { name: '次戦のオーダーを作る' });
+    await screen.findByRole('heading', { name: 'オーダー設定' });
+    return screen.getByTestId('match-source');
   }
+  const generateButton = (): HTMLElement => screen.getByRole('button', { name: /オーダーを生成|生成中/ });
+  const box = (name: string): HTMLInputElement => screen.getByRole('checkbox', { name: `${name} を参加者に含める` });
 
-  it('HOME shows the next match; one tap syncs, asks who is here, and builds the order', async () => {
+  it('HOME shows the next match; one tap opens SETUP, syncs there, and the order is made from the same page', async () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
@@ -262,14 +299,27 @@ describe('next match order in one flow (Phase 5)', () => {
     expect(card).toHaveTextContent('10/8');
     expect(card).toHaveTextContent('kalavinka ・ ATDO ・ A Division');
     expect(screen.getByTestId('n01-freshness')).toHaveTextContent('n01 ✓ 最新');
+    // The old hero (catch copy and a second "new order" button) is gone.
+    expect(screen.queryByRole('button', { name: '新しいオーダーを作る' })).toBeNull();
+    expect(screen.queryByText('速く・公平に・強く。')).toBeNull();
 
-    const flow = await startNextMatch(user);
-    const attendance = await within(flow).findByTestId('flow-attendance', {}, { timeout: 10_000 });
-    expect(attendance).toHaveTextContent('vs スピンコブラ');
-    expect(attendance).toHaveTextContent('本日参加 7 / 7');
-    await user.click(within(attendance).getByRole('checkbox', { name: /伊藤 由佳/ }));
-    expect(attendance).toHaveTextContent('本日参加 6 / 7');
-    await user.click(within(attendance).getByRole('button', { name: 'このメンバーで作成' }));
+    const source = await startNextMatch(user);
+    // No sheet and no attendance screen in between.
+    expect(screen.queryByRole('dialog', { name: '次戦のオーダーを作る' })).toBeNull();
+    const ready = await within(source).findByTestId('flow-ready', {}, { timeout: 10_000 });
+    expect(ready).toHaveTextContent('n01 ✓ 最新');
+    expect(source).toHaveTextContent('n01 の次戦');
+    expect(source).toHaveTextContent('vs スピンコブラ');
+    expect(screen.getByRole('heading', { name: /参加者 7 \/ 7/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /対戦相手最適化/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('setup-opponent')).toHaveTextContent('相手の出場予測を使えます');
+    expect(document.querySelector('.match-summary')).toHaveTextContent('vs スピンコブラ ・ 2026-10-08');
+    // Nothing was generated by opening or syncing.
+    expect(screen.queryByRole('heading', { name: 'オーダー結果' })).toBeNull();
+
+    await user.click(box('伊藤 由佳'));
+    expect(screen.getByRole('heading', { name: /参加者 6 \/ 7/ })).toBeInTheDocument();
+    await user.click(generateButton());
 
     await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
     expect(screen.getByTestId('opponent-panel')).toHaveTextContent('スピンコブラ');
@@ -282,24 +332,180 @@ describe('next match order in one flow (Phase 5)', () => {
     // The next time, today's attendance starts from last time's.
     await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
     const again = await startNextMatch(user);
-    const second = await within(again).findByTestId('flow-attendance', {}, { timeout: 10_000 });
-    expect((within(second).getByRole('checkbox', { name: /伊藤 由佳/ }) as HTMLInputElement).checked).toBe(false);
+    await within(again).findByTestId('flow-ready', {}, { timeout: 10_000 });
+    expect(box('伊藤 由佳').checked).toBe(false);
   }, 60_000);
+
+  it('a slow n01: SETUP is on screen first, locked; switching to a match by hand is never overwritten by the late answer', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    const release = holdN01();
+    const source = await startNextMatch(user);
+    // Open before n01 has answered: the progress is shown, the conditions and 生成 are locked.
+    expect(within(source).getByTestId('setup-syncing')).toHaveTextContent('n01から試合情報を取得中…');
+    expect(generateButton()).toBeDisabled();
+    expect(box('伊藤 由佳')).toBeDisabled();
+    // The way out and back stay usable.
+    expect(within(source).getByRole('button', { name: '別の試合を作る' })).toBeEnabled();
+
+    await user.click(within(source).getByRole('button', { name: '別の試合を作る' }));
+    expect(source).toHaveTextContent('作成する試合');
+    expect(source).toHaveTextContent('手動で設定');
+    expect(generateButton()).toBeEnabled();
+    expect(screen.queryByRole('radio', { name: /対戦相手最適化/ })).toBeNull();
+    expect(screen.queryByTestId('setup-opponent')).toBeNull();
+    await user.click(screen.getByText('試合情報 (任意)'));
+    const opponent = screen.getByLabelText('対戦相手 (任意)');
+    expect(opponent).toHaveValue('');
+    await user.type(opponent, '手入力クラブ');
+    await user.click(box('伊藤 由佳'));
+
+    // n01 answers now: nothing typed or ticked by hand changes.
+    release();
+    await flush();
+    expect(source).toHaveTextContent('手動で設定');
+    expect(screen.getByLabelText('対戦相手 (任意)')).toHaveValue('手入力クラブ');
+    expect(box('伊藤 由佳').checked).toBe(false);
+    expect(screen.queryByTestId('setup-opponent')).toBeNull();
+
+    // Back to the next match: fetched again, with its own conditions.
+    await user.click(within(source).getByRole('button', { name: 'n01の次戦を使う' }));
+    await within(source).findByTestId('flow-ready', {}, { timeout: 10_000 });
+    expect(box('伊藤 由佳').checked).toBe(true);
+    expect(document.querySelector('.match-summary')).toHaveTextContent('vs スピンコブラ');
+    // … and the hand-made match is still as it was left.
+    await user.click(within(source).getByRole('button', { name: '別の試合を作る' }));
+    expect(document.querySelector('.match-summary')).toHaveTextContent('vs 手入力クラブ');
+    expect(box('伊藤 由佳').checked).toBe(false);
+
+    // Generated by hand: no opponent data of the n01 next match goes into the order.
+    await user.click(generateButton());
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
+    expect(screen.queryByTestId('opponent-panel')).toBeNull();
+  }, 60_000);
+
+  it('the next match keeps its own helpers and attendance changes, never the hand-made match’s', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    const source = await startNextMatch(user);
+    await within(source).findByTestId('flow-ready', {}, { timeout: 10_000 });
+    await user.click(screen.getByRole('button', { name: '今回だけ助っ人を追加' }));
+    const editor = await screen.findByRole('dialog', { name: '今回だけ助っ人を追加' });
+    await user.type(within(editor).getByPlaceholderText('例: ちひろ'), '助っ人 花子');
+    await user.click(within(editor).getByRole('button', { name: '助っ人として追加' }));
+    await user.click(box('中村 蓮'));
+    expect(screen.getByRole('heading', { name: /参加者 7 \/ 8/ })).toBeInTheDocument();
+
+    await user.click(within(source).getByRole('button', { name: '別の試合を作る' }));
+    expect(screen.queryByRole('checkbox', { name: '助っ人 花子 を参加者に含める' })).toBeNull();
+    expect(box('中村 蓮').checked).toBe(true);
+    expect(screen.getByRole('heading', { name: /参加者 7 \/ 7/ })).toBeInTheDocument();
+    // A match by hand starts with no opponent and no date (the league name stays).
+    expect(document.querySelector('.match-summary')?.textContent).toBe('ATDO');
+
+    await user.click(within(source).getByRole('button', { name: 'n01の次戦を使う' }));
+    expect(box('助っ人 花子').checked).toBe(true);
+    expect(box('中村 蓮').checked).toBe(false);
+  }, 60_000);
+
+  it('the work open in this session stays until a new order is generated; cancelling the discard keeps it', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    let source = await startNextMatch(user);
+    await within(source).findByTestId('flow-ready', {}, { timeout: 10_000 });
+    await user.click(generateButton());
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
+    const firstLabel = document.querySelector('.candidate-tab[aria-selected="true"] .c-label')?.textContent;
+
+    // HOME → the same button: SETUP opens, the order is still there to resume.
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
+    source = await startNextMatch(user);
+    expect(screen.queryByRole('dialog', { name: '新しいオーダーを作る' })).toBeNull();
+    await within(source).findByTestId('flow-ready', {}, { timeout: 10_000 });
+    await user.click(within(source).getByRole('button', { name: '別の試合を作る' }));
+    await user.click(box('伊藤 由佳'));
+    // Generating replaces unsaved work: asked first; cancelled, nothing changes.
+    await user.click(generateButton());
+    const dialog = await screen.findByRole('dialog', { name: '新しいオーダーを作る' });
+    await user.click(within(dialog).getByRole('button', { name: 'キャンセル' }));
+    expect(screen.getByRole('heading', { name: 'オーダー設定' })).toBeInTheDocument();
+    expect(box('伊藤 由佳').checked).toBe(false);
+    await user.click(screen.getByRole('button', { name: /作業中のオーダーを開く/ }));
+    await screen.findByRole('heading', { name: 'オーダー結果' });
+    expect(document.querySelector('.candidate-tab[aria-selected="true"] .c-label')?.textContent).toBe(firstLabel);
+    expect(screen.getByTestId('opponent-panel')).toHaveTextContent('スピンコブラ');
+  }, 90_000);
+
+  it('a new order is never a revision of the finalized order that was open', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    let source = await startNextMatch(user);
+    await within(source).findByTestId('flow-ready', {}, { timeout: 10_000 });
+    await user.click(generateButton());
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
+    await user.click(screen.getByRole('button', { name: /オーダーを確定/ }));
+    await waitFor(() => expect(document.querySelector('.app-header')).toHaveTextContent('v1'));
+
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
+    source = await startNextMatch(user);
+    await within(source).findByTestId('flow-ready', {}, { timeout: 10_000 });
+    // Not the editing banner of the saved order: this is a new one.
+    expect(screen.queryByTestId('editing-banner')).toBeNull();
+    await user.click(box('伊藤 由佳'));
+    await user.click(generateButton());
+    // Saved work is not asked about.
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
+    expect(screen.queryByRole('dialog', { name: '新しいオーダーを作る' })).toBeNull();
+    expect(document.querySelector('.app-header')).toHaveTextContent('DRAFT');
+    await user.click(screen.getByRole('button', { name: '下書きを保存' }));
+    const { openBackend } = await import('../../storage/db');
+    await waitFor(async () => expect((await new Repository(await openBackend()).loadAll()).orders).toHaveLength(2));
+    const orders = (await new Repository(await openBackend()).loadAll()).orders;
+    expect(orders.map((order) => order.versions.length).sort()).toEqual([0, 1]);
+  }, 90_000);
 
   it('offline: names the last sync and continues with that data only when asked', async () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
     failRequests = true;
-    const flow = await startNextMatch(user);
-    const offline = await within(flow).findByTestId('flow-offline');
+    const source = await startNextMatch(user);
+    const offline = await within(source).findByTestId('flow-offline');
     expect(offline).toHaveTextContent('n01 に接続できませんでした');
     expect(offline).toHaveTextContent('前回:');
     expect(offline).toHaveTextContent('このデータは最新ではありません');
-    expect(within(flow).queryByTestId('flow-attendance')).toBeNull();
+    expect(generateButton()).toBeDisabled();
     await user.click(within(offline).getByRole('button', { name: '前回データで続ける' }));
-    const attendance = await within(flow).findByTestId('flow-attendance');
-    expect(within(attendance).getByTestId('flow-stale')).toHaveTextContent('最新ではありません');
+    expect(within(source).getByTestId('flow-stale')).toHaveTextContent('最新ではありません');
+    expect(generateButton()).toBeEnabled();
+    expect(screen.getByTestId('setup-opponent')).toHaveTextContent('次戦: vs スピンコブラ');
+    // Focus is not lost with the button that was pressed.
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: /vs スピンコブラ/, level: 2 }));
+  }, 30_000);
+
+  it('offline with nothing on the device: only 再試行 and the match by hand are offered', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    // The device's n01 data is gone (cleared storage), and n01 cannot be reached.
+    cleanup();
+    const { openBackend } = await import('../../storage/db');
+    const backend = await openBackend();
+    for (const record of await new Repository(backend).loadN01Cache()) await backend.remove('n01Cache', (record as { id: string }).id);
+    failRequests = true;
+    renderApp();
+    await screen.findByRole('heading', { name: 'kalavinka', level: 1 });
+    const source = await startNextMatch(user);
+    const offline = await within(source).findByTestId('flow-offline');
+    expect(offline).toHaveTextContent('この端末には前回のデータがありません');
+    expect(within(offline).queryByRole('button', { name: '前回データで続ける' })).toBeNull();
+    expect(within(offline).getByRole('button', { name: '再試行' })).toBeInTheDocument();
+    await user.click(within(source).getByRole('button', { name: '別の試合を作る' }));
+    expect(generateButton()).toBeEnabled();
   }, 30_000);
 
   it('a re-sync whose opponent analysis fails drops the old analysis instead of showing it as current', async () => {
@@ -308,14 +514,16 @@ describe('next match order in one flow (Phase 5)', () => {
     await createKalavinka(user);
     expect(screen.getByTestId('next-match-card')).toHaveTextContent('vs スピンコブラ');
     failOpponent = true;
-    const flow = await startNextMatch(user);
-    const changes = await within(flow).findByTestId('flow-changes', {}, { timeout: 10_000 });
+    const source = await startNextMatch(user);
+    const changes = await within(source).findByTestId('flow-changes', {}, { timeout: 10_000 });
     expect(changes).toHaveTextContent('次戦の分析データを取得できませんでした');
+    expect(generateButton()).toBeDisabled();
     await user.click(within(changes).getByRole('button', { name: '確認して続ける' }));
-    const attendance = await within(flow).findByTestId('flow-attendance');
-    expect(attendance).toHaveTextContent('次戦の相手データがないため、勝利優先で作成します。');
-    expect(attendance).not.toHaveTextContent('スピンコブラ');
-    await user.click(within(flow).getByRole('button', { name: '閉じる' }));
+    expect(within(source).getByTestId('flow-no-opponent')).toHaveTextContent('次戦の相手データがないため、勝利優先で作成します。');
+    expect(source).not.toHaveTextContent('スピンコブラ');
+    expect(screen.getByRole('radio', { name: /勝利優先/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByTestId('setup-opponent')).toBeNull();
+    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
     expect(screen.getByTestId('next-match-card')).toHaveTextContent('次戦: 未取得');
   }, 30_000);
 
@@ -324,10 +532,11 @@ describe('next match order in one flow (Phase 5)', () => {
     renderApp();
     await createKalavinka(user);
     extraRoster = [{ opid: 'op_newcomer', oid: 'o3_op_newcomer', tpid: 'GpiQ', oname: '新加入 太郎' }];
-    const flow = await startNextMatch(user);
-    const changes = await within(flow).findByTestId('flow-changes', {}, { timeout: 10_000 });
+    const source = await startNextMatch(user);
+    const changes = await within(source).findByTestId('flow-changes', {}, { timeout: 10_000 });
     expect(changes).toHaveTextContent('メンバー追加: 新加入 太郎');
     await user.click(within(changes).getByRole('button', { name: '確認して続ける' }));
-    expect(await within(flow).findByTestId('flow-attendance')).toHaveTextContent('本日参加 8 / 8');
+    await within(source).findByTestId('flow-ready');
+    expect(screen.getByRole('heading', { name: /参加者 8 \/ 8/ })).toBeInTheDocument();
   }, 30_000);
 });

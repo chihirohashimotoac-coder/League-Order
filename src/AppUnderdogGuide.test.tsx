@@ -107,7 +107,7 @@ async function generateFromSetup(user: User): Promise<PendingRequest> {
 
 async function openSetup(user: User): Promise<void> {
   await user.click(within(nav()).getByRole('button', { name: 'ホーム' }));
-  await user.click(await screen.findByRole('button', { name: '新しいオーダーを作る' }));
+  await user.click(await screen.findByRole('button', { name: 'オーダーを作る' }));
   await screen.findByRole('heading', { name: 'オーダー設定' });
 }
 

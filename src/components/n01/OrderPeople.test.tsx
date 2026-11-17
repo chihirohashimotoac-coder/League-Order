@@ -19,7 +19,7 @@ vi.mock('../../pwa', () => ({ onUpdateAvailable: () => () => undefined, initServ
 
 /**
  * F06 and F07 through the real app: a one-order helper and a member added for next time,
- * entered from 「次戦のオーダーを作る」 and from the ordinary SETUP screen, against the
+ * entered on ORDER SETUP opened by 「次戦のオーダーを作る」 and on the ordinary SETUP screen, against the
  * fixture n01 league. What is checked is what a captain would see — and what is stored.
  */
 
@@ -76,12 +76,28 @@ async function createKalavinka(user: User): Promise<void> {
   await screen.findByRole('heading', { name: 'kalavinka', level: 1 });
 }
 
-async function openAttendance(user: User): Promise<HTMLElement> {
-  await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
-  const flow = await screen.findByRole('dialog', { name: '次戦のオーダーを作る' });
-  await within(flow).findByTestId('flow-attendance', {}, { timeout: 10_000 });
-  return flow;
+/** HOME → 次戦のオーダーを作る: ORDER SETUP, once n01 has answered and the next match is settled. */
+async function openNextMatch(user: User): Promise<HTMLElement> {
+  await startNextMatch(user);
+  await screen.findByTestId('flow-ready', {}, { timeout: 10_000 });
+  return page();
 }
+
+async function startNextMatch(user: User): Promise<void> {
+  await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
+  await screen.findByRole('heading', { name: 'オーダー設定' });
+}
+
+const page = (): HTMLElement => document.querySelector<HTMLElement>('main')!;
+const goHome = async (user: User): Promise<void> =>
+  user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
+/** The ordinary SETUP screen (the オーダー tab, with no order open). */
+const openOrdinarySetup = async (user: User): Promise<void> => {
+  await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'オーダー' }));
+  await screen.findByRole('heading', { name: 'オーダー設定' });
+};
+const box = (name: string): HTMLInputElement => screen.getByRole('checkbox', { name: `${name} を参加者に含める` });
+const count = (text: string): HTMLElement => screen.getByRole('heading', { name: new RegExp(`参加者 ${text.replace('/', '\\/')}`) });
 
 async function fillAndSave(user: User, dialogName: string, name: string, rating: string, saveLabel: string): Promise<void> {
   const editor = await screen.findByRole('dialog', { name: dialogName });
@@ -99,13 +115,13 @@ const storedPlayers = async (): Promise<{ id: string; name: string; teamId: stri
 const fieldedNames = (): string[] =>
   [...document.querySelectorAll<HTMLSelectElement>('.order-game select')].map((select) => select.selectedOptions[0]?.textContent ?? '');
 
-describe('今回だけの助っ人 from the next-match flow', () => {
+describe('今回だけの助っ人 on the next match’s SETUP', () => {
   it('joins this order only: ticked and fielded now, in no roster, not offered next time', async () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
 
-    const flow = await openAttendance(user);
+    const flow = await openNextMatch(user);
     await user.click(within(flow).getByRole('button', { name: '今回だけ助っ人を追加' }));
     const editor = await screen.findByRole('dialog', { name: '今回だけ助っ人を追加' });
     expect(within(editor).getByTestId('player-editor-notice-guest')).toHaveTextContent('チームのメンバー・次回の候補・シーズン累計には残りません');
@@ -115,12 +131,11 @@ describe('今回だけの助っ人 from the next-match flow', () => {
 
     await user.click(within(flow).getByRole('button', { name: '今回だけ助っ人を追加' }));
     await fillAndSave(user, '今回だけ助っ人を追加', '助っ人 花子', '10', '助っ人として追加');
-    const attendance = within(flow).getByTestId('flow-attendance');
-    expect(attendance).toHaveTextContent('本日参加 8 / 8');
-    expect(within(attendance).getByTestId('guest-tag')).toHaveTextContent('助っ人 (今回のみ)');
-    expect(within(attendance).getByText('助っ人 花子')).toBeInTheDocument();
+    expect(count('8 / 8')).toBeInTheDocument();
+    expect(within(flow).getByTestId('guest-tag')).toHaveTextContent('助っ人 (今回のみ)');
+    expect(box('助っ人 花子').checked).toBe(true);
 
-    await user.click(within(attendance).getByRole('button', { name: 'このメンバーで作成' }));
+    await user.click(screen.getByRole('button', { name: 'オーダーを生成' }));
     await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
     expect(fieldedNames().some((name) => name.includes('助っ人 花子'))).toBe(true);
 
@@ -139,20 +154,20 @@ describe('今回だけの助っ人 from the next-match flow', () => {
     expect(screen.queryByText('助っ人 花子')).toBeNull();
 
     // … and not offered the next time.
-    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
-    const again = await openAttendance(user);
-    expect(again).not.toHaveTextContent('助っ人 花子');
-    expect(again).toHaveTextContent('本日参加 7 / 7');
+    await goHome(user);
+    const again = await openNextMatch(user);
+    expect(within(again).queryByRole('checkbox', { name: '助っ人 花子 を参加者に含める' })).toBeNull();
+    expect(count('7 / 7')).toBeInTheDocument();
   }, 90_000);
 });
 
-describe('次回から参加するメンバー from the next-match flow', () => {
+describe('次回から参加するメンバー on the next match’s SETUP', () => {
   it('is saved as a team member, ticked for today, and stays a candidate', async () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
 
-    const flow = await openAttendance(user);
+    const flow = await openNextMatch(user);
     await user.click(within(flow).getByRole('button', { name: '次回から参加するメンバーを追加' }));
     const editor = await screen.findByRole('dialog', { name: '次回から参加するメンバーを追加' });
     expect(within(editor).getByTestId('player-editor-notice-member')).toHaveTextContent('次回以降のオーダーでも候補になります');
@@ -160,10 +175,9 @@ describe('次回から参加するメンバー from the next-match flow', () => 
     await user.click(within(flow).getByRole('button', { name: '次回から参加するメンバーを追加' }));
     await fillAndSave(user, '次回から参加するメンバーを追加', '新人 次郎', '8', 'メンバーに追加');
 
-    const attendance = within(flow).getByTestId('flow-attendance');
-    expect(attendance).toHaveTextContent('本日参加 8 / 8');
-    expect(within(attendance).getByTestId('manual-tag')).toHaveTextContent('n01 未連携');
-    expect((within(attendance).getByRole('checkbox', { name: /新人 次郎/ }) as HTMLInputElement).checked).toBe(true);
+    await waitFor(() => expect(count('8 / 8')).toBeInTheDocument());
+    expect(within(flow).getByTestId('manual-tag')).toHaveTextContent('n01 未連携');
+    expect(box('新人 次郎').checked).toBe(true);
 
     const saved = (await storedPlayers()).filter((entry) => entry.name === '新人 次郎');
     expect(saved).toHaveLength(1);
@@ -171,25 +185,25 @@ describe('次回から参加するメンバー from the next-match flow', () => 
     expect(saved[0].n01).toBeUndefined();
 
     // Next time, with no order made in between, they are still offered.
-    await user.click(within(flow).getByRole('button', { name: '閉じる' }));
-    const again = await openAttendance(user);
-    expect(again).toHaveTextContent('新人 次郎');
+    await goHome(user);
+    await openNextMatch(user);
+    expect(box('新人 次郎')).toBeInTheDocument();
   }, 60_000);
 
   it('is the same person, with the same id and numbers, when n01 later lists their exact name', async () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
-    const flow = await openAttendance(user);
+    const flow = await openNextMatch(user);
     await user.click(within(flow).getByRole('button', { name: '次回から参加するメンバーを追加' }));
     await fillAndSave(user, '次回から参加するメンバーを追加', '新人 次郎', '8', 'メンバーに追加');
     const before = (await storedPlayers()).find((entry) => entry.name === '新人 次郎')!;
-    await user.click(within(flow).getByRole('button', { name: '閉じる' }));
+    await goHome(user);
 
     extraRoster = [{ opid: 'op_shinjin', oid: 'o3_op_shinjin', tpid: 'GpiQ', oname: '新人 次郎' }];
-    const second = await openAttendance(user);
-    expect(second).toHaveTextContent('本日参加 8 / 8');
-    expect(within(second).getAllByText('新人 次郎')).toHaveLength(1);
+    const second = await openNextMatch(user);
+    expect(count('8 / 8')).toBeInTheDocument();
+    expect(within(second).getAllByRole('checkbox', { name: /新人 次郎/ })).toHaveLength(1);
     expect(within(second).queryByTestId('manual-tag')).toBeNull();
 
     const after = (await storedPlayers()).filter((entry) => entry.name === '新人 次郎');
@@ -202,25 +216,25 @@ describe('次回から参加するメンバー from the next-match flow', () => 
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
-    const flow = await openAttendance(user);
+    const flow = await openNextMatch(user);
     await user.click(within(flow).getByRole('button', { name: '次回から参加するメンバーを追加' }));
     await fillAndSave(user, '次回から参加するメンバーを追加', '新人 次郎', '8', 'メンバーに追加');
     const before = (await storedPlayers()).find((entry) => entry.name === '新人 次郎')!;
-    await user.click(within(flow).getByRole('button', { name: '閉じる' }));
+    await goHome(user);
 
     extraRoster = [{ opid: 'op_shinjin', oid: 'o3_op_shinjin', tpid: 'GpiQ', oname: '新人次郎' }];
-    await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
-    const sheet = await screen.findByRole('dialog', { name: '次戦のオーダーを作る' });
-    const links = await within(sheet).findByTestId('pending-links', {}, { timeout: 10_000 });
+    await startNextMatch(user);
+    const links = await within(page()).findByTestId('pending-links', {}, { timeout: 10_000 });
     expect(links).toHaveTextContent('新人次郎');
-    // Nothing is chosen for the captain, and nobody has been added meanwhile.
+    // Nothing is chosen for the captain, nobody has been added meanwhile, and nothing is generated.
     expect(within(links).getByRole('button', { name: '選んだ内容で確定' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'オーダーを生成' })).toBeDisabled();
     expect((await storedPlayers()).filter((entry) => /新人/.test(entry.name))).toHaveLength(1);
 
     await user.click(within(links).getByRole('radio', { name: /既存メンバー「新人 次郎」と同じ人/ }));
     await user.click(within(links).getByRole('button', { name: '選んだ内容で確定' }));
-    const attendance = await within(sheet).findByTestId('flow-attendance', {}, { timeout: 10_000 });
-    expect(within(attendance).getAllByText(/新人/)).toHaveLength(1);
+    await screen.findByTestId('flow-ready', {}, { timeout: 10_000 });
+    await waitFor(() => expect(within(page()).getAllByRole('checkbox', { name: /新人/ })).toHaveLength(1));
 
     const after = (await storedPlayers()).filter((entry) => /新人/.test(entry.name));
     expect(after).toHaveLength(1);
@@ -232,15 +246,14 @@ describe('次回から参加するメンバー from the next-match flow', () => 
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
-    const flow = await openAttendance(user);
+    const flow = await openNextMatch(user);
     await user.click(within(flow).getByRole('button', { name: '次回から参加するメンバーを追加' }));
     await fillAndSave(user, '次回から参加するメンバーを追加', '新人 次郎', '', 'メンバーに追加');
-    await user.click(within(flow).getByRole('button', { name: '閉じる' }));
+    await goHome(user);
 
     extraRoster = [{ opid: 'op_shinjin', oid: 'o3_op_shinjin', tpid: 'GpiQ', oname: '新人次郎' }];
-    await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
-    const sheet = await screen.findByRole('dialog', { name: '次戦のオーダーを作る' });
-    const links = await within(sheet).findByTestId('pending-links', {}, { timeout: 10_000 });
+    await startNextMatch(user);
+    const links = await within(page()).findByTestId('pending-links', {}, { timeout: 10_000 });
     // What “later” does is stated about each side separately, and nothing reads as “the same person”.
     const note = within(links).getByTestId('pending-links-later');
     expect(note).toHaveTextContent('手動で追加済みのメンバーは、これまでどおり今回の参加候補に残ります');
@@ -251,14 +264,13 @@ describe('次回から参加するメンバー from the next-match flow', () => 
     expect(within(links).getByRole('group', { name: /新人次郎/ })).toHaveAccessibleDescription(/手動で追加済みのメンバーは/);
 
     await user.click(within(links).getByRole('button', { name: 'あとで確認する' }));
-    const attendance = await within(sheet).findByTestId('flow-attendance');
+    await screen.findByTestId('flow-ready');
     // The member is still offered (and ticked), marked as not linked to n01; the n01 row is not.
-    expect(within(attendance).getAllByText(/新人/)).toHaveLength(1);
-    expect(within(attendance).getByText('新人 次郎')).toBeInTheDocument();
-    expect(within(attendance).queryByText('新人次郎')).toBeNull();
-    expect(within(attendance).getByTestId('manual-tag')).toHaveTextContent('n01 未連携');
-    expect((within(attendance).getByRole('checkbox', { name: /新人 次郎/ }) as HTMLInputElement).checked).toBe(true);
-    expect(attendance).toHaveTextContent('本日参加 8 / 8');
+    expect(within(page()).getAllByRole('checkbox', { name: /新人/ })).toHaveLength(1);
+    expect(box('新人 次郎').checked).toBe(true);
+    expect(screen.queryByRole('checkbox', { name: '新人次郎 を参加者に含める' })).toBeNull();
+    expect(within(page()).getByTestId('manual-tag')).toHaveTextContent('n01 未連携');
+    expect(count('8 / 8')).toBeInTheDocument();
 
     // Nothing was created or linked, and no n01 numbers were attached to the member.
     const after = (await storedPlayers()).filter((entry) => /新人/.test(entry.name));
@@ -267,17 +279,16 @@ describe('次回から参加するメンバー from the next-match flow', () => 
     expect(after[0].n01).toBeUndefined();
 
     // The member can be fielded now; their strength is Unknown, not n01’s.
-    await user.click(within(attendance).getByRole('button', { name: 'このメンバーで作成' }));
+    await user.click(screen.getByRole('button', { name: 'オーダーを生成' }));
     await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
     expect(fieldedNames().some((name) => name.includes('新人 次郎'))).toBe(true);
     expect(fieldedNames().some((name) => name.includes('新人次郎'))).toBe(false);
     expect(within(screen.getByTestId('strength-basis-panel')).getByText('新人 次郎').closest('.basis-row')).toHaveAttribute('data-origin', 'unknown');
 
     // The next sync asks again.
-    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
-    await user.click(screen.getByRole('button', { name: '次戦のオーダーを作る' }));
-    const again = await screen.findByRole('dialog', { name: '次戦のオーダーを作る' });
-    expect(await within(again).findByTestId('pending-links', {}, { timeout: 10_000 })).toHaveTextContent('新人次郎');
+    await goHome(user);
+    await startNextMatch(user);
+    expect(await within(page()).findByTestId('pending-links', {}, { timeout: 10_000 })).toHaveTextContent('新人次郎');
   }, 120_000);
 });
 
@@ -287,8 +298,7 @@ describe('助っ人 on the ordinary SETUP screen', () => {
     renderApp();
     await createKalavinka(user);
 
-    await user.click(screen.getByRole('button', { name: '新しいオーダーを作る' }));
-    await screen.findByRole('heading', { name: 'オーダー設定' });
+    await openOrdinarySetup(user);
     await user.click(screen.getByRole('button', { name: '今回だけ助っ人を追加' }));
     await fillAndSave(user, '今回だけ助っ人を追加', '助っ人 花子', '10', '助っ人として追加');
     expect(screen.getByTestId('guest-tag')).toHaveTextContent('助っ人 (今回のみ)');
@@ -334,14 +344,14 @@ describe('助っ人 on the ordinary SETUP screen', () => {
     await screen.findByRole('heading', { name: 'オーダー結果' });
     expect(fieldedNames().some((name) => name.includes('助っ人 花子'))).toBe(true);
 
-    // A new order does not carry them over.
-    await user.click(within(screen.getByRole('navigation', { name: 'メインナビゲーション' })).getByRole('button', { name: 'ホーム' }));
-    await user.click(screen.getByRole('button', { name: '新しいオーダーを作る' }));
-    const discard = screen.queryByRole('button', { name: '破棄して作成' });
-    if (discard) await user.click(discard);
-    await screen.findByRole('heading', { name: 'オーダー設定' });
-    expect(screen.queryByText('助っ人 花子')).toBeNull();
-    expect(screen.getByRole('heading', { name: /参加者 7 \/ 7/ })).toBeInTheDocument();
+    // A new order does not carry them over: neither the next match nor a match by hand.
+    await goHome(user);
+    await openNextMatch(user);
+    expect(screen.queryByRole('checkbox', { name: '助っ人 花子 を参加者に含める' })).toBeNull();
+    expect(count('7 / 7')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '別の試合を作る' }));
+    expect(screen.queryByRole('checkbox', { name: '助っ人 花子 を参加者に含める' })).toBeNull();
+    expect(count('7 / 7')).toBeInTheDocument();
   }, 120_000);
 });
 
@@ -350,8 +360,7 @@ describe('助っ人 and the season', () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
-    await user.click(screen.getByRole('button', { name: '新しいオーダーを作る' }));
-    await screen.findByRole('heading', { name: 'オーダー設定' });
+    await openOrdinarySetup(user);
     await user.click(screen.getByRole('button', { name: '今回だけ助っ人を追加' }));
     await fillAndSave(user, '今回だけ助っ人を追加', '助っ人 花子', '10', '助っ人として追加');
     await user.click(screen.getByRole('button', { name: 'オーダーを生成' }));
@@ -393,37 +402,40 @@ describe('助っ人 and the season', () => {
 });
 
 
-describe('参加者と当日の条件 in the next-match flow (audit 2026-11-12)', () => {
+describe('参加者と当日の条件 on the next match’s SETUP (audit 2026-11-12)', () => {
   it('clears everyone, ticks five, sets one player to the second half only, and the order keeps that window', async () => {
     const user = userEvent.setup();
     renderApp();
     await createKalavinka(user);
 
-    const flow = await openAttendance(user);
-    const attendance = within(flow).getByTestId('flow-attendance');
-    await user.click(within(attendance).getByRole('button', { name: 'すべて解除' }));
-    expect(attendance).toHaveTextContent('本日参加 0 / 7');
-    expect(within(attendance).getByRole('button', { name: 'このメンバーで作成' })).toBeDisabled();
-    await user.click(within(attendance).getByRole('button', { name: '全員を選択' }));
-    expect(attendance).toHaveTextContent('本日参加 7 / 7');
-    await user.click(within(attendance).getByRole('button', { name: 'すべて解除' }));
+    await openNextMatch(user);
+    await user.click(screen.getByRole('button', { name: '解除' }));
+    expect(count('0 / 7')).toBeInTheDocument();
+    // Nothing is generated with nobody here.
+    await user.click(screen.getByRole('button', { name: 'オーダーを生成' }));
+    expect(await screen.findByText('参加者を 1 名以上選択してください')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'オーダー結果' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '全員' }));
+    expect(count('7 / 7')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '解除' }));
 
-    const boxes = within(attendance).getAllByRole('checkbox');
-    for (const box of boxes.slice(0, 5)) await user.click(box);
-    expect(attendance).toHaveTextContent('本日参加 5 / 7');
-    const late = boxes[0].closest('label')!.querySelector('.grow')!.childNodes[0].textContent!.trim();
+    const boxes = screen.getAllByRole('checkbox', { name: /を参加者に含める$/ });
+    for (const entry of boxes.slice(0, 5)) await user.click(entry);
+    expect(count('5 / 7')).toBeInTheDocument();
+    const nameOf = (entry: HTMLElement): string => entry.getAttribute('aria-label')!.replace(/ を参加者に含める$/, '');
+    const late = nameOf(boxes[0]);
 
     // The late player's conditions, before anything is generated.
-    await user.click(within(attendance).getByRole('button', { name: `${late} の出場条件` }));
+    await user.click(screen.getByRole('button', { name: `${late} の出場条件` }));
     const sheet = await screen.findByRole('dialog', { name: `${late} の出場条件` });
     await user.click(within(sheet).getByRole('button', { name: '後半のみ' }));
     await user.click(within(sheet).getByRole('button', { name: '閉じる' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: `${late} の出場条件` })).toBeNull());
-    const summary = within(attendance).getAllByTestId('attendance-conditions')[0];
+    const summary = boxes[0].closest('li')!.querySelector('.p-meta')!;
     expect(summary).toHaveTextContent(/範囲 G\d+〜最終/u);
     const from = Number(/範囲 G(\d+)/u.exec(summary.textContent ?? '')![1]);
 
-    await user.click(within(attendance).getByRole('button', { name: 'このメンバーで作成' }));
+    await user.click(screen.getByRole('button', { name: 'オーダーを生成' }));
     await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
     // Never in a game before the window; nobody who stayed home is fielded.
     const games = [...document.querySelectorAll<HTMLElement>('.order-game')];
@@ -432,7 +444,7 @@ describe('参加者と当日の条件 in the next-match flow (audit 2026-11-12)'
       const names = [...game.querySelectorAll<HTMLSelectElement>('select')].map((select) => select.selectedOptions[0]?.textContent ?? '');
       if (index + 1 < from) expect(names.some((name) => name.includes(late))).toBe(false);
     });
-    const absent = boxes.slice(5).map((box) => box.closest('label')!.querySelector('.grow')!.childNodes[0].textContent!.trim());
+    const absent = boxes.slice(5).map(nameOf);
     for (const name of absent) expect(fieldedNames().some((fielded) => fielded.includes(name))).toBe(false);
 
     // SETUP shows the same condition on that player.

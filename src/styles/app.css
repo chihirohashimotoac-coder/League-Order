@@ -1755,52 +1755,6 @@ input[type='range'] {
 
 /* ======================================================================= HOME */
 
-.hero {
-  position: relative;
-  overflow: hidden;
-  padding: 22px 18px 18px;
-  margin-bottom: var(--space-3);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
-  background:
-    /* Dartboard rings, top-right: the one decorative motif, printed faintly. */
-    repeating-radial-gradient(
-      circle at 108% -12%,
-      transparent 0 26px,
-      rgb(8 127 140 / 7%) 26px 28px
-    ),
-    var(--color-surface-2);
-}
-
-.hero::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 18px;
-  bottom: 18px;
-  width: 4px;
-  border-radius: 0 3px 3px 0;
-  background: var(--color-accent);
-}
-
-.hero .kicker {
-  color: var(--color-accent-text);
-}
-
-.hero-title {
-  margin: 8px 0 18px;
-  font-size: 25px;
-  font-weight: 900;
-  line-height: 1.32;
-  letter-spacing: 0.01em;
-}
-
-.hero-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .resume-card {
   display: flex;
   align-items: center;
@@ -3474,23 +3428,6 @@ input[type='range'] {
     padding-inline: var(--space-5);
   }
 
-  .hero {
-    padding: 30px 28px 26px;
-  }
-
-  .hero-title {
-    font-size: 32px;
-  }
-
-  .hero-actions {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .hero-actions .btn.xl {
-    min-width: 280px;
-  }
-
   .preset-grid {
     grid-template-columns: repeat(3, 1fr);
   }
@@ -3513,10 +3450,6 @@ input[type='range'] {
 @media (max-width: 359px) {
   .app-main {
     padding-inline: 10px;
-  }
-
-  .hero-title {
-    font-size: 22px;
   }
 
   .team-name {
@@ -4100,12 +4033,30 @@ input[type='range'] {
 /* ------------------------------------------------------------- next match (Phase 5) */
 
 .next-match-card {
+  position: relative;
+  overflow: hidden;
   margin: 0 0 14px;
   padding: 16px;
   border: 1px solid var(--color-border-strong);
   border-top: 4px solid var(--color-accent);
   border-radius: var(--radius-lg);
-  background: var(--color-surface-2);
+  background:
+    /* Dartboard rings, top-right: the one decorative motif, printed faintly. */
+    repeating-radial-gradient(
+      circle at 108% -12%,
+      transparent 0 26px,
+      rgb(8 127 140 / 7%) 26px 28px
+    ),
+    var(--color-surface-2);
+}
+
+/* The card's content sits above the ripple. */
+.next-match-card > * {
+  position: relative;
+}
+
+.next-match-card > .resume-card {
+  margin-top: 12px;
 }
 
 .next-match-title {
@@ -4162,6 +4113,70 @@ input[type='range'] {
 
 .next-match-actions .btn.xl {
   flex: 1 1 220px;
+}
+
+/* ------------------------------------------------- new order SETUP: which match, n01 state */
+
+.match-source {
+  margin-bottom: 12px;
+  border-color: var(--color-border-strong);
+  border-top: 4px solid var(--color-accent);
+}
+
+.match-source-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.match-source-name {
+  margin: 2px 0 0;
+  font-size: 19px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.match-source-date {
+  color: var(--color-text-secondary);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.match-source .next-match-status,
+.match-source > .notice,
+.match-source > .pending-links {
+  margin-top: 10px;
+}
+
+.match-source .n01-fresh {
+  margin: 0;
+}
+
+.match-source .next-match-status .flow-actions {
+  margin-top: 8px;
+}
+
+.setup-resume {
+  margin-bottom: 12px;
+}
+
+/* Locked, nothing in the side column can take focus: it must not be a scroll region of its own
+   (a keyboard could not reach what it hides). */
+.setup-layout.is-split.is-locked .setup-side {
+  max-height: none;
+  overflow: visible;
+}
+
+/* A box-less fieldset: it only disables the conditions while the next match is being fetched. */
+.setup-lock {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
 }
 
 .flow-block {
@@ -4838,24 +4853,8 @@ input[type='range'] {
   animation-duration: var(--dur-3);
 }
 
-/* "速く・公平に・強く。" — a marker stroke sweeps under the line once the letters land. */
-.hero-accent {
-  background-image: linear-gradient(transparent 66%, var(--color-selection) 66%);
-  background-repeat: no-repeat;
-  background-size: 100% 100%;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-  animation: marker-sweep 0.7s var(--ease-out) 1.05s backwards;
-}
-
-@keyframes marker-sweep {
-  from {
-    background-size: 0% 100%;
-  }
-}
-
 /* A single dart-hit ripple from the dartboard motif; it fades out and stays gone. */
-.hero::after {
+.next-match-card::after {
   content: '';
   position: absolute;
   top: -70px;
@@ -6105,7 +6104,7 @@ select:not([multiple]) {
     transition-delay: 0s !important;
   }
 
-  .hero::after {
+  .next-match-card::after {
     display: none;
   }
 }

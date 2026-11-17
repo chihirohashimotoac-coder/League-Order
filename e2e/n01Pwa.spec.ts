@@ -67,11 +67,13 @@ test('offline in the installed app: last sync named, continue only when asked, o
   await expect(page.getByTestId('n01-freshness')).not.toContainText('最新');
 
   await page.getByRole('button', { name: '次戦のオーダーを作る' }).click();
-  const flow = page.getByRole('dialog', { name: '次戦のオーダーを作る' });
-  await expect(flow.getByTestId('flow-offline')).toContainText('このデータは最新ではありません');
-  await flow.getByRole('button', { name: '前回データで続ける' }).click();
-  await expect(flow.getByTestId('flow-stale')).toBeVisible();
-  await flow.getByRole('button', { name: 'このメンバーで作成' }).click();
+  await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+  const source = page.getByTestId('match-source');
+  await expect(source.getByTestId('flow-offline')).toContainText('このデータは最新ではありません');
+  await expect(page.getByRole('button', { name: 'オーダーを生成' })).toBeDisabled();
+  await source.getByRole('button', { name: '前回データで続ける' }).click();
+  await expect(source.getByTestId('flow-stale')).toBeVisible();
+  await page.getByRole('button', { name: 'オーダーを生成' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('opponent-panel')).toContainText('スピンコブラ');
   await context.setOffline(false);

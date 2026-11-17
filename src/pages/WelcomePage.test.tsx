@@ -106,7 +106,9 @@ describe('manual setup', () => {
     await screen.findByRole('heading', { name: 'ソフトチーム', level: 1 });
     const next = screen.getByTestId('next-step');
     expect(next).toHaveTextContent('フォーマットの内容を確認');
-    expect(next).toHaveTextContent('最初のオーダーを作る');
+    // The order itself is made from the order card's one button, not from a second one here.
+    expect(next).not.toHaveTextContent('最初のオーダーを作る');
+    expect(within(screen.getByTestId('order-card')).getByRole('button', { name: 'オーダーを作る' })).toBeInTheDocument();
     const data = await stored();
     expect(data.formats).toHaveLength(1);
     expect(data.formats[0].discipline).toBe('SOFT');
@@ -141,7 +143,7 @@ describe('manual setup', () => {
     expect(validateFormat(data.formats[0].games)).toEqual([]);
     expect(data.players.map((player) => player.ppr)).toEqual([72.5, 61, 55]);
 
-    await user.click(within(screen.getByTestId('next-step')).getByRole('button', { name: 'オーダーを作る' }));
+    await user.click(within(screen.getByTestId('order-card')).getByRole('button', { name: 'オーダーを作る' }));
     const basis = await screen.findByTestId('setup-strength-basis');
     expect(basis).toHaveTextContent('戦力評価 PPR 100%');
     expect(basis).toHaveTextContent('Rating が未入力のため、PPR (3投平均) だけで評価します');
@@ -167,7 +169,7 @@ describe('manual setup', () => {
     await screen.findByRole('heading', { name: 'あとでチーム', level: 1 });
     expect((await stored()).formats[0].discipline).toBe('UNSPECIFIED');
 
-    await user.click(within(screen.getByTestId('next-step')).getByRole('button', { name: 'オーダーを作る' }));
+    await user.click(within(screen.getByTestId('order-card')).getByRole('button', { name: 'オーダーを作る' }));
     const basis = await screen.findByTestId('setup-strength-basis');
     expect(basis).toHaveTextContent('戦力評価 Rating 100%');
     expect(basis).not.toHaveTextContent('同じ比重');
@@ -285,7 +287,7 @@ describe('n01 wizard dead ends lead back to manual entry', () => {
     await user.click(screen.getByRole('radio', { name: /シングルス4ゲーム/ }));
     await user.click(screen.getByRole('button', { name: 'チームを作成' }));
     await screen.findByRole('heading', { name: 'オフライン', level: 1 });
-    await user.click(within(screen.getByTestId('next-step')).getByRole('button', { name: 'オーダーを作る' }));
+    await user.click(within(screen.getByTestId('order-card')).getByRole('button', { name: 'オーダーを作る' }));
     await user.click(await screen.findByRole('button', { name: 'オーダーを生成' }));
     // シングルス4ゲーム → the Singles question only.
     expect(await answerRuleQuestions(user, 'はい')).toEqual(['同じ選手がシングルスに2回出場しても良いですか？']);

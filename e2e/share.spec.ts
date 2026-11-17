@@ -18,7 +18,7 @@ async function openApp(page: Page): Promise<void> {
 }
 
 async function generate(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -33,7 +33,7 @@ async function fillMatchInfo(
   page: Page,
   values: { league?: string; opponent?: string; date?: string },
 ): Promise<void> {
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await openMatchFields(page);
   if (values.league !== undefined) await page.getByLabel('リーグ名 (任意)').fill(values.league);
   if (values.opponent !== undefined) await page.getByLabel('対戦相手 (任意)').fill(values.opponent);
