@@ -16,7 +16,7 @@ export interface MatchSet {
   mid: string;
   /** n01's set position (0-based `currentSet`), `null` when n01 gave none. */
   position: number | null;
-  /** 「ダブルス1」: the part of the title that tells the sets apart, else 「第 N セット」. */
+  /** 「ダブルス1」: the part of the title that tells the sets apart, else 「第Nセット」 (n01's set order). */
   label: string;
   title: string;
   /** Players of this set, left and right. */
@@ -72,14 +72,21 @@ export function sharedTitle(titles: readonly string[]): string {
 }
 
 /**
- * With one title only (the first set, before the next exists), nothing tells the set's own name
- * apart from the match's: n01 has no separate field for it (match/get carries no orgTitle; checked
- * 2026-11-17). The last word is taken when it ends in a number (「シングルス1」「Set3」), else none.
+ * A word that names a game of a set-format match (「シングルス1」「ダブルス 2」「トリオス1」「Set 3」):
+ * a known kind of game, optionally numbered. Only such a word is taken off the end of a title
+ * when nothing else tells the set's name apart (one title only: n01 has no separate field for
+ * it — match/get carries no orgTitle, checked 2026-11-17). A team name that ends in a number
+ * (「Team2」) is not one: the title is then kept whole.
  */
-function lastNumberedWord(title: string): string {
-  const words = title.trim().split(/\s+/u);
-  const last = words[words.length - 1] ?? '';
-  return words.length > 1 && /\d$/u.test(last) ? last : '';
+const SET_NAME = /^(?:シングルス|ダブルス|トリオス|トリプルス|クアトロ|カルテット|クリケット|ゼロワン|セット|Singles?|Doubles?|Trios?|Triples?|Set)\s*\d*$/iu;
+
+/** The set's name at the end of a title, or `''` when there is no evidence of one. */
+export function setNameAtEnd(title: string): string {
+  const trimmed = title.trim();
+  const match = /(?:^|\s)(\S+(?:\s\d+)?)$/u.exec(trimmed);
+  if (!match) return '';
+  const word = match[1];
+  return word !== trimmed && SET_NAME.test(word) ? word : '';
 }
 
 function winnerOf(legs: [number, number] | null, finished: boolean): 0 | 1 | -1 | null {
@@ -101,8 +108,8 @@ export function matchSetsView(rows: readonly GameRow[], live: LiveState | null, 
   const titles = [...ordered.map((row) => row.title), ...(live ? [live.title] : [])];
   const shared = sharedTitle(titles);
   const label = (title: string, position: number | null, index: number): string => {
-    const own = shared && title.startsWith(shared) ? title.slice(shared.length).trim() : shared ? '' : lastNumberedWord(title);
-    return own || `第 ${(position ?? index) + 1} セット`;
+    const own = shared && title.startsWith(shared) ? title.slice(shared.length).trim() : shared ? '' : setNameAtEnd(title);
+    return own || `第${(position ?? index) + 1}セット`;
   };
   const sets: MatchSet[] = ordered.map((row, index) => {
     const isLive = live !== null && live.mid === row.mid;
@@ -163,7 +170,7 @@ export function matchSetsView(rows: readonly GameRow[], live: LiveState | null, 
     else sets.splice(at, 0, entry);
   }
   const only = live?.title || ordered[ordered.length - 1]?.title || fallbackTitle;
-  const word = lastNumberedWord(only);
+  const word = setNameAtEnd(only);
   const matchTitle = shared.trim() || (word ? only.trim().slice(0, -word.length).trim() : only);
   let setsWon: [number, number] | null = null;
   if (live && live.showSets) setsWon = [live.sets[0], live.sets[1]];

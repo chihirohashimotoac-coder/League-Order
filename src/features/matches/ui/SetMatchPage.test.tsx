@@ -235,4 +235,96 @@ describe('SetMatchPage', () => {
     expect(doubles1.textContent).toContain('Bravo 選手2-1 / Bravo 選手2-2 の勝ち');
     expect(doubles1.textContent).not.toContain('進行中');
   });
+
+  it('a finished set opens on its last leg played, even with an unstarted leg held after it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const w = world({ phase: 4, unstartedLegAfterEnd: true });
+    open(w, setMid(2));
+    await flush(10);
+    await flush(10);
+    fireEvent.click(items()[1]); // ダブルス1: 3 legs played, a 4th held with no throw
+    await flush(10);
+    await flush(10);
+    const chips = within(screen.getByTestId('leg-chips')).getAllByRole('tab');
+    expect(chips).toHaveLength(4);
+    expect(screen.getByTestId('leg-sheet').textContent).toContain('Leg 3 のスコア表');
+    // The viewer's own choice of leg still works.
+    fireEvent.click(chips[0]);
+    await flush(10);
+    expect(screen.getByTestId('leg-sheet').textContent).toContain('Leg 1 のスコア表');
+  });
+
+  it('11 sets in the archive and the live list failing: all 11 stay listed, the score keeps updating, and the retry reads only the live list', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const w = world({ phase: 20, sets: 11, liveListFails: true }); // ダブルス5 (set 11) in play
+    open(w, setMid(10));
+    await flush(10);
+    await flush(10);
+    expect(items()).toHaveLength(11);
+    expect(screen.getByTestId('sets-error').textContent).toContain('進行中のセットの一覧を取得できませんでした');
+    expect(screen.getByTestId('sets-error').textContent).not.toContain('終了したセット');
+    expect(screen.getByTestId('set-legs').textContent).toBe('1 - 1');
+    w.options.phase = 21; // the last set (and the match) over: archive 11
+    await flush(1600);
+    await flush(10);
+    expect(items()).toHaveLength(11);
+    expect(screen.getByTestId('set-legs').textContent).toBe('2 - 1');
+    const before = w.calls.length;
+    w.options.liveListFails = false;
+    fireEvent.click(within(screen.getByTestId('sets-error')).getByRole('button', { name: '再取得' }));
+    await flush(10);
+    const retried = w.calls.slice(before).filter((call) => call.startsWith('match/list'));
+    expect(retried).toHaveLength(1);
+    expect(retried[0]).toContain('live=1');
+    expect(screen.queryByTestId('sets-error')).toBeNull();
+    expect(new Set(items().map((item) => item.getAttribute('data-mid'))).size).toBe(11);
+  });
+
+  it('the archive failing after a good read keeps the sets it brought; an empty live list is not a failure', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const w = world({ phase: 4 });
+    open(w, setMid(2));
+    await flush(10);
+    await flush(10);
+    expect(items()).toHaveLength(3);
+    w.options.archiveFails = true;
+    w.options.phase = 5; // ダブルス2 over, nothing in play: the live list is read empty
+    await flush(1600);
+    await flush(10);
+    expect(items()).toHaveLength(3);
+    expect(screen.getByTestId('sets-error').textContent).toContain('終了したセットの一覧を取得できませんでした');
+    expect(screen.getByTestId('sets-error').textContent).not.toContain('進行中のセット');
+    w.options.phase = 6; // シングルス2 began: shown, the earlier sets still listed
+    await flush(1600);
+    await flush(10);
+    expect(labels()).toEqual(['シングルス1', 'ダブルス1', 'ダブルス2', 'LIVEシングルス2']);
+  });
+
+  it('reads of another match are dropped: opening another game aborts the reads still on their way', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const signals: { params: Record<string, string>; signal?: AbortSignal }[] = [];
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const transport: AnalyticsTransport = {
+      request: async (operation, params, signal) => {
+        if (params.scid && operation === 'match/list') {
+          signals.push({ params, signal });
+          await gate;
+        }
+        return setMatchReply(operation, params, 4) ?? { result: 0, list: [] };
+      },
+    };
+    const factory: MatchesApiFactory = (opts) => new MatchesApi({ transport, governor: new RequestGovernor(100_000), pollPerMinute: 100_000, ...opts });
+    const props = { factory, onBack: () => undefined, onShown: () => undefined };
+    const view = render(<SetMatchPage mid={setMid(2)} {...props} />);
+    await flush(10);
+    await flush(10);
+    expect(signals.length).toBeGreaterThan(0);
+    view.rerender(<SetMatchPage mid="Other_1800009999000" {...props} />);
+    await flush(10);
+    expect(signals.every((entry) => entry.signal?.aborted)).toBe(true);
+    release();
+    await flush(10);
+    expect(screen.queryByTestId('set-item')).toBeNull();
+  });
 });

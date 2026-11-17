@@ -31,6 +31,23 @@ import { liveStatusText } from './MatchSheet';
 /** How often the list of sets is read again while the match is on (the live set is polled every 1.5 s). */
 export const SETS_REFRESH_MS = 20_000;
 
+type SetSource = 'archive' | 'live';
+interface SourceState {
+  rows: GameRow[] | null;
+  error: string | null;
+  loading: boolean;
+}
+const NO_SOURCE: SourceState = { rows: null, error: null, loading: false };
+
+/** Both sources by `mid`, the archive first (it is the record once a set is in it); `null` while neither was read. */
+export function mergeSources(archive: readonly GameRow[] | null, live: readonly GameRow[] | null): GameRow[] | null {
+  if (archive === null && live === null) return null;
+  const byMid = new Map<string, GameRow>();
+  for (const game of archive ?? []) byMid.set(game.mid, game);
+  for (const game of live ?? []) if (!byMid.has(game.mid)) byMid.set(game.mid, game);
+  return [...byMid.values()];
+}
+
 interface Followed {
   api: MatchesApi;
   row: GameRow | null;
@@ -50,9 +67,10 @@ function useFollowedMatch(mid: string, factory: MatchesApiFactory): Followed {
   const [rowError, setRowError] = useState<string | null>(null);
   const [live, setLive] = useState<LiveState | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ kind: 'idle' });
-  const [sets, setSets] = useState<GameRow[] | null>(null);
-  const [setsError, setSetsError] = useState<string | null>(null);
-  const [setsLoading, setSetsLoading] = useState(false);
+  // The list of sets, from two sources kept apart (see MatchesApi.matchSetsFrom): `rows` is the
+  // last successful read (`[]` = read, none), `null` = never read; `error` = the last read failed.
+  const [archive, setArchive] = useState<SourceState>(NO_SOURCE);
+  const [liveList, setLiveList] = useState<SourceState>(NO_SOURCE);
   const [setsTick, setSetsTick] = useState(0);
 
   useEffect(() => {
@@ -93,24 +111,40 @@ function useFollowedMatch(mid: string, factory: MatchesApiFactory): Followed {
   const liveMid = live?.mid ?? null;
   const liveEnded = live?.gameEnded ?? false;
   const matchOver = status.kind === 'finished' || (live?.cardEnded ?? false);
-  useEffect(() => {
+  // One read per source at a time: a new read of a source drops the one before it, and nothing
+  // arrives after the page (this match) is gone.
+  const reads = useRef<Record<SetSource, AbortController | null>>({ archive: null, live: null });
+  useEffect(
+    () => () => {
+      reads.current.archive?.abort();
+      reads.current.live?.abort();
+    },
+    [],
+  );
+  const readSources = (sources: readonly SetSource[]): void => {
     if (!scid) return;
-    const controller = new AbortController();
-    setSetsLoading(true);
-    api
-      .matchSets(scid, controller.signal)
-      .then((list) => {
-        if (controller.signal.aborted) return;
-        setSets(list);
-        setSetsError(null);
-      })
-      .catch((reason) => {
-        if (!controller.signal.aborted) setSetsError(describeN01Error(reason));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setSetsLoading(false);
-      });
-    return () => controller.abort();
+    for (const source of sources) {
+      reads.current[source]?.abort();
+      const controller = new AbortController();
+      reads.current[source] = controller;
+      const set = source === 'archive' ? setArchive : setLiveList;
+      set((held) => ({ ...held, loading: true }));
+      api
+        .matchSetsFrom(scid, source, controller.signal)
+        .then((rows) => {
+          if (!controller.signal.aborted) set({ rows, error: null, loading: false });
+        })
+        .catch((reason) => {
+          // A failed read keeps the rows of the last one that worked.
+          if (!controller.signal.aborted) set((held) => ({ rows: held.rows, error: describeN01Error(reason), loading: false }));
+        })
+        .finally(() => {
+          if (reads.current[source] === controller) reads.current[source] = null;
+        });
+    }
+  };
+  useEffect(() => {
+    readSources(['archive', 'live']);
   }, [api, scid, liveMid, liveEnded, matchOver, setsTick]);
   useEffect(() => {
     if (!scid || matchOver) return;
@@ -120,7 +154,12 @@ function useFollowedMatch(mid: string, factory: MatchesApiFactory): Followed {
     return () => clearInterval(timer);
   }, [scid, matchOver]);
 
-  return { api, row, rowError, live, status, sets, setsError, setsLoading, retrySets: () => setSetsTick((n) => n + 1) };
+  const sets = useMemo(() => mergeSources(archive.rows, liveList.rows), [archive.rows, liveList.rows]);
+  const failed: SetSource[] = [...(archive.error ? (['archive'] as const) : []), ...(liveList.error ? (['live'] as const) : [])];
+  const setsError = failed.length ? `${failed.map((source) => (source === 'archive' ? '終了したセット' : '進行中のセット')).join('・')}の一覧を取得できませんでした (${(archive.error ?? liveList.error)!})` : null;
+  // Again: only what failed (both when nothing did).
+  const retrySets = (): void => readSources(failed.length ? failed : ['archive', 'live']);
+  return { api, row, rowError, live, status, sets, setsError, setsLoading: archive.loading || liveList.loading, retrySets };
 }
 
 const legsText = (set: MatchSet): string => (set.legs ? `${set.legs[0]} - ${set.legs[1]}` : '— - —');
@@ -165,7 +204,7 @@ function SetList({ sets, shownMid, onPick, loading, error, onRetry }: { sets: Ma
       </div>
       {error ? (
         <p className="small-text" role="alert" data-testid="sets-error">
-          セット一覧を更新できませんでした ({error})。最新のスコアは更新を続けています。{' '}
+          {error}。取得できたセットは表示しています。最新のスコアは更新を続けています。{' '}
           <button type="button" className="btn small" onClick={onRetry}>
             再取得
           </button>
@@ -319,7 +358,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
       {following && live && !live.gameEnded ? (
         <LiveSheet key={live.mid} api={api} live={live} status={{ ...statusLine, updated }} />
       ) : (
-        <GameView key={shownMid} api={api} mid={shownMid} cricket={shown?.cricket ?? row.matchType === 'cricket'} finished={shown?.finished ?? row.finished} names={names} flip={false} />
+        <GameView key={shownMid} api={api} mid={shownMid} cricket={shown?.cricket ?? row.matchType === 'cricket'} finished={shown?.finished ?? row.finished} names={names} flip={false} openPlayedLeg />
       )}
     </section>
   );

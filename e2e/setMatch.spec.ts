@@ -192,3 +192,22 @@ test('an existing game link (#/watch?m=…) still opens that game, as before', a
   await expect(sheet).toContainText('Alpha 選手2-1');
   await expect(sheet.getByTestId('score-sheet')).toBeVisible();
 });
+
+test('a finished set opens on its last leg played; with the live list failing, the 11 published sets stay listed', async ({ page }) => {
+  // 2026-11-16 Light League: ダブルス1 ended at Leg 1 and n01 also held a Leg 2 with no throw.
+  const control: SetMatchControl = { phase: 20, sets: 11, log: [], unstartedLegAfterEnd: true, liveListFails: true };
+  await openNow(page, control);
+  await page.getByTestId('now-single').first().click();
+  const items = page.getByTestId('set-item');
+  await expect(items).toHaveCount(11);
+  await expect(page.getByTestId('sets-error')).toContainText('進行中のセットの一覧を取得できませんでした');
+  await expect(page.getByTestId('live-leg')).toBeVisible();
+  await items.nth(1).click(); // ダブルス1: 3 legs played, a 4th never begun
+  await expect(shown(page)).toContainText('ダブルス1');
+  await expect(page.getByTestId('leg-sheet')).toContainText('Leg 3 のスコア表');
+  control.phase = 21; // the live score goes on while the list still fails
+  await page.getByTestId('back-to-live').click();
+  await expect(page.getByTestId('set-legs')).toHaveText('2 - 1');
+  await expect(items).toHaveCount(11);
+  await expect(page.getByTestId('set-page-title')).toHaveText('【デモリーグ】R3 Alpha Darts vs Bravo Arrows');
+});

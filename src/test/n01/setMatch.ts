@@ -14,24 +14,29 @@
  */
 
 export const SET_SCID = 'scid_Demo0Set_1800000000000';
-export const SET_LABELS = ['シングルス1', 'ダブルス1', 'ダブルス2', 'シングルス2'] as const;
+/** The first four are the default match; `sets: 11` plays all (the length of the 2026-11-16 Light League card). */
+const ALL_LABELS = ['シングルス1', 'ダブルス1', 'ダブルス2', 'シングルス2', 'トリオス1', 'シングルス3', 'ダブルス3', 'シングルス4', 'トリオス2', 'ダブルス4', 'ダブルス5'] as const;
+export const SET_LABELS = ALL_LABELS.slice(0, 4);
 const TITLE = '【デモリーグ】R3 Alpha Darts vs Bravo Arrows';
 const TEAMS = ['Alpha Darts', 'Bravo Arrows'] as const;
 /** Who won each leg of each set (the last leg is the one in play while the set is on). */
-const LEG_WINNERS: (0 | 1)[][] = [
+const WINNER_PATTERNS: (0 | 1)[][] = [
   [0, 0],
   [1, 0, 1],
   [0, 1, 0],
   [1, 1],
 ];
+const LEG_WINNERS = (set: number): (0 | 1)[] => WINNER_PATTERNS[set % WINNER_PATTERNS.length];
 const START_SEC = 1_800_000_000;
 const SET_SECONDS = 600;
 
 export const SET_COUNT = SET_LABELS.length;
 export const LAST_PHASE = SET_COUNT * 2 - 1;
+/** The last phase of a match of `count` sets. */
+export const lastPhaseOf = (count: number): number => count * 2 - 1;
 
 export const setMid = (set: number): string => `Dset${set}_${(START_SEC + set * SET_SECONDS) * 1000}`;
-export const setTitle = (set: number): string => `${TITLE} ${SET_LABELS[set]}`;
+export const setTitle = (set: number): string => `${TITLE} ${ALL_LABELS[set]}`;
 
 export interface SetMatchOptions {
   /** The list of sets (`match/list` by `scid`) is this many phases behind the live set. */
@@ -40,6 +45,17 @@ export interface SetMatchOptions {
   omitDetailOnNewSet?: boolean;
   /** Every `match/list` by `scid` fails (n01 unreachable for the list only). */
   listFails?: boolean;
+  /** Only the archive list by `scid` fails. */
+  archiveFails?: boolean;
+  /** Only the live list by `scid` (`live=1`) fails. */
+  liveListFails?: boolean;
+  /** How many sets the match has (default 4, at most 11). */
+  sets?: number;
+  /**
+   * A set that is over also holds the next leg, never started (no throw, not ended), as n01 did
+   * for the 2026-11-16 Light League ダブルス1 (Leg 2 with 0 throws after the set ended at Leg 1).
+   */
+  unstartedLegAfterEnd?: boolean;
 }
 
 type Throw = { p: 0 | 1; r: number; score: number; left: number; darts: number; finish?: number };
@@ -72,11 +88,11 @@ function legThrows(set: number, leg: number, winner: 0 | 1, ended: boolean): { t
 const setStateAt = (set: number, phase: number): 'future' | 'playing' | 'ended' => (phase < set * 2 ? 'future' : phase === set * 2 ? 'playing' : 'ended');
 const updateTimeOf = (set: number, phase: number): number => (START_SEC + set * SET_SECONDS + (setStateAt(set, phase) === 'ended' ? SET_SECONDS - 30 : 240)) * 1000;
 /** The set n01 says is the latest at a phase. */
-export const latestSet = (phase: number): number => Math.min(SET_COUNT - 1, Math.floor(phase / 2));
+export const latestSet = (phase: number, count = SET_COUNT): number => Math.min(count - 1, Math.floor(phase / 2));
 
 function legsOf(set: number, phase: number): Record<string, unknown>[] {
   const state = setStateAt(set, phase);
-  const winners = LEG_WINNERS[set];
+  const winners = LEG_WINNERS(set);
   return winners.map((winner, leg) => {
     const ended = state === 'ended' || leg < winners.length - 1;
     const built = legThrows(set, leg, winner, ended);
@@ -114,16 +130,16 @@ function setsWon(upTo: number, phase: number): [number, number] {
 }
 
 const players = (set: number): [string[], string[]] => {
-  const count = SET_LABELS[set].startsWith('ダブルス') ? 2 : 1;
+  const count = ALL_LABELS[set].startsWith('ダブルス') ? 2 : ALL_LABELS[set].startsWith('トリオス') ? 3 : 1;
   return [Array.from({ length: count }, (_, k) => `Alpha 選手${set + 1}-${k + 1}`), Array.from({ length: count }, (_, k) => `Bravo 選手${set + 1}-${k + 1}`)];
 };
 
 /** `match/list` row of a set (as n01 Live sends it: no tdid, players' names as the entries). */
-export function setRow(set: number, phase: number): Record<string, unknown> {
+export function setRow(set: number, phase: number, count = SET_COUNT): Record<string, unknown> {
   const state = setStateAt(set, phase);
   const legs = legsWon(set, phase);
   const won = setsWon(set, phase);
-  const last = state === 'ended' && set === SET_COUNT - 1;
+  const last = state === 'ended' && set === count - 1;
   const names = players(set);
   return {
     mid: setMid(set),
@@ -135,13 +151,13 @@ export function setRow(set: number, phase: number): Record<string, unknown> {
     endMatch: state === 'ended' ? 1 : 0,
     ...(last ? { endSchedule: 1 } : {}),
     currentSet: set,
-    currentLeg: LEG_WINNERS[set].length - 1,
+    currentLeg: LEG_WINNERS(set).length - 1,
     statsData: [0, 1].map((side) => ({ name: names[side].join(' / '), winSets: won[side], winLegs: legs[side], allScore: 400, allDarts: 30 })),
   };
 }
 
 /** `match/live` of a set (by `mid`, or the latest set by `scid`). */
-export function setLive(set: number, phase: number): Record<string, unknown> {
+export function setLive(set: number, phase: number, count = SET_COUNT): Record<string, unknown> {
   const state = setStateAt(set, phase);
   const legs = legsOf(set, phase);
   const current = legs[legs.length - 1];
@@ -156,7 +172,7 @@ export function setLive(set: number, phase: number): Record<string, unknown> {
     updateTime: updateTimeOf(set, phase),
     startTime: START_SEC + set * SET_SECONDS,
     end_match: state === 'ended' ? 1 : 0,
-    end_schedule: state === 'ended' && set === SET_COUNT - 1 ? 1 : 0,
+    end_schedule: state === 'ended' && set === count - 1 ? 1 : 0,
     format: { limit_leg: 2, limit_set: 0, draw_mode: 0, schedule: 0, start_score: 501 },
     show_sets: 1,
     sets: setsWon(set, phase),
@@ -174,45 +190,47 @@ export function setLive(set: number, phase: number): Record<string, unknown> {
 }
 
 /** `match/throws` of a set. */
-export function setThrows(set: number, phase: number): Record<string, unknown> {
+export function setThrows(set: number, phase: number, unstartedLegAfterEnd = false): Record<string, unknown> {
   const state = setStateAt(set, phase);
-  const legs = legsOf(set, phase);
+  const played = legsOf(set, phase);
+  const legs = state === 'ended' && unstartedLegAfterEnd ? [...played, { leg: played.length, first: (played.length + set) % 2, end: 0, winner: null, start: [501, 501], left: [501, 501], darts: [0, 0], throws: [] }] : played;
   return { result: 0, changed: 1, mid: setMid(set), match_type: '01', updateTime: updateTimeOf(set, phase), end_match: state === 'ended' ? 1 : 0, current_leg: legs.length - 1, leg_count: legs.length, legs: legsWon(set, phase), leg_data: legs };
 }
 
-const setOfMid = (mid: string | undefined): number => (mid ? Array.from({ length: SET_COUNT }, (_, set) => set).find((set) => setMid(set) === mid) ?? -1 : -1);
+const setOfMid = (mid: string | undefined, count: number): number => (mid ? Array.from({ length: count }, (_, set) => set).find((set) => setMid(set) === mid) ?? -1 : -1);
 
 /**
  * The reply to one n01 read at a phase, or `undefined` when the read is not about this match
  * (the caller answers it from elsewhere). Error replies are thrown as `Error('list down')`.
  */
 export function setMatchReply(operation: string, params: Record<string, string>, phase: number, options: SetMatchOptions = {}): unknown | undefined {
-  const latest = latestSet(phase);
+  const count = Math.min(ALL_LABELS.length, options.sets ?? SET_COUNT);
+  const latest = latestSet(phase, count);
   if (operation === 'match/list') {
     if (params.scid === SET_SCID) {
-      if (options.listFails) throw new Error('list down');
+      if (options.listFails || (params.live === '1' ? options.liveListFails : options.archiveFails)) throw new Error('list down');
       const seen = Math.max(0, phase - (options.listLag ?? 0));
-      const rows = Array.from({ length: SET_COUNT }, (_, set) => set).filter((set) => setStateAt(set, seen) !== 'future').map((set) => setRow(set, seen));
+      const rows = Array.from({ length: count }, (_, set) => set).filter((set) => setStateAt(set, seen) !== 'future').map((set) => setRow(set, seen, count));
       // The archive holds a set once it is over; a set in play is in the live list only.
       return { result: 0, list: rows.filter((row) => (params.live === '1' ? row.endMatch === 0 : row.endMatch === 1)) };
     }
     if (params.mid) {
-      const set = setOfMid(params.mid);
+      const set = setOfMid(params.mid, count);
       if (set < 0) return undefined;
       const state = setStateAt(set, phase);
       if (state === 'future') return { result: 0, list: [] };
-      const row = setRow(set, phase);
+      const row = setRow(set, phase, count);
       return { result: 0, list: (params.live === '1') === (state === 'playing') ? [row] : [] };
     }
     if (params.live === '1' && !params.tdid) {
-      return { result: 0, list: setStateAt(latest, phase) === 'playing' ? [setRow(latest, phase)] : [] };
+      return { result: 0, list: setStateAt(latest, phase) === 'playing' ? [setRow(latest, phase, count)] : [] };
     }
     return undefined;
   }
   if (operation === 'match/live') {
-    const set = params.scid === SET_SCID ? latest : setOfMid(params.mid);
+    const set = params.scid === SET_SCID ? latest : setOfMid(params.mid, count);
     if (set < 0 || (params.scid && params.scid !== SET_SCID)) return undefined;
-    const body = setLive(set, phase);
+    const body = setLive(set, phase, count);
     const since = params.since ? Number(params.since) : null;
     if (since !== null && since >= Number(body.updateTime)) return { result: 0, changed: 0, mid: body.mid, updateTime: body.updateTime };
     // n01 moving `scid` to the next set: a `since` read may name the new set and leave out the rest.
@@ -220,9 +238,9 @@ export function setMatchReply(operation: string, params: Record<string, string>,
     return body;
   }
   if (operation === 'match/throws') {
-    const set = setOfMid(params.mid);
+    const set = setOfMid(params.mid, count);
     if (set < 0) return undefined;
-    return setThrows(set, phase);
+    return setThrows(set, phase, options.unstartedLegAfterEnd);
   }
   return undefined;
 }

@@ -435,20 +435,16 @@ export class MatchesApi {
   }
 
   /**
-   * Every published set of one set-format match (`scid`, manual §2 match/list), oldest first:
-   * the archive (finished sets, and sets in progress of a competition) and the live list (a set
-   * in progress outside any competition reaches the archive only after it ends), kept once per
-   * `mid`. A polling read; with `currentSet` so the sets can be put in n01's order.
+   * The published sets of one set-format match (`scid`, manual §2 match/list) from one source:
+   * `archive` — finished sets (and sets in progress of a competition); `live` — the live list (a
+   * set in progress outside any competition reaches the archive only after it ends). The two are
+   * read and kept apart, so one failing never hides what the other brought; the caller merges
+   * them by `mid`. A polling read, with `currentSet` so the sets can be put in n01's order.
    */
-  async matchSets(scid: string, signal?: AbortSignal): Promise<GameRow[]> {
+  matchSetsFrom(scid: string, source: 'archive' | 'live', signal?: AbortSignal): Promise<GameRow[]> {
     const params: Record<string, string> = { scid, sort: 'startTime', order: 'asc', count: String(MATCH_ROWS_PAGE), fields: `${GAME_FIELDS},currentSet` };
-    const archived = await this.read('match/list', this.fresh('match/list', params, signal), parseGameRows);
-    const live = await this.read('match/list', this.fresh('match/list', { ...params, live: '1' }, signal), parseGameRows);
-    const byMid = new Map<string, GameRow>();
-    for (const game of archived.games) byMid.set(game.mid, game);
-    // The archive is the record once a set is in it; the live row only fills what it lacks.
-    for (const game of live.games) if (!byMid.has(game.mid)) byMid.set(game.mid, game);
-    return [...byMid.values()];
+    if (source === 'live') params.live = '1';
+    return this.read('match/list', this.fresh('match/list', params, signal), parseGameRows).then((result) => result.games);
   }
 
   /** `match/live` by card (`tmid`), set-format match (`scid`) or game (`mid`); `since` = the last `updateTime`. */

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { matchSetsView, orderSets, sharedTitle } from './matchSets';
+import { matchSetsView, orderSets, setNameAtEnd, sharedTitle } from './matchSets';
+import { lastPlayedLeg } from './ui/GameView';
+import { mergeSources } from './ui/SetMatchPage';
+import { parseThrows } from './parse';
+import { setThrows } from '../../test/n01/setMatch';
 import { parseGameRows, parseLive } from './parse';
 import type { LiveState } from './parse';
 import { LivePoller } from './livePoller';
@@ -18,13 +22,28 @@ describe('sets of one match (scid)', () => {
   it('names each set by the part of the title that differs', () => {
     expect(sharedTitle(['A vs B ダブルス1', 'A vs B ダブルス2'])).toBe('A vs B ');
     expect(sharedTitle(['only one'])).toBe('');
-    // The first set alone: its last word when it ends in a number, else 「第 N セット」.
+    // The first set alone: a set's name only where the title shows one, else 「第Nセット」.
     expect(matchSetsView(rows(0, [0]), null).sets[0].label).toBe('シングルス1');
     const plain = parseGameRows({ result: 0, list: [{ ...setRow(0, 0), title: 'Alpha vs Bravo' }] }).games;
-    expect(matchSetsView(plain, null).sets[0].label).toBe('第 1 セット');
+    expect(matchSetsView(plain, null).sets[0].label).toBe('第1セット');
     const view = matchSetsView(rows(3, [0, 1]), null);
     expect(view.sets.map((set) => set.label)).toEqual(['シングルス1', 'ダブルス1']);
     expect(view.matchTitle).toBe('【デモリーグ】R3 Alpha Darts vs Bravo Arrows');
+  });
+
+  it('a team name ending in a number stays in the match’s name; a real set name is taken off', () => {
+    const titled = (title: string) => matchSetsView(parseGameRows({ result: 0, list: [{ ...setRow(0, 0), title }] }).games, null);
+    const team2 = titled('Test League Team A vs Team2');
+    expect(team2.sets[0].label).toBe('第1セット');
+    expect(team2.matchTitle).toBe('Test League Team A vs Team2');
+    const both = titled('Test League Team A vs Team2 ダブルス1');
+    expect(both.sets[0].label).toBe('ダブルス1');
+    expect(both.matchTitle).toBe('Test League Team A vs Team2');
+    expect(setNameAtEnd('A vs B シングルス 2')).toBe('シングルス 2');
+    expect(setNameAtEnd('A vs B Set3')).toBe('Set3');
+    expect(setNameAtEnd('A vs B2')).toBe('');
+    expect(setNameAtEnd('ダブルス1')).toBe('');
+    expect(setNameAtEnd('Darts Club 2026')).toBe('');
   });
 
   it('keeps each set’s legs and result apart from the sets won so far', () => {
@@ -151,5 +170,33 @@ describe('LIVE MATCH: following a set-format match by scid', () => {
     expect(h.states.at(-1)).toMatchObject({ gameEnded: true, cardEnded: false, showSets: false });
     expect(h.statuses.at(-1)).toMatchObject({ kind: 'polling' });
     expect(h.timers).toHaveLength(1);
+  });
+});
+
+describe('the leg a finished set opens on', () => {
+  it('is the last leg played, not a leg n01 holds that never began (2026-11-16 ダブルス1)', () => {
+    const body = setThrows(1, 3, true); // ダブルス1 over after 3 legs, a 4th held with no throw
+    const reply = parseThrows(body);
+    expect(reply.legs.map((leg) => leg.throws.length > 0)).toEqual([true, true, true, false]);
+    expect(lastPlayedLeg(reply.legs)).toBe(2);
+    // A leg seen ended counts even without a throw recorded.
+    const ended = reply.legs.map((leg, index) => (index === 3 ? { ...leg, ended: true } : leg));
+    expect(lastPlayedLeg(ended)).toBe(3);
+    expect(lastPlayedLeg([])).toBeNull();
+  });
+});
+
+describe('the two lists of sets (archive, live)', () => {
+  it('merges by mid, the archive first; null only while neither was read; [] is a read', () => {
+    const a = rows(5, [0, 1]);
+    const b = rows(4, [1, 2]);
+    expect(mergeSources(a, b)!.map((row) => [row.mid, row.finished])).toEqual([
+      [setMid(0), true],
+      [setMid(1), true],
+      [setMid(2), false],
+    ]);
+    expect(mergeSources(null, null)).toBeNull();
+    expect(mergeSources([], null)).toEqual([]);
+    expect(mergeSources(null, b)!.length).toBe(2);
   });
 });
