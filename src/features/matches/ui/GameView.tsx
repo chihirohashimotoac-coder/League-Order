@@ -7,7 +7,7 @@ import { useGameLegs } from './useGameLegs';
 import { gameStats } from '../gameStats';
 import type { SideStats } from '../gameStats';
 import { CricketGrid, ZeroOneGrid } from './ScoreGrid';
-import { FinishChances, RaceChart } from './LegCharts';
+import { FinishChances, RaceChart, hasRaceChart } from './LegCharts';
 import { LegsStatusLine } from './LegsStatusLine';
 import { legDarts, shortName } from './legLabel';
 
@@ -83,6 +83,14 @@ export function GameView({
   const leg = all.find((entry) => entry.index === shown) ?? null;
   // 終了したゲームで、最後にプレイされた Leg より後に n01 が残している投擲のない Leg は「未実施」。
   const lastPlayed = finished ? lastPlayedLeg(all) : null;
+  // 推移チャートは1つだけ。線が引ける Leg (RaceChart の描画条件) のときだけ、見出しと一緒に描く。
+  const chart =
+    !cricket && leg && hasRaceChart(leg, null) ? (
+      <>
+        <h4 className="gv-sheet-title">Leg {leg.index + 1} の残り点の推移</h4>
+        <RaceChart leg={leg} startScore={null} order={[at(0), at(1)]} names={names} />
+      </>
+    ) : null;
   const unplayed = (entry: ThrowLeg): boolean => finished && !entry.ended && entry.throws.length === 0 && (lastPlayed === null || entry.index > lastPlayed);
 
   // Figures are computed from the whole game only: until it is read, none are shown.
@@ -180,6 +188,8 @@ export function GameView({
             <p className="muted small-text">まだ投げた記録がありません。</p>
           )}
           {leg ? <ScoreSheet leg={leg} cricket={cricket} names={names} at={at} mark={focus && focus.leg === leg.index ? { side: focus.n01Side, round: focus.round } : null} /> : null}
+          {/* 進行中のゲーム: チャートはスコア表の直後。 */}
+          {!finished ? chart : null}
         </div>
         <div className="gv-figures">
           {!history.complete ? <LegsStatusLine history={history} /> : null}
@@ -223,15 +233,8 @@ export function GameView({
           ) : null}
           {!cricket && history.complete ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
         </div>
-        {/* 推移チャートは1つだけ描く。DOM では統計・上がり圏の後に置き、スマホの表示順と読み上げ順を
-            「Leg 選択 → スコア表 → 統計 → 上がり圏 → チャート」にそろえる。PC ではグリッドで
-            スコア表の列 (左) に戻す。 */}
-        {!cricket && leg ? (
-          <div className="gv-chart">
-            <h4 className="gv-sheet-title">Leg {leg.index + 1} の残り点の推移</h4>
-            <RaceChart leg={leg} startScore={null} order={[at(0), at(1)]} names={names} />
-          </div>
-        ) : null}
+        {/* 終了したゲーム: チャートは統計・上がり圏の後 (スマホの表示順・読み上げ順。PC はグリッドで左列へ)。 */}
+        {finished && chart ? <div className="gv-chart">{chart}</div> : null}
       </div>
     </div>
   );

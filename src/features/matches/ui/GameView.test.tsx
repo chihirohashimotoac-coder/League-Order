@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MatchesApi } from '../api';
 import type { AnalyticsTransport } from '../../analytics/api/readApi';
 import { RequestGovernor } from '../governor';
 import { GameView } from './GameView';
 
 /**
- * 終了したゲームの Leg チップの状態表記と、推移チャートの位置 (統計・上がり圏の後)。
+ * 終了したゲームの Leg チップの状態表記と、推移チャートの見出し・位置 (終了したゲームは統計・
+ * 上がり圏の後、進行中のゲームはスコア表の直後)。
  * n01 の記録 (`match/throws`) はここで作った架空のもの。
  */
 
@@ -61,5 +62,35 @@ describe('GameView (終了したゲーム)', () => {
     );
     expect(order).toEqual(['leg-chips', 'leg-sheet', 'stats', 'finish-chances', 'race-chart']);
     expect(screen.getAllByTestId('race-chart')).toHaveLength(1);
+  });
+
+  it('未実施の Leg を選ぶと見出しもチャートも描かず、投擲のある Leg に戻ると1つずつ描く', async () => {
+    const { container } = render(<GameView api={apiOf(reply([leg(0, 0), unstarted(1)]))} mid="g1" cricket={false} finished names={['A', 'B']} flip={false} openPlayedLeg />);
+    await flush();
+    const heading = () => [...container.querySelectorAll('h4')].filter((h) => h.textContent?.includes('残り点の推移'));
+    expect(heading()).toHaveLength(1);
+    expect(screen.getAllByTestId('race-chart')).toHaveLength(1);
+    const chips = within(screen.getByTestId('leg-chips')).getAllByRole('tab');
+    fireEvent.click(chips[1]); // Leg 2: 未実施
+    expect(chips[1].textContent).toBe('Leg 2未実施');
+    expect(heading()).toHaveLength(0);
+    expect(screen.queryByTestId('race-chart')).toBeNull();
+    expect(container.querySelector('.gv-chart')).toBeNull();
+    fireEvent.click(chips[0]);
+    expect(heading().map((h) => h.textContent)).toEqual(['Leg 1 の残り点の推移']);
+    expect(screen.getAllByTestId('race-chart')).toHaveLength(1);
+  });
+});
+
+describe('GameView (進行中のゲーム)', () => {
+  it('推移チャートはスコア表の直後 (統計より前) に1つだけ置く', async () => {
+    const { container } = render(<GameView api={apiOf(reply([leg(0, 0), leg(1, 0)]))} mid="g1" cricket={false} finished={false} names={['A', 'B']} flip={false} />);
+    await flush();
+    const order = [...container.querySelectorAll('[data-testid="leg-chips"], [data-testid="leg-sheet"], [data-testid="race-chart"], table.gv-compare, [data-testid="finish-chances"]')].map(
+      (el) => el.getAttribute('data-testid') ?? 'stats',
+    );
+    expect(order).toEqual(['leg-chips', 'leg-sheet', 'race-chart', 'stats', 'finish-chances']);
+    expect(screen.getAllByTestId('race-chart')).toHaveLength(1);
+    expect(container.querySelector('.gv-chart')).toBeNull();
   });
 });
