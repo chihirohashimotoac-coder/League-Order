@@ -29,6 +29,17 @@ describe('sets of one match (scid)', () => {
     expect(view.sets.map((set) => set.mid)).toEqual([setMid(0), setMid(1), setMid(2)]);
   });
 
+  it('positions and start times missing here and there: the same order whatever order the rows come in', () => {
+    const base = rows(6, [0])[0];
+    const a = { ...base, mid: 'A', currentSet: 0, startTime: null };
+    const b = { ...base, mid: 'B', currentSet: undefined, startTime: 20 };
+    const c = { ...base, mid: 'C', currentSet: 1, startTime: 10 };
+    const d = { ...base, mid: 'D', currentSet: undefined, startTime: null };
+    const orders = [[a, b, c, d], [c, b, a, d], [b, a, d, c], [d, c, a, b], [b, d, c, a]].map((input) => orderSets(input).map((row) => row.mid).join(''));
+    expect(new Set(orders).size).toBe(1);
+    expect(orders[0]).toBe('ACBD');
+  });
+
   it('names each set by the part of the title that differs', () => {
     expect(sharedTitle(['A vs B ダブルス1', 'A vs B ダブルス2'])).toBe('A vs B ');
     expect(sharedTitle(['only one'])).toBe('');

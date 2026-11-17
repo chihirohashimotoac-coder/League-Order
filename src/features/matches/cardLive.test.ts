@@ -49,4 +49,21 @@ describe('a card in progress, as its live states say it is now', () => {
     const card = cardWithLive(listed(), new Map([['tm01', old]]), sg01);
     expect(card.games.find((game) => game.slot.schid === 'tm01')).toMatchObject({ state: 'finished', winner: 0, legs: [1, 0] });
   });
+
+  it('a game the list still has in progress is over once the card moved on, down to its row (its details open as a finished game)', () => {
+    const card = cardWithLive(listed(), new Map([['sg02', sg02(false)]]), sg02(false));
+    const singles1 = card.games.find((game) => game.slot.schid === 'sg01')!;
+    expect(singles1.state).toBe('finished');
+    expect(singles1.game?.finished).toBe(true);
+  });
+
+  it('the list newer than a live state kept: a replay of the slot, or the same game further on, is not taken back', () => {
+    const base = listed();
+    const old = live({ mid: 'c003_sg01_old', schid: 'sg01', legs: [0, 1], updateTime: 1_799_000_000_000 });
+    const replay = cardWithLive(base, new Map([['sg01', old]]), old);
+    expect(replay.games.find((game) => game.slot.schid === 'sg01')?.game?.mid).toBe('c003_sg01');
+    const behind = live({ mid: 'c003_sg01', schid: 'sg01', legs: [0, 0], updateTime: 1_800_000_000_000 });
+    const same = cardWithLive(base, new Map([['sg01', behind]]), behind);
+    expect(same.games.find((game) => game.slot.schid === 'sg01')).toMatchObject({ state: 'live', legs: [1, 1] });
+  });
 });

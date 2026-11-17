@@ -44,20 +44,27 @@ export interface MatchSetsView {
 const sideName = (side: { name: string; members: string[] }): string => side.members.join(' / ') || side.name;
 
 /**
- * n01's order: the set position, then the start time, then the id (never the list's order). A set
- * with no start time (known from the live state only) comes after the sets that have one: it is
- * the one n01 moved on to.
+ * n01's order: the set position, then the start time, then the id (never the list's order). Each
+ * row gets its place up front, so the order is the same whatever order the rows come in: a set
+ * with no position goes just after the last set with one that started no later than it, and a
+ * set with neither (known from the live state only) after every set that has a start time.
  */
 export function orderSets(rows: readonly GameRow[]): GameRow[] {
-  return [...rows].sort((a, b) => {
-    const pa = a.currentSet ?? null;
-    const pb = b.currentSet ?? null;
-    if (pa !== null && pb !== null && pa !== pb) return pa - pb;
-    const sa = a.startTime ?? Number.POSITIVE_INFINITY;
-    const sb = b.startTime ?? Number.POSITIVE_INFINITY;
-    if (sa !== sb) return sa - sb;
-    return a.mid < b.mid ? -1 : a.mid > b.mid ? 1 : 0;
+  const anchors = rows.filter((row) => row.currentSet != null && row.startTime != null);
+  const place = (row: GameRow): number => {
+    if (row.currentSet != null) return row.currentSet;
+    if (row.startTime == null) return Number.POSITIVE_INFINITY;
+    const before = anchors.filter((anchor) => anchor.startTime! <= row.startTime!).map((anchor) => anchor.currentSet!);
+    return (before.length ? Math.max(...before) : -1) + 0.5;
+  };
+  const start = (row: GameRow): number => row.startTime ?? Number.POSITIVE_INFINITY;
+  const keyed = rows.map((row) => ({ row, place: place(row), start: start(row) }));
+  keyed.sort((a, b) => {
+    if (a.place !== b.place) return a.place < b.place ? -1 : 1;
+    if (a.start !== b.start) return a.start < b.start ? -1 : 1;
+    return a.row.mid < b.row.mid ? -1 : a.row.mid > b.row.mid ? 1 : 0;
   });
+  return keyed.map((entry) => entry.row);
 }
 
 /** The longest start shared by every title, cut back to a word boundary. */

@@ -159,11 +159,16 @@ export function cardWithLive(card: MatchCard, states: ReadonlyMap<string, LiveSt
   const games = card.games.map((entry): CardGame => {
     const state = states.get(entry.slot.schid);
     const row = entry.game;
-    const ahead = state !== undefined && (!row || row.mid !== state.mid || !row.finished || row.updateTime === null || state.updateTime > row.updateTime);
+    // The live state is shown when it is newer than the list's row: a later update, or (the same
+    // game) its end the list does not have yet. A row of another game (a replay of the slot) is
+    // kept when it is the newer one.
+    const ahead =
+      state !== undefined &&
+      (!row || row.updateTime === null || state.updateTime > row.updateTime || (row.mid === state.mid && state.gameEnded && !row.finished));
     // Over: n01 said so, or it has moved on from this game, or the card is over.
     const over = (mid: string): boolean => latest.cardEnded || latest.mid !== mid;
     if (!ahead || !state) {
-      return entry.state === 'live' && row && over(row.mid) ? { ...entry, state: 'finished' } : entry;
+      return entry.state === 'live' && row && over(row.mid) ? { ...entry, state: 'finished', game: { ...row, finished: true } } : entry;
     }
     const flip = state.sides[0].teamId === card.teams[1].id;
     const pick = <T>(pair: readonly [T, T]): [T, T] => (flip ? [pair[1], pair[0]] : [pair[0], pair[1]]);
