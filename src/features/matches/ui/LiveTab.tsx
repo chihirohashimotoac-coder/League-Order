@@ -15,6 +15,8 @@ import { formatClock, seasonStatsSource, useFollowed, useTodayBoard } from './us
 import { GameView } from './GameView';
 import { CardTrail, shortSlot } from './CardTrail';
 import { LiveSheet } from './LiveSheet';
+import { LiveReturn, UnitChips, UnitHead } from './MatchParts';
+import type { MatchUnit } from './MatchParts';
 import { liveStatusText } from './MatchSheet';
 import type { PlayerLevel } from './LiveSheet';
 import { usePlayerStats } from './useMatchContext';
@@ -543,58 +545,29 @@ function FocusCard({
         </strong>
         <span className={registered.includes(card.teams[1].id) ? 'own' : ''}>{names[1]}</span>
       </header>
-      <ol className="game-tabs" aria-label="ゲームの流れ" data-testid="game-tabs">
-        {schedule.map((slot) => {
+      <UnitChips
+        label="ゲームの流れ"
+        names={names}
+        selected={selected}
+        onPick={(schid) => setPicked(schid === liveSchid ? null : schid)}
+        units={schedule.map((slot): MatchUnit => {
           const game = bySchid.get(slot.schid);
           const winner = game ? gameWinner(game) : null;
-          const cardWinner = game && winner !== null ? (flipOf(game) ? 1 - winner : winner) : null;
+          const cardWinner = game && winner !== null ? ((flipOf(game) ? 1 - winner : winner) as 0 | 1) : null;
           // Which game is live is the poller's word (1.5 s) once it has one: the board's rows are a
           // few seconds older, and right after a game ends they still call the previous game
           // unfinished and do not hold the next one yet.
           const isLive = liveSchid !== null ? slot.schid === liveSchid : !!game && !game.finished;
-          const legs = game ? (flipOf(game) ? [game.sides[1].legsWon ?? 0, game.sides[0].legsWon ?? 0] : [game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0]) : null;
-          return (
-            <li key={slot.schid}>
-              <button
-                type="button"
-                className={`game-tab${cardWinner === 0 ? ' a' : cardWinner === 1 ? ' b' : ''}${isLive ? ' is-live' : ''}${!game && !isLive ? ' todo' : ''}`}
-                aria-pressed={selected === slot.schid}
-                disabled={!game && !isLive}
-                onClick={() => setPicked(isLive ? null : slot.schid)}
-                title={slot.label}
-                data-testid="game-tab"
-              >
-                <span className="n" aria-hidden="true">
-                  {shortSlot(slot.label)}
-                </span>
-                <span className="r" aria-hidden="true">
-                  {isLive ? <span className="live-tag">LIVE</span> : legs ? (
-                    <>
-                      <b className={cardWinner === 0 ? 'win' : undefined}>{legs[0]}</b>-<b className={cardWinner === 1 ? 'win' : undefined}>{legs[1]}</b>
-                    </>
-                  ) : (
-                    '—'
-                  )}
-                </span>
-                <span className="sr-only">
-                  {slot.label} {cardWinner === 0 ? `${names[0]} 勝ち` : cardWinner === 1 ? `${names[1]} 勝ち` : isLive ? '進行中' : '未実施'}
-                  {legs && !isLive ? ` ${legs[0]} 対 ${legs[1]}` : ''}
-                </span>
-              </button>
-            </li>
-          );
+          const legs: [number, number] | null = game ? (flipOf(game) ? [game.sides[1].legsWon ?? 0, game.sides[0].legsWon ?? 0] : [game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0]) : null;
+          return { key: slot.schid, label: slot.label, short: shortSlot(slot.label), legs, winner: cardWinner, live: isLive, playable: !!game || isLive };
         })}
-      </ol>
+      />
 
       {live && !live.gameEnded && !showsLive ? (
-        <button type="button" className="live-return" onClick={() => setPicked(null)} data-testid="back-to-live">
-          <span className="live-tag">LIVE</span>
-          <span className="grow">
-            {liveLabel} ・ Leg {(live.leg?.index ?? live.currentLeg ?? 0) + 1} ・ {live.legs[0]}-{live.legs[1]}
-            {live.leg?.left ? ` ・ 残り ${live.leg.left[0]} / ${live.leg.left[1]}` : ''}
-          </span>
-          <span className="go">ライブに戻る</span>
-        </button>
+        <LiveReturn
+          onReturn={() => setPicked(null)}
+          text={`${liveLabel} ・ Leg ${(live.leg?.index ?? live.currentLeg ?? 0) + 1} ・ ${live.legs[0]}-${live.legs[1]}${live.leg?.left ? ` ・ 残り ${live.leg.left[0]} / ${live.leg.left[1]}` : ''}`}
+        />
       ) : null}
 
       {live && !live.gameEnded ? (
@@ -613,15 +586,19 @@ function FocusCard({
 
       {selectedGame && !showsLive ? (
         <section className="game-block" aria-label={slotLabel(data.season, selectedGame.schid)} data-testid="game-block">
-          <h3 className="game-block-head">
-            {slotLabel(data.season, selectedGame.schid)}
-            <span className={`tag state-${selectedGame.finished ? 'official' : 'live'}`}>{selectedGame.finished ? '終了' : '進行中'}</span>
-          </h3>
-          <p className="small-text game-block-people">
-            <span>{(flipOf(selectedGame) ? selectedGame.sides[1] : selectedGame.sides[0]).members.map((m) => m.name).join(' / ') || names[0]}</span>
-            <span className="muted">vs</span>
-            <span>{(flipOf(selectedGame) ? selectedGame.sides[0] : selectedGame.sides[1]).members.map((m) => m.name).join(' / ') || names[1]}</span>
-          </p>
+          <UnitHead
+            label={slotLabel(data.season, selectedGame.schid)}
+            state={selectedGame.finished ? 'finished' : 'live'}
+            sides={[
+              (flipOf(selectedGame) ? selectedGame.sides[1] : selectedGame.sides[0]).members.map((m) => m.name).join(' / ') || names[0],
+              (flipOf(selectedGame) ? selectedGame.sides[0] : selectedGame.sides[1]).members.map((m) => m.name).join(' / ') || names[1],
+            ]}
+            legs={flipOf(selectedGame) ? [selectedGame.sides[1].legsWon, selectedGame.sides[0].legsWon] : [selectedGame.sides[0].legsWon, selectedGame.sides[1].legsWon]}
+            winner={(() => {
+              const w = gameWinner(selectedGame);
+              return w === null ? null : ((flipOf(selectedGame) ? 1 - w : w) as 0 | 1);
+            })()}
+          />
           <GameView
             key={selectedGame.mid}
             api={api}
@@ -631,6 +608,7 @@ function FocusCard({
             names={names}
             flip={flipOf(selectedGame)}
             liveLeg={live && live.mid === selectedGame.mid && !live.gameEnded ? live.leg : null}
+            openPlayedLeg
           />
         </section>
       ) : null}

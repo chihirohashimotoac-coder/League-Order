@@ -1,6 +1,7 @@
 import { N01Error } from '../integrations/n01/client';
 import type { N01Request } from '../integrations/n01/endpoints';
 import { allFixtureDatasets, fixtureResponse } from '../test/n01/transport';
+import { LAST_PHASE, setMatchReply } from '../test/n01/setMatch';
 
 /**
  * Review-preview only (never in the production build): an n01 made of the repository's
@@ -381,7 +382,26 @@ function todayRows(): Record<string, unknown>[] {
   return LIVE ? [...DONE_WINNERS.map((_, slot) => doneRow(slot)), liveRow(Date.now())!] : [];
 }
 
+/**
+ * The made-up set-format match (src/test/n01/setMatch.ts) of 「いま n01 で進行中 → 個別の試合」: a
+ * phase every SET_PHASE_MS — a set in play, then over and the next awaited — so a reviewer sees
+ * the page move to the next set by itself and can open the earlier ones. After the match ends
+ * it stays ended for a while, then starts again.
+ */
+const SET_PHASE_MS = 25_000;
+function setPhase(now: number): number {
+  return Math.min(LAST_PHASE, Math.floor((now - START) / SET_PHASE_MS) % (LAST_PHASE + 3));
+}
+
 function respond(operation: string, params: Record<string, string>): unknown | undefined {
+  const set = setMatchReply(operation, params, setPhase(Date.now()));
+  if (set !== undefined) {
+    // The live list holds the demo card too.
+    if (operation === 'match/list' && params.live === '1' && !params.tdid && !params.mid && !params.scid) {
+      return { result: 0, list: [...((set as { list: unknown[] }).list ?? []), ...todayRows().filter((row) => row.endMatch === 0)] };
+    }
+    return set;
+  }
   // Everything in progress on n01 / one game by id: the demo card's games.
   if (operation === 'match/list' && !params.tdid && params.live === '1' && !params.mid) return { result: 0, list: todayRows().filter((row) => row.endMatch === 0) };
   if (operation === 'match/list' && params.mid && !params.tdid) {

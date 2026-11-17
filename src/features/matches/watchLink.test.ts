@@ -48,3 +48,13 @@ describe('shortTitles', () => {
     expect(map.get('2026 ATDO 3rd')).toBe('2026 ATDO 3rd');
   });
 });
+
+describe('watch link: a game opened from 「いま n01 で進行中」', () => {
+  it('keeps the now flag with the game, and drops anything but 1', () => {
+    const link = parseWatchLink(formatWatchLink({ now: '1', mid: 'Dset1_1800000600000' }));
+    expect(link).toEqual({ now: '1', mid: 'Dset1_1800000600000' });
+    expect(parseWatchLink('#/watch?n=2&m=abc')).toEqual({ mid: 'abc' });
+    // An existing game link (without the flag) is unchanged.
+    expect(parseWatchLink('#/watch?m=abc')).toEqual({ mid: 'abc' });
+  });
+});

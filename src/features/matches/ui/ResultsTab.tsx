@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/icons';
-import { SPLIT_QUERY, useMediaQuery } from '../../../components/useMediaQuery';
 import { useAppStore } from '../../../state/appStore';
 import type { MatchesApi } from '../api';
 import type { CardGame, MatchCard } from '../cards';
-import { CARD_STATE_LABELS, cardScore, slotKindLabel } from '../cards';
+import { CARD_STATE_LABELS, cardScore, cardWithLive, liveSuperseded, slotKindLabel } from '../cards';
+import type { LiveState } from '../parse';
 import { fixtureDate, slotsFor } from '../parse';
 import { checkReproduction, projectStandings } from '../standings';
 import { headToHead, linkOrder, percent, teamProfile } from '../insights';
@@ -12,10 +12,14 @@ import type { WatchLink } from '../watchLink';
 import { closeWatchLink, pushWatchLink, replaceWatchLink, watchLinkUrl } from '../watchLink';
 import type { SeasonData } from './useMatchContext';
 import { formatClock, formatRate } from './useMatchContext';
+import { LiveReturn, MatchBar, MatchHead, UnitChips, UnitHead, useCardLive } from './MatchParts';
+import { LiveSheet } from './LiveSheet';
+import { liveStatusText } from './MatchSheet';
+import type { MatchUnit } from './MatchParts';
+import { shortSlot } from './CardTrail';
 import { GameView } from './GameView';
 import { Highlights } from './Highlights';
 import { CardTrail } from './CardTrail';
-import { CopyLink } from './CopyLink';
 import { outlookTrail, slotChances } from '../cardTrail';
 import type { HighlightFocus } from './Highlights';
 
@@ -103,7 +107,7 @@ export function ResultsTab({
   };
   const back = (): void => closeWatchLink(Object.keys(base).length ? base : null);
 
-  if (card) return <MatchCenter card={card} data={data} registered={registered} api={api} onBack={back} onTeam={onTeam} link={link} base={base} />;
+  if (card) return <MatchCenter key={card.key} card={card} data={data} registered={registered} api={api} onBack={back} onTeam={onTeam} link={link} base={base} />;
 
   const section = (round: Round, id?: string): React.JSX.Element => (
     <section key={round.title} className="round" id={id}>
@@ -208,8 +212,13 @@ function CardRow({ card, registered, onOpen }: { card: MatchCard; registered: st
   );
 }
 
+/** The name of a card's game by its slot id (「シングルス1」), the id itself when unknown. */
+function slotLabelOf(card: MatchCard, schid: string | null): string {
+  return card.games.find((entry) => entry.slot.schid === schid)?.slot.label ?? schid ?? '';
+}
+
 function MatchCenter({
-  card,
+  card: listed,
   data,
   registered,
   api,
@@ -227,21 +236,38 @@ function MatchCenter({
   link: WatchLink | null;
   base: WatchLink;
 }): React.JSX.Element {
-  // A large screen: the games on the left, the chosen game (legs, score sheet, figures) beside
-  // them. A phone: the chosen game opens under its row and is brought to the top of the screen.
-  const wide = useMediaQuery(SPLIT_QUERY);
+  // A card in progress is followed as on the live tab (match/live by tmid): the game being played
+  // shows its live scoreboard, and an earlier game opened meanwhile offers ライブに戻る. What the
+  // live states say (the next game, a game or the card ending, n01's score) is laid over the
+  // season's list, which is read less often: the card never goes back to the list's older state.
+  // A late reply of a game whose slot the list shows replayed (another mid, older than the list's
+  // row) is dropped by the poller itself: not shown, not used as `since`, not taken as the end.
+  const { live: polled, status } = useCardLive(api, listed.state === 'live' ? listed.tmid : null, (state) => !liveSuperseded(listed, state));
+  const [states, setStates] = useState<ReadonlyMap<string, LiveState>>(() => new Map());
+  const [statesFrom, setStatesFrom] = useState<LiveState | null>(null);
+  if (polled !== statesFrom) {
+    setStatesFrom(polled);
+    if (polled?.schid) setStates((map) => (map.get(polled.schid!) === polled ? map : new Map(map).set(polled.schid!, polled)));
+  }
+  const card = useMemo(() => cardWithLive(listed, states, polled), [listed, states, polled]);
+  // A late live state of a game the list has gone past (its slot replayed) is neither shown nor
+  // followed: the list's newer game is.
+  const live = polled && !liveSuperseded(listed, polled) ? polled : null;
+  // The same view as every other match (MatchParts): the games as chips on top, the chosen game
+  // under them — on a phone and on a PC alike. Opened on the game a link names, else the game
+  // being played, else the last one played.
   const playable = card.games.filter((entry) => entry.game);
   const linked = link?.game && playable.some((entry) => entry.slot.schid === link.game) ? link.game : null;
-  const game = linked ?? (wide ? (playable[0]?.slot.schid ?? null) : null);
+  const liveSchid = live && !live.gameEnded && !live.cardEnded ? live.schid : null;
+  // Followed (no game in the link): the game the live state is about — being played, or the last
+  // one played once it is over — else the game the list has in progress, else the last played.
+  const followed = live?.schid && playable.some((entry) => entry.slot.schid === live.schid) ? live.schid : null;
+  const fallback = liveSchid ?? followed ?? (playable.find((entry) => entry.state === 'live') ?? playable[playable.length - 1])?.slot.schid ?? null;
+  const game = linked ?? fallback;
   const [focus, setFocus] = useState<HighlightFocus | null>(null);
   const names: [string, string] = [card.teams[0].name, card.teams[1].name];
   const here: WatchLink = { ...base, card: card.key };
   const setGame = (schid: string | null): void => replaceWatchLink(schid ? { ...here, game: schid } : here);
-  const reveal = (schid: string): void => {
-    if (wide) return;
-    const behavior: ScrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
-    requestAnimationFrame(() => document.getElementById(`game-row-${schid}`)?.scrollIntoView({ block: 'start', behavior }));
-  };
   const openHighlight = (next: HighlightFocus): void => {
     setGame(next.schid);
     setFocus(next);
@@ -255,118 +281,93 @@ function MatchCenter({
     };
     requestAnimationFrame(() => show(0));
   };
-  // A link that names a game opens with that game in view.
-  const linkedOnOpen = useRef(linked);
-  useEffect(() => {
-    if (linkedOnOpen.current) reveal(linkedOnOpen.current);
-    // Once, when the card opens.
-  }, []);
   const score = cardScore(card);
-  const panel = (entry: CardGame): React.JSX.Element => (
-    <section className="game-panel" id={`game-${entry.slot.schid}`} aria-label={`${entry.slot.label} の詳細`} data-testid="game-panel">
-      {wide ? (
-        <header className="game-panel-head">
-          <span className="slot">
-            {entry.slot.label} <span className="muted small-text">{slotKindLabel(entry.slot)}</span>
-          </span>
-          <span className="duel">
-            <span className={entry.winner === 0 ? 'won' : ''}>{entry.members[0].join(' / ') || names[0]}</span>
-            <strong>
-              {entry.legs[0] ?? '—'} - {entry.legs[1] ?? '—'}
-            </strong>
-            <span className={entry.winner === 1 ? 'won' : ''}>{entry.members[1].join(' / ') || names[1]}</span>
-          </span>
-        </header>
-      ) : null}
-      <GameView
-        key={focus?.schid === entry.slot.schid ? `${focus.leg}:${focus.n01Side}:${focus.round}` : 'game'}
-        api={api}
-        mid={entry.game!.mid}
-        cricket={entry.slot.matchType === 'cricket'}
-        finished={entry.game!.finished}
-        names={[entry.members[0].join(' / ') || names[0], entry.members[1].join(' / ') || names[1]]}
-        flip={entry.flip}
-        focus={focus?.schid === entry.slot.schid ? focus : null}
-      />
-    </section>
-  );
   const chosen = game ? (playable.find((entry) => entry.slot.schid === game) ?? null) : null;
+  const showsLive = live !== null && !live.gameEnded && game === liveSchid;
+  const side = (entry: CardGame, index: 0 | 1): React.JSX.Element => (
+    <>
+      {entry.members[index].join(' / ') || names[index]}
+      {entry.rate[index] !== null ? <span className="rate muted small-text">{formatRate(entry.rate[index])}</span> : null}
+    </>
+  );
   return (
     <div className="match-center" data-testid="match-detail">
-      <div className="match-center-bar">
-        <button type="button" className="btn ghost small" onClick={onBack}>
-          <Icon name="chevronLeft" size={16} /> 一覧に戻る
-        </button>
-        <CopyLink url={watchLinkUrl(game && linked ? { ...here, game } : here)} />
-      </div>
-      <header className="focus-head">
-        <button type="button" className={`linklike${registered.includes(card.teams[0].id) ? ' own' : ''}`} onClick={() => onTeam(card.teams[0].id)}>
-          {names[0]}
-        </button>
-        <strong>{score ? `${score.score[0]} - ${score.score[1]}` : 'vs'}</strong>
-        <button type="button" className={`linklike${registered.includes(card.teams[1].id) ? ' own' : ''}`} onClick={() => onTeam(card.teams[1].id)}>
-          {names[1]}
-        </button>
-      </header>
-      <p className="muted small-text center">
-        {card.title} ・ {card.divisionTitle} ・ {card.official ? '公式結果 (n01)' : CARD_STATE_LABELS[card.state]}
-        {card.officialAvg[0] !== null ? ` ・ 平均 ${formatRate(card.officialAvg[0])} / ${formatRate(card.officialAvg[1])}` : ''} ・ 更新 {formatClock(card.updatedAt)}
-        {data.season.url ? (
+      <MatchBar backLabel="一覧に戻る" onBack={onBack} link={watchLinkUrl(game && linked ? { ...here, game } : here)} />
+      <MatchHead
+        sides={[
+          <button key="a" type="button" className={`linklike${registered.includes(card.teams[0].id) ? ' own' : ''}`} onClick={() => onTeam(card.teams[0].id)}>
+            {names[0]}
+          </button>,
+          <button key="b" type="button" className={`linklike${registered.includes(card.teams[1].id) ? ' own' : ''}`} onClick={() => onTeam(card.teams[1].id)}>
+            {names[1]}
+          </button>,
+        ]}
+        score={score ? `${score.score[0]} - ${score.score[1]}` : 'vs'}
+        note={
           <>
-            {' ・ '}
-            <a href={data.season.url} target="_blank" rel="noreferrer noopener">
-              n01 のシーズンページを開く
-            </a>
+            {card.title} ・ {card.divisionTitle} ・ {card.official ? '公式結果 (n01)' : CARD_STATE_LABELS[card.state]}
+            {card.officialAvg[0] !== null ? ` ・ 平均 ${formatRate(card.officialAvg[0])} / ${formatRate(card.officialAvg[1])}` : ''} ・ 更新 {formatClock(card.updatedAt)}
+            {data.season.url ? (
+              <>
+                {' ・ '}
+                <a href={data.season.url} target="_blank" rel="noreferrer noopener">
+                  n01 のシーズンページを開く
+                </a>
+              </>
+            ) : null}
           </>
-        ) : null}
-      </p>
-      <div className={`match-body${wide ? ' is-split' : ''}`}>
-        <ul className="game-list" aria-label="ゲーム">
-          {card.games.map((entry) => {
-            const selected = game === entry.slot.schid;
-            return (
-              <li key={entry.slot.schid} id={`game-row-${entry.slot.schid}`}>
-                <button
-                  type="button"
-                  className="game-row"
-                  aria-expanded={selected}
-                  aria-controls={selected ? `game-${entry.slot.schid}` : undefined}
-                  disabled={!entry.game}
-                  onClick={() => {
-                    setFocus(null);
-                    if (selected && !wide) {
-                      setGame(null);
-                      return;
-                    }
-                    setGame(entry.slot.schid);
-                    reveal(entry.slot.schid);
-                  }}
-                >
-                  <span className="game-name">
-                    {entry.slot.label}
-                    <span className="muted small-text"> {slotKindLabel(entry.slot)}</span>
-                  </span>
-                  <span className={`side${entry.winner === 0 ? ' won' : ''}`}>
-                    {entry.members[0].join(' / ') || '—'}
-                    <span className="muted small-text">{formatRate(entry.rate[0])}</span>
-                  </span>
-                  <span className="legs">{entry.state === 'notPlayed' ? '未実施' : `${entry.legs[0] ?? '—'} - ${entry.legs[1] ?? '—'}`}</span>
-                  <span className={`side right${entry.winner === 1 ? ' won' : ''}`}>
-                    {entry.members[1].join(' / ') || '—'}
-                    <span className="muted small-text">{formatRate(entry.rate[1])}</span>
-                  </span>
-                </button>
-                {!wide && selected && entry.game ? panel(entry) : null}
-              </li>
-            );
-          })}
-        </ul>
-        {wide ? (
-          <div className="game-pane" data-testid="game-pane">
-            {chosen ? panel(chosen) : <p className="muted small-text">このカードには、まだ記録のあるゲームがありません。</p>}
-          </div>
-        ) : null}
-      </div>
+        }
+      />
+      <UnitChips
+        label="ゲーム"
+        names={names}
+        selected={game}
+        onPick={(schid) => {
+          setFocus(null);
+          // The game being played is followed (no game in the link), as on the live tab.
+          setGame(schid === liveSchid ? null : schid);
+        }}
+        units={card.games.map((entry): MatchUnit => ({
+          key: entry.slot.schid,
+          label: entry.slot.label,
+          short: shortSlot(entry.slot.label),
+          legs: entry.state === 'notPlayed' ? null : entry.legs,
+          winner: entry.winner,
+          live: liveSchid !== null ? entry.slot.schid === liveSchid : entry.state === 'live',
+          playable: !!entry.game || entry.slot.schid === liveSchid,
+        }))}
+      />
+      {live && liveSchid && !showsLive ? (
+        <LiveReturn
+          onReturn={() => {
+            setFocus(null);
+            setGame(null);
+          }}
+          text={`${slotLabelOf(card, liveSchid)} ・ Leg ${(live.leg?.index ?? live.currentLeg ?? 0) + 1} ・ ${live.legs[0]}-${live.legs[1]}${live.leg?.left ? ` ・ 残り ${live.leg.left[0]} / ${live.leg.left[1]}` : ''}`}
+        />
+      ) : null}
+      {showsLive && live ? (
+        <section className="game-panel" aria-label={`${slotLabelOf(card, live.schid)} の詳細`} data-testid="game-panel">
+          <LiveSheet key={live.mid} api={api} live={live} title={slotLabelOf(card, live.schid)} status={{ ...liveStatusText(status, card.state !== 'live'), updated: new Date(live.updateTime).toLocaleTimeString('ja-JP') }} />
+        </section>
+      ) : chosen ? (
+        <section className="game-panel" id={`game-${chosen.slot.schid}`} aria-label={`${chosen.slot.label} の詳細`} data-testid="game-panel">
+          <UnitHead label={chosen.slot.label} kind={slotKindLabel(chosen.slot)} state={chosen.state === 'live' ? 'live' : 'finished'} sides={[side(chosen, 0), side(chosen, 1)]} legs={chosen.legs} winner={chosen.winner} />
+          <GameView
+            key={`${chosen.slot.schid}:${focus?.schid === chosen.slot.schid ? `${focus.leg}:${focus.n01Side}:${focus.round}` : 'game'}`}
+            api={api}
+            mid={chosen.game!.mid}
+            cricket={chosen.slot.matchType === 'cricket'}
+            finished={chosen.game!.finished}
+            names={[chosen.members[0].join(' / ') || names[0], chosen.members[1].join(' / ') || names[1]]}
+            flip={chosen.flip}
+            focus={focus?.schid === chosen.slot.schid ? focus : null}
+            openPlayedLeg
+          />
+        </section>
+      ) : (
+        <p className="muted small-text">このカードには、まだ記録のあるゲームがありません。</p>
+      )}
       <Highlights card={card} api={api} onOpen={openHighlight} />
       <MatchTrail card={card} data={data} />
       <Insights card={card} data={data} registered={registered} />

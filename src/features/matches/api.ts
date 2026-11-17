@@ -13,6 +13,7 @@ import { parseRoster } from '../../integrations/n01/validation';
 import type { N01RosterPlayer } from '../../integrations/n01/types';
 import type { PlayerStatsRow, TeamStatsRow } from '../analytics/types';
 import { RequestGovernor, sharedGovernor } from './governor';
+import type { LiveTarget } from './livePoller';
 import type { CompetitionDoc, CompetitionSummary, StandingGroup } from './competition';
 import { parseAllStandings, parseCompetition, parseCompetitionList } from './competition';
 
@@ -433,9 +434,22 @@ export class MatchesApi {
     return this.read('match/get', this.memoised('match/get', { mid }), parseGameDetail);
   }
 
-  /** `match/live` by card (`tmid`) or game (`mid`); `since` = the last `updateTime`. */
-  live(target: { tmid: string } | { mid: string }, since: number | null, signal?: AbortSignal): Promise<LiveResponse> {
-    const params: Record<string, string> = 'tmid' in target ? { tmid: target.tmid } : { mid: target.mid };
+  /**
+   * The published sets of one set-format match (`scid`, manual §2 match/list) from one source:
+   * `archive` — finished sets (and sets in progress of a competition); `live` — the live list (a
+   * set in progress outside any competition reaches the archive only after it ends). The two are
+   * read and kept apart, so one failing never hides what the other brought; the caller merges
+   * them by `mid`. A polling read, with `currentSet` so the sets can be put in n01's order.
+   */
+  matchSetsFrom(scid: string, source: 'archive' | 'live', signal?: AbortSignal): Promise<GameRow[]> {
+    const params: Record<string, string> = { scid, sort: 'startTime', order: 'asc', count: String(MATCH_ROWS_PAGE), fields: `${GAME_FIELDS},currentSet` };
+    if (source === 'live') params.live = '1';
+    return this.read('match/list', this.fresh('match/list', params, signal), parseGameRows).then((result) => result.games);
+  }
+
+  /** `match/live` by card (`tmid`), set-format match (`scid`) or game (`mid`); `since` = the last `updateTime`. */
+  live(target: LiveTarget, since: number | null, signal?: AbortSignal): Promise<LiveResponse> {
+    const params: Record<string, string> = 'tmid' in target ? { tmid: target.tmid } : 'scid' in target ? { scid: target.scid } : { mid: target.mid };
     if (since !== null) params.since = String(since);
     return this.read('match/live', this.fresh('match/live', params, signal), parseLive);
   }

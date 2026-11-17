@@ -40,14 +40,16 @@ const GAMES: Record<string, ReturnType<typeof leg>[]> = {
   c003_tm01: [leg(0, 0, [[100, 85, 140, 60, 100, 95, 121, 100, 60, 100, 40], [60, 60, 81, 100, 45, 60, 100, 85, 41, 60]], 0, 1001)],
   c003_db01: [leg(0, 0, [[60, 45, 81, 60, 100], [100, 100, 81, 140, 48, 32]], 1), leg(1, 1, [[100, 140, 100, 121, 40], [60, 60, 45, 100]], 0), leg(2, 0, [[45, 60, 60, 81, 60], [100, 60, 140, 100, 61, 40]], 1)],
   c003_sg01: SG01,
+  // Singles 2, once the card is over (cardEnded): Corks 2-1.
+  c003_sg02: [leg(0, 0, [[60, 100, 140, 81, 80, 40], [85, 60, 100, 45]], 0), leg(1, 1, [[45, 60, 85, 41, 100], [140, 100, 95, 100, 34, 32]], 1), leg(2, 0, [[60, 45, 81, 60, 100], [100, 100, 81, 140, 48, 32]], 1)],
   c004_tm01: [leg(0, 1, [[60, 60, 81, 100, 45, 60, 100, 85, 41, 60], [100, 85, 140, 60, 100, 95, 121, 100, 60, 100, 40]], 1, 1001)],
 };
 
-const today = (): unknown[] => [
+const today = (replayed = false): unknown[] => [
   gameRow('c003', 'AAAA', 'CCCC', 'tm01', [side('AAAA', [['a1', '青木 一郎'], ['a2', '井上 次郎'], ['a3', '上田 三郎'], ['a4', '遠藤 四郎']], 1, 1001, 33), side('CCCC', [['c1', '加藤 健'], ['c2', '木村 守'], ['c3', '工藤 仁'], ['c4', '小林 学']], 0, 692, 30)], { start: 1_800_000_000, mid: 'c003_tm01' }),
   gameRow('c003', 'AAAA', 'CCCC', 'db01', [side('AAAA', [['a1', '青木 一郎'], ['a2', '井上 次郎']], 1, 1153, 45), side('CCCC', [['c1', '加藤 健'], ['c2', '木村 守']], 2, 1267, 48)], { start: 1_800_000_900, mid: 'c003_db01' }),
   gameRow('c003', 'AAAA', 'CCCC', 'db02', [side('AAAA', [['a3', '上田 三郎'], ['a4', '遠藤 四郎']], 2, 0, 90, 190), side('CCCC', [['c3', '工藤 仁'], ['c4', '小林 学']], 0, 0, 90, 150)], { start: 1_800_001_800, mid: 'c003_db02' }),
-  gameRow('c003', 'AAAA', 'CCCC', 'sg01', [side('AAAA', [['a1', '青木 一郎']], 1, 1213, 60), side('CCCC', [['c1', '加藤 健']], 1, 1092, 57)], { start: 1_800_002_700, finished: false, mid: 'c003_sg01' }),
+  gameRow('c003', 'AAAA', 'CCCC', 'sg01', [side('AAAA', [['a1', '青木 一郎']], 1, 1213, 60), side('CCCC', [['c1', '加藤 健']], 1, 1092, 57)], { start: 1_800_002_700, finished: false, mid: replayed ? 'c003_sg01_r2' : 'c003_sg01' }),
   gameRow('c004', 'BBBB', 'DDDD', 'tm01', [side('BBBB', [['b1', '佐藤 B1'], ['b2', '鈴木 B2'], ['b3', '瀬川 B3'], ['b4', '曽根 B4']], 0, 692, 30), side('DDDD', [['d1', '田中 D1'], ['d2', '千葉 D2'], ['d3', '津田 D3'], ['d4', '寺田 D4']], 1, 1001, 33)], { start: 1_800_000_100, mid: 'c004_tm01' }),
   gameRow('c004', 'BBBB', 'DDDD', 'db01', [side('BBBB', [['b1', '佐藤 B1'], ['b2', '鈴木 B2']], 0, 300, 18), side('DDDD', [['d1', '田中 D1'], ['d2', '千葉 D2']], 1, 501, 18)], { start: 1_800_001_000, finished: false, mid: 'c004_db01' }),
 ];
@@ -59,6 +61,18 @@ export interface NightOptions {
    * for a few seconds it still calls Singles 1 unfinished and does not hold Singles 2.
    */
   nextGameStarted?: () => boolean;
+  /**
+   * True once Singles 2 — the card's last game — has ended, and the card with it (`end_match`
+   * and `end_schedule`), as `match/live` says it. The game list is still left as it was.
+   */
+  cardEnded?: () => boolean;
+  /**
+   * Singles 1 replayed: the game list holds the new game (c003_sg01_r2, in progress, updated
+   * later). `match/live` answers by the stage returned: `old` — the old game, ended, and the card
+   * with it (a late answer); `current` — the new game in progress (its third leg); `ended` — the
+   * new game over at 2-1, and the card with it.
+   */
+  replayed?: () => 'old' | 'current' | 'ended';
   /** A third card today (c006, Corks – Bulls): its team game played, the next not started. */
   thirdCard?: boolean;
 }
@@ -92,13 +106,55 @@ export async function serveNight(page: Page, options: NightOptions = {}): Promis
     else if (operation === 'league/schedule/get') body = fixtures();
     else if (operation === 'tournament/standings')
       body = { result: 0, tdid: TDID, groups: [{ kind: 'lg', index: 0, title: 'A Division', players: [{ tpid: 'AAAA', name: 'Arrows', rank: 1, p: 1, w: 1, d: 0, l: 0, pts: 5 }, { tpid: 'BBBB', name: 'Bulls', rank: 2, p: 1, w: 0, d: 0, l: 1, pts: 2 }, { tpid: 'CCCC', name: 'Corks', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 }, { tpid: 'DDDD', name: 'Doubles', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 }] }] };
-    else if (operation === 'match/list' && q.get('startTime__gte')) body = list([...today(), ...third()]);
-    else if (operation === 'match/list') body = list([...c001, ...today(), ...third()]);
+    else if (operation === 'match/list' && q.get('startTime__gte')) body = list([...today(!!options.replayed), ...third()]);
+    else if (operation === 'match/list') body = list([...c001, ...today(!!options.replayed), ...third()]);
     else if (operation === 'match/throws') {
       const mid = q.get('mid') ?? '';
       const live = mid === 'c003_sg01';
       body = { result: 0, changed: 1, mid, match_type: mid.endsWith('db02') ? 'cricket' : '01', end_match: live ? 0 : 1, current_leg: live ? 2 : undefined, updateTime: 1_800_000_500_000, leg_data: live ? [...SG01, SG01_LIVE] : (GAMES[mid] ?? []) };
-    } else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.nextGameStarted?.())
+    } else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.replayed && options.replayed() !== 'old') {
+      const ended = options.replayed() === 'ended';
+      body = liveBody({
+        mid: 'c003_sg01_r2',
+        schid: 'sg01',
+        title: 'Test League A Division シングルス1',
+        updateTime: ended ? 1_800_003_100_000 : 1_800_003_000_000,
+        end_match: ended ? 1 : 0,
+        end_schedule: ended ? 1 : 0,
+        sets: ended ? [3, 1] : [2, 1],
+        legs: ended ? [2, 1] : [1, 1],
+        current_leg: 2,
+        players: [{ name: 'Arrows', tpid: 'AAAA', order: [{ oid: 'a1', name: '青木 一郎' }] }, { name: 'Corks', tpid: 'CCCC', order: [{ oid: 'c1', name: '加藤 健' }] }],
+        leg: { ...SG01_LIVE, end: ended ? 1 : 0, winner: ended ? 0 : null, thrower: 1, round: 4, member: { oid: 'c1', name: '加藤 健' } },
+      });
+    } else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.replayed)
+      body = liveBody({
+        mid: 'c003_sg01',
+        schid: 'sg01',
+        title: 'Test League A Division シングルス1',
+        updateTime: 1_800_000_010_000,
+        end_match: 1,
+        end_schedule: 1,
+        sets: [0, 5],
+        legs: [0, 2],
+        current_leg: 1,
+        players: [{ name: 'Arrows', tpid: 'AAAA', order: [{ oid: 'a1', name: '青木 一郎' }] }, { name: 'Corks', tpid: 'CCCC', order: [{ oid: 'c1', name: '加藤 健' }] }],
+      });
+    else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.cardEnded?.())
+      body = liveBody({
+        mid: 'c003_sg02',
+        schid: 'sg02',
+        title: 'Test League A Division シングルス2',
+        updateTime: 1_800_000_030_000,
+        end_match: 1,
+        end_schedule: 1,
+        sets: [3, 2],
+        legs: [1, 2],
+        current_leg: 2,
+        players: [{ name: 'Arrows', tpid: 'AAAA', order: [{ oid: 'a2', name: '井上 次郎' }] }, { name: 'Corks', tpid: 'CCCC', order: [{ oid: 'c2', name: '木村 守' }] }],
+        leg: { ...GAMES.c003_sg02[2], thrower: 1, round: 6, member: { oid: 'c2', name: '木村 守' } },
+      });
+    else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.nextGameStarted?.())
       body = liveBody({
         mid: 'c003_sg02',
         schid: 'sg02',

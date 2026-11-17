@@ -22,6 +22,11 @@ export interface WatchLink {
   game?: string;
   /** `mid` of one game (a tournament match, an n01 Online / Live game). */
   mid?: string;
+  /**
+   * `1`: opened from 「いま n01 で進行中」 — the list of games in progress, and a game opened from
+   * it on a page of its own (its whole match followed by `scid`).
+   */
+  now?: string;
 }
 
 const PREFIX = '#/watch';
@@ -33,6 +38,7 @@ const KEYS: [keyof WatchLink, string][] = [
   ['card', 'c'],
   ['game', 'g'],
   ['mid', 'm'],
+  ['now', 'n'],
 ];
 
 /** The link in a URL fragment, or `null` when the fragment is not a watch link. Unknown or malformed values are dropped. */
@@ -47,6 +53,7 @@ export function parseWatchLink(hash: string): WatchLink | null {
   // A card or a game needs its season; a game needs its card.
   if (!link.season) delete link.card;
   if (!link.card) delete link.game;
+  if (link.now !== '1') delete link.now;
   return link;
 }
 

@@ -6936,15 +6936,15 @@ tr.own th,
   font-variant-numeric: tabular-nums;
 }
 
+/* The games of a card / the sets of a match (MatchParts.UnitChips), the same everywhere: they
+   wrap rather than scroll sideways, so every unit is in view (eleven sets fit a phone). */
 .game-tabs {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(52px, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
   gap: 6px;
-  overflow-x: auto;
   /* The chosen tab's ring is inside its border; the padding keeps the focus ring whole too. */
   padding: 3px;
   margin: -3px;
@@ -8622,74 +8622,6 @@ ul.plain {
   width: min(100%, 420px);
   font-size: 12px;
 }
-.match-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-.match-body.is-split {
-  display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-.match-body.is-split .game-list {
-  position: sticky;
-  top: calc(72px + var(--safe-top));
-}
-.match-body.is-split .game-row {
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) auto minmax(0, 1fr);
-}
-.match-body.is-split .game-row[aria-expanded='true'] {
-  border-color: var(--color-accent);
-  box-shadow: inset 3px 0 0 var(--color-accent);
-  background: var(--color-accent-tint);
-}
-.game-row[aria-expanded='true'] {
-  border-color: var(--color-accent);
-}
-.game-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px 0 4px;
-  min-width: 0;
-}
-.game-pane {
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--color-surface-1);
-}
-.game-panel-head {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--color-border);
-}
-.game-panel-head .slot {
-  font-weight: 700;
-}
-.game-panel-head .duel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
-  font-size: 1.05em;
-}
-.game-panel-head .duel > span:last-child {
-  text-align: right;
-}
-.game-panel-head .duel strong {
-  font-size: 1.4em;
-  font-variant-numeric: tabular-nums;
-}
-.game-panel-head .won {
-  font-weight: 800;
-}
 .gv-sheet-title {
   margin: 0;
   font-size: 13px;
@@ -8915,39 +8847,6 @@ ul.plain {
 }
 .round-chips .chip {
   flex: none;
-}
-.rounds.is-split {
-  display: grid;
-  grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-.rounds.is-split .match-row[aria-current='true'] {
-  border-color: var(--color-accent);
-  box-shadow: inset 3px 0 0 var(--color-accent);
-  background: var(--color-accent-tint);
-}
-.rounds-pane {
-  position: sticky;
-  top: calc(72px + var(--safe-top));
-  max-height: calc(100dvh - 96px);
-  overflow-y: auto;
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--color-surface-1);
-}
-.rounds-pane-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.rounds-pane-empty {
-  margin: 24px 8px;
 }
 /* Names and the score of a match: close together on a wide list, not at its two ends. */
 .duel-row .match-teams {
@@ -9365,10 +9264,6 @@ ul.plain {
   margin-top: var(--space-5, 28px);
   border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
 }
-/* A game opened on a phone comes to the top of the screen below the sticky header. */
-.match-center .game-list > li {
-  scroll-margin-top: calc(76px + var(--safe-top));
-}
 /* The bar stays one line on a phone: the season takes what the two buttons leave. */
 .watch-bar.has-season {
   flex-wrap: nowrap;
@@ -9502,4 +9397,66 @@ ul.plain {
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
+}
+
+/* A game on a page of its own (SetMatchPage.tsx): the shared match view (MatchParts), nothing more. */
+.set-wait {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-3);
+}
+
+/* The competition under a game opened on its own page: kept (state, scroll), not shown. */
+.watch-keep {
+  display: contents;
+}
+
+.watch-keep[hidden] {
+  display: none;
+}
+
+/* The unit shown (MatchParts.UnitHead): its name and state, then who played it and its legs. */
+.unit-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.unit-duel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin: 0;
+  font-weight: 600;
+}
+
+.unit-duel > :last-child {
+  text-align: right;
+}
+
+.unit-duel strong {
+  font-size: 1.3em;
+  font-variant-numeric: tabular-nums;
+}
+
+.unit-duel .won {
+  font-weight: 800;
+}
+
+.unit-duel .rate {
+  display: block;
+  font-weight: 500;
+}
+
+.match-note {
+  margin: 0;
+}
+
+/* A game's page takes the keyboard focus when it opens (SetMatchPage): no ring around the page. */
+.match-page:focus {
+  outline: none;
 }

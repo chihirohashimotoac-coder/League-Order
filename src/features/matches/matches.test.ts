@@ -239,7 +239,7 @@ describe('LIVE MATCH: parsing', () => {
 });
 
 /** A manual clock + timer queue, so polling is tested step by step. */
-function harness(replies: (since: number | null, target: unknown) => Promise<unknown>) {
+function harness(replies: (since: number | null, target: unknown) => Promise<unknown>, extra: { accept?: (state: LiveState) => boolean } = {}) {
   let now = 1_800_000_011_000;
   const timers: { at: number; fn: () => void; id: number }[] = [];
   let id = 0;
@@ -267,6 +267,7 @@ function harness(replies: (since: number | null, target: unknown) => Promise<unk
     },
     onState: (state) => states.push(state),
     onStatus: (status) => statuses.push(status),
+    ...extra,
   });
   const step = async (): Promise<void> => {
     timers.sort((a, b) => a.at - b.at);
@@ -296,6 +297,26 @@ describe('LIVE MATCH: polling', () => {
     expect(h.calls).toEqual([null, 1_800_000_010_000, 1_800_000_010_000, 1_800_000_010_000, 1_800_000_020_000]);
     expect(h.states.map((s) => s.mid)).toEqual(['c003_sg01', 'c003_sg02', 'c003_sg02']);
     expect(h.states.some((s) => s.legs[0] === 9)).toBe(false);
+    expect(h.statuses.at(-1)).toEqual({ kind: 'finished' });
+    expect(h.timers).toHaveLength(0);
+  });
+
+  it('a reply turned down by accept is not shown, not used as since and not taken as the end: the reads go on to the accepted end', async () => {
+    let n = 0;
+    const h = harness(
+      async () => {
+        n += 1;
+        // A late end of the old game first, then the current game in progress, then its own end.
+        if (n <= 2) return liveBody({ mid: 'old', updateTime: 1_800_000_001_000, end_match: 1, end_schedule: 1 });
+        if (n === 3) return liveBody({ mid: 'new', updateTime: 1_800_000_020_000, legs: [1, 1] });
+        return liveBody({ mid: 'new', updateTime: 1_800_000_030_000, end_match: 1, end_schedule: 1, legs: [2, 1] });
+      },
+      { accept: (state) => state.mid !== 'old' },
+    );
+    h.poller.start();
+    for (let i = 0; i < 6; i += 1) await h.step();
+    expect(h.calls).toEqual([null, null, null, 1_800_000_020_000]);
+    expect(h.states.map((s) => `${s.mid} ${s.legs.join('-')}`)).toEqual(['new 1-1', 'new 2-1']);
     expect(h.statuses.at(-1)).toEqual({ kind: 'finished' });
     expect(h.timers).toHaveLength(0);
   });

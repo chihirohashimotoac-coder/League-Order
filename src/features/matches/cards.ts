@@ -1,5 +1,5 @@
-import type { Fixture, GameRow, SeasonDocument, SeasonSlot } from './parse';
-import { parseLeagueTmid, slotsFor } from './parse';
+import type { Fixture, GameRow, LiveState, SeasonDocument, SeasonSlot } from './parse';
+import { gameRowOfLive, parseLeagueTmid, slotsFor } from './parse';
 
 /**
  * Match cards (対戦カード) of one season: a fixture, n01's official card result, and the games
@@ -143,6 +143,69 @@ export function buildCards(season: SeasonDocument, fixtures: readonly Fixture[],
       tmid: rows[0]?.tmid ?? null,
     };
   });
+}
+
+/**
+ * The card as n01's live states of it say it is now, over the season's (slower) game list:
+ * `states` holds the last live state seen of each of its games (by `schid`), `latest` the one
+ * the live poller is on. A game the list does not hold yet, or holds as less far on, is shown
+ * from its live state; a game the list still has in progress is over once the card has moved
+ * on to another game or ended. The card ends with `end_schedule` (`cardEnded`) only — a game
+ * ending is not the card ending — and its score is n01's count of games won (`sets` of a team
+ * schedule) while it has one. n01's official result, when the list has it, is kept as it is.
+ */
+export function cardWithLive(card: MatchCard, states: ReadonlyMap<string, LiveState>, latest: LiveState | null): MatchCard {
+  if (!latest || card.official) return card;
+  // A live state the list has gone past (its slot replayed as a newer game) says nothing of the
+  // card now: not that a game ended, nor the card, nor its score.
+  const current = liveSuperseded(card, latest) ? null : latest;
+  const games = card.games.map((entry): CardGame => {
+    const state = states.get(entry.slot.schid);
+    const row = entry.game;
+    // The live state is shown when it is newer than the list's row: a later update, or (the same
+    // game) its end the list does not have yet. A row of another game (a replay of the slot) is
+    // kept when it is the newer one.
+    const ahead =
+      state !== undefined &&
+      (!row || row.updateTime === null || state.updateTime > row.updateTime || (row.mid === state.mid && state.gameEnded && !row.finished));
+    // Over: n01 said so, or it has moved on from this game, or the card is over.
+    const over = (mid: string): boolean => current !== null && (current.cardEnded || current.mid !== mid);
+    if (!ahead || !state) {
+      return entry.state === 'live' && row && over(row.mid) ? { ...entry, state: 'finished', game: { ...row, finished: true } } : entry;
+    }
+    const flip = state.sides[0].teamId === card.teams[1].id;
+    const pick = <T>(pair: readonly [T, T]): [T, T] => (flip ? [pair[1], pair[0]] : [pair[0], pair[1]]);
+    const ended = state.gameEnded || over(state.mid);
+    const legs = pick(state.legs);
+    const winner = state.gameEnded && legs[0] !== legs[1] ? (legs[0] > legs[1] ? 0 : 1) : null;
+    const same = row?.mid === state.mid;
+    return {
+      ...entry,
+      state: ended ? 'finished' : 'live',
+      game: { ...(same && row ? { ...row, sides: gameRowOfLive(state).sides.map((side, i) => ({ ...row.sides[i], legsWon: side.legsWon })) as GameRow['sides'] } : gameRowOfLive(state)), finished: ended },
+      winner,
+      legs,
+      rate: same ? entry.rate : [null, null],
+      members: pick([state.sides[0].members, state.sides[1].members]),
+      flip,
+    };
+  });
+  const counted: [number, number] = [0, 0];
+  for (const game of games) if (game.winner !== null) counted[game.winner] += 1;
+  if (!current) return { ...card, games, counted };
+  const latestFlip = current.sides[0].teamId === card.teams[1].id;
+  const won: [number, number] = current.isSchedule ? (latestFlip ? [current.sets[1], current.sets[0]] : [current.sets[0], current.sets[1]]) : counted;
+  const state: CardState = current.cardEnded ? 'unrecorded' : 'live';
+  return { ...card, games, counted: won, state, updatedAt: Math.max(card.updatedAt ?? 0, current.updateTime) };
+}
+
+/**
+ * The live state is of an older game than the one the list holds for the same slot of the same
+ * card (the slot replayed): another `mid`, and the list's row updated after it.
+ */
+export function liveSuperseded(card: MatchCard, latest: LiveState): boolean {
+  const row = card.games.find((entry) => entry.slot.schid === latest.schid)?.game;
+  return row !== null && row !== undefined && row.mid !== latest.mid && row.updateTime !== null && row.updateTime > latest.updateTime;
 }
 
 /** The score to show and whose it is: n01's official score, else League Order's count. */

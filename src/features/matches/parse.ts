@@ -287,6 +287,11 @@ export interface GameRow {
   updateTime: number | null;
   finished: boolean;
   cardFinished: boolean;
+  /**
+   * The set's position in its `scid` (0-based, `currentSet` of `match/list`), `undefined` when the
+   * row was read without it. Orders the sets of one match; never a count of sets won.
+   */
+  currentSet?: number | null;
   sides: [GameSide, GameSide];
 }
 
@@ -340,6 +345,7 @@ export function parseGameRows(raw: unknown): { games: GameRow[]; rows: number; u
       updateTime: num(row.updateTime),
       finished: num(row.endMatch) === 1,
       cardFinished: num(row.endSchedule) === 1,
+      ...(row.currentSet !== undefined ? { currentSet: num(row.currentSet) } : {}),
       sides: sides as [GameSide, GameSide],
     });
   }
@@ -549,6 +555,27 @@ export interface LiveState {
   legCount: number | null;
   sides: [LiveSide, LiveSide];
   leg: LiveLeg | null;
+}
+
+/**
+ * A game row standing for what a live state says of its game, for a game no list holds yet (the
+ * list lags behind the live game, or failed). No start time, figures or update time of its own.
+ */
+export function gameRowOfLive(state: LiveState): GameRow {
+  return {
+    mid: state.mid,
+    tmid: state.tmid,
+    schid: state.schid,
+    scid: state.scid,
+    matchType: state.matchType,
+    title: state.title,
+    startTime: null,
+    updateTime: null,
+    finished: state.gameEnded,
+    cardFinished: state.cardEnded,
+    currentSet: state.currentSet,
+    sides: [0, 1].map((i) => ({ teamId: state.sides[i].teamId ?? '', name: state.sides[i].name, members: state.sides[i].members.map((name) => ({ oid: null, opid: null, name })), legsWon: state.legs[i], setsWon: null, score: null, darts: null, marks: null })) as GameRow['sides'],
+  };
 }
 
 export type LiveResponse = LiveState | { changed: false; mid: string | null; updateTime: number | null };

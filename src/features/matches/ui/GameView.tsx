@@ -29,6 +29,17 @@ import { LegsStatusLine } from './LegsStatusLine';
 
 const fmt = (value: number | null, digits = 2): string => (value === null ? '—' : value.toFixed(digits));
 
+/**
+ * The last leg that was actually played: thrown in, or seen ended (a leg decided without a
+ * recorded throw still counts). n01 may hold a next leg that never started once a game is over
+ * (2026-11-16, Light League ダブルス1: Leg 2 with no throw after the game ended at Leg 1).
+ * `null` when no leg was played; then the last leg held is the one to show.
+ */
+export function lastPlayedLeg(legs: readonly ThrowLeg[]): number | null {
+  for (let i = legs.length - 1; i >= 0; i -= 1) if (legs[i].ended || legs[i].throws.length > 0) return legs[i].index;
+  return null;
+}
+
 export function GameView({
   api,
   mid,
@@ -38,6 +49,7 @@ export function GameView({
   flip,
   liveLeg,
   focus = null,
+  openPlayedLeg = false,
 }: {
   api: MatchesApi;
   mid: string;
@@ -51,6 +63,8 @@ export function GameView({
   liveLeg?: LiveLeg | null;
   /** Open this leg with this visit marked (a highlight). */
   focus?: { leg: number; n01Side: 0 | 1; round: number } | null;
+  /** A finished game opens on its last leg played, not on a leg n01 holds that never began. */
+  openPlayedLeg?: boolean;
 }): React.JSX.Element {
   const [chosen, setChosen] = useState<number | null>(focus?.leg ?? null);
   const liveIndex = liveLeg?.index ?? null;
@@ -62,7 +76,8 @@ export function GameView({
   const card = (pair: [SideStats, SideStats]): [SideStats, SideStats] => (flip ? [pair[1], pair[0]] : pair);
   const [a, b] = card(stats);
   const at = (side: 0 | 1): 0 | 1 => (flip ? ((1 - side) as 0 | 1) : side);
-  const shown = chosen ?? (all.length ? all[all.length - 1].index : null);
+  const lastHeld = all.length ? all[all.length - 1].index : null;
+  const shown = chosen ?? (openPlayedLeg && finished ? (lastPlayedLeg(all) ?? lastHeld) : lastHeld);
   const leg = all.find((entry) => entry.index === shown) ?? null;
 
   // Figures are computed from the whole game only: until it is read, none are shown.

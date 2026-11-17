@@ -5,15 +5,12 @@ import type { MatchesApi } from '../api';
 import type { CompetitionDoc, CompetitionMatch, StandingGroup } from '../competition';
 import { TTYPE_LABELS, bracketLinks, groupMatches, matchesOfPlayer, stageLabel } from '../competition';
 import type { WatchLink } from '../watchLink';
-import { watchLinkUrl } from '../watchLink';
 import type { GameRow } from '../parse';
 import type { MatchesApiFactory } from '../environment';
 import type { PlayerLine, StatsSource } from './useMatchContext';
 import { formatClock, formatRate, useFollowed, usePlayerStats } from './useMatchContext';
 import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './rankingList';
 import { n01Avg3 } from '../../analytics/n01Figures';
-import { CopyLink } from './CopyLink';
-import { MatchPane } from './MatchSheet';
 import { ListCoverage, listIncomplete } from './ListCoverage';
 import type { ListCoverageState } from './ListCoverage';
 
@@ -94,31 +91,24 @@ export interface PickedPlayer {
 
 export function TournamentHub({
   api,
-  factory,
   tdid,
   tab,
   onGame,
-  selectedMid = null,
-  inline = false,
-  onCloseMatch,
-  link,
   onTitle,
+  onMatches,
 }: {
   api: MatchesApi;
-  /** For the match shown in place on a large screen. */
+  /** Accepted for the call sites; a match now always opens on its own page. */
   factory?: MatchesApiFactory;
   tdid: string;
   tab: HubTab;
   onGame: (mid: string, title?: string) => void;
-  /** The match shown beside the rounds (large screens); `null` = none chosen. */
-  selectedMid?: string | null;
-  /** True when the chosen match is shown in place (`selectedMid`), not in a sheet. */
-  inline?: boolean;
-  onCloseMatch?: () => void;
   /** The league / season or tournament a copied link starts from. */
   link?: WatchLink;
   /** Reports the competition's title once it is read. */
   onTitle?: (title: string) => void;
+  /** Reports the competition's matches and their round names (for a match's page: 勝ち上がり). */
+  onMatches?: (matches: readonly CompetitionMatch[], labels: ReadonlyMap<string, string>) => void;
 }): React.JSX.Element {
   const [doc, setDoc] = useState<CompetitionDoc | null>(null);
   const [rows, setRows] = useState<GameRow[] | null>(null);
@@ -193,6 +183,13 @@ export function TournamentHub({
   }, [api, tdid]);
 
   const matches = useMemo(() => (rows && doc ? groupMatches(rows, doc.entries, doc.tdid) : []), [rows, doc]);
+  const reportMatches = useRef(onMatches);
+  reportMatches.current = onMatches;
+  useEffect(() => {
+    if (!doc) return;
+    const labels = new Map(matches.map((match) => [match.key, match.place ? stageLabel(match.place, { rrGroups: doc.rrGroups, divisions: doc.divisions, rounds: doc.rounds }) : 'その他']));
+    reportMatches.current?.(matches, labels);
+  }, [matches, doc]);
   const source = useMemo<StatsSource | null>(() => (doc ? (doc.teamGames ? { teamGames: true } : { teamGames: false, entries: doc.entries }) : null), [doc]);
   const stats = usePlayerStats(api, tdid, tab === 'stats', source);
 
@@ -220,26 +217,14 @@ export function TournamentHub({
     if (match.games.length === 1) onGame(match.games[0].mid, titleOf(match));
     else setOpen(match.key === open ? null : match.key);
   };
-  const selectedMatch = selectedMid ? (matches.find((match) => match.games.some((game) => game.mid === selectedMid)) ?? null) : null;
-  const links = selectedMatch ? bracketLinks(selectedMatch, matches) : null;
   const pickedMatches = picked ? matchesOfPlayer(matches, picked) : [];
   const rowOf = (match: CompetitionMatch): React.JSX.Element => (
     <li key={match.key}>
-      <MatchRow match={match} onOpen={() => openMatch(match)} selected={inline && selectedMatch?.key === match.key} />
+      <MatchRow match={match} onOpen={() => openMatch(match)} />
       {opened?.key === match.key ? <CardGames match={match} onGame={(game) => onGame(game.mid, titleOf(match))} /> : null}
     </li>
   );
-  const pathRow = (label: string, match: CompetitionMatch): React.JSX.Element => (
-    <li key={`${label}:${match.key}`}>
-      <button type="button" className="path-row" onClick={() => openMatch(match)}>
-        <span className="path-label">{label}</span>
-        <span className="path-match">
-          {match.names[0]} <strong>{match.score[0]} - {match.score[1]}</strong> {match.names[1]}
-        </span>
-        <span className="muted small-text">{labelOf(match)}</span>
-      </button>
-    </li>
-  );
+
 
   return (
     <div className="competition" data-testid="tournament-hub">
@@ -267,7 +252,7 @@ export function TournamentHub({
         )
       ) : null}
       {tab === 'results' ? (
-        <div className={`rounds${inline ? ' is-split' : ''}`} data-testid="rounds">
+        <div className="rounds" data-testid="rounds">
           <div className="rounds-list">
             <RankingSearch value={matchQuery} onChange={setMatchQuery} label={doc.teamGames ? 'チーム名・選手名で試合を検索' : '選手名で試合を検索'} />
             {stageList.length > 1 ? (
@@ -297,38 +282,6 @@ export function TournamentHub({
               </section>
             ))}
           </div>
-          {inline ? (
-            <div className="rounds-pane" data-testid="rounds-pane">
-              {selectedMid && factory ? (
-                <>
-                  <div className="rounds-pane-bar">
-                    <strong>{selectedMatch ? `${labelOf(selectedMatch)} ・ ${titleOf(selectedMatch)}` : '選択した試合'}</strong>
-                    <span className="row" style={{ gap: 8 }}>
-                      {link ? <CopyLink url={watchLinkUrl({ ...link, mid: selectedMid })} label="リンクをコピー" /> : null}
-                      {onCloseMatch ? (
-                        <button type="button" className="btn small ghost" onClick={onCloseMatch}>
-                          閉じる
-                        </button>
-                      ) : null}
-                    </span>
-                  </div>
-                  {links ? (
-                    <section className="bracket-path" aria-label="勝ち上がり" data-testid="bracket-path">
-                      <h3 className="section-mini">勝ち上がり (この試合の前後)</h3>
-                      <ul className="plain">
-                        {links.before.map((before, side) => (before && selectedMatch ? pathRow(`${selectedMatch.names[side]} の前の試合`, before) : null))}
-                        {links.after ? pathRow('勝者の次の試合', links.after) : null}
-                      </ul>
-                      <p className="muted small-text">同じエントリー ID が前後のラウンドに 1 試合だけある場合に表示します (n01 の公開データ)。</p>
-                    </section>
-                  ) : null}
-                  <MatchPane key={selectedMid} mid={selectedMid} factory={factory} />
-                </>
-              ) : (
-                <p className="muted small-text rounds-pane-empty">左の一覧から試合を選ぶと、ここにスコアと Leg ごとの記録を表示します。ラウンドと選んだ試合を並べて確認できます。</p>
-              )}
-            </div>
-          ) : null}
         </div>
       ) : null}
       {tab === 'standings' ? (
@@ -621,5 +574,36 @@ export function NowView({ factory, onCompetition, onGame }: { factory: MatchesAp
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * 勝ち上がり: the matches before and after a bracket match (the same entry one round before /
+ * after, n01's public data), shown on the match's page; a tap opens that match.
+ */
+export function BracketPath({ matches, labels, mid, onOpen }: { matches: readonly CompetitionMatch[]; labels: ReadonlyMap<string, string>; mid: string; onOpen: (match: CompetitionMatch) => void }): React.JSX.Element | null {
+  const match = matches.find((entry) => entry.games.some((game) => game.mid === mid)) ?? null;
+  const links = match ? bracketLinks(match, matches) : null;
+  if (!match || !links || (!links.before.some(Boolean) && !links.after)) return null;
+  const row = (label: string, other: CompetitionMatch): React.JSX.Element => (
+    <li key={`${label}:${other.key}`}>
+      <button type="button" className="path-row" onClick={() => onOpen(other)}>
+        <span className="path-label">{label}</span>
+        <span className="path-match">
+          {other.names[0]} <strong>{other.score[0]} - {other.score[1]}</strong> {other.names[1]}
+        </span>
+        <span className="muted small-text">{labels.get(other.key) ?? ''}</span>
+      </button>
+    </li>
+  );
+  return (
+    <section className="bracket-path" aria-label="勝ち上がり" data-testid="bracket-path">
+      <h3 className="section-mini">勝ち上がり (この試合の前後)</h3>
+      <ul className="plain">
+        {links.before.map((before, side) => (before ? row(`${match.names[side]} の前の試合`, before) : null))}
+        {links.after ? row('勝者の次の試合', links.after) : null}
+      </ul>
+      <p className="muted small-text">同じエントリー ID が前後のラウンドに 1 試合だけある場合に表示します (n01 の公開データ)。</p>
+    </section>
   );
 }
