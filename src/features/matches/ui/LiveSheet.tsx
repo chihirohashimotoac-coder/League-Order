@@ -214,8 +214,10 @@ export function LiveSheet({
                           {darts ? ` ${darts}本` : ''}
                           {entry?.bull ? ' (ブル)' : ''}
                         </>
+                      ) : entry?.winner === -1 ? (
+                        '引き分け'
                       ) : usable ? (
-                        '終了'
+                        '勝者不明'
                       ) : (
                         '取得中…'
                       )}

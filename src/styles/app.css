@@ -8506,7 +8506,8 @@ ul.plain {
 
 .gv-body,
 .gv-figures,
-.gv-legs {
+.gv-legs,
+.gv-chart {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -8542,8 +8543,26 @@ ul.plain {
   .gv-body {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    /* 2 行目 (チャート) が残りの高さを受け持ち、チャートはスコア表のすぐ下に置かれる。 */
+    grid-template-rows: auto 1fr;
     gap: 12px 20px;
     align-items: start;
+  }
+
+  /* 左列: Leg 選択とスコア表、その下にチャート。右列: 統計と上がり圏 (2 行にまたがる)。 */
+  .gv-body > .gv-legs {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .gv-body > .gv-figures {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .gv-body > .gv-chart {
+    grid-column: 1;
+    grid-row: 2;
   }
 }
 

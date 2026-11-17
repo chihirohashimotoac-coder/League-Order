@@ -81,6 +81,9 @@ export function GameView({
   const lastHeld = all.length ? all[all.length - 1].index : null;
   const shown = chosen ?? (openPlayedLeg && finished ? (lastPlayedLeg(all) ?? lastHeld) : lastHeld);
   const leg = all.find((entry) => entry.index === shown) ?? null;
+  // 終了したゲームで、最後にプレイされた Leg より後に n01 が残している投擲のない Leg は「未実施」。
+  const lastPlayed = finished ? lastPlayedLeg(all) : null;
+  const unplayed = (entry: ThrowLeg): boolean => finished && !entry.ended && entry.throws.length === 0 && (lastPlayed === null || entry.index > lastPlayed);
 
   // Figures are computed from the whole game only: until it is read, none are shown.
   if (state === 'loading') return <p className="muted small-text" role="status">記録を読み込み中…</p>;
@@ -159,8 +162,12 @@ export function GameView({
                           {darts ? ` ${darts}本` : ''}
                           {entry.bull ? ' (ブル)' : ''}
                         </>
+                      ) : entry.winner === -1 ? (
+                        '引き分け'
                       ) : entry.ended ? (
                         '勝者不明'
+                      ) : unplayed(entry) ? (
+                        '未実施'
                       ) : (
                         '未決着'
                       )}
@@ -216,6 +223,15 @@ export function GameView({
           ) : null}
           {!cricket && history.complete ? <FinishChances legs={all} order={[at(0), at(1)]} names={names} /> : null}
         </div>
+        {/* 推移チャートは1つだけ描く。DOM では統計・上がり圏の後に置き、スマホの表示順と読み上げ順を
+            「Leg 選択 → スコア表 → 統計 → 上がり圏 → チャート」にそろえる。PC ではグリッドで
+            スコア表の列 (左) に戻す。 */}
+        {!cricket && leg ? (
+          <div className="gv-chart">
+            <h4 className="gv-sheet-title">Leg {leg.index + 1} の残り点の推移</h4>
+            <RaceChart leg={leg} startScore={null} order={[at(0), at(1)]} names={names} />
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -246,7 +262,6 @@ function ScoreSheet({
           {leg.numbers.map((number, index) => `${number === 25 ? 'BULL' : number}: ${leg.marks![order[0]][index]}-${leg.marks![order[1]][index]}`).join(' ・ ')}
         </p>
       ) : null}
-      {!cricket ? <RaceChart leg={leg} startScore={null} order={order} names={names} /> : null}
     </div>
   );
 }

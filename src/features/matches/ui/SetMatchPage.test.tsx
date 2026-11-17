@@ -284,7 +284,7 @@ describe('SetMatchPage', () => {
     // 各チップは Leg 番号 → 勝者名 → 本数。選択中は selected、始まっていない Leg はその旨を表示。
     expect(chips[2].textContent).toMatch(/^Leg 3\S+ \d+本$/u);
     expect(chips[2].getAttribute('aria-selected')).toBe('true');
-    expect(chips[3].textContent).toBe('Leg 4未決着');
+    expect(chips[3].textContent).toBe('Leg 4未実施');
     // 終了したセットの見出しは、勝者を文字でも示す。
     expect(screen.getByTestId('shown-set').closest('header')?.querySelectorAll('.won-tag')).toHaveLength(1);
     // 終了した Leg の 01 表は履歴の見た目で描く。
