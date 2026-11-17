@@ -322,22 +322,41 @@ test('日程・結果: an earlier game chosen stays chosen through the next game
   await expect(detail.getByTestId('game-panel')).toContainText('終了');
 });
 
-test('日程・結果: a slot replayed — a late live answer of the old game neither ends the new one nor the card', async ({ page }) => {
-  await serveNight(page, { replayed: true });
+test('日程・結果: a slot replayed — a late end of the old game neither ends the new one nor stops the live reads; the new game is followed to its own end', async ({ page }) => {
+  let stage: 'old' | 'current' | 'ended' = 'old';
+  const log = await serveNight(page, { replayed: () => stage });
+  const reads = (): number => log.filter((entry) => entry.startsWith('match/live') && entry.includes('c003')).length;
   await page.goto('/');
   await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
   await page.getByRole('tab', { name: '日程・結果' }).click();
   await page.getByTestId('match-card').filter({ hasText: 'Corks' }).filter({ hasText: '進行中' }).first().click();
   const detail = page.getByTestId('match-detail');
   const chips = detail.getByTestId('game-tab');
-  // The new game: in progress, with its own legs (1-1), and the card in progress with the list's score.
+  // 1. The old game's late end: the new game stays in progress with its own legs (1-1), the card
+  // in progress with the list's score, nothing of the old answer shown — and the reads go on.
   await expect(chips.nth(3)).toContainText('LIVE');
   await expect(detail.getByTestId('game-panel')).toContainText('シングルス1');
   await expect(detail.getByTestId('game-panel')).toContainText('進行中');
   await expect(detail.getByTestId('game-panel')).toContainText('1 - 1');
   await expect(detail.locator('.match-note')).toContainText('進行中');
   await expect(detail.locator('.focus-head strong')).toHaveText('2 - 1');
-  // Nothing of the old game's answer is shown: no live board of it, no 0-5.
   await expect(detail.getByTestId('live-leg')).toHaveCount(0);
-  await expect(detail.locator('.focus-head strong')).not.toHaveText('0 - 5');
+  const afterOld = reads();
+  await expect.poll(reads, { timeout: 5_000 }).toBeGreaterThan(afterOld + 1);
+
+  // 2. The new game answers, on the same page: its live scoreboard (third leg) is shown.
+  stage = 'current';
+  await expect(detail.getByTestId('live-leg')).toContainText('Leg 3 進行中');
+  await expect(chips.nth(3)).toContainText('LIVE');
+
+  // 3. The new game's own end: shown as over (2-1, the card 3-1), and the reads stop.
+  stage = 'ended';
+  await expect(chips.nth(3)).toContainText('2-1');
+  await expect(chips.nth(3)).not.toContainText('LIVE');
+  await expect(detail.getByTestId('live-leg')).toHaveCount(0);
+  await expect(detail.locator('.focus-head strong')).toHaveText('3 - 1');
+  await expect(detail.locator('.match-note')).not.toContainText('進行中');
+  const afterEnd = reads();
+  await page.waitForTimeout(4_000);
+  expect(reads()).toBe(afterEnd);
 });

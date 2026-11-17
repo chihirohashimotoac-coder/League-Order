@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import type { MatchesApi } from '../api';
 import type { LiveState } from '../parse';
@@ -209,14 +209,22 @@ export function MatchBar({ backLabel, onBack, link, backTestId }: { backLabel: s
 /**
  * A league card followed as it is played (`match/live` by `tmid`, the live poller: 1.5 s, paused
  * while the page is hidden, stopped at the end of the card). `tmid` `null` = nothing to follow.
+ * `accept`: which replies are of the card as it is now (others are dropped before they are shown,
+ * used as `since` or taken as the end); every reply when absent.
  */
-export function useCardLive(api: MatchesApi, tmid: string | null): { live: LiveState | null; status: LiveStatus } {
+export function useCardLive(api: MatchesApi, tmid: string | null, accept?: (state: LiveState) => boolean): { live: LiveState | null; status: LiveStatus } {
   const [live, setLive] = useState<LiveState | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ kind: 'idle' });
+  // The latest judgement of which replies are the card's current ones (it follows the list), read
+  // by the poller on each reply without starting it again.
+  const acceptRef = useRef(accept);
+  useEffect(() => {
+    acceptRef.current = accept;
+  });
   useEffect(() => {
     setLive(null);
     if (!tmid) return;
-    const poller = new LivePoller(api, { tmid }, { maxRequests: 20_000, onState: setLive, onStatus: setStatus });
+    const poller = new LivePoller(api, { tmid }, { maxRequests: 20_000, onState: setLive, onStatus: setStatus, accept: (state) => acceptRef.current?.(state) ?? true });
     const onVisibility = (): void => poller.setHidden(document.visibilityState === 'hidden');
     document.addEventListener('visibilitychange', onVisibility);
     poller.setHidden(document.visibilityState === 'hidden');

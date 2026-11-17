@@ -68,9 +68,11 @@ export interface NightOptions {
   cardEnded?: () => boolean;
   /**
    * Singles 1 replayed: the game list holds the new game (c003_sg01_r2, in progress, updated
-   * later), while `match/live` still answers with the old game — ended, and the card with it.
+   * later). `match/live` answers by the stage returned: `old` — the old game, ended, and the card
+   * with it (a late answer); `current` — the new game in progress (its third leg); `ended` — the
+   * new game over at 2-1, and the card with it.
    */
-  replayed?: boolean;
+  replayed?: () => 'old' | 'current' | 'ended';
   /** A third card today (c006, Corks – Bulls): its team game played, the next not started. */
   thirdCard?: boolean;
 }
@@ -104,12 +106,27 @@ export async function serveNight(page: Page, options: NightOptions = {}): Promis
     else if (operation === 'league/schedule/get') body = fixtures();
     else if (operation === 'tournament/standings')
       body = { result: 0, tdid: TDID, groups: [{ kind: 'lg', index: 0, title: 'A Division', players: [{ tpid: 'AAAA', name: 'Arrows', rank: 1, p: 1, w: 1, d: 0, l: 0, pts: 5 }, { tpid: 'BBBB', name: 'Bulls', rank: 2, p: 1, w: 0, d: 0, l: 1, pts: 2 }, { tpid: 'CCCC', name: 'Corks', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 }, { tpid: 'DDDD', name: 'Doubles', rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 }] }] };
-    else if (operation === 'match/list' && q.get('startTime__gte')) body = list([...today(options.replayed), ...third()]);
-    else if (operation === 'match/list') body = list([...c001, ...today(options.replayed), ...third()]);
+    else if (operation === 'match/list' && q.get('startTime__gte')) body = list([...today(!!options.replayed), ...third()]);
+    else if (operation === 'match/list') body = list([...c001, ...today(!!options.replayed), ...third()]);
     else if (operation === 'match/throws') {
       const mid = q.get('mid') ?? '';
       const live = mid === 'c003_sg01';
       body = { result: 0, changed: 1, mid, match_type: mid.endsWith('db02') ? 'cricket' : '01', end_match: live ? 0 : 1, current_leg: live ? 2 : undefined, updateTime: 1_800_000_500_000, leg_data: live ? [...SG01, SG01_LIVE] : (GAMES[mid] ?? []) };
+    } else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.replayed && options.replayed() !== 'old') {
+      const ended = options.replayed() === 'ended';
+      body = liveBody({
+        mid: 'c003_sg01_r2',
+        schid: 'sg01',
+        title: 'Test League A Division シングルス1',
+        updateTime: ended ? 1_800_003_100_000 : 1_800_003_000_000,
+        end_match: ended ? 1 : 0,
+        end_schedule: ended ? 1 : 0,
+        sets: ended ? [3, 1] : [2, 1],
+        legs: ended ? [2, 1] : [1, 1],
+        current_leg: 2,
+        players: [{ name: 'Arrows', tpid: 'AAAA', order: [{ oid: 'a1', name: '青木 一郎' }] }, { name: 'Corks', tpid: 'CCCC', order: [{ oid: 'c1', name: '加藤 健' }] }],
+        leg: { ...SG01_LIVE, end: ended ? 1 : 0, winner: ended ? 0 : null, thrower: 1, round: 4, member: { oid: 'c1', name: '加藤 健' } },
+      });
     } else if (operation === 'match/live' && q.get('tmid')?.includes('c003') && options.replayed)
       body = liveBody({
         mid: 'c003_sg01',

@@ -48,6 +48,12 @@ export interface LivePollerOptions {
   onState: (state: LiveState) => void;
   onStatus: (status: LiveStatus) => void;
   onSample?: (sample: LiveSample) => void;
+  /**
+   * Whether a reply is about the game being followed. A reply it turns down is dropped before it
+   * is shown, used as `since` or taken as the end (日程・結果: a late reply of a game whose slot
+   * was replayed). Without it every reply is taken, as before.
+   */
+  accept?: (state: LiveState) => boolean;
 }
 
 export const LIVE_INTERVAL_MS = 1500;
@@ -203,6 +209,8 @@ export class LivePoller {
 
   private apply(next: LiveState, rttMs: number): void {
     const previous = this.state;
+    // A reply the viewer has gone past (another game's, by the caller's own evidence): drop it.
+    if (this.options.accept && !this.options.accept(next)) return;
     // A reply about the same game that is older than what is shown is stale: drop it.
     if (previous && previous.mid === next.mid && next.updateTime < previous.updateTime) return;
     // A late reply about an earlier set of the match (a replica behind): never shown as the latest.

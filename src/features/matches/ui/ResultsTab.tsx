@@ -240,7 +240,9 @@ function MatchCenter({
   // shows its live scoreboard, and an earlier game opened meanwhile offers ライブに戻る. What the
   // live states say (the next game, a game or the card ending, n01's score) is laid over the
   // season's list, which is read less often: the card never goes back to the list's older state.
-  const { live: polled, status } = useCardLive(api, listed.state === 'live' ? listed.tmid : null);
+  // A late reply of a game whose slot the list shows replayed (another mid, older than the list's
+  // row) is dropped by the poller itself: not shown, not used as `since`, not taken as the end.
+  const { live: polled, status } = useCardLive(api, listed.state === 'live' ? listed.tmid : null, (state) => !liveSuperseded(listed, state));
   const [states, setStates] = useState<ReadonlyMap<string, LiveState>>(() => new Map());
   const [statesFrom, setStatesFrom] = useState<LiveState | null>(null);
   if (polled !== statesFrom) {
