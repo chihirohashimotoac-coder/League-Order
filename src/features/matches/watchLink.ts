@@ -27,6 +27,11 @@ export interface WatchLink {
    * it on a page of its own (its whole match followed by `scid`).
    */
   now?: string;
+  /**
+   * n01 公式メニューの一覧 (`online` / `tournament` / `league`): 観戦の「n01オンライン」「n01トーナメント」
+   * 「n01リーグ」。`online` と `mid` の組み合わせは、その一覧から開いた試合 (戻ると一覧)。
+   */
+  browse?: 'online' | 'tournament' | 'league';
 }
 
 const PREFIX = '#/watch';
@@ -39,7 +44,9 @@ const KEYS: [keyof WatchLink, string][] = [
   ['game', 'g'],
   ['mid', 'm'],
   ['now', 'n'],
+  ['browse', 'b'],
 ];
+const BROWSE_VALUES = new Set(['online', 'tournament', 'league']);
 
 /** The link in a URL fragment, or `null` when the fragment is not a watch link. Unknown or malformed values are dropped. */
 export function parseWatchLink(hash: string): WatchLink | null {
@@ -48,12 +55,16 @@ export function parseWatchLink(hash: string): WatchLink | null {
   const link: WatchLink = {};
   for (const [key, param] of KEYS) {
     const value = params.get(param);
-    if (value && TOKEN.test(value)) link[key] = value;
+    if (value && TOKEN.test(value)) (link as Record<string, string>)[key] = value;
   }
   // A card or a game needs its season; a game needs its card.
   if (!link.season) delete link.card;
   if (!link.card) delete link.game;
   if (link.now !== '1') delete link.now;
+  if (!link.browse || !BROWSE_VALUES.has(link.browse)) delete link.browse;
+  // A game of the online list only; the list itself names nothing else.
+  if (link.browse && link.browse !== 'online') delete link.mid;
+  if (link.browse && (link.league || link.tournament || link.now)) delete link.browse;
   return link;
 }
 

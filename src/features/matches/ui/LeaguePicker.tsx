@@ -5,6 +5,8 @@ import { useN01Environment } from '../../../state/n01Environment';
 import type { WatchSettings } from '../../../domain/types';
 import { useMatchesApiFactory } from '../environment';
 import { parseCompetitionReference } from '../competition';
+import type { BrowseCategory } from '../browse';
+import { BROWSE_CATEGORIES } from '../browse';
 
 /**
  * What to watch: a league (its seasons), a tournament or event, or one match. The known
@@ -28,14 +30,14 @@ const STATUS: Record<number, string> = { 10: '準備中', 20: '受付中', 25: '
 export function LeaguePicker({
   onPick,
   onMatch,
-  onNow,
+  onBrowse,
   current,
 }: {
   onPick: (target: WatchSettings) => void;
   /** A pasted match id or link: open that one game. */
   onMatch?: (mid: string) => void;
-  /** Browse what is being played on n01 right now. */
-  onNow?: () => void;
+  /** n01 公式メニューの一覧 (n01オンライン → n01トーナメント → n01リーグ) を開く。 */
+  onBrowse?: (category: BrowseCategory) => void;
   current?: string | null;
 }): React.JSX.Element {
   const environment = useN01Environment();
@@ -95,12 +97,22 @@ export function LeaguePicker({
             {league.title}
           </button>
         ))}
-        {onNow ? (
-          <button type="button" className="chip" onClick={onNow}>
-            いま n01 で進行中
-          </button>
-        ) : null}
       </div>
+      {onBrowse ? (
+        // 公式メニューと同じ順。旧「いま n01 で進行中」の位置に置く。
+        <div className="browse-entries" role="group" aria-labelledby="browse-entries-label" data-testid="browse-entries">
+          <span id="browse-entries-label" className="muted small-text">
+            n01 の一覧から探す
+          </span>
+          <span className="chip-row">
+            {BROWSE_CATEGORIES.map((entry) => (
+              <button key={entry.id} type="button" className="chip" onClick={() => onBrowse(entry.id)}>
+                {entry.label}
+              </button>
+            ))}
+          </span>
+        </div>
+      ) : null}
       <div className="chip-row" role="group" aria-label="団体から探す">
         {ORGANISATIONS.map((name) => (
           <button

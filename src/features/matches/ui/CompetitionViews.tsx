@@ -12,6 +12,7 @@ import { formatClock, formatRate, useFollowed, usePlayerStats } from './useMatch
 import { RankingFooter, RankingSearch, matchesQuery, rankThenSearch } from './rankingList';
 import { n01Avg3 } from '../../analytics/n01Figures';
 import { ListCoverage, listIncomplete } from './ListCoverage';
+import { N01Row } from './BrowseView';
 import type { ListCoverageState } from './ListCoverage';
 
 /** Refresh of a competition's games: while a game is on, and while it is running but between games. */
@@ -507,73 +508,78 @@ export function NowView({ factory, onCompetition, onGame }: { factory: MatchesAp
       competitions.set(tdid, entry);
     } else singles.push(row);
   }
+  const legs = (row: GameRow): string => `${row.sides[0].legsWon ?? 0} - ${row.sides[1].legsWon ?? 0}`;
   return (
-    <div className="now" data-testid="now-view">
-      <p className="muted small-text">
-        n01 全体で進行中 {rows.length} 試合{rows.length >= 100 ? ' (新しい順に 100 件まで)' : ''} ・ 取得 {formatClock(fetchedAt)}
-      </p>
-      <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="大会名・選手名で絞り込み" aria-label="大会名・選手名で絞り込み" />
+    <section className="now browse" data-testid="now-view" aria-labelledby="now-heading">
+      <h2 id="now-heading" className="browse-title">
+        いま n01 で進行中 (以前の一覧)
+      </h2>
+      <div className="browse-meta small-text">
+        <span className="browse-meta-text">
+          読み込み済み {rows.length} 試合{rows.length >= 100 ? ' (開始の新しい順に 100 件まで)' : ''} ・ 取得 {formatClock(fetchedAt)} ・ 大会・リーグ・個別の試合を含む
+        </span>
+      </div>
+      <input type="search" className="browse-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="大会名・選手名で絞り込み" aria-label="大会名・選手名で絞り込み" autoComplete="off" />
+      {error ? (
+        <p className="small-text" role="alert">
+          更新できませんでした: {error}
+        </p>
+      ) : null}
       {starred.length ? (
         <section className="followed-now" aria-label="注目選手" data-testid="followed-now">
           <h3 className="section-mini">
             <span aria-hidden="true">★</span> 注目選手が出場中
           </h3>
-          <ul className="plain">
+          <ul className="n01-list">
             {starred.map(({ row, names }) => (
-              <li key={row.mid}>
-                <button type="button" className="followed-row is-live" onClick={() => onGame(row.mid, `${row.sides[0].name} vs ${row.sides[1].name}`)}>
-                  <strong>{names.join('・')}</strong>
-                  <span>
-                    {row.sides[0].name} {row.sides[0].legsWon ?? 0} - {row.sides[1].legsWon ?? 0} {row.sides[1].name}
-                  </span>
-                  <span className="muted small-text">
-                    {row.title} ・ {row.startTime ? `開始 ${formatClock(row.startTime * 1000)}` : '開始時刻 未取得'}
-                  </span>
-                </button>
-              </li>
+              <N01Row key={row.mid} id={`followed:${row.mid}`} current={false} testId="followed-row" onOpen={() => onGame(row.mid, `${row.sides[0].name} vs ${row.sides[1].name}`)} title={names.join('・')} aside={<span className="tag browse-state state-live">進行中</span>}>
+                <span>
+                  {row.sides[0].name} {legs(row)} {row.sides[1].name}
+                </span>
+                <span className="muted">
+                  {' '}
+                  ・ {row.title} ・ {row.startTime ? `開始 ${formatClock(row.startTime * 1000)}` : '開始時刻 未取得'}
+                </span>
+              </N01Row>
             ))}
           </ul>
           <p className="muted small-text">選手名で照合しています (同姓同名は区別できません)。</p>
         </section>
       ) : null}
-      <h3 className="section-mini">大会・リーグ</h3>
-      <ul className="match-list">
+      <h3 className="section-mini browse-subhead">大会・リーグ</h3>
+      {competitions.size === 0 ? <p className="muted small-text">該当する大会・リーグはありません。</p> : null}
+      <ul className="n01-list">
         {[...competitions.entries()].map(([tdid, entry]) => (
-          <li key={tdid}>
-            <button type="button" className="match-row" onClick={() => onCompetition(tdid, entry.title)}>
-              <span className="match-teams">
-                <span>{entry.title}</span>
-              </span>
-              <span className="match-tags">
-                <span className="tag state-live">進行中 {entry.rows.length}</span>
-              </span>
-            </button>
-          </li>
+          <N01Row key={tdid} id={tdid} current={false} testId="now-competition" onOpen={() => onCompetition(tdid, entry.title)} title={entry.title} aside={<span className="tag browse-state state-live">進行中 {entry.rows.length}</span>} />
         ))}
       </ul>
-      <h3 className="section-mini">個別の試合 (n01 Online / Live など)</h3>
-      <ul className="match-list">
+      <h3 className="section-mini browse-subhead">個別の試合 (n01 Online / Live など)</h3>
+      {singles.length === 0 ? <p className="muted small-text">該当する試合はありません。</p> : null}
+      <ul className="n01-list">
         {singles.slice(0, 40).map((row) => (
-          <li key={row.mid}>
-            <button type="button" className="match-row" onClick={() => onGame(row.mid, `${row.sides[0].name} vs ${row.sides[1].name}`)} data-testid="now-single">
-              <span className="match-teams">
-                <span>{row.sides[0].name}</span>
-                <span className="match-score">
-                  {row.sides[0].legsWon ?? 0} - {row.sides[1].legsWon ?? 0}
-                </span>
-                <span>{row.sides[1].name}</span>
+          <N01Row
+            key={row.mid}
+            id={row.mid}
+            current={false}
+            testId="now-single"
+            onOpen={() => onGame(row.mid, `${row.sides[0].name} vs ${row.sides[1].name}`)}
+            title={
+              <span className="n01-duel">
+                <span className="n01-duel-name">{row.sides[0].name}</span>
+                <span className="n01-duel-score">{legs(row)}</span>
+                <span className="n01-duel-name">{row.sides[1].name}</span>
               </span>
-              <span className="match-tags">
-                <span className="muted small-text">{row.matchType === 'cricket' ? 'Cricket' : '01'}</span>
-                <span className="muted small-text" data-testid="now-times">
-                  {row.startTime ? `開始 ${formatClock(row.startTime * 1000)}` : '開始時刻 未取得'} ・ {row.updateTime ? `最終更新 ${formatTime(row.updateTime)}` : '更新時刻 未取得'}
-                </span>
-              </span>
-            </button>
-          </li>
+            }
+            aside={<span className="muted small-text">{row.matchType === 'cricket' ? 'Cricket' : '01'}</span>}
+          >
+            <span data-testid="now-times">
+              {row.startTime ? `開始 ${formatClock(row.startTime * 1000)}` : '開始時刻 未取得'} ・ {row.updateTime ? `最終更新 ${formatTime(row.updateTime)}` : '更新時刻 未取得'}
+            </span>
+          </N01Row>
         ))}
       </ul>
-    </div>
+      {singles.length > 40 ? <p className="muted small-text">個別の試合は開始の新しい 40 件まで表示しています。</p> : null}
+    </section>
   );
 }
 

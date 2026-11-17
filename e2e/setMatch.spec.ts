@@ -8,7 +8,7 @@ import { fakeWakeLock, setPageHidden, wakeHeld, wakeRecord } from './wakeLockFak
 import { tab } from './nav';
 
 /**
- * 「観戦 → いま n01 で進行中 → 個別の試合」 (and 注目選手) on canned n01, in a real browser: a
+ * 「観戦 → いま n01 で進行中 (以前の一覧、#/watch?n=1) → 個別の試合」 (and 注目選手) on canned n01, in a real browser: a
  * set-format match (one `scid`, a `mid` per set) on a page of its own. The case of 2026-11-16
  * (Light League): the screen stayed on ダブルス1 after ダブルス2 began, the earlier sets could
  * not be opened, and the bottom sheet left margins on both sides (PC) and on top (phone).
@@ -22,13 +22,23 @@ const noSidewaysScroll = async (page: Page): Promise<void> => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 };
 
+/**
+ * 以前の一覧「いま n01 で進行中」: 観戦の入口は n01オンライン・n01トーナメント・n01リーグに替わり、
+ * この一覧は共有済みのリンク (`#/watch?n=1`) から開く。
+ */
+async function openOldList(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.location.hash = '#/watch?n=1';
+  });
+}
+
 async function openNow(page: Page, control: SetMatchControl): Promise<void> {
   await serveNight(page);
   await serveSetMatch(page, control);
   await page.goto('/');
   await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
   await expect(page.getByTestId('live-board')).toBeVisible();
-  await page.getByRole('button', { name: /いま n01 で進行中の試合を見る/ }).click();
+  await openOldList(page);
   await expect(page.getByTestId('now-view')).toBeVisible();
 }
 
@@ -170,7 +180,7 @@ test('a followed player’s match (注目選手) opens the same page', async ({ 
   await page.getByTestId('player-card').getByRole('button', { name: /注目選手に追加/ }).click();
   await page.getByRole('button', { name: '閉じる' }).click();
   await page.getByRole('tab', { name: 'ライブ' }).click();
-  await page.getByRole('button', { name: /いま n01 で進行中の試合を見る/ }).click();
+  await openOldList(page);
   const followed = page.getByTestId('followed-now');
   await expect(followed).toContainText('青木 一郎');
   await followed.getByRole('button').first().click();
@@ -218,7 +228,7 @@ test('大会・リーグ: a game of a competition opens on the same page; back (
   await serveNowCompetition(page);
   await page.goto('/');
   await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
-  await page.getByRole('button', { name: /いま n01 で進行中の試合を見る/ }).click();
+  await openOldList(page);
   await page.getByTestId('now-view').getByRole('button', { name: /Sample Open/ }).click();
   const hub = page.getByTestId('tournament-hub');
   await expect(hub.getByTestId('competition-match').first()).toBeVisible();

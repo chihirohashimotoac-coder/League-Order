@@ -2,6 +2,7 @@ import { N01Error } from '../integrations/n01/client';
 import type { N01Request } from '../integrations/n01/endpoints';
 import { allFixtureDatasets, fixtureResponse } from '../test/n01/transport';
 import { LAST_PHASE, setMatchReply } from '../test/n01/setMatch';
+import { BROWSE_JDO_EVENT, browseReply } from '../test/n01/browse';
 
 /**
  * Review-preview only (never in the production build): an n01 made of the repository's
@@ -393,7 +394,21 @@ function setPhase(now: number): number {
   return Math.min(LAST_PHASE, Math.floor((now - START) / SET_PHASE_MS) % (LAST_PHASE + 3));
 }
 
+/**
+ * 観戦の n01オンライン・n01トーナメント・n01リーグの一覧 (src/test/n01/browse.ts の架空の一覧)。
+ * 先頭の大会は、このデモで開ける大会 (ATDO のデモシーズン) に差し替える。
+ */
+function browseDemo(operation: string, params: Record<string, string>): unknown | undefined {
+  const body = browseReply(operation, params) as { list?: Record<string, unknown>[] } | undefined;
+  if (body?.list && operation === 'tournament/list') {
+    return { ...body, list: body.list.map((row) => (row.tdid === BROWSE_JDO_EVENT ? { ...row, tdid: 't_ABvC_5234', title: 'デモ: ATDO シーズン (大会の画面で表示)', lgid: undefined } : row)) };
+  }
+  return body;
+}
+
 function respond(operation: string, params: Record<string, string>): unknown | undefined {
+  const browse = browseDemo(operation, params);
+  if (browse !== undefined) return browse;
   const set = setMatchReply(operation, params, setPhase(Date.now()));
   if (set !== undefined) {
     // The live list holds the demo card too.

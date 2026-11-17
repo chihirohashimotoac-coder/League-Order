@@ -29,6 +29,7 @@ const PATHS = {
   edit: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   diff: 'M8 4v11M4.5 11.5 8 15l3.5-3.5M16 20V9M12.5 12.5 16 9l3.5 3.5',
   chevronRight: 'm9 5 7 7-7 7',
+  external: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
   chevronLeft: 'm15 5-7 7 7 7',
   chevronDown: 'm5 9 7 7 7-7',
   close: 'M6 6l12 12M18 6 6 18',
