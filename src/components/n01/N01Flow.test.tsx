@@ -30,6 +30,8 @@ let failRequests = false;
 let failOpponent = false;
 /** Extra roster entries served for kalavinka on later syncs (simulates an n01 change). */
 let extraRoster: { opid: string; oid: string; tpid: string; oname: string }[] = [];
+/** Names dropped from kalavinka's roster on later syncs (a player who left the team). */
+let dropRoster: string[] = [];
 /** While set, every n01 request waits for it: a slow venue connection. */
 let gate: Promise<void> | null = null;
 
@@ -40,6 +42,7 @@ beforeEach(() => {
   failRequests = false;
   failOpponent = false;
   extraRoster = [];
+  dropRoster = [];
   gate = null;
 });
 
@@ -70,9 +73,9 @@ const env: N01Environment = {
         override: (request) => {
           if (failRequests) return FAIL;
           if (failOpponent && request.operation === 'team/player/list' && request.params.tpid === '68wv') return FAIL;
-          if (extraRoster.length > 0 && request.operation === 'team/player/list' && request.params.tpid === 'GpiQ') {
-            const base = fixtureResponse(request, allFixtureDatasets()) as { list: unknown[] };
-            return { list: [...base.list, ...extraRoster] };
+          if ((extraRoster.length > 0 || dropRoster.length > 0) && request.operation === 'team/player/list' && request.params.tpid === 'GpiQ') {
+            const base = fixtureResponse(request, allFixtureDatasets()) as { list: { oname?: string }[] };
+            return { list: [...base.list.filter((entry) => !dropRoster.includes(entry.oname ?? '')), ...extraRoster] };
           }
           return undefined;
         },
@@ -399,6 +402,63 @@ describe('next match order on ORDER SETUP (Phase 5)', () => {
     const { openBackend } = await import('../../storage/db');
     await waitFor(async () => expect((await new Repository(await openBackend()).loadAll()).orders).toHaveLength(1));
     expect((await new Repository(await openBackend()).loadAll()).orders[0].input.opponent).toBeUndefined();
+
+    // Reopened from history, it is still that match: re-generated without the n01 next match.
+    await openScreen(user, '履歴');
+    await user.click(await screen.findByRole('button', { name: /勝利|バランス|公平|育成|ペア|カスタム|20\d\d/ }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'このオーダーを開いて編集' }));
+    await screen.findByRole('heading', { name: 'オーダー結果' });
+    await user.click(screen.getByRole('button', { name: '戻る' }));
+    await screen.findByRole('heading', { name: 'オーダー設定' });
+    expect(screen.queryByTestId('setup-opponent')).toBeNull();
+    await user.click(generateButton());
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
+    expect(screen.queryByTestId('opponent-panel')).toBeNull();
+  }, 90_000);
+
+  it('the next match offers only players on the n01 roster, as its attendance always did', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    dropRoster = ['中村 蓮'];
+    const source = await startNextMatch(user);
+    const changes = await within(source).findByTestId('flow-changes', {}, { timeout: 10_000 });
+    await user.click(within(changes).getByRole('button', { name: '確認して続ける' }));
+    await within(source).findByTestId('flow-ready');
+    expect(screen.queryByRole('checkbox', { name: '中村 蓮 を参加者に含める' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '解除' }));
+    await user.click(screen.getByRole('button', { name: '全員' }));
+    expect(screen.getByRole('heading', { name: /参加者 6 \/ 6/ })).toBeInTheDocument();
+    await user.click(generateButton());
+    await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
+    const fielded = [...document.querySelectorAll<HTMLSelectElement>('.order-game select')].map((select) => select.selectedOptions[0]?.textContent ?? '');
+    expect(fielded.some((name) => name.includes('中村 蓮'))).toBe(false);
+  }, 60_000);
+
+  it('without its n01 format the next match is not generated; a match by hand still is', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await createKalavinka(user);
+    // A hand-made copy exists; the managed format itself is gone from the device.
+    await openScreen(user, 'フォーマット');
+    await user.click(await screen.findByRole('button', { name: /ATDO 2026 3rd A Division.*n01 管理/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'n01 管理フォーマット' })).getByRole('button', { name: 'コピーして手動フォーマット' }));
+    await screen.findByText('ATDO 2026 3rd A Division (手動)');
+    cleanup();
+    const { openBackend } = await import('../../storage/db');
+    const backend = await openBackend();
+    const stored = await new Repository(backend).loadAll();
+    const team = stored.teams.find((entry) => entry.name === 'kalavinka')!;
+    await backend.remove('formats', team.n01!.managedFormatId!);
+    failRequests = true;
+    renderApp();
+    await screen.findByRole('heading', { name: 'kalavinka', level: 1 });
+    const source = await startNextMatch(user);
+    await user.click(await within(source).findByRole('button', { name: '前回データで続ける' }));
+    expect(within(source).getByRole('alert')).toHaveTextContent('n01 のフォーマットがありません');
+    expect(generateButton()).toBeDisabled();
+    await user.click(within(source).getByRole('button', { name: '別の試合を作る' }));
+    expect(generateButton()).toBeEnabled();
   }, 60_000);
 
   it('the next match keeps its own helpers and attendance changes, never the hand-made match’s', async () => {

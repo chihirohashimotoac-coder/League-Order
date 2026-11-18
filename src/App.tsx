@@ -456,7 +456,9 @@ export function App(): React.JSX.Element {
       const baseline = order.match ?? match;
       setMatch(baseline);
       setRecord(order.match ? order : { ...order, match: baseline });
-      setHandMade(false);
+      // An order of an n01 team saved without opponent data (a match set by hand, or no data
+      // then) never picks up today's next-match analysis when it is generated again.
+      setHandMade(!!store.activeTeam?.n01 && !order.input.opponent);
       // SETUP edits this order from now on: restore the conditions it was generated
       // with, so going back and re-generating revises *this* order's line-up.
       setDraft(draftFor(order.input));
@@ -464,7 +466,7 @@ export function App(): React.JSX.Element {
       setPage('result');
       toast.show('履歴から読み込みました', 'ok');
     },
-    [toast, match, invalidateGeneration, draftFor],
+    [toast, match, invalidateGeneration, draftFor, store.activeTeam],
   );
 
   /**

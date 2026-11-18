@@ -19,7 +19,7 @@ import { LeagueRulesSummary } from '../components/LeagueRules';
 import { scopeForPreset, weightsForPreset } from '../domain/orders/presets';
 import { formatStructureIssues, totalSlots } from '../domain/games/format';
 import { createParticipantConfig, syncParticipants } from '../domain/orders/participants';
-import { buildNextMatchOrder, previousAvailability } from '../domain/n01/nextMatch';
+import { buildNextMatchOrder, eligiblePlayers, previousAvailability } from '../domain/n01/nextMatch';
 import { NextMatchStatus, isNextMatchPending, useNextMatchSync } from '../components/n01/NextMatchFlow';
 import { N01TeamWizard } from '../components/n01/N01TeamWizard';
 import { finalizeMember, newGuest, newMember } from '../domain/players/newPlayer';
@@ -112,6 +112,7 @@ export function SetupPage({
   opponentIntel,
   locked = false,
   memberAdd = false,
+  rosterOnly = false,
 }: {
   draft: SetupDraft;
   onDraftChange: (next: SetupDraft) => void;
@@ -137,6 +138,11 @@ export function SetupPage({
    * saved to the team, here today and a candidate from now on.
    */
   memberAdd?: boolean;
+  /**
+   * Only players who can play in the league are offered (the next match): nobody archived or
+   * no longer on the n01 roster, as the next-match attendance always was.
+   */
+  rosterOnly?: boolean;
 }): React.JSX.Element {
   const store = useAppStore();
   const toast = useToast();
@@ -174,7 +180,11 @@ export function SetupPage({
   // n01-linked players carry their PPR from n01 — this season's, or the estimate over the
   // seasons the last analysis returned — or the manual fallback: the order input snapshots
   // that value and where it came from, so a saved order keeps the PPR it was made with.
-  const everyone = useMemo(() => [...store.teamPlayers, ...draft.guests], [store.teamPlayers, draft.guests]);
+  const everyone = useMemo(
+    () => [...(rosterOnly ? eligiblePlayers(store.teamPlayers) : store.teamPlayers), ...draft.guests],
+    [store.teamPlayers, draft.guests, rosterOnly],
+  );
+  const offered = useMemo(() => new Set(everyone.map((player) => player.id)), [everyone]);
   const unstated = statusRequired
     ? everyone.filter((player) => configById.get(player.id)?.include && leagueStatusOf(configById.get(player.id)) === null)
     : [];
@@ -280,7 +290,10 @@ export function SetupPage({
       formatId: format.id,
       games: format.games,
       players: effectivePlayers,
-      participants: draft.participants,
+      // A player not offered here never plays, whatever an older condition said.
+      participants: rosterOnly
+        ? draft.participants.map((config) => (offered.has(config.playerId) ? config : { ...config, include: false }))
+        : draft.participants,
       pairs: store.teamPairs,
       locks: [],
       preset: draft.preset,
@@ -413,7 +426,7 @@ export function SetupPage({
               onClick={() =>
                 onDraftChange({
                   ...draft,
-                  participants: draft.participants.map((config) => ({ ...config, include: true })),
+                  participants: draft.participants.map((config) => ({ ...config, include: offered.has(config.playerId) })),
                 })
               }
             >
@@ -767,6 +780,8 @@ export function SetupPage({
             // An ordinary roster player from now on, whether or not n01 knows them yet; the
             // roster sync adds them to this order as here today.
             store.savePlayer(finalizeMember(saved));
+            // Here today: ticked at once (players that arrive any other way start unticked here).
+            onDraftChange({ ...draft, participants: [...draft.participants, createParticipantConfig(saved.id, true)] });
             setMemberDraft(null);
           }}
         />
@@ -844,7 +859,12 @@ type NewOrderMode = 'next' | 'manual';
 /** The draft kept in step with the roster and the formats, as the shell keeps its own. */
 function resyncSetup(setup: MatchSetup, players: readonly Player[], formatIds: readonly string[]): MatchSetup {
   const formatId = formatIds.includes(setup.draft.formatId) ? setup.draft.formatId : (formatIds[0] ?? '');
-  const participants = syncParticipants(setup.draft.participants, players, setup.draft.guests);
+  // A member who appears while this page is open (a sync answering late, a member added on
+  // another screen) is offered, never ticked behind the captain's back.
+  const known = new Set(setup.draft.participants.map((config) => config.playerId));
+  const participants = syncParticipants(setup.draft.participants, players, setup.draft.guests).map((config) =>
+    known.has(config.playerId) ? config : { ...config, include: false },
+  );
   return { ...setup, draft: { ...setup.draft, formatId, participants } };
 }
 
@@ -944,7 +964,8 @@ function NewOrderSetupFor({
       ...base,
       // A helper plays one order: a new one starts without them.
       guests: [],
-      participants: base.participants.filter((config) => !gone.has(config.playerId)),
+      // Everyone on the roster when the page opens is offered as ORDER SETUP always offers them.
+      participants: syncParticipants(base.participants.filter((config) => !gone.has(config.playerId)), store.teamPlayers),
       preset,
       settings: { ...base.settings, fairnessScope: scopeForPreset(preset, base.settings.fairnessScope) },
     };
@@ -1026,7 +1047,9 @@ function NewOrderSetupFor({
   }, [sync.phase.kind, mode]);
 
   const pending = isNextMatchPending(sync.phase);
-  const locked = mode === 'next' && (pending || next === null);
+  // The next match is made with its n01 format only: without it, nothing is generated for it.
+  const managedMissing = linked && !store.teamFormats.some((format) => format.id === team.n01?.managedFormatId);
+  const locked = mode === 'next' && (pending || next === null || managedMissing);
   // Until the next match is settled the page shows what is known from the device, locked.
   const provisional = useMemo(
     () => (mode === 'next' && next === null ? buildNext(intel?.nextMatchStatus === 'resolved' ? intel : null) : null),
@@ -1095,8 +1118,10 @@ function NewOrderSetupFor({
         {mode === 'next' || sync.phase.kind === 'noMatch' ? (
           <NextMatchStatus team={team} sync={sync} onRelink={() => setWizard(true)} />
         ) : null}
-        {mode === 'next' && !store.teamFormats.some((format) => format.id === team.n01?.managedFormatId) ? (
-          <p className="notice warn small-text">n01 のフォーマットがありません。n01 を再同期してください。</p>
+        {mode === 'next' && managedMissing ? (
+          <p className="notice warn small-text" role="alert">
+            n01 のフォーマットがありません。n01 を再同期してください。「別の試合を作る」から手動では作成できます。
+          </p>
         ) : null}
       </section>
 
@@ -1130,6 +1155,7 @@ function NewOrderSetupFor({
         opponentIntel={mode === 'next' ? intel : null}
         locked={locked}
         memberAdd
+        rosterOnly={mode === 'next'}
       />
 
       {wizard ? (
