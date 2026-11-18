@@ -492,6 +492,22 @@ describe('HarimaruController (PR2)', () => {
     }
   });
 
+  it('ジャンプの途中で足場がホバーなどで動き始めたら、着地の高さが合わないので中断して出直す', () => {
+    const tile = document.createElement('div');
+    root.append(tile);
+    tile.getBoundingClientRect = () => ({ left: 340, right: 600, top: 290, bottom: 380, width: 260, height: 90, x: 340, y: 290, toJSON: () => ({}) }) as DOMRect;
+    current = { ...terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]), elements: [] };
+    make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    for (let i = 0; i < 2_000 && !controller.snapshot().airborne; i += 1) advance(16);
+    expect(controller.snapshot().airborne).toBe(true);
+    const event = new Event('transitionrun', { bubbles: true });
+    Object.defineProperty(event, 'propertyName', { value: 'transform' });
+    tile.dispatchEvent(event);
+    expect(controller.snapshot().events).toContain('jump:aborted');
+    expect(controller.snapshot().airborne).toBe(false);
+    expect(sprite.dataset.visible).toBe('false');
+  });
+
   it('経路に障害物があればジャンプしない', () => {
     current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
     controller = new HarimaruController({
@@ -647,6 +663,27 @@ describe('HarimaruController (PR2)', () => {
     advance(DEFAULT_INTERACTION.reactionCooldownMs + 100);
     tapAt(target.x, target.y);
     expect(controller.snapshot().events).toContain('react:approach');
+  });
+
+  it('足元のすぐ下 (カードの面) をタップしても、体に触れたことにしない', () => {
+    current = terrain([{ left: 100, right: 700, top: 300 }]);
+    let obstacles: { left: number; right: number; top: number; bottom: number }[] = [];
+    controller = new HarimaruController({
+      sprite, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => current,
+      obstaclesIn: () => obstacles, behavior: only({ idle: 1 }), finePointer: false,
+    });
+    controller.start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    // 足場のカード (上辺 300 から下) の面。
+    obstacles = [{ left: 100, right: 700, top, bottom: top + 80 }];
+    tapAt(x + 15, top + 3);
+    expect(controller.snapshot().events).toContain('tap:ignored:content');
+    expect(controller.snapshot().events.some((e) => e.startsWith('react:'))).toBe(false);
+    // 体そのもの (見えている枠の中) へのタップは反応する。
+    advance(DEFAULT_INTERACTION.reactionCooldownMs + 100);
+    tapAt(x + 15, top - 10);
+    expect(controller.snapshot().events.some((e) => e === 'react:happy' || e === 'react:turn')).toBe(true);
   });
 
   it('PC: 止まったカーソルに近づき、速いカーソルへの「じゃれる」は素材待ちとして見送る', () => {

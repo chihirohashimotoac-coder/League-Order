@@ -134,6 +134,19 @@ describe('ジャンプの経路', () => {
     expect(arcIsClear(steep, [{ left: 0, right: 200, top: peakHead + 0.6, bottom: peakHead + 1.6 }], { top: 0, bottom: 1_000 })).toBe(false);
   });
 
+  it('頂点が判定点の間にあっても、表示範囲の上端をはみ出すジャンプは通さない', () => {
+    const steep = { from: { x: 0, top: 340 }, to: { x: 100, top: 300 }, height: 14 };
+    const steps = 4;
+    let sampledHead = Infinity;
+    for (let i = 0; i <= steps; i += 1) sampledHead = Math.min(sampledHead, arcAt(steep, i / steps).foot - SPRITE.height);
+    const trueHead = arcPeakFoot(steep) - SPRITE.height;
+    expect(trueHead).toBeLessThan(sampledHead - 0.5);
+    // 表示範囲の上端が、本当の頂点と等分の点の最高点の間にある。
+    const viewTop = (trueHead + sampledHead) / 2;
+    expect(arcIsClear(steep, [], { top: viewTop, bottom: 1_000 }, steps)).toBe(false);
+    expect(arcIsClear(steep, [], { top: trueHead - 1, bottom: 1_000 }, steps)).toBe(true);
+  });
+
   it('判定する点と点の間にある細い障害物も見逃さない', () => {
     const flat = { from: { x: 0, top: 300 }, to: { x: 240, top: 300 }, height: 14 };
     // 24 等分の点 (10px ごと) の、ちょうど間に立つ 2px 幅の縦線。

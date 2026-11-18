@@ -34,6 +34,7 @@ import {
   computeSegments,
   findSegment,
   jumpCandidates,
+  spriteBox,
   visibleSegments,
   type JumpPlan,
   type Rect,
@@ -325,6 +326,8 @@ export class HarimaruController {
       // タブ非表示・モーダルの休止中は計測しない (休止が解けたときに計測し直す)。
       if (this.destroyed || this.pauses.has('hidden') || this.pauses.has('modal')) return;
       if (!event.target || !this.placed) return;
+      // 空中では、着地先の足場が浮く・沈むと着地の高さが合わなくなる: 位置の変わる動きがあれば中断して出直す。
+      if (this.abortAirborne()) return;
       if (this.isPlatform(event.target)) {
         const keys = this.riding.get(event.target) ?? new Set<string>();
         keys.add(shiftKey(event));
@@ -1295,8 +1298,11 @@ export class HarimaruController {
     if (!this.placed || this.pauses.size > 0 || this.airborne || this.sink > 0) return;
     const zone = touchZone(point, { x: this.x, top: this.top, dir: this.dir }, this.interaction);
     if (zone === null) return;
-    // 体の外 (近く・背後) へのタップは、文字・操作部品・色の付いた要素のない余白で成立したものだけ。
-    if ((zone === 'near' || zone === 'behind') && !this.emptySpace(point)) {
+    // 見えている体の外 (近く・背後、体の周りの余裕の部分) へのタップは、文字・操作部品・色の付いた要素
+    // (足元のカード面など) のない余白で成立したものだけ。
+    const box = spriteBox(this.x, this.top);
+    const onBody = point.x >= box.left && point.x <= box.right && point.y >= box.top && point.y <= box.bottom;
+    if (!onBody && !this.emptySpace(point)) {
       this.log('tap:ignored:content');
       return;
     }

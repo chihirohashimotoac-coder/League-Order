@@ -213,8 +213,14 @@ export function arcIsClear(
   // 両端は足場の上に立っている姿そのもの。間の区間は、足場の上辺 (着地・踏切の線) をまたがない。
   let previous = spriteBox(plan.from.x, plan.from.top);
   if (!boxIsClear(previous, obstacles, view)) return false;
-  for (let i = 1; i <= steps; i += 1) {
-    const { x, foot } = arcAt(plan, i / steps);
+  // 等分の点に、頂点 (いちばん高い位置) の点を加える。
+  const lift = plan.height + Math.abs(plan.from.top - plan.to.top) / 2;
+  const peakT = lift > 0 ? Math.min(1, Math.max(0, 0.5 - (plan.to.top - plan.from.top) / (8 * lift))) : 0;
+  const ts = Array.from({ length: steps }, (_, i) => (i + 1) / steps);
+  if (peakT > 0 && peakT < 1) ts.push(peakT);
+  ts.sort((a, b) => a - b);
+  for (const t of ts) {
+    const { x, foot } = arcAt(plan, t);
     const box = spriteBox(x, foot);
     const swept = union(previous, box);
     // 掃いた範囲の下端は、両端の足場の上辺より下へ出ない (足場そのものとは重ならない)。
