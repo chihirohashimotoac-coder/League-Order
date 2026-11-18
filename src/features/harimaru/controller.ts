@@ -93,8 +93,9 @@ export class HarimaruController {
   private animationWaits = 0;
   private x = 0;
   private top = 0;
-  /** 最後に確かめた足場。 */
+  /** 最後に確かめた足場と、そのときの表示範囲。 */
   private segment: Segment | null = null;
+  private view: MeasuredTerrain['view'] | null = null;
   private dir: -1 | 1 = -1;
   private action: HarimaruAction | null = null;
   private history: HarimaruAction[] = [];
@@ -224,7 +225,11 @@ export class HarimaruController {
 
     const RO = (win as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
     if (RO) {
-      const observer = new RO(() => this.scheduleRemeasure());
+      // ResizeObserver の通知は描画の前に届く: その場で確かめ、立てなくなっていれば描画される前に消す。
+      const observer = new RO(() => {
+        this.checkNow();
+        this.scheduleRemeasure();
+      });
       observer.observe(this.root);
       this.cleanups.push(() => observer.disconnect());
     }
@@ -234,6 +239,9 @@ export class HarimaruController {
         // モーダル・シートは開いた瞬間に隠す (計測を待たない)。
         if (this.modalOpen()) this.pause('modal');
         else this.resume('modal');
+        // DOM の変化 (MutationObserver の通知は描画の前) で足場が消えた・動いた・ボタンが入ったら、
+        // 再計測のまとめ待ちをせず、変化が描画される前に消す。
+        this.checkNow();
         this.scheduleRemeasure();
       });
       observer.observe(this.watch, { childList: true, subtree: true });
@@ -352,6 +360,12 @@ export class HarimaruController {
     if (this.destroyed || this.pauses.has(reason)) return;
     this.pauses.add(reason);
     this.interrupt();
+    if (reason === 'hidden' || reason === 'modal') {
+      // 位置変化の見張りもやめる (休止が解けたときに足場を計測し直すので、ここで待つ必要はない)。
+      this.clearTimer('shift');
+      this.shifting.clear();
+      this.pauses.delete('shift');
+    }
     if (reason !== 'offscreen') {
       // 即座に消す (フェードしない)。休止中は計測・スクロールの補助タイマーも残さない。
       this.setVisible(false);
@@ -416,8 +430,23 @@ export class HarimaruController {
     }
   }
 
+  /** いまの位置にまだ立てるかを、その場で確かめる (立てなければ即座に消えて出直す)。 */
+  private checkNow(): void {
+    if (this.destroyed || !this.placed || this.pauses.size > 0) return;
+    const segment = this.currentSegment();
+    if (!segment) {
+      this.vanish(between(this.rng, this.timing.enterDelayMs));
+      return;
+    }
+    if (this.x < segment.minX || this.x > segment.maxX) {
+      this.x = clamp(this.x, segment.minX, segment.maxX);
+      this.run({ action: 'idle', durationMs: between(this.rng, this.behavior.idleMs) });
+    }
+  }
+
   private currentSegment(): Segment | null {
     const terrain = this.measureFn(this.root, this.selector, this.win);
+    this.view = terrain.view;
     this.segment = findSegment(computeSegments(terrain), this.top, this.x, SNAP_TOLERANCE);
     // 小さなずれ (フォントの読み込み・端数・ホバーで浮くタイル) は、足元を新しい上辺に合わせ直す。
     if (this.segment && this.segment.top !== this.top) {
@@ -502,8 +531,17 @@ export class HarimaruController {
       this.vanish(between(this.rng, this.timing.enterDelayMs));
       return;
     }
+    // ピンチズーム中は、横方向に見えている範囲の中だけを歩く。見えない位置にいれば休む (スクロールで再開)。
+    const viewLeft = this.view?.left ?? -Infinity;
+    const viewRight = this.view?.right ?? Infinity;
+    const minX = Math.max(segment.minX, viewLeft - SPRITE.sideInset);
+    const maxX = Math.min(segment.maxX, viewRight - SPRITE.width + SPRITE.sideInset);
+    if (maxX < minX || this.x < minX - 1 || this.x > maxX + 1) {
+      this.pause('offscreen');
+      return;
+    }
     const decision = decideNext(
-      { now: this.now(), lastActivityAt: this.lastActivityAt, history: this.history, x: this.x, minX: segment.minX, maxX: segment.maxX },
+      { now: this.now(), lastActivityAt: this.lastActivityAt, history: this.history, x: this.x, minX, maxX },
       this.rng,
       this.behavior,
     );

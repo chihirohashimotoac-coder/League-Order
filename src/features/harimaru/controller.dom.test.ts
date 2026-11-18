@@ -276,6 +276,55 @@ describe('HarimaruController', () => {
     hidden.mockRestore();
   });
 
+  it('DOM の変化で足場が消えたら、再計測のまとめ待ちをせずに (描画の前に) 消える', async () => {
+    make().start();
+    advance(3_000);
+    expect(sprite.dataset.visible).toBe('true');
+    // 旧座標にボタンが入った: 足場はもう使えない。
+    current = { ...terrain([{ left: 100, right: 500, top: 300 }]), obstacles: [{ left: 0, right: 1_000, top: 285, bottom: 299 }] };
+    root.append(document.createElement('button'));
+    await Promise.resolve();
+    expect(sprite.dataset.visible).toBe('false');
+    expect(controller.snapshot().placed).toBe(false);
+  });
+
+  it('ピンチズームで横方向の見える範囲が狭まったら、その中だけを歩く', () => {
+    make(11).start();
+    advance(3_000);
+    const { x } = controller.snapshot();
+    const view = { ...VIEW, left: Math.max(100, x - 40), right: Math.min(500, x + 70) };
+    current = { ...terrain([{ left: 100, right: 500, top: 300 }]), view };
+    for (let i = 0; i < 400; i += 1) {
+      advance(100);
+      const state = controller.snapshot();
+      if (!state.placed || state.paused.length > 0) continue;
+      expect(state.x + 2).toBeGreaterThanOrEqual(view.left - 0.01);
+      expect(state.x + 30 - 2).toBeLessThanOrEqual(view.right + 0.01);
+    }
+  });
+
+  it('位置の動きで隠れたあとにモーダルが開いても、見張りのタイマーを残さない', async () => {
+    make().start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    const tile = document.createElement('div');
+    root.append(tile);
+    await Promise.resolve();
+    tile.getBoundingClientRect = () => ({ left: x, right: x + 100, top, bottom: top + 80, width: 100, height: 80, x, y: top, toJSON: () => ({}) }) as DOMRect;
+    tile.dispatchEvent(new Event('animationstart', { bubbles: true }));
+    expect(controller.snapshot().paused).toContain('shift');
+    const dialog = document.createElement('div');
+    dialog.setAttribute('aria-modal', 'true');
+    app.append(dialog);
+    await Promise.resolve();
+    expect(controller.snapshot().paused).toEqual(['modal']);
+    expect(controller.snapshot().auxTimers).toBe(0);
+    expect(controller.snapshot().timers).toBe(0);
+    dialog.remove();
+    await Promise.resolve();
+    expect(sprite.dataset.visible).toBe('true');
+  });
+
   it('離れた場所のアニメーションでは隠れない', () => {
     make().start();
     advance(3_000);
