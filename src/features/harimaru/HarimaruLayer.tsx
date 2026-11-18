@@ -46,15 +46,19 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
     if (!sprite || !root) return undefined;
     let controller: HarimaruController | null = null;
     let disposed = false;
-    /** いま使っている (または読み込み中の) 素材。古い要求の結果は反映しない。 */
+    /** いま使っている (または読み込み中の) 素材と、その要求の番号。古い要求の結果は反映しない。 */
     let requested = '';
+    let generation = 0;
 
     const load = (): void => {
       const url = atlasFor(window.devicePixelRatio || 1);
       if (url === requested) return;
       requested = url;
+      generation += 1;
+      const mine = generation;
       const image = new Image();
-      const current = (): boolean => !disposed && requested === url;
+      // URL が 1x → 2x → 1x と戻っても、最初の 1x の結果は古い要求として扱う。
+      const current = (): boolean => !disposed && mine === generation;
       image.onload = () => {
         if (!current()) return;
         sprite.style.backgroundImage = `url("${url}")`;

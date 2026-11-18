@@ -115,6 +115,27 @@ describe('HarimaruLayer', () => {
     ratio.mockRestore();
   });
 
+  it('1x → 2x → 1x と戻っても、最初の要求の失敗では休止しない', () => {
+    const ratio = vi.spyOn(window, 'devicePixelRatio', 'get').mockReturnValue(1);
+    render(<HarimaruLayer page="home" />);
+    for (const next of [2, 1]) {
+      ratio.mockReturnValue(next);
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+    }
+    expect(FakeImage.instances).toHaveLength(3);
+    act(() => {
+      FakeImage.instances[0].onerror?.();
+    });
+    expect(layer()).not.toBeNull();
+    act(() => {
+      FakeImage.instances[2].onload?.();
+    });
+    expect(document.body.querySelector<HTMLElement>('[data-testid="harimaru"]')!.style.backgroundImage).toContain('@1x');
+    ratio.mockRestore();
+  });
+
   it('読み込めたら素材を表示に使う (登場までは透明)', () => {
     render(<HarimaruLayer page="home" />);
     act(() => {

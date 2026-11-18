@@ -55,6 +55,8 @@ const MAX_ANIMATION_WAITS = 10;
 const GEOMETRY_PROPERTY = /^(all|transform|translate|scale|rotate|top|right|bottom|left|inset.*|width|height|min-.*|max-.*|margin.*|padding.*|border(-top|-bottom)?-width|font-size|line-height)$/;
 /** 位置が変わり続けても、この時間で一度計測し直す (終了イベントが届かない場合の保険)。 */
 const SHIFT_FALLBACK_MS = 2_000;
+/** 保険の確認を繰り返す回数。超えても動いていれば、姿を消して安全な場所から出直す。 */
+const SHIFT_MAX_CHECKS = 5;
 /** 足場の高さがこの範囲でずれたら、足元を合わせ直して続ける (ホバーで 2px 浮くタイルなど)。 */
 const SNAP_TOLERANCE = 3;
 
@@ -79,7 +81,8 @@ export class HarimaruController {
   private shiftTimer: number | null = null;
   private frame: number | null = null;
   /** 足場の近くで動いているトランジション・アニメーションの対象。 */
-  private readonly shifting = new Set<EventTarget>();
+  private readonly shifting = new Map<EventTarget, Set<string>>();
+  private shiftChecks = 0;
   private readonly cleanups: (() => void)[] = [];
   private readonly pauses = new Set<PauseReason>();
 
@@ -122,7 +125,8 @@ export class HarimaruController {
     this.listen();
     if (this.win.document.hidden) this.pauses.add('hidden');
     if (this.modalOpen()) this.pauses.add('modal');
-    this.scheduleEnter(between(this.rng, this.timing.enterDelayMs));
+    // 休止中は登場を予約しない (休止が解けたときに予約する)。
+    if (!this.blocked()) this.scheduleEnter(between(this.rng, this.timing.enterDelayMs));
   }
 
   destroy(): void {
@@ -181,20 +185,28 @@ export class HarimaruController {
     }
 
     // 足場の近くで位置の変わるトランジション・アニメーションが始まったら、終わるまで隠す。
+    // 同じ要素でも、位置のトランジション (プロパティごと) とアニメーション (名前ごと) を別々に数える。
+    const shiftKey = (event: Event): string =>
+      event.type.startsWith('transition')
+        ? `transition:${(event as TransitionEvent).propertyName ?? ''}`
+        : `animation:${(event as AnimationEvent).animationName ?? ''}`;
     const onShiftStart = (event: Event): void => {
       if (event.type === 'transitionrun' && !GEOMETRY_PROPERTY.test((event as TransitionEvent).propertyName ?? '')) return;
-      if (!this.nearSprite(event.target)) return;
-      this.shifting.add(event.target!);
+      // タブ非表示・モーダルの休止中は計測しない (休止が解けたときに計測し直す)。
+      if (this.destroyed || this.pauses.has('hidden') || this.pauses.has('modal')) return;
+      if (!event.target || !this.nearSprite(event.target)) return;
+      const keys = this.shifting.get(event.target) ?? new Set<string>();
+      keys.add(shiftKey(event));
+      this.shifting.set(event.target, keys);
       this.pause('shift');
-      this.clearTimer('shift');
-      this.shiftTimer = win.setTimeout(() => {
-        this.shiftTimer = null;
-        this.shifting.clear();
-        this.resume('shift');
-      }, SHIFT_FALLBACK_MS);
+      this.shiftChecks = 0;
+      this.armShiftFallback();
     };
     const onShiftEnd = (event: Event): void => {
-      if (!this.shifting.delete(event.target!) || this.shifting.size > 0) return;
+      const keys = event.target ? this.shifting.get(event.target) : undefined;
+      if (!keys || !keys.delete(shiftKey(event))) return;
+      if (keys.size === 0) this.shifting.delete(event.target!);
+      if (this.shifting.size > 0) return;
       this.clearTimer('shift');
       this.resume('shift');
     };
@@ -231,15 +243,51 @@ export class HarimaruController {
     fonts?.ready.then(() => this.scheduleRemeasure()).catch(() => undefined);
   }
 
-  /** 要素がキャラクターの足元・周囲 (左右 8px、上下 40px) にかかっているか。 */
-  private nearSprite(target: EventTarget | null): boolean {
+  /**
+   * 要素がキャラクターの周囲、または歩ける範囲 (いまの足場の全幅) の足元にかかっているか。
+   * 歩いて向かう先の足場が動く場合も含める (左右 8px、上下 40px の余裕)。
+   */
+  private nearSprite(target: EventTarget): boolean {
     if (!this.placed || !(target instanceof Element)) return false;
     const rect = target.getBoundingClientRect();
-    const left = this.x - this.win.scrollX - 8;
-    const right = this.x - this.win.scrollX + SPRITE.width + 8;
+    const from = Math.min(this.x, this.segment?.minX ?? this.x);
+    const to = Math.max(this.x, this.segment?.maxX ?? this.x);
+    const left = from - this.win.scrollX - 8;
+    const right = to - this.win.scrollX + SPRITE.width + 8;
     const top = this.top - this.win.scrollY - 40;
     const bottom = this.top - this.win.scrollY + 40;
     return rect.right > left && rect.left < right && rect.bottom > top && rect.top < bottom;
+  }
+
+  /** 位置変化の終了が届かない場合の保険。まだ動いていれば待ち続け、長すぎれば出直す。 */
+  private armShiftFallback(): void {
+    this.clearTimer('shift');
+    this.shiftTimer = this.win.setTimeout(() => {
+      this.shiftTimer = null;
+      if (this.stillShifting() && this.shiftChecks < SHIFT_MAX_CHECKS) {
+        this.shiftChecks += 1;
+        this.armShiftFallback();
+        return;
+      }
+      const moving = this.stillShifting();
+      this.shifting.clear();
+      if (moving) {
+        // 安全を確かめられない: 非表示のまま、動きが落ち着いてから安全な場所に出直す。
+        this.pauses.delete('shift');
+        this.vanish(between(this.rng, this.timing.enterDelayMs));
+        return;
+      }
+      this.resume('shift');
+    }, SHIFT_FALLBACK_MS);
+  }
+
+  /** 見張っている要素で、有限のアニメーション・トランジションがまだ動いているか。 */
+  private stillShifting(): boolean {
+    for (const target of this.shifting.keys()) {
+      const animations = (target as Element & { getAnimations?: () => Animation[] }).getAnimations?.() ?? [];
+      if (animations.some((a) => a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity)) return true;
+    }
+    return false;
   }
 
   /** タイマー・計測を止めておく休止 (画面外の休止はスクロール停止の確認だけ続ける)。 */
@@ -279,7 +327,11 @@ export class HarimaruController {
       return;
     }
     const terrain = this.measureFn(this.root, this.selector, this.win);
-    const inView = this.top - SPRITE.height >= terrain.view.top && this.top <= terrain.view.bottom;
+    const inView =
+      this.top - SPRITE.height >= terrain.view.top &&
+      this.top <= terrain.view.bottom &&
+      this.x + SPRITE.sideInset >= terrain.view.left &&
+      this.x + SPRITE.width - SPRITE.sideInset <= terrain.view.right;
     if (inView) {
       this.resume('offscreen');
       return;

@@ -118,7 +118,23 @@ export function findSegment(segments: readonly Segment[], top: number, x: number
   return near.sort((a, b) => Math.abs(a.top - top) - Math.abs(b.top - top))[0] ?? null;
 }
 
-/** 縦方向の表示範囲 [top, bottom] (ページ座標) に、立っている姿がすべて収まる足場。 */
-export function visibleSegments(segments: readonly Segment[], view: { top: number; bottom: number }): Segment[] {
-  return segments.filter((s) => s.top - SPRITE.height >= view.top && s.top <= view.bottom);
+/**
+ * 表示範囲 (ページ座標) に立っている姿がすべて収まる足場。横方向はピンチズーム中の見えている範囲に
+ * 合わせて、左端 x の範囲を狭めた写しを返す (left / right を省くと横方向は制限しない)。
+ */
+export function visibleSegments(
+  segments: readonly Segment[],
+  view: { top: number; bottom: number; left?: number; right?: number },
+): Segment[] {
+  const viewLeft = view.left ?? -Infinity;
+  const viewRight = view.right ?? Infinity;
+  const visible: Segment[] = [];
+  for (const s of segments) {
+    if (s.top - SPRITE.height < view.top || s.top > view.bottom) continue;
+    const minX = Math.max(s.minX, viewLeft - SPRITE.sideInset);
+    const maxX = Math.min(s.maxX, viewRight - SPRITE.width + SPRITE.sideInset);
+    if (maxX < minX) continue;
+    visible.push({ ...s, minX, maxX });
+  }
+  return visible;
 }

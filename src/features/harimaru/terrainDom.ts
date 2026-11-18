@@ -10,8 +10,8 @@ import { SPRITE, DEFAULT_TERRAIN } from './params';
 import type { Platform, Rect, TerrainInput } from './terrain';
 
 export interface MeasuredTerrain extends TerrainInput {
-  /** いま見えている縦方向の範囲 (ページ座標)。固定ヘッダー・下部ナビ・固定操作バーを除く。 */
-  view: { top: number; bottom: number };
+  /** いま見えている範囲 (ページ座標)。固定ヘッダー・下部ナビ・固定操作バーと、ピンチズームで見えない部分を除く。 */
+  view: { top: number; bottom: number; left: number; right: number };
 }
 
 const SOLID_TAGS = new Set([
@@ -112,16 +112,20 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
   range.detach();
 
   // ピンチズーム中は、実際に見えている範囲 (visual viewport) に狭める。
+  let viewLeft = 0;
+  let viewRight = viewportWidth;
   const visual = win.visualViewport;
   if (visual) {
     viewTop = Math.max(viewTop, visual.offsetTop);
     viewBottom = Math.min(viewBottom, visual.offsetTop + visual.height);
+    viewLeft = Math.max(viewLeft, visual.offsetLeft);
+    viewRight = Math.min(viewRight, visual.offsetLeft + visual.width);
   }
 
   return {
     platforms,
     obstacles,
     bounds: { left: sx + 4, right: sx + viewportWidth - 4 },
-    view: { top: sy + viewTop, bottom: sy + viewBottom },
+    view: { top: sy + viewTop, bottom: sy + viewBottom, left: sx + viewLeft, right: sx + viewRight },
   };
 }

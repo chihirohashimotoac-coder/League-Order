@@ -11,6 +11,21 @@ import { tab } from './nav';
 
 const sprite = (page: Page) => page.getByTestId('harimaru');
 
+/** 次に「隠れた」瞬間を記録し始める (短い非表示もポーリングで取りこぼさない)。返り値で、隠れたときの不透明度を得る。 */
+async function watchHide(page: Page): Promise<() => Promise<string | null>> {
+  await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>('[data-testid="harimaru"]')!;
+    const w = window as unknown as { __harimaruHidden: string | null; __harimaruObserver?: MutationObserver };
+    w.__harimaruHidden = null;
+    w.__harimaruObserver?.disconnect();
+    w.__harimaruObserver = new MutationObserver(() => {
+      if (el.dataset.visible === 'false' && w.__harimaruHidden === null) w.__harimaruHidden = getComputedStyle(el).opacity;
+    });
+    w.__harimaruObserver.observe(el, { attributes: true, attributeFilter: ['data-visible'] });
+  });
+  return () => page.evaluate(() => (window as unknown as { __harimaruHidden: string | null }).__harimaruHidden);
+}
+
 async function openSampleHome(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルで試す' }).click();
@@ -167,32 +182,58 @@ test('安全な足場がなくなると即座に消え、足場が戻ると安�
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
   expect(await overlaps(page)).toEqual([]);
 
-  // 表示中に足場がふさがれたら、フェードを待たずに消える。
+  // 表示中に足場がふさがれたら、検出した時点 (DOM 変化のまとめ待ち 200ms) でフェードせずに消える。
   await block();
-  await page.clock.runFor(400);
+  await page.clock.runFor(250);
   await expect(sprite(page)).toHaveAttribute('data-visible', 'false');
+  // 消えた直後でも不透明度は 0 (残像のフェードがない)。
   expect(await sprite(page).evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
 });
 
-test('PC: 足場のタイルにホバーして浮いても、タイルに重ならない', async ({ page }, info) => {
+test('PC: 足場のタイルにホバーして浮く間は隠れ、終わると重ならない位置に戻る', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'ホバーで浮くのはマウスのある画面だけ');
   await page.clock.install();
   await openSampleHome(page);
   await page.clock.runFor(4_000);
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  let hovered = 0;
   for (let i = 0; i < 6; i += 1) {
-    // ハリマルの足元のタイルを指す。
+    await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+    // ハリマルの足元を指す。
     const point = await sprite(page).evaluate((el) => {
       const r = el.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.bottom + 12 };
+      const x = r.left + r.width / 2;
+      const y = r.bottom + 12;
+      return { x, y, tile: !!document.elementFromPoint(x, y)?.closest('.quick-tile') };
     });
+    const hiddenOnHover = await watchHide(page);
     await page.mouse.move(point.x, point.y);
-    await page.waitForTimeout(400);
+    if (point.tile) {
+      hovered += 1;
+      // タイルが浮き始めたら (トランジション中) すぐに、残像なしで隠れる。
+      await expect.poll(hiddenOnHover, { timeout: 1_000 }).toBe('0');
+    }
+    // 浮き終わったら、浮いたタイルの上辺に合わせて戻る (重ならない)。
+    await page.waitForTimeout(500);
     await page.clock.runFor(300);
-    if ((await sprite(page).getAttribute('data-visible')) === 'true') expect(await overlaps(page), `hover ${i}`).toEqual([]);
+    await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+    expect(await overlaps(page), `hover ${i}`).toEqual([]);
+    // まだ同じ (浮いている) タイルの上に立っているか。角に立っていた場合などは、消えて別の安全な場所に
+    // 出直しているので、ホバーを外してもこのタイルの動きとは関係しない。
+    const stillOnTile = await sprite(page).evaluate((el, at) => {
+      const r = el.getBoundingClientRect();
+      const tile = document.elementFromPoint(at.x, at.y)?.closest('.quick-tile');
+      const under = document.elementFromPoint(r.left + r.width / 2, r.bottom + 6)?.closest('.quick-tile');
+      return !!tile && tile === under;
+    }, point);
+    const hiddenOnLeave = await watchHide(page);
     await page.mouse.move(5, 300);
-    await page.waitForTimeout(400);
+    if (point.tile && stillOnTile) await expect.poll(hiddenOnLeave, { timeout: 1_000 }).toBe('0');
+    await page.waitForTimeout(500);
+    await page.clock.runFor(300);
+    await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+    expect(await overlaps(page), `leave ${i}`).toEqual([]);
     await page.clock.runFor(2_000);
-    if ((await sprite(page).getAttribute('data-visible')) === 'true') expect(await overlaps(page), `leave ${i}`).toEqual([]);
   }
+  expect(hovered, '足元のタイルにホバーした回数').toBeGreaterThan(0);
 });

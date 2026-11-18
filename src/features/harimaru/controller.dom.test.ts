@@ -4,7 +4,7 @@ import { HarimaruController } from './controller';
 import { DEFAULT_TIMING } from './params';
 import type { MeasuredTerrain } from './terrainDom';
 
-const VIEW = { top: 0, bottom: 800 };
+const VIEW = { top: 0, bottom: 800, left: 0, right: 1_000 };
 const terrain = (platforms: MeasuredTerrain['platforms'], view = VIEW): MeasuredTerrain => ({
   platforms,
   obstacles: [],
@@ -188,12 +188,101 @@ describe('HarimaruController', () => {
     expect(sprite.dataset.visible).toBe('true');
   });
 
+  it('歩いて向かう先 (同じ足場の遠い端) のタイルが動き始めても隠れる', () => {
+    make().start();
+    advance(3_000);
+    const { top } = controller.snapshot();
+    const farTile = document.createElement('button');
+    root.append(farTile);
+    // 足場は x 100〜500。キャラクターから離れた右端のタイル。
+    farTile.getBoundingClientRect = () => ({ left: 440, right: 500, top, bottom: top + 80, width: 60, height: 80, x: 440, y: top, toJSON: () => ({}) }) as DOMRect;
+    const event = new Event('transitionrun', { bubbles: true });
+    Object.defineProperty(event, 'propertyName', { value: 'transform' });
+    farTile.dispatchEvent(event);
+    expect(sprite.dataset.visible).toBe('false');
+  });
+
+  it('同じ要素の別のプロパティ・別のアニメーションが終わっても、位置の動きが終わるまで隠れたまま', () => {
+    make().start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    const tile = document.createElement('button');
+    root.append(tile);
+    tile.getBoundingClientRect = () => ({ left: x, right: x + 100, top, bottom: top + 80, width: 100, height: 80, x, y: top, toJSON: () => ({}) }) as DOMRect;
+    const fire = (type: string, props: Record<string, string>): void => {
+      const event = new Event(type, { bubbles: true });
+      for (const [key, value] of Object.entries(props)) Object.defineProperty(event, key, { value });
+      tile.dispatchEvent(event);
+    };
+    fire('transitionrun', { propertyName: 'transform' });
+    fire('animationstart', { animationName: 'lift' });
+    fire('transitionend', { propertyName: 'border-color' });
+    expect(sprite.dataset.visible).toBe('false');
+    fire('transitionend', { propertyName: 'transform' });
+    expect(sprite.dataset.visible).toBe('false');
+    fire('animationend', { animationName: 'lift' });
+    expect(sprite.dataset.visible).toBe('true');
+  });
+
+  it('保険の確認でまだ動いていれば隠れたまま、長く続けば姿を消して出直す', () => {
+    make().start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    const tile = document.createElement('div');
+    root.append(tile);
+    tile.getBoundingClientRect = () => ({ left: x, right: x + 100, top, bottom: top + 80, width: 100, height: 80, x, y: top, toJSON: () => ({}) }) as DOMRect;
+    let running = true;
+    (tile as unknown as { getAnimations: () => unknown[] }).getAnimations = () =>
+      running ? [{ playState: 'running', effect: { getTiming: () => ({ iterations: 1 }) } }] : [];
+    tile.dispatchEvent(new Event('animationstart', { bubbles: true }));
+    advance(2_100);
+    expect(sprite.dataset.visible).toBe('false');
+    advance(2_000 * 5);
+    expect(controller.snapshot().placed).toBe(false);
+    running = false;
+    advance(4_000);
+    expect(controller.snapshot().placed).toBe(true);
+    expect(sprite.dataset.visible).toBe('true');
+  });
+
+  it('休止中 (モーダル) は位置の動きを見張らず、タイマーも予約しない', async () => {
+    make().start();
+    advance(3_000);
+    const dialog = document.createElement('div');
+    dialog.setAttribute('aria-modal', 'true');
+    app.append(dialog);
+    await Promise.resolve();
+    const { x, top } = controller.snapshot();
+    const tile = document.createElement('div');
+    root.append(tile);
+    await Promise.resolve();
+    advance(300);
+    tile.getBoundingClientRect = () => ({ left: x, right: x + 100, top, bottom: top + 80, width: 100, height: 80, x, y: top, toJSON: () => ({}) }) as DOMRect;
+    tile.dispatchEvent(new Event('animationstart', { bubbles: true }));
+    expect(controller.snapshot().paused).not.toContain('shift');
+    expect(controller.snapshot().auxTimers).toBe(0);
+    expect(controller.snapshot().timers).toBe(0);
+  });
+
+  it('タブが非表示のまま始まったら、登場を予約しない', () => {
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    make().start();
+    expect(controller.snapshot().timers).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+    advance(3_000);
+    expect(sprite.dataset.visible).toBe('true');
+    hidden.mockRestore();
+  });
+
   it('離れた場所のアニメーションでは隠れない', () => {
     make().start();
     advance(3_000);
     const far = document.createElement('div');
     root.append(far);
-    far.getBoundingClientRect = () => ({ left: 0, right: 50, top: 0, bottom: 50, width: 50, height: 50, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    // 足場 (x 100〜500, 上辺 300) から縦に離れた要素。
+    far.getBoundingClientRect = () => ({ left: 0, right: 600, top: 0, bottom: 50, width: 600, height: 50, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     far.dispatchEvent(new Event('animationstart', { bubbles: true }));
     expect(sprite.dataset.visible).toBe('true');
   });

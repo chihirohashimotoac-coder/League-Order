@@ -82,4 +82,10 @@ describe('findSegment / visibleSegments', () => {
     expect(visibleSegments(segments, { top: 190, bottom: 800 })).toHaveLength(0);
     expect(visibleSegments(segments, { top: 0, bottom: 199 })).toHaveLength(0);
   });
+  it('ピンチズーム中は、横方向にも見えている範囲だけを使う', () => {
+    const [clipped] = visibleSegments(segments, { top: 0, bottom: 800, left: 200, right: 300 });
+    expect(clipped.minX + SPRITE.sideInset).toBeGreaterThanOrEqual(200);
+    expect(clipped.maxX + SPRITE.width - SPRITE.sideInset).toBeLessThanOrEqual(300);
+    expect(visibleSegments(segments, { top: 0, bottom: 800, left: 380, right: 600 })).toHaveLength(0);
+  });
 });
