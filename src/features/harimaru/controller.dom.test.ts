@@ -508,6 +508,46 @@ describe('HarimaruController (PR2)', () => {
     expect(sprite.dataset.visible).toBe('false');
   });
 
+  it('踏切の前から足場が動いている途中なら跳ばない (動いたあとの高さが分からない)', () => {
+    const target = document.createElement('div');
+    const start = document.createElement('div');
+    root.append(target, start);
+    target.getBoundingClientRect = () => ({ left: 340, right: 600, top: 290, bottom: 380, width: 260, height: 90, x: 340, y: 290, toJSON: () => ({}) }) as DOMRect;
+    start.getBoundingClientRect = () => ({ left: 100, right: 300, top: 300, bottom: 380, width: 200, height: 80, x: 100, y: 300, toJSON: () => ({}) }) as DOMRect;
+    current = { ...terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]), elements: [start, target] };
+    make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    // 「ジャンプ」を選んで踏切へ歩き始めたところで、着地先の足場がホバーで浮き始める (終わらない)。
+    for (let i = 0; i < 4_000 && !controller.snapshot().events.includes('action:jump'); i += 1) advance(16);
+    expect(controller.snapshot().events).toContain('action:jump');
+    const event = new Event('transitionrun', { bubbles: true });
+    Object.defineProperty(event, 'propertyName', { value: 'transform' });
+    target.dispatchEvent(event);
+    // 浮く途中のトランジションが動いている。
+    (target as unknown as { getAnimations: () => unknown[] }).getAnimations = () => [{ playState: 'running', effect: { getTiming: () => ({ iterations: 1 }) } }];
+    for (let i = 0; i < 1_500 && !controller.snapshot().events.includes('jump:skipped:moving'); i += 1) {
+      advance(16);
+      expect(controller.snapshot().airborne).toBe(false);
+    }
+    expect(controller.snapshot().events).toContain('jump:skipped:moving');
+  });
+
+  it('その場で跳ねている途中に画面が変わったら、足場に降りて確かめ直す。跳ねている間のタップには反応しない', async () => {
+    make2({ behavior: only({ hop: 1, idle: 0.0001 }), finePointer: false }).start();
+    controller = controller as HarimaruController;
+    // 跳ねる余地あり (障害物なし) なので、そのうち跳ねる。
+    for (let i = 0; i < 4_000 && !(controller.snapshot().lift > 0); i += 1) advance(8);
+    expect(controller.snapshot().lift).toBeGreaterThan(0);
+    const { x, top } = controller.snapshot();
+    pointer('pointerdown', x + 15, top - 10);
+    pointer('pointerup', x + 15, top - 10);
+    expect(controller.snapshot().events.some((e) => e.startsWith('react:'))).toBe(false);
+    root.append(document.createElement('p'));
+    await Promise.resolve();
+    const state = controller.snapshot();
+    expect(state.events).toContain('hop:aborted');
+    expect(state.lift).toBe(0);
+  });
+
   it('経路に障害物があればジャンプしない', () => {
     current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
     controller = new HarimaruController({

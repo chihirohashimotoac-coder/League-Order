@@ -543,10 +543,29 @@ export class HarimaruController {
 
   /** ジャンプの途中で画面が動いた・変わった: 経路の安全を保てないので、即座に隠れて安全な足場から出直す。 */
   private abortAirborne(): boolean {
-    if (!this.airborne) return false;
-    this.log('jump:aborted');
-    this.vanish(between(this.rng, this.timing.enterDelayMs));
-    return true;
+    if (this.airborne) {
+      this.log('jump:aborted');
+      this.vanish(between(this.rng, this.timing.enterDelayMs));
+      return true;
+    }
+    // その場で跳ねている途中: 頭の上の余白を確かめ直せないので、足場に降りて立ち止まる (立ち姿は呼ぶ側で確かめる)。
+    if (this.lift > 0 && this.placed) {
+      this.log('hop:aborted');
+      this.interrupt();
+      this.action = 'idle';
+      this.render(ROW.idle, IDLE_OPEN);
+      this.after(between(this.rng, this.behavior.idleMs), () => this.nextAction());
+    }
+    return false;
+  }
+
+  /** 足場 (またはその近く) で、位置の変わるアニメーション・トランジションが動いている途中か。 */
+  private platformsMoving(): boolean {
+    if (this.riding.size > 0 || this.shifting.size > 0) return true;
+    return this.platformEls.some((el) => {
+      const animations = (el as Element & { getAnimations?: () => Animation[] }).getAnimations?.() ?? [];
+      return animations.some((a) => a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity);
+    });
   }
 
   private onScroll(): void {
@@ -1052,6 +1071,12 @@ export class HarimaruController {
   /** 踏切の位置まで歩いてから、放物線で別の足場へ跳ぶ (経路の安全は確かめ済み)。 */
   private jump(plan: JumpPlan): void {
     this.walk(plan.from.x, false, () => {
+      // 足場が動いている途中 (ホバーで浮く途中など) は、動いたあとの高さが分からないので跳ばない。
+      if (this.platformsMoving()) {
+        this.log('jump:skipped:moving');
+        this.idle(between(this.rng, this.behavior.idleMs));
+        return;
+      }
       // 歩いている間に画面が変わったかもしれない: 経路をもう一度確かめる。
       const current = this.currentSegment();
       const again = current ? this.safeJumps(current).find((p) => p.target.top === plan.target.top && p.target.minX === plan.target.minX) : undefined;
@@ -1295,7 +1320,8 @@ export class HarimaruController {
 
   /** 採用したタップ (ページ座標)。 */
   private onTap(point: { x: number; y: number }): void {
-    if (!this.placed || this.pauses.size > 0 || this.airborne || this.sink > 0) return;
+    // 跳ねている・飛んでいる・沈んでいる間は、描かれている位置と足場の位置がずれるので反応しない。
+    if (!this.placed || this.pauses.size > 0 || this.airborne || this.sink > 0 || this.lift > 0) return;
     const zone = touchZone(point, { x: this.x, top: this.top, dir: this.dir }, this.interaction);
     if (zone === null) return;
     // 見えている体の外 (近く・背後、体の周りの余裕の部分) へのタップは、文字・操作部品・色の付いた要素
