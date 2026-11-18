@@ -15,10 +15,16 @@ import { useHarimaruEnabled } from './preference';
 import { atlasFor, BACKGROUND_SIZE } from './sprite';
 import './harimaru.css';
 
-/** 画面ごとの足場 (カード・タイルの上辺)。登録のない画面には出ない。 */
-export const HARIMARU_PLATFORMS: Partial<Record<string, string>> = {
-  home: '.home-grid .next-match-card, .home-grid .card, .home-grid .quick-tile',
-};
+/**
+ * 足場にする要素 (カード・タイルの上辺)。どの画面でも、上に文字・操作部品・スコアのない余白だけを使う
+ * (terrain.ts)。安全な余白のない画面では表示しない。
+ */
+const PLATFORMS = '.card, .next-match-card, .quick-tile, .focus-card, .board-tile, .n01-list, .browse-lobby';
+
+/** 足場を探す画面。登録のない画面には出ない。 */
+export const HARIMARU_PLATFORMS: Partial<Record<string, string>> = Object.fromEntries(
+  ['home', 'watch', 'live', 'matches', 'analytics', 'setup', 'result', 'players', 'formats', 'pairs', 'history', 'settings', 'more'].map((page) => [page, PLATFORMS]),
+);
 
 export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 

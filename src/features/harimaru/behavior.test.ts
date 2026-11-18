@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actionWeights, decideNext, pickWeighted, seededRng, walkRoom, type DecisionInput, type HarimaruAction } from './behavior';
+import { ACTIONS, MOVING, actionWeights, decideNext, pickWeighted, seededRng, walkRoom, type DecisionInput, type HarimaruAction } from './behavior';
 import { DEFAULT_BEHAVIOR } from './params';
 
 const base: DecisionInput = { now: 10_000, lastActivityAt: 9_000, history: [], x: 100, minX: 0, maxX: 300 };
@@ -30,10 +30,20 @@ describe('actionWeights', () => {
   });
   it('直前と同じ行動は重みが下がり、2 回続くとさらに下がる', () => {
     const fresh = actionWeights(base);
-    const once = actionWeights({ ...base, history: ['walk'] });
-    const twice = actionWeights({ ...base, history: ['walk', 'walk'] });
-    expect(once.walk).toBeCloseTo(fresh.walk * DEFAULT_BEHAVIOR.repeatPenalty);
-    expect(twice.walk).toBeCloseTo(fresh.walk * DEFAULT_BEHAVIOR.repeatTwicePenalty);
+    const once = actionWeights({ ...base, history: ['look'] });
+    const twice = actionWeights({ ...base, history: ['look', 'look'] });
+    expect(once.look).toBeCloseTo(fresh.look * DEFAULT_BEHAVIOR.repeatPenalty);
+    expect(twice.look).toBeCloseTo(fresh.look * DEFAULT_BEHAVIOR.repeatTwicePenalty);
+  });
+  it('動いたあとは動く行動が選ばれにくく、2 回続いたら 3 回目は選ばない (動きっぱなしにしない)', () => {
+    const all = { ...base, canHop: true, canJump: true };
+    const fresh = actionWeights(all);
+    const once = actionWeights({ ...all, history: ['idle', 'walk'] });
+    expect(once.run).toBeCloseTo(fresh.run * DEFAULT_BEHAVIOR.afterMovingPenalty);
+    expect(once.jump).toBeCloseTo(fresh.jump * DEFAULT_BEHAVIOR.afterMovingPenalty);
+    const twice = actionWeights({ ...all, history: ['walk', 'hop'] });
+    for (const action of ['walk', 'run', 'hop', 'jump'] as const) expect(twice[action]).toBe(0);
+    expect(twice.idle).toBeGreaterThan(0);
   });
   it('無操作が続くと眠りやすくなる (境界値を含む)', () => {
     const awake = actionWeights({ ...base, lastActivityAt: base.now - DEFAULT_BEHAVIOR.inactiveSleepAfterMs + 1 });
@@ -72,24 +82,71 @@ describe('decideNext', () => {
     expect(sleep.durationMs).toBeGreaterThanOrEqual(DEFAULT_BEHAVIOR.sleepMs[0]);
     expect(sleep.durationMs).toBeLessThanOrEqual(DEFAULT_BEHAVIOR.sleepMs[1]);
   });
-  it('長く続けても同じ行動が機械的に続かず、何もしない時間もある', () => {
+  it('長く続けても同じ行動が機械的に続かず、静かな時間の方が長い (動きっぱなしにしない)', () => {
     const rng = seededRng(7);
     const history: HarimaruAction[] = [];
     let x = 150;
     let longestRun = 0;
     let run = 0;
-    const counts: Record<HarimaruAction, number> = { idle: 0, walk: 0, sleep: 0 };
-    for (let step = 0; step < 2_000; step += 1) {
-      const decision = decideNext({ ...base, now: step * 5_000, lastActivityAt: step * 5_000 - (step % 20) * 5_000, history: history.slice(-6), x, minX: 0, maxX: 300 }, rng);
+    let movingStreak = 0;
+    let longestMoving = 0;
+    const counts = Object.fromEntries(ACTIONS.map((a) => [a, 0])) as Record<HarimaruAction, number>;
+    let calmMs = 0;
+    let movingMs = 0;
+    for (let step = 0; step < 3_000; step += 1) {
+      const decision = decideNext(
+        { ...base, now: step * 5_000, lastActivityAt: step * 5_000 - (step % 20) * 5_000, history: history.slice(-6), x, minX: 0, maxX: 300, canHop: true, canJump: step % 3 === 0, canRelocate: true },
+        rng,
+      );
       if (decision.targetX !== undefined) x = decision.targetX;
       run = history[history.length - 1] === decision.action ? run + 1 : 1;
       longestRun = Math.max(longestRun, run);
+      movingStreak = MOVING.has(decision.action) ? movingStreak + 1 : 0;
+      longestMoving = Math.max(longestMoving, movingStreak);
       history.push(decision.action);
       counts[decision.action] += 1;
+      // ジャンプ・跳ねるは 1 秒弱、隠れている時間は静か。
+      const ms = decision.action === 'jump' || decision.action === 'hop' ? 800 : decision.durationMs;
+      if (MOVING.has(decision.action)) movingMs += ms;
+      else calmMs += ms;
     }
-    expect(counts.idle).toBeGreaterThan(400);
-    expect(counts.walk).toBeGreaterThan(300);
-    expect(counts.sleep).toBeGreaterThan(20);
+    // 素材のある行動はすべて現れ、素材待ちの行動 (毛づくろい・伸び) は選ばれない。
+    for (const action of ['idle', 'rest', 'look', 'walk', 'run', 'hop', 'jump', 'hide', 'sleep'] as const) {
+      expect(counts[action], action).toBeGreaterThan(20);
+    }
+    expect(counts.groom).toBe(0);
+    expect(counts.stretch).toBe(0);
     expect(longestRun).toBeLessThanOrEqual(5);
+    expect(longestMoving).toBeLessThanOrEqual(2);
+    expect(calmMs / (calmMs + movingMs)).toBeGreaterThan(0.75);
+  });
+
+  it('素材が届いた動作 (毛づくろい・伸び) は、表を変えるだけで選ばれるようになる', () => {
+    const rng = seededRng(3);
+    const seen = new Set<HarimaruAction>();
+    for (let i = 0; i < 400; i += 1) {
+      seen.add(decideNext({ ...base, history: i % 2 ? ['rest'] : [], available: () => true }, rng).action);
+    }
+    expect(seen.has('groom')).toBe(true);
+    expect(seen.has('stretch')).toBe(true);
+  });
+
+  it('跳ねる空き・ジャンプ先・移れる場所がなければ、その行動は選ばない', () => {
+    const weights = actionWeights({ ...base, canHop: false, canJump: false, canRelocate: false });
+    expect(weights.hop).toBe(0);
+    expect(weights.jump).toBe(0);
+    expect(weights.hide).toBe(0);
+  });
+
+  it('駆け足は歩くより速く、足場の中で止まる', () => {
+    for (let seed = 0; seed < 400; seed += 1) {
+      const decision = decideNext({ ...base, x: 100, minX: 0, maxX: 400 }, seededRng(seed));
+      if (decision.action !== 'run') continue;
+      expect(decision.targetX).toBeGreaterThanOrEqual(0);
+      expect(decision.targetX).toBeLessThanOrEqual(400);
+      expect(decision.durationMs).toBeCloseTo((Math.abs(decision.targetX! - 100) / DEFAULT_BEHAVIOR.runSpeed) * 1000);
+      return;
+    }
+    throw new Error('run was never chosen');
   });
 });

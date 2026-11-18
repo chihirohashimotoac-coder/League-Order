@@ -45,6 +45,8 @@ export function isSolid(el: Element, style: CSSStyleDeclaration): boolean {
   const tabindex = el.getAttribute('tabindex');
   if (tabindex !== null && Number(tabindex) >= 0) return true;
   if ((el as HTMLElement).isContentEditable) return true;
+  // 中身がスクロールする領域は、見えている文字が入れ替わるので箱全体を障害物にする。
+  if (/(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`)) return true;
   if (style.backgroundImage && style.backgroundImage !== 'none') return true;
   if (style.backgroundColor && !transparent(style.backgroundColor)) return true;
   for (const side of ['Top', 'Right', 'Bottom', 'Left'] as const) {
@@ -61,6 +63,54 @@ function hasPseudoContent(el: Element, win: Window): boolean {
     if (content && content !== 'none' && content !== 'normal') return true;
   }
   return false;
+}
+
+/**
+ * 足場の要素が、ページのスクロールとは別に動くか (固定・sticky、内側のスクロール領域の中)。
+ * そうした足場はページ座標で追えないので使わない。
+ */
+export function movesOnItsOwn(el: Element, root: Element, win: Window): boolean {
+  for (let node: Element | null = el; node && node !== root; node = node.parentElement) {
+    const style = win.getComputedStyle(node);
+    if (style.position === 'fixed' || style.position === 'sticky') return true;
+    if (node !== el && /(auto|scroll)/.test(`${style.overflowX} ${style.overflowY}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * 範囲 (ページ座標の矩形の一覧) に重なる障害物を集める。
+ * 操作部品・画像・色や枠の付いた要素・スクロール領域・疑似要素の内容がある要素は箱全体、それ以外は直下の文字の矩形。
+ */
+export function collectObstacles(root: Element, regions: readonly Rect[], win: Window = window): Rect[] {
+  const doc = root.ownerDocument;
+  const sx = win.scrollX;
+  const sy = win.scrollY;
+  const inRegion = (r: Rect): boolean => regions.some((g) => r.bottom > g.top && r.top < g.bottom && r.right > g.left && r.left < g.right);
+  const obstacles: Rect[] = [];
+  if (regions.length === 0) return obstacles;
+  const range = doc.createRange();
+  for (const el of Array.from(root.querySelectorAll('*'))) {
+    // SVG の子要素は親の svg で数える。
+    if (el.parentElement?.closest('svg')) continue;
+    const box = toPage(el.getBoundingClientRect(), sx, sy);
+    if (box.right <= box.left || box.bottom <= box.top || !inRegion(box)) continue;
+    const style = win.getComputedStyle(el);
+    if (style.display === 'contents') continue;
+    if (isSolid(el, style) || hasPseudoContent(el, win)) {
+      obstacles.push(box);
+      continue;
+    }
+    for (const node of Array.from(el.childNodes)) {
+      if (node.nodeType !== 3 || !node.textContent?.trim()) continue;
+      range.selectNodeContents(node);
+      for (const rect of Array.from(range.getClientRects())) {
+        if (rect.width > 0 && rect.height > 0) obstacles.push(toPage(rect, sx, sy));
+      }
+    }
+  }
+  range.detach();
+  return obstacles;
 }
 
 /** 計測する。root (例: `.app-main`) の中だけを見る。 */
@@ -85,35 +135,18 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
   for (const el of Array.from(root.querySelectorAll(platformSelector))) {
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) continue;
+    if (movesOnItsOwn(el, root, win)) continue;
     platforms.push({ left: rect.left + sx, right: rect.right + sx, top: rect.top + sy });
     elements.push(el);
   }
 
-  const bands = platforms.map((p) => [p.top - SPRITE.height - DEFAULT_TERRAIN.clearanceTop, p.top] as const);
-  const inBand = (r: Rect): boolean => bands.some(([top, bottom]) => r.bottom > top && r.top < bottom);
-
-  const obstacles: Rect[] = [];
-  const range = doc.createRange();
-  for (const el of Array.from(root.querySelectorAll('*'))) {
-    // SVG の子要素は親の svg で数える。
-    if (el.parentElement?.closest('svg')) continue;
-    const box = toPage(el.getBoundingClientRect(), sx, sy);
-    if (box.right <= box.left || box.bottom <= box.top || !inBand(box)) continue;
-    const style = win.getComputedStyle(el);
-    if (style.display === 'contents') continue;
-    if (isSolid(el, style) || hasPseudoContent(el, win)) {
-      obstacles.push(box);
-      continue;
-    }
-    for (const node of Array.from(el.childNodes)) {
-      if (node.nodeType !== 3 || !node.textContent?.trim()) continue;
-      range.selectNodeContents(node);
-      for (const rect of Array.from(range.getClientRects())) {
-        if (rect.width > 0 && rect.height > 0) obstacles.push(toPage(rect, sx, sy));
-      }
-    }
-  }
-  range.detach();
+  const bands: Rect[] = platforms.map((p) => ({
+    left: p.left,
+    right: p.right,
+    top: p.top - SPRITE.height - DEFAULT_TERRAIN.clearanceTop,
+    bottom: p.top,
+  }));
+  const obstacles = collectObstacles(root, bands, win);
 
   // ピンチズーム中は、実際に見えている範囲 (visual viewport) に狭める。
   let viewLeft = 0;

@@ -699,6 +699,8 @@ export function App(): React.JSX.Element {
         </main>
         <TabBar active={TAB_FOR_PAGE[viewerPage] ?? viewerPage} onSelect={setPage} />
         {showChangelog ? <ChangelogSheet onClose={() => setShowChangelog(false)} /> : null}
+        {/* ハリマル (装飾。足場のある画面だけ・操作や読み上げには関与しない) */}
+        <HarimaruLayer page={viewerPage} />
       </div>
     );
   }

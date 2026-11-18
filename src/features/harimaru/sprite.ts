@@ -17,6 +17,13 @@ export type SpriteRow = (typeof ROW)[keyof typeof ROW];
 
 export const IDLE_OPEN = 0;
 export const IDLE_BLINK = 1;
+/** 待機のコマ 3: 少し正面を向く (周囲を見る・顔を出したときに使う)。 */
+export const IDLE_LOOK = 2;
+/** 睡眠のコマ 1・2: 目を開けて伏せる / 目を閉じて伏せる (休むときに使う)。 */
+export const REST_OPEN = 0;
+export const REST_BLINK = 1;
+/** 歩行のコマ 2: 前後の足が開いた姿 (ジャンプの空中で使う)。 */
+export const WALK_AIR = 1;
 export const SLEEP_FRAMES = 4;
 export const WALK_FRAMES = 4;
 
