@@ -10,6 +10,7 @@ import { Accordion, Card, ConfirmDialog, RadioCards, Stepper, useToast } from '.
 import { BarChart } from '../components/motion';
 import { ChangelogSheet } from '../components/ChangelogSheet';
 import { THEMES, useTheme, type ThemeId } from '../components/theme';
+import { saveHarimaruEnabled, useHarimaruEnabled } from '../features/harimaru/preference';
 
 // The opponent term is not a custom weight: it only means something with opponent data,
 // which the opponent-optimised preset brings along.
@@ -45,6 +46,7 @@ export function SettingsPage(): React.JSX.Element {
 
   const settings = store.settings;
   const [theme, setTheme] = useTheme();
+  const harimaru = useHarimaruEnabled();
   const n01 = settings.n01 ?? DEFAULT_N01_SETTINGS;
 
   const update = (change: Partial<AppSettings>): void => store.saveSettings({ ...settings, ...change });
@@ -127,6 +129,31 @@ export function SettingsPage(): React.JSX.Element {
           }}
           hint="見た目だけの設定です。オーダー・データ・共有画像には影響せず、バックアップにも含まれません。"
         />
+      </Accordion>
+
+      <Accordion
+        group="settings"
+        kicker="MASCOT"
+        icon="spark"
+        title="ハリマル"
+        note={`${harimaru ? '表示する' : '表示しない'} ・ この端末だけに保存`}
+      >
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={harimaru}
+            onChange={(event) => {
+              if (!saveHarimaruEnabled(event.target.checked)) {
+                toast.show('この端末に保存できませんでした。再読み込みすると元の設定に戻ります。', 'error');
+              }
+            }}
+            data-testid="harimaru-toggle"
+          />
+          <span className="small-text">ハリマルを表示する</span>
+        </label>
+        <p className="tiny muted" style={{ marginBottom: 0 }}>
+          ホーム画面のカードの余白を、小さなキャラクターが歩いたり眠ったりします。見た目だけの設定で、オーダー・データ・共有画像には影響せず、バックアップにも含まれません。端末の「視差効果を減らす／動きを減らす」設定がオンのときは表示しません。
+        </p>
       </Accordion>
 
       <Accordion
