@@ -112,6 +112,12 @@ export function App(): React.JSX.Element {
    * re-creates the page each time the button is pressed. Leaving SETUP clears it.
    */
   const [newOrderSetup, setNewOrderSetup] = useState<number | null>(null);
+  /**
+   * The working order was made for a match set by hand (「別の試合を作る」). Its SETUP and RESULT
+   * then never take the n01 next match's opponent data from the team's latest analysis — not
+   * on the first generation, nor on any re-generation after going back.
+   */
+  const [handMade, setHandMade] = useState(false);
   const newOrderSerial = useRef(0);
 
   // A new build is never applied automatically — the captain decides when.
@@ -145,6 +151,7 @@ export function App(): React.JSX.Element {
       invalidateGeneration();
       setSession(null);
       setRecord(null);
+      setHandMade(false);
       setDiagnostics([]);
       // One team's one-order helpers are nobody's in the other team.
       setDraft((current) => (current && current.guests.length > 0 ? clearGuests(current) : current));
@@ -174,6 +181,7 @@ export function App(): React.JSX.Element {
     invalidateGeneration();
     setSession(null);
     setRecord(null);
+    setHandMade(false);
     setDiagnostics([]);
     setDraft(null);
     setPage('home');
@@ -317,6 +325,7 @@ export function App(): React.JSX.Element {
     invalidateGeneration();
     setSession(null);
     setRecord(null);
+    setHandMade(false);
     setDiagnostics([]);
   }, [invalidateGeneration]);
 
@@ -392,9 +401,10 @@ export function App(): React.JSX.Element {
    * the record that was open (`resetWorkingOrder` drops it before generating).
    */
   const generateNewOrder = useCallback(
-    (input: OrderInput, nextMatch: MatchInfo, nextDraft: SetupDraft) => {
+    (input: OrderInput, nextMatch: MatchInfo, nextDraft: SetupDraft, byHand: boolean) => {
       const start = (): void => {
         resetWorkingOrder();
+        setHandMade(byHand);
         setMatch(nextMatch);
         setDraft(nextDraft);
         // From here SETUP edits this order like any other (back from RESULT, re-generation).
@@ -446,6 +456,7 @@ export function App(): React.JSX.Element {
       const baseline = order.match ?? match;
       setMatch(baseline);
       setRecord(order.match ? order : { ...order, match: baseline });
+      setHandMade(false);
       // SETUP edits this order from now on: restore the conditions it was generated
       // with, so going back and re-generating revises *this* order's line-up.
       setDraft(draftFor(order.input));
@@ -816,6 +827,8 @@ export function App(): React.JSX.Element {
             // Detaching drops the working copy, so it asks first exactly like a new order.
             onDetach={() => startNewOrder()}
             onNavigate={setPage}
+            // A match set by hand keeps clear of the n01 next match on every re-generation.
+            opponentIntel={handMade ? null : undefined}
           />
         ) : null}
         {page === 'result' ? (
@@ -839,7 +852,7 @@ export function App(): React.JSX.Element {
               onCommitSeason={handleCommitSeason}
               onWithdrawSeason={handleWithdrawSeason}
               onOpenSetup={openSetupFromResult}
-              opponentPresetAvailable={hasNextOpponent(activeIntel(store))}
+              opponentPresetAvailable={!handMade && hasNextOpponent(activeIntel(store))}
             />
           ) : (
             <EmptyState

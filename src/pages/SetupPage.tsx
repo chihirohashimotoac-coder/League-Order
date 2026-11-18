@@ -878,7 +878,7 @@ export function NewOrderSetup({
   /** The order open in this session, if any (offered to resume, never replaced here). */
   working: { label: string } | null;
   onResume: () => void;
-  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft) => void;
+  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft, handMade: boolean) => void;
   generating: boolean;
   onNavigate: (page: Page) => void;
 }): React.JSX.Element | null {
@@ -914,7 +914,7 @@ function NewOrderSetupFor({
   currentParticipants: readonly ParticipantConfig[] | null;
   working: { label: string } | null;
   onResume: () => void;
-  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft) => void;
+  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft, handMade: boolean) => void;
   generating: boolean;
   onNavigate: (page: Page) => void;
 }): React.JSX.Element {
@@ -1119,7 +1119,8 @@ function NewOrderSetupFor({
         match={shown.match}
         onMatchChange={(match) => update({ match })}
         onGenerate={(input) => {
-          if (!locked) onGenerate(input, shown.match, shown.draft);
+          // `handMade`: another match than the n01 next match (an unlinked team has none to keep clear of).
+          if (!locked) onGenerate(input, shown.match, shown.draft, linked && mode === 'manual');
         }}
         generating={generating}
         editing={null}
