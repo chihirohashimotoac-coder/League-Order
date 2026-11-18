@@ -31,7 +31,7 @@
 |---|---|---|---|
 | PR1 基本実装（ホーム・待機/歩行/睡眠・ON/OFF・休止） | `feat/harimaru-pr1-base` → `main`（マージしない） | [PR #58](https://github.com/chihirohashimotoac-coder/League-Order/pull/58)。最終 `fd6c147`（ホバー修正を含む） | **承認済み**（2026-11-18）。実機確認は未 |
 | 統合ブランチ | `feat/harimaru-integration` | `fd6c147` から作成（main 71bc8ad + PR1 の 7 コミットだけ） | ― |
-| PR2 気まぐれさ・アスレチック・触れ合い・全画面 | `feat/harimaru-pr2-behavior` → `feat/harimaru-integration` | 実装・PR 作成（本書 §7）。統合ブランチへの取り込みはユーザー承認待ち | 未 |
+| PR2 気まぐれさ・アスレチック・触れ合い・全画面 | `feat/harimaru-pr2-behavior` → `feat/harimaru-integration` | [PR #59](https://github.com/chihirohashimotoac-coder/League-Order/pull/59)（ドラフト：素材待ちの動作あり）。統合ブランチへの取り込みはユーザー承認待ち | 未 |
 | PR3 n01 観戦連動 | 未作成 | 未着手（PR2 の統合ブランチへの取り込み後に分岐） | 未 |
 
 承認履歴が確認できないときは、承認されたと推定して次段階へ進まない。
