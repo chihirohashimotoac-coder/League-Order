@@ -113,11 +113,14 @@ export function App(): React.JSX.Element {
    */
   const [newOrderSetup, setNewOrderSetup] = useState<number | null>(null);
   /**
-   * The working order was made for a match set by hand (「別の試合を作る」). Its SETUP and RESULT
-   * then never take the n01 next match's opponent data from the team's latest analysis — not
-   * on the first generation, nor on any re-generation after going back.
+   * Which match the working order was made for on the new-order SETUP (null: unknown — an
+   * order opened otherwise). `other` (「別の試合を作る」, or a saved order of an n01 team with
+   * no opponent data): its SETUP and RESULT never take the n01 next match's opponent data
+   * from the team's latest analysis, on any re-generation. `next`: its SETUP keeps offering
+   * only the players on the n01 roster, as when it was made.
    */
-  const [handMade, setHandMade] = useState(false);
+  const [origin, setOrigin] = useState<'next' | 'other' | null>(null);
+  const handMade = origin === 'other' && !!store.activeTeam?.n01;
   const newOrderSerial = useRef(0);
 
   // A new build is never applied automatically — the captain decides when.
@@ -151,7 +154,7 @@ export function App(): React.JSX.Element {
       invalidateGeneration();
       setSession(null);
       setRecord(null);
-      setHandMade(false);
+      setOrigin(null);
       setDiagnostics([]);
       // One team's one-order helpers are nobody's in the other team.
       setDraft((current) => (current && current.guests.length > 0 ? clearGuests(current) : current));
@@ -181,7 +184,7 @@ export function App(): React.JSX.Element {
     invalidateGeneration();
     setSession(null);
     setRecord(null);
-    setHandMade(false);
+    setOrigin(null);
     setDiagnostics([]);
     setDraft(null);
     setPage('home');
@@ -325,7 +328,7 @@ export function App(): React.JSX.Element {
     invalidateGeneration();
     setSession(null);
     setRecord(null);
-    setHandMade(false);
+    setOrigin(null);
     setDiagnostics([]);
   }, [invalidateGeneration]);
 
@@ -401,10 +404,10 @@ export function App(): React.JSX.Element {
    * the record that was open (`resetWorkingOrder` drops it before generating).
    */
   const generateNewOrder = useCallback(
-    (input: OrderInput, nextMatch: MatchInfo, nextDraft: SetupDraft, byHand: boolean) => {
+    (input: OrderInput, nextMatch: MatchInfo, nextDraft: SetupDraft, madeFor: 'next' | 'other') => {
       const start = (): void => {
         resetWorkingOrder();
-        setHandMade(byHand);
+        setOrigin(madeFor);
         setMatch(nextMatch);
         setDraft(nextDraft);
         // From here SETUP edits this order like any other (back from RESULT, re-generation).
@@ -458,7 +461,7 @@ export function App(): React.JSX.Element {
       setRecord(order.match ? order : { ...order, match: baseline });
       // An order of an n01 team saved without opponent data (a match set by hand, or no data
       // then) never picks up today's next-match analysis when it is generated again.
-      setHandMade(!!store.activeTeam?.n01 && !order.input.opponent);
+      setOrigin(store.activeTeam?.n01 && !order.input.opponent ? 'other' : null);
       // SETUP edits this order from now on: restore the conditions it was generated
       // with, so going back and re-generating revises *this* order's line-up.
       setDraft(draftFor(order.input));
@@ -831,6 +834,7 @@ export function App(): React.JSX.Element {
             onNavigate={setPage}
             // A match set by hand keeps clear of the n01 next match on every re-generation.
             opponentIntel={handMade ? null : undefined}
+            rosterOnly={origin === 'next'}
           />
         ) : null}
         {page === 'result' ? (

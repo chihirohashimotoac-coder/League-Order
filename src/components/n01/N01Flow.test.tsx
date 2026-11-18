@@ -433,6 +433,13 @@ describe('next match order on ORDER SETUP (Phase 5)', () => {
     await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
     const fielded = [...document.querySelectorAll<HTMLSelectElement>('.order-game select')].map((select) => select.selectedOptions[0]?.textContent ?? '');
     expect(fielded.some((name) => name.includes('中村 蓮'))).toBe(false);
+
+    // Back on SETUP for this order, still only the roster (audit 2026-11-17, 3rd).
+    await user.click(screen.getByRole('button', { name: '戻る' }));
+    await screen.findByRole('heading', { name: 'オーダー設定' });
+    expect(screen.queryByRole('checkbox', { name: '中村 蓮 を参加者に含める' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '全員' }));
+    expect(screen.getByRole('heading', { name: /参加者 6 \/ 6/ })).toBeInTheDocument();
   }, 60_000);
 
   it('without its n01 format the next match is not generated; a match by hand still is', async () => {
@@ -492,6 +499,7 @@ describe('next match order on ORDER SETUP (Phase 5)', () => {
     await createKalavinka(user);
     let source = await startNextMatch(user);
     await within(source).findByTestId('flow-ready', {}, { timeout: 10_000 });
+    await user.click(box('高橋 大輔'));
     await user.click(generateButton());
     await screen.findByRole('heading', { name: 'オーダー結果' }, { timeout: 20_000 });
     const firstLabel = document.querySelector('.candidate-tab[aria-selected="true"] .c-label')?.textContent;
@@ -502,6 +510,8 @@ describe('next match order on ORDER SETUP (Phase 5)', () => {
     expect(screen.queryByRole('dialog', { name: '新しいオーダーを作る' })).toBeNull();
     await within(source).findByTestId('flow-ready', {}, { timeout: 10_000 });
     await user.click(within(source).getByRole('button', { name: '別の試合を作る' }));
+    // Another match starts from the roster, not from the next match's attendance.
+    expect(box('高橋 大輔').checked).toBe(true);
     await user.click(box('伊藤 由佳'));
     // Generating replaces unsaved work: asked first; cancelled, nothing changes.
     await user.click(generateButton());

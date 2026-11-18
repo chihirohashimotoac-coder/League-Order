@@ -898,7 +898,7 @@ export function NewOrderSetup({
   /** The order open in this session, if any (offered to resume, never replaced here). */
   working: { label: string } | null;
   onResume: () => void;
-  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft, handMade: boolean) => void;
+  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft, origin: 'next' | 'other') => void;
   generating: boolean;
   onNavigate: (page: Page) => void;
 }): React.JSX.Element | null {
@@ -934,7 +934,7 @@ function NewOrderSetupFor({
   currentParticipants: readonly ParticipantConfig[] | null;
   working: { label: string } | null;
   onResume: () => void;
-  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft, handMade: boolean) => void;
+  onGenerate: (input: OrderInput, match: MatchInfo, draft: SetupDraft, origin: 'next' | 'other') => void;
   generating: boolean;
   onNavigate: (page: Page) => void;
 }): React.JSX.Element {
@@ -959,13 +959,13 @@ function NewOrderSetupFor({
     };
     // Without the next match there is no opponent to optimise against.
     const preset = base.preset === 'OPPONENT_OPTIMIZED' ? 'WIN_FIRST' : base.preset;
-    const gone = new Set(base.guests.map((guest) => guest.id));
     const draft: SetupDraft = {
       ...base,
       // A helper plays one order: a new one starts without them.
       guests: [],
-      // Everyone on the roster when the page opens is offered as ORDER SETUP always offers them.
-      participants: syncParticipants(base.participants.filter((config) => !gone.has(config.playerId)), store.teamPlayers),
+      // Another match starts from the roster: nobody's attendance or day-of conditions of the
+      // order open in this session (made for its own match) carry over to it.
+      participants: syncParticipants([], store.teamPlayers),
       preset,
       settings: { ...base.settings, fairnessScope: scopeForPreset(preset, base.settings.fairnessScope) },
     };
@@ -1022,12 +1022,16 @@ function NewOrderSetupFor({
     if (relinked > 0 || opening.current === 'next') startSync.current();
   }, [relinked]);
 
-  // The next match is settled: its conditions are built once per sync that settled it.
+  // The next match is made with its n01 format only: without it, nothing is generated for it.
+  const managedMissing = linked && !store.teamFormats.some((format) => format.id === team.n01?.managedFormatId);
+
+  // The next match is settled: its conditions are built once per sync that settled it — and
+  // only with its n01 format (a format arriving later builds them then, never a stand-in).
   useEffect(() => {
-    if (sync.phase.kind !== 'ready' || builtFor.current === sync.phase.run) return;
+    if (sync.phase.kind !== 'ready' || builtFor.current === sync.phase.run || managedMissing) return;
     builtFor.current = sync.phase.run;
     setNext(buildNext(sync.intel));
-  }, [sync.phase, sync.intel, buildNext]);
+  }, [sync.phase, sync.intel, buildNext, managedMissing]);
 
   // n01 has no match left: the same page, set by hand.
   useEffect(() => {
@@ -1047,8 +1051,6 @@ function NewOrderSetupFor({
   }, [sync.phase.kind, mode]);
 
   const pending = isNextMatchPending(sync.phase);
-  // The next match is made with its n01 format only: without it, nothing is generated for it.
-  const managedMissing = linked && !store.teamFormats.some((format) => format.id === team.n01?.managedFormatId);
   const locked = mode === 'next' && (pending || next === null || managedMissing);
   // Until the next match is settled the page shows what is known from the device, locked.
   const provisional = useMemo(
@@ -1144,8 +1146,8 @@ function NewOrderSetupFor({
         match={shown.match}
         onMatchChange={(match) => update({ match })}
         onGenerate={(input) => {
-          // `handMade`: another match than the n01 next match (an unlinked team has none to keep clear of).
-          if (!locked) onGenerate(input, shown.match, shown.draft, linked && mode === 'manual');
+          // Which match the order is for travels with it (see App's `origin`).
+          if (!locked) onGenerate(input, shown.match, shown.draft, mode === 'next' ? 'next' : 'other');
         }}
         generating={generating}
         editing={null}
