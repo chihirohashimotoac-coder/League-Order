@@ -9,6 +9,7 @@ import { useAppStore } from '../state/appStore';
 import { Accordion, Card, ConfirmDialog, RadioCards, Stepper, useToast } from '../components/ui';
 import { BarChart } from '../components/motion';
 import { ChangelogSheet } from '../components/ChangelogSheet';
+import { THEMES, useTheme, type ThemeId } from '../components/theme';
 
 // The opponent term is not a custom weight: it only means something with opponent data,
 // which the opponent-optimised preset brings along.
@@ -43,6 +44,7 @@ export function SettingsPage(): React.JSX.Element {
   const [showChangelog, setShowChangelog] = useState(false);
 
   const settings = store.settings;
+  const [theme, setTheme] = useTheme();
   const n01 = settings.n01 ?? DEFAULT_N01_SETTINGS;
 
   const update = (change: Partial<AppSettings>): void => store.saveSettings({ ...settings, ...change });
@@ -109,6 +111,24 @@ export function SettingsPage(): React.JSX.Element {
       </Card>
 
       {/* One open at a time: the long settings stay out of the way until needed. */}
+      <Accordion
+        group="settings"
+        kicker="THEME"
+        icon="image"
+        title="表示テーマ"
+        note={`${THEMES.find((entry) => entry.key === theme)?.label ?? ''} ・ この端末だけに保存`}
+      >
+        <RadioCards
+          label="画面の配色"
+          value={theme}
+          options={THEMES.map(({ key, label, hint }) => ({ key, label, hint }))}
+          onChange={(next: ThemeId) => {
+            if (!setTheme(next)) toast.show('この端末に保存できませんでした。再読み込みすると元のテーマに戻ります。', 'error');
+          }}
+          hint="見た目だけの設定です。オーダー・データ・共有画像には影響せず、バックアップにも含まれません。"
+        />
+      </Accordion>
+
       <Accordion
         group="settings"
         kicker="N01"

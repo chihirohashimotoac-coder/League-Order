@@ -25,7 +25,22 @@
         background: #f4f3ef;
         color: #172026;
       }
+      /* 表示テーマ「スタジアム」の端末では、起動直後から濃い地にする (白く光らない)。 */
+      html[data-theme='stadium'],
+      html[data-theme='stadium'] body {
+        background-color: #0d151b;
+        color: #e9f0f3;
+      }
     </style>
+    <!-- 保存された表示テーマ (src/components/theme.ts と同じキー) を、最初の描画より前に適用する。 -->
+    <script>
+      try {
+        var theme = window.localStorage.getItem('league-order:theme');
+        if (theme === 'stadium' || theme === 'clean') document.documentElement.dataset.theme = theme;
+      } catch (error) {
+        /* 読めない環境では既定のテーマのまま */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
