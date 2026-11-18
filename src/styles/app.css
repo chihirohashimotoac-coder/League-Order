@@ -705,7 +705,7 @@ textarea {
   color: var(--color-text-muted);
 }
 
-/* `input:not([type])` is a text box too (the league search of 観戦 has no type attribute). */
+/* type 属性のない input もテキスト欄として扱う (観戦のリーグ・大会検索は type を持たない)。 */
 input:not([type]),
 input[type='text'],
 input[type='number'],
@@ -997,8 +997,8 @@ input[type='range'] {
   flex-wrap: wrap;
 }
 
-/* 観戦's four tabs on a narrow phone: each tab is as wide as its label plus an even share of
-   the rest, so 「日程・結果」 is shown in full instead of being cut to 「日程・…」. */
+/* 狭いスマホの観戦タブ: 各タブをラベルの幅 + 残りの均等配分にして、
+   「日程・結果」が「日程・…」と欠けずに全文表示されるようにする。 */
 @media (max-width: 479px) {
   .watch .segmented[role='tablist'] > button {
     flex: 1 1 auto;
@@ -1937,8 +1937,7 @@ input[type='range'] {
   font-size: 13.5px;
 }
 
-/* When the line is short the button moves under the text instead of squeezing it into a
-   column of two or three characters. */
+/* 行が短いときは、説明文を 2〜3 文字幅に押しつぶさず、ボタンを下の行へ送る。 */
 .demo-banner > .grow {
   flex: 1 1 13em;
   min-width: 0;
@@ -2337,8 +2336,8 @@ input[type='range'] {
   color: var(--color-accent-text);
 }
 
-/* Three cards side by side on a phone: the figures (「役割最多 1」「平均 Rt.10.2」) are a little
-   smaller so they stay inside the card instead of running into its right edge. */
+/* スマホで候補カードが 3 枚並ぶとき: 数値 (「役割最多 1」「平均 Rt.10.2」) を少し小さくして、
+   カードの右端の枠に接しないようにする。 */
 @media (max-width: 419px) {
   .candidate-tab dl {
     font-size: 11px;
@@ -2346,7 +2345,7 @@ input[type='range'] {
   }
 }
 
-/* Up to 379px (360 / 375px phones as well as smaller ones). */
+/* 379px 以下 (360 / 375px のスマホと、それより狭い端末)。 */
 @media (max-width: 379px) {
   .candidate-tab {
     padding-inline: 7px;
@@ -4143,8 +4142,8 @@ input[type='range'] {
   flex: 1 1 220px;
 }
 
-/* The primary button keeps the same distance from the text above it with or without the n01
-   freshness line (without it, the button sat directly on the team name). */
+/* n01 の鮮度行の有無にかかわらず、主ボタンと上の文字との間隔を揃える
+   (鮮度行がないとき、ボタンがチーム名に密着していた)。 */
 .next-match-card > .n01-fresh {
   margin-bottom: 0;
 }
@@ -8765,8 +8764,8 @@ ul.plain {
 .next-round .round {
   margin: 0;
 }
-/* On a wide screen the cards of a round sit two to a row (in reading order), so the two team
-   names of a card are not at the two ends of the page and more of the schedule is in view. */
+/* 広い画面では 1 節のカードを 2 列に並べる (読む順は左→右→次の行)。左右のチーム名が
+   画面の両端に離れず、一度に見える日程も増える。 */
 @media (min-width: 900px) {
   .results .match-list {
     display: grid;
@@ -8943,8 +8942,8 @@ ul.plain {
   max-width: 7.5em;
   overflow-wrap: anywhere;
 }
-/* On a phone the figures take only the width they need, so the team column gets the rest and a
-   name such as 「スピンコブラ」 stays on one line instead of breaking every few characters. */
+/* スマホでは数値列を内容の幅に詰め、残りをチーム名列に回す。「スピンコブラ」のような名前が
+   数文字ずつ折り返さず 1 行に収まる。 */
 .standings.is-narrow tbody td {
   width: 1%;
   white-space: nowrap;
@@ -8957,7 +8956,7 @@ ul.plain {
 .standings.is-narrow thead th {
   font-size: 11.5px;
 }
-/* 「League Order 計算」 over the two narrow columns may take two lines rather than widen them. */
+/* 狭い 2 列の上の「League Order 計算」は、列を広げずに 2 行へ折り返してよい。 */
 .standings.is-narrow .source-row th.own-calc {
   white-space: normal;
 }
@@ -9246,8 +9245,8 @@ ul.plain {
   max-width: 736px;
   margin: 0 auto;
 }
-/* In one column the side panel continues the page: its first step (03 方針) gets the same space
-   above it as every other step, not the top-of-column margin of the split layout. */
+/* 1 カラム表示では右パネルがページの続きになるので、最初のステップ (03 方針) の上にも
+   他のステップと同じ余白を取る (2 カラム時の列先頭用の余白を使わない)。 */
 .setup-layout:not(.is-split) .setup-side > .section-head:first-child {
   margin-top: 22px;
 }
