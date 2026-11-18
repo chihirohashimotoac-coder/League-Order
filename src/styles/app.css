@@ -3450,6 +3450,13 @@ input[type='range'] {
     border-color: var(--color-accent-hover);
   }
 
+  /* 白文字の赤いボタン (削除の確認など) は、ホバーでも赤の塗りのまま少し暗くする
+     (上の .btn:hover の灰色が当たると、白文字が読めなくなっていた)。 */
+  .btn.danger-solid:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-danger-fill) 86%, #000000);
+    border-color: color-mix(in srgb, var(--color-danger-fill) 86%, #000000);
+  }
+
   .btn.ghost:hover:not(:disabled),
   .btn.outline:hover:not(:disabled) {
     background: var(--color-surface-3);
