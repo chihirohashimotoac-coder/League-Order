@@ -1,0 +1,50 @@
+/*
+ * ハリマルの描画レイヤー。ページ座標 (body 直下の absolute) に 1 体だけ置くので、スクロールに
+ * JavaScript なしで追従する。固定ヘッダー (z-index 20)・下部ナビ (30)・固定操作バー (25)・
+ * シート (60)・トースト (70) より下に描き、それらを隠さない。クリック・タップは受け取らない。
+ */
+.harimaru-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.harimaru-sprite {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* 1 コマの表示枠。キャラクターの可視高さは素材側で 20 CSS px 以下 (足元は枠の下端)。 */
+  width: 30px;
+  height: 20px;
+  background-repeat: no-repeat;
+  background-size: 120px 60px;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+}
+
+/* フェードは登場するときだけ。隠すとき (モーダル・足場の消失など) は残像を残さず即座に消す。 */
+.harimaru-sprite[data-visible='true'][data-ready='true'] {
+  opacity: 1;
+  transition: opacity 240ms ease;
+}
+
+/* 「動きを減らす」設定では表示しない (確定仕様)。React 側でも描画そのものを止める。 */
+@media (prefers-reduced-motion: reduce) {
+  .harimaru-layer {
+    display: none !important;
+  }
+}
+
+@media print {
+  .harimaru-layer {
+    display: none !important;
+  }
+}
