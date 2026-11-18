@@ -122,7 +122,9 @@ export function SettingsPage(): React.JSX.Element {
           label="画面の配色"
           value={theme}
           options={THEMES.map(({ key, label, hint }) => ({ key, label, hint }))}
-          onChange={(next: ThemeId) => setTheme(next)}
+          onChange={(next: ThemeId) => {
+            if (!setTheme(next)) toast.show('この端末に保存できませんでした。再読み込みすると元のテーマに戻ります。', 'error');
+          }}
           hint="見た目だけの設定です。オーダー・データ・共有画像には影響せず、バックアップにも含まれません。"
         />
       </Accordion>

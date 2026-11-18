@@ -83,17 +83,26 @@ for (const theme of THEMES) {
  * (タブの aria-pressed、スコア表の読み込み中の印 .ns-dot の aria-label)。マークアップの問題で、
  * このテーマの変更の範囲外 (PR に報告済み)。ここでは色のコントラストを含むその他の規則を確かめる。
  */
-const KNOWN_WATCH_ARIA = ['aria-allowed-attr', 'aria-prohibited-attr'];
+/** 既知の指摘: 規則と、その指摘を受けている要素 (axe の target) の組だけを除く。 */
+const KNOWN_WATCH_ARIA: { id: string; target: RegExp }[] = [
+  { id: 'aria-allowed-attr', target: /^#watch-tab-/u },
+  { id: 'aria-prohibited-attr', target: /\.ns-dot$/u },
+];
 
 async function auditWatch(page: Page, info: TestInfo, label: string): Promise<void> {
   await noSidewaysScroll(page, label);
   await waitForRest(page);
-  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).disableRules(KNOWN_WATCH_ARIA).analyze();
-  if (results.violations.length > 0) await info.attach(`axe-${label}.json`, { body: JSON.stringify(results.violations, null, 2), contentType: 'application/json' });
-  expect(
-    results.violations.map((violation) => ({ id: violation.id, nodes: violation.nodes.map((node) => `${node.target.join(' ')} — ${node.failureSummary ?? ''}`) })),
-    label,
-  ).toEqual([]);
+  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
+  const violations = results.violations
+    .map((violation) => ({
+      id: violation.id,
+      nodes: violation.nodes
+        .filter((node) => !KNOWN_WATCH_ARIA.some((known) => known.id === violation.id && known.target.test(node.target.join(' '))))
+        .map((node) => `${node.target.join(' ')} — ${node.failureSummary ?? ''}`),
+    }))
+    .filter((violation) => violation.nodes.length > 0);
+  if (violations.length > 0) await info.attach(`axe-${label}.json`, { body: JSON.stringify(results.violations, null, 2), contentType: 'application/json' });
+  expect(violations, label).toEqual([]);
 }
 
 for (const theme of [{ id: 'sheet' }, ...THEMES]) {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { DEFAULT_THEME, THEMES, THEME_IDS, THEME_STORAGE_KEY, applyTheme, readTheme, saveTheme } from './theme';
+import { DEFAULT_THEME, THEMES, THEME_IDS, THEME_STORAGE_KEY, applyTheme, currentTheme, readTheme, saveTheme } from './theme';
+import { ToastProvider } from './ui';
 
 // 設定画面を描くための最小限のストア。テーマはストアを通らない (保存されるのは localStorage だけ)。
 const saveSettings = vi.fn();
@@ -102,5 +103,38 @@ describe('SettingsPage: 表示テーマ', () => {
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('stadium');
     // チームのデータ・バックアップ (AppSettings) には書かない。
     expect(saveSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe('when this device cannot store the theme', () => {
+  it('the screen keeps the applied theme, the settings show it, and a toast says it lasts only until a reload', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota');
+    });
+    try {
+      const { SettingsPage } = await import('../pages/SettingsPage');
+      const first = render(
+        <ToastProvider>
+          <SettingsPage />
+        </ToastProvider>,
+      );
+      fireEvent.click(screen.getByRole('radio', { name: /スタジアム/u }));
+      expect(document.documentElement.dataset.theme).toBe('stadium');
+      expect(await screen.findByText('この端末に保存できませんでした。再読み込みすると元のテーマに戻ります。')).toBeTruthy();
+      first.unmount();
+
+      // 設定画面を開き直しても、選択表示は画面の配色 (適用中のテーマ) と同じ。
+      expect(currentTheme()).toBe('stadium');
+      render(<SettingsPage />);
+      expect((screen.getByRole('radio', { name: /スタジアム/u }) as HTMLInputElement).checked).toBe(true);
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it('currentTheme falls back to the stored theme before any theme is applied', () => {
+    saveTheme('clean');
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+    expect(currentTheme()).toBe('clean');
   });
 });

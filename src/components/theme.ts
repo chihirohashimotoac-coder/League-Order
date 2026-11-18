@@ -83,13 +83,22 @@ function safeStorage(): Storage | null {
   }
 }
 
-/** 設定画面用: 現在のテーマと、選ぶと適用・保存する関数。 */
-export function useTheme(): [ThemeId, (next: ThemeId) => void] {
-  const [theme, setTheme] = useState<ThemeId>(() => readTheme());
+/** いま画面に適用されているテーマ (保存できなかった選択も含む)。未適用なら保存値。 */
+export function currentTheme(doc: Document | null = typeof document !== 'undefined' ? document : null): ThemeId {
+  const applied = doc?.documentElement.dataset.theme;
+  return isThemeId(applied) ? applied : readTheme();
+}
+
+/**
+ * 設定画面用: 現在のテーマと、選ぶと適用・保存する関数 (保存できたら true)。
+ * 初期値は画面に適用中のテーマなので、保存できない環境でも選択表示と配色が食い違わない。
+ */
+export function useTheme(): [ThemeId, (next: ThemeId) => boolean] {
+  const [theme, setTheme] = useState<ThemeId>(() => currentTheme());
   const choose = useCallback((next: ThemeId) => {
     applyTheme(next);
-    saveTheme(next);
     setTheme(next);
+    return saveTheme(next);
   }, []);
   return [theme, choose];
 }

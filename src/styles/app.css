@@ -75,6 +75,8 @@
   /* 白文字を載せる塗り (危険ボタン・LIVE タグなど)。文字用の --color-danger とは分ける。 */
   --color-danger-fill: #be2f2a;
   --color-on-fill: #ffffff;
+  /* 琥珀色の塗り (--color-warning-fill) に載せる文字 (どのテーマでも濃い茶)。 */
+  --color-on-warning-fill: #2b1d00;
   /* 反転したパネル (ライブのスコアボードの見出し・残り点): 濃い地に明るい数字。 */
   --color-ink-panel: #172026;
   --color-ink-panel-text: #f8f7f3;
@@ -1186,7 +1188,7 @@ input[type='range'] {
   padding: 2px 8px;
   border-radius: 4px;
   background: var(--color-warning-fill);
-  color: #2b1d00;
+  color: var(--color-on-warning-fill);
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.14em;
@@ -8052,6 +8054,7 @@ ul.plain {
 
 .ns-table tr.marked td.mid {
   background: var(--color-warning-fill);
+  color: var(--color-on-warning-fill);
 }
 
 .ns-table td.mark {
@@ -10092,6 +10095,15 @@ body {
   box-shadow: var(--shadow-card);
 }
 
+/* 選択状態はグロー (影) ではなく、ソリッドな塗り + 枠線 + チェックで示す (README の設計方針)。
+   影で示している選択 (board-tile などの内側の線) は、それぞれのルールがそのまま上書きする。 */
+.candidate-tab[aria-pressed='true'],
+.preset[aria-checked='true'],
+.match-row[aria-expanded='true'],
+.live-card-row[aria-pressed='true'] {
+  box-shadow: none;
+}
+
 .btn:not(.ghost, .outline, .accent-outline, .danger, :disabled) {
   box-shadow: var(--shadow-btn);
 }
@@ -10115,11 +10127,11 @@ body {
     border-color: transparent;
   }
 
+  /* 選択中・展開中の部品は、影ではなく枠・内側の線で状態を示すので、ホバーの影を当てない。 */
   .quick-tile:hover,
-  .match-row:hover,
-  .live-card-row:hover,
-  .board-tile:hover,
-  .list-row:hover {
+  .match-row:not([aria-expanded='true']):hover,
+  .live-card-row:not([aria-pressed='true']):hover,
+  .board-tile:not([aria-pressed='true']):hover {
     box-shadow: var(--shadow-card-hover);
   }
 }
@@ -10187,7 +10199,7 @@ body {
   --color-history-mid: #18232b;
   --color-history-out: #123a3d;
 
-  --color-danger-fill: #c93530;
+  --color-danger-fill: #b02d29;
   --color-on-fill: #ffffff;
   --color-ink-panel: #060a0d;
   --color-ink-panel-text: #f4f3ef;
