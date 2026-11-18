@@ -67,8 +67,27 @@
   --color-history-mid: #f3f3f1;
   --color-history-out: #dcefef;
 
-  --shadow-float: 0 8px 24px rgb(23 32 38 / 12%);
-  --shadow-bar: 0 -1px 0 var(--color-border), 0 -6px 16px rgb(23 32 38 / 6%);
+  /* 影の色 (rgb の 3 値)。ダークテーマでは黒に寄せる。 */
+  --shadow-rgb: 23 32 38;
+  --shadow-float: 0 8px 24px rgb(var(--shadow-rgb) / 12%);
+  --shadow-bar: 0 -1px 0 var(--color-border), 0 -6px 16px rgb(var(--shadow-rgb) / 6%);
+
+  /* 白文字を載せる塗り (危険ボタン・LIVE タグなど)。文字用の --color-danger とは分ける。 */
+  --color-danger-fill: #be2f2a;
+  --color-on-fill: #ffffff;
+  /* 反転したパネル (ライブのスコアボードの見出し・残り点): 濃い地に明るい数字。 */
+  --color-ink-panel: #172026;
+  --color-ink-panel-text: #f8f7f3;
+  /* 装飾 (ダーツボードの輪の模様) の色 (rgb の 3 値)。 */
+  --motif-rgb: 8 127 140;
+  --color-btn-hover: #e6e9eb;
+  --color-bar-end: #12a4b4;
+  --color-live-ok: #5fd38d;
+  /* カードの既定の外枠 (状態や種類で色を変える枠は、それぞれのルールが上書きする)。 */
+  --color-card-border: var(--color-border);
+  --color-card-border-strong: var(--color-border-strong);
+  /* プルダウンの矢印 (枠の色で描く)。 */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%234f5d67' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 
   --radius-sm: 8px;
   --radius-md: 10px;
@@ -543,9 +562,9 @@ textarea {
 }
 
 .btn.danger-solid:not(:disabled) {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
-  color: #ffffff;
+  background: var(--color-danger-fill);
+  border-color: var(--color-danger-fill);
+  color: var(--color-on-fill);
   font-weight: 800;
 }
 
@@ -593,7 +612,7 @@ textarea {
 
 .card {
   background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-card-border);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
   margin-bottom: var(--space-3);
@@ -1538,7 +1557,7 @@ input[type='range'] {
 /* ---------------------------------------------------------------- disclosure */
 
 .disclosure {
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-card-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface-2);
   margin-bottom: var(--space-3);
@@ -1612,7 +1631,7 @@ input[type='range'] {
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: rgb(23 32 38 / 45%);
+  background: rgb(var(--shadow-rgb) / 45%);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -1630,7 +1649,7 @@ input[type='range'] {
   border-bottom: 0;
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
-  box-shadow: 0 -8px 28px rgb(23 32 38 / 16%);
+  box-shadow: 0 -8px 28px rgb(var(--shadow-rgb) / 16%);
   animation: sheet-up 0.2s ease-out;
 }
 
@@ -1774,7 +1793,7 @@ input[type='range'] {
   min-height: 56px;
   padding: 10px 12px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-card-border-strong);
   background: var(--color-surface-2);
   text-align: left;
   cursor: pointer;
@@ -1869,7 +1888,7 @@ input[type='range'] {
   min-height: 108px;
   padding: 14px;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-card-border);
   background: var(--color-surface-2);
   text-align: left;
   cursor: pointer;
@@ -3019,7 +3038,7 @@ input[type='range'] {
   margin-bottom: 10px;
   border-radius: var(--radius-lg);
   background:
-    repeating-linear-gradient(135deg, transparent 0 10px, rgb(23 32 38 / 2.5%) 10px 20px),
+    repeating-linear-gradient(135deg, transparent 0 10px, rgb(var(--shadow-rgb) / 2.5%) 10px 20px),
     var(--color-surface-3);
   border: 1px solid var(--color-border);
 }
@@ -3192,7 +3211,7 @@ input[type='range'] {
   background: repeating-radial-gradient(
     circle at 50% 42%,
     transparent 0 30px,
-    rgb(8 127 140 / 8%) 30px 32px
+    rgb(var(--motif-rgb) / 8%) 30px 32px
   );
   mask-image: radial-gradient(circle at 50% 42%, #000 0 40%, transparent 72%);
   -webkit-mask-image: radial-gradient(circle at 50% 42%, #000 0 40%, transparent 72%);
@@ -3356,7 +3375,7 @@ input[type='range'] {
   display: grid;
   gap: 8px;
   padding: 14px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-card-border);
   border-radius: var(--radius-md);
   background: var(--color-surface-1);
 }
@@ -3421,7 +3440,7 @@ input[type='range'] {
 @media (hover: hover) {
   .btn:hover:not(:disabled) {
     border-color: var(--color-control-border);
-    background: #e6e9eb;
+    background: var(--color-btn-hover);
   }
 
   .btn.primary:hover:not(:disabled) {
@@ -4064,7 +4083,7 @@ input[type='range'] {
   overflow: hidden;
   margin: 0 0 14px;
   padding: 16px;
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-card-border-strong);
   border-top: 4px solid var(--color-accent);
   border-radius: var(--radius-lg);
   background:
@@ -4072,7 +4091,7 @@ input[type='range'] {
     repeating-radial-gradient(
       circle at 108% -12%,
       transparent 0 26px,
-      rgb(8 127 140 / 7%) 26px 28px
+      rgb(var(--motif-rgb) / 7%) 26px 28px
     ),
     var(--color-surface-2);
 }
@@ -4899,7 +4918,7 @@ input[type='range'] {
   width: 200px;
   height: 200px;
   border-radius: 50%;
-  border: 2px solid rgb(8 127 140 / 30%);
+  border: 2px solid rgb(var(--motif-rgb) / 30%);
   opacity: 0;
   pointer-events: none;
   animation: hit-ripple 1.4s var(--ease-out) 0.35s;
@@ -5093,7 +5112,7 @@ input[type='range'] {
   border-right: 1px solid var(--color-border);
   border-radius: 0 20px 20px 0;
   padding-top: var(--safe-top);
-  box-shadow: 12px 0 40px rgb(23 32 38 / 18%);
+  box-shadow: 12px 0 40px rgb(var(--shadow-rgb) / 18%);
   animation: drawer-in var(--dur-3) var(--ease-out);
 }
 
@@ -5119,7 +5138,7 @@ input[type='range'] {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background:
-    repeating-radial-gradient(circle at 112% -20%, transparent 0 18px, rgb(8 127 140 / 9%) 18px 20px),
+    repeating-radial-gradient(circle at 112% -20%, transparent 0 18px, rgb(var(--motif-rgb) / 9%) 18px 20px),
     var(--color-accent-tint);
 }
 
@@ -5326,7 +5345,7 @@ input[type='range'] {
   max-height: min(86dvh, 720px);
   border: 1px solid var(--color-border);
   border-radius: 18px;
-  box-shadow: 0 24px 60px rgb(23 32 38 / 28%);
+  box-shadow: 0 24px 60px rgb(var(--shadow-rgb) / 28%);
   overflow: hidden;
   animation: modal-pop var(--dur-2) var(--ease-spring);
 }
@@ -5591,7 +5610,7 @@ select:not([multiple]) {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 38px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%234f5d67' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: var(--select-chevron);
   background-repeat: no-repeat;
   background-position: right 12px center;
   background-size: 18px;
@@ -5728,7 +5747,7 @@ select:not([multiple]) {
   width: 100%;
   height: 100%;
   padding: 14px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-card-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface-2);
   text-align: left;
@@ -5808,7 +5827,7 @@ select:not([multiple]) {
 
 .guide-slide {
   background:
-    repeating-radial-gradient(circle at 110% 120%, transparent 0 22px, rgb(8 127 140 / 6%) 22px 24px),
+    repeating-radial-gradient(circle at 110% 120%, transparent 0 22px, rgb(var(--motif-rgb) / 6%) 22px 24px),
     var(--color-surface-2);
 }
 
@@ -6043,7 +6062,7 @@ select:not([multiple]) {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--color-accent), #12a4b4);
+  background: linear-gradient(90deg, var(--color-accent), var(--color-bar-end));
   transition: width var(--dur-2) var(--ease-out);
   animation: bar-grow 0.8s var(--ease-out) backwards;
   animation-delay: calc(120ms + var(--i, 0) * 45ms);
@@ -6839,7 +6858,7 @@ select:not([multiple]) {
   top: calc(var(--watch-sticky-top, 66px) + var(--safe-top, 0px));
   z-index: 3;
   background: var(--color-bg);
-  box-shadow: 0 6px 8px -8px rgb(23 32 38 / 35%);
+  box-shadow: 0 6px 8px -8px rgb(var(--shadow-rgb) / 35%);
 }
 
 .board > li {
@@ -6939,8 +6958,8 @@ select:not([multiple]) {
   display: inline-block;
   padding: 0 6px;
   border-radius: 4px;
-  background: var(--color-danger);
-  color: #ffffff;
+  background: var(--color-danger-fill);
+  color: var(--color-on-fill);
   font-size: 0.78em;
   font-weight: 800;
   letter-spacing: 0.04em;
@@ -6959,7 +6978,7 @@ tr.own th,
 
 .focus-card {
   padding: 12px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-card-border);
   border-radius: 12px;
   background: var(--color-surface-1);
 }
@@ -7274,8 +7293,8 @@ tr.own th,
 .ns-left-note {
   margin: 0;
   padding: 0 10px;
-  background: var(--color-text);
-  color: var(--color-paper);
+  background: var(--color-ink-panel);
+  color: var(--color-ink-panel-text);
   text-align: center;
 }
 
@@ -7553,13 +7572,13 @@ ul.plain {
   flex-direction: column;
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-card-border-strong);
   background: var(--color-surface-1);
 }
 
 .ns-head {
-  background: var(--color-text);
-  color: var(--color-paper);
+  background: var(--color-ink-panel);
+  color: var(--color-ink-panel-text);
   padding: 8px 12px 8px;
 }
 
@@ -7577,13 +7596,13 @@ ul.plain {
   border-radius: 999px;
   padding: 0 8px;
   font-size: 0.8em;
-  background: var(--color-paper);
-  color: var(--color-text);
+  background: var(--color-ink-panel-text);
+  color: var(--color-ink-panel);
 }
 
 .ns-live.done {
   background: transparent;
-  color: var(--color-paper);
+  color: var(--color-ink-panel-text);
 }
 
 .ns-names {
@@ -7844,7 +7863,7 @@ ul.plain {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   padding: 0 10px 10px;
-  background: var(--color-text);
+  background: var(--color-ink-panel);
 }
 
 .ns-big {
@@ -7855,15 +7874,15 @@ ul.plain {
   font-size: 3.4em;
   font-weight: 800;
   line-height: 1.05;
-  color: var(--color-paper);
+  color: var(--color-ink-panel-text);
   font-variant-numeric: tabular-nums;
   border-radius: 4px;
   padding: 4px 0;
 }
 
 .ns-big.on {
-  background: var(--color-paper);
-  color: var(--color-text);
+  background: var(--color-ink-panel-text);
+  color: var(--color-ink-panel);
 }
 
 .ns-member {
@@ -8011,9 +8030,9 @@ ul.plain {
 }
 
 .hl-kind.k-comeback {
-  background: var(--color-text);
-  border-color: var(--color-text);
-  color: var(--color-paper);
+  background: var(--color-ink-panel);
+  border-color: var(--color-ink-panel);
+  color: var(--color-ink-panel-text);
 }
 
 .hl-kind.k-highOut {
@@ -8521,7 +8540,7 @@ ul.plain {
   right: 10px;
   bottom: 10px;
   z-index: 2;
-  box-shadow: 0 2px 8px rgb(23 32 38 / 22%);
+  box-shadow: 0 2px 8px rgb(var(--shadow-rgb) / 22%);
 }
 
 /* ------------------------------------------------------------------ */
@@ -8851,7 +8870,7 @@ ul.plain {
   grid-row: 1;
 }
 .ns-name {
-  color: var(--color-paper);
+  color: var(--color-ink-panel-text);
   font-size: 15px;
   font-weight: 700;
   text-align: center;
@@ -8862,7 +8881,7 @@ ul.plain {
   grid-column: 2;
   grid-row: 1;
   align-self: center;
-  color: var(--color-paper);
+  color: var(--color-ink-panel-text);
   font-size: 1.9em;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
@@ -8876,8 +8895,8 @@ ul.plain {
   gap: 4px 10px;
   margin: 0;
   padding: 4px 10px 6px;
-  background: var(--color-text);
-  color: var(--color-paper);
+  background: var(--color-ink-panel);
+  color: var(--color-ink-panel-text);
   font-size: 13px;
 }
 .ns-status-dot {
@@ -8887,10 +8906,10 @@ ul.plain {
   background: currentColor;
 }
 .ns-status.tone-ok .ns-status-dot {
-  background: #5fd38d;
+  background: var(--color-live-ok);
 }
 .ns-status.tone-error {
-  background: var(--color-danger);
+  background: var(--color-danger-fill);
 }
 .ns-status.tone-paused .ns-status-dot {
   background: var(--color-warning-fill);
@@ -9985,4 +10004,263 @@ ul.plain {
 .browse-entries .chip,
 .browse-links .chip {
   padding: 6px 12px;
+}
+
+/* ===========================================================================
+   表示テーマ (設定 › 表示テーマ。src/components/theme.ts が <html data-theme> を切り替える)
+
+   - マッチシート (既定, data-theme="sheet"): 紙色のページ + 白いカード + Deep Teal。
+     下の「共通の仕上げ」で、カードの奥行き・主ボタンの立体感・ヘッダーとタブバーの影を加える。
+   - スタジアム (data-theme="stadium"): 濃紺の画面に明るい数字。暗い会場・夜の観戦向け。
+   - クリーン (data-theme="clean"): 白い画面に濃紺の操作色。罫線を薄くし、影で区切る。
+
+   どのテーマでも、状態色の意味 (確定=緑 / 下書き=琥珀 / 更新=橙 / 違反・LIVE=赤 / LOCK=紫 /
+   シーズン=青) と「アイコン + 文字 + 色」の原則は同じ。各テーマの背景で文字は 4.5:1 以上、
+   操作部品の枠は 3:1 以上になる値を選んでいる (PR の検証表を参照)。
+   =========================================================================== */
+
+/* ---------------------------------------------------------- 共通の仕上げ */
+
+:root {
+  --radius-lg: 16px;
+  /* カード: ほんの少し浮かせる (紙が台紙から 1 枚浮いている程度)。 */
+  --shadow-card: 0 1px 2px rgb(var(--shadow-rgb) / 5%), 0 8px 20px -14px rgb(var(--shadow-rgb) / 18%);
+  --shadow-card-hover: 0 1px 2px rgb(var(--shadow-rgb) / 6%), 0 12px 26px -14px rgb(var(--shadow-rgb) / 26%);
+  --shadow-btn: 0 1px 1px rgb(var(--shadow-rgb) / 6%);
+  /* 主ボタン: 上から下へわずかに濃くなる塗りと、操作色の淡い影。 */
+  --primary-fill: linear-gradient(180deg, var(--color-accent), var(--color-accent-hover));
+  --shadow-primary:
+    inset 0 1px 0 rgb(255 255 255 / 14%),
+    0 1px 2px rgb(var(--shadow-rgb) / 12%),
+    0 10px 20px -12px color-mix(in srgb, var(--color-accent) 75%, transparent);
+  /* ページ上部の淡い光 (操作色を薄く)。 */
+  --page-glow: radial-gradient(120% 420px at 50% -160px, color-mix(in srgb, var(--color-accent) 9%, transparent), transparent 70%);
+  --header-shadow: 0 1px 0 var(--color-border), 0 10px 24px -20px rgb(var(--shadow-rgb) / 45%);
+  --tabbar-shadow: 0 -1px 0 var(--color-border), 0 -10px 26px -20px rgb(var(--shadow-rgb) / 45%);
+}
+
+body {
+  background-image: var(--page-glow);
+  background-repeat: no-repeat;
+}
+
+.app-header {
+  border-bottom-color: transparent;
+  box-shadow: var(--header-shadow);
+}
+
+/* ブランドの印: 操作色の塗りに白い的。 */
+.brand-mark {
+  background: var(--primary-fill);
+  border-color: transparent;
+  color: var(--color-accent-ink);
+  box-shadow: var(--shadow-primary);
+}
+
+.tab-bar {
+  border-top-color: transparent;
+  box-shadow: var(--tabbar-shadow);
+}
+
+.tab-bar button[aria-current='page'] .tab-label {
+  font-weight: 800;
+}
+
+.card,
+.next-match-card,
+.disclosure,
+.resume-card,
+.quick-tile,
+.participant,
+.preset,
+.candidate-tab,
+.order-game,
+.start-option,
+.choice-list,
+.opponent-panel,
+.underdog-panel,
+.radio-card,
+.guide-slide,
+.live-card-row,
+.board-tile,
+.focus-card,
+.n01-sheet,
+.division-summary,
+.picked-player,
+.n01-list,
+.match-row {
+  box-shadow: var(--shadow-card);
+}
+
+.btn:not(.ghost, .outline, .accent-outline, .danger, :disabled) {
+  box-shadow: var(--shadow-btn);
+}
+
+.btn.primary:not(:disabled) {
+  background: var(--primary-fill);
+  border-color: transparent;
+  box-shadow: var(--shadow-primary);
+  letter-spacing: 0.02em;
+}
+
+.btn.primary:focus-visible {
+  box-shadow:
+    var(--shadow-primary),
+    0 0 0 5px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+@media (hover: hover) {
+  .btn.primary:hover:not(:disabled) {
+    background: var(--color-accent-hover);
+    border-color: transparent;
+  }
+
+  .quick-tile:hover,
+  .match-row:hover,
+  .live-card-row:hover,
+  .board-tile:hover,
+  .list-row:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+}
+
+/* 見出しの階層をはっきりさせる (文字はそのまま、太さと詰めだけ)。 */
+.section-title {
+  font-size: 17px;
+  letter-spacing: 0.01em;
+}
+
+.card-title {
+  letter-spacing: 0.01em;
+}
+
+/* 大きな数字は詰めて、スコアボードの数字らしく。 */
+.scoreboard .v,
+.next-match-date,
+.candidate-tab .c-score,
+.ns-big,
+.match-score {
+  letter-spacing: -0.01em;
+}
+
+/* --------------------------------------------- スタジアム (ダーク) */
+
+:root[data-theme='stadium'] {
+  color-scheme: dark;
+
+  --color-bg: #0d151b;
+  --color-surface-1: #121d24;
+  --color-surface-2: #15222b;
+  --color-surface-3: #1e2d37;
+  --color-paper: #101b22;
+  --color-input: #0f1a21;
+  --color-border: #253540;
+  --color-border-strong: #364a57;
+  --color-control-border: #6f8796;
+
+  --color-text: #e9f0f3;
+  --color-text-secondary: #b6c4cc;
+  --color-text-muted: #a5b4bd;
+  --color-text-dim: #97a7b1;
+  --color-decor: #364a57;
+
+  --color-accent: #2cc5cf;
+  --color-accent-hover: #53d3db;
+  --color-accent-ink: #062327;
+  --color-accent-text: #5fd6df;
+  --color-accent-tint: #123a40;
+  --color-selection: #1f5960;
+
+  --color-success: #4fcf8e;
+  --color-warning: #f0b84a;
+  --color-warning-fill: #f2b33d;
+  --color-updated: #ff9a5c;
+  --color-danger: #ff7a73;
+  --color-lock: #b9a2ff;
+  --color-season: #82b5ff;
+
+  --color-score-100: #82b5ff;
+  --color-score-140: #5fd6df;
+  --color-score-180: #ff7a8c;
+  --color-history-head: #1b2a34;
+  --color-history-togo: #14232c;
+  --color-history-mid: #18232b;
+  --color-history-out: #123a3d;
+
+  --color-danger-fill: #c93530;
+  --color-on-fill: #ffffff;
+  --color-ink-panel: #060a0d;
+  --color-ink-panel-text: #f4f3ef;
+  --motif-rgb: 44 197 207;
+  --color-btn-hover: #263844;
+  --color-bar-end: #7fe3ea;
+  --color-live-ok: #5fd38d;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23b6c4cc' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+
+  --shadow-rgb: 0 0 0;
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 3%) inset, 0 10px 24px -16px rgb(0 0 0 / 70%);
+  --shadow-card-hover: 0 1px 0 rgb(255 255 255 / 4%) inset, 0 14px 30px -16px rgb(0 0 0 / 80%);
+  --shadow-btn: 0 1px 1px rgb(0 0 0 / 30%);
+  --shadow-primary:
+    inset 0 1px 0 rgb(255 255 255 / 22%),
+    0 1px 2px rgb(0 0 0 / 40%),
+    0 10px 22px -12px color-mix(in srgb, var(--color-accent) 55%, transparent);
+  --page-glow: radial-gradient(120% 460px at 50% -180px, rgb(44 197 207 / 16%), transparent 70%);
+  --header-shadow: 0 1px 0 var(--color-border), 0 12px 26px -20px rgb(0 0 0 / 80%);
+  --tabbar-shadow: 0 -1px 0 var(--color-border), 0 -12px 28px -20px rgb(0 0 0 / 80%);
+}
+
+/* 濃い地では、白い数字の枠 (次に投げる側) を明るい紙色にして目立たせる。 */
+:root[data-theme='stadium'] .ns-big.on {
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+/* --------------------------------------------- クリーン (白基調) */
+
+:root[data-theme='clean'] {
+  --color-bg: #f2f4f7;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #f1f3f6;
+  --color-paper: #f7f8fa;
+  --color-input: #ffffff;
+  --color-border: #e6e9ee;
+  --color-border-strong: #cdd2da;
+  --color-control-border: #7c8594;
+
+  --color-text: #111827;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #535e6c;
+  --color-text-dim: #5b6676;
+  --color-decor: #cdd2da;
+
+  --color-accent: #243b73;
+  --color-accent-hover: #1b2d59;
+  --color-accent-ink: #ffffff;
+  --color-accent-text: #243b73;
+  --color-accent-tint: #eaeef7;
+  --color-selection: #c9d4ee;
+
+  --color-history-head: #eceff3;
+  --color-history-togo: #f1f4f8;
+  --color-history-mid: #f5f6f8;
+  --color-history-out: #e3e9f6;
+
+  --color-ink-panel: #111827;
+  --color-ink-panel-text: #f7f8fa;
+  --motif-rgb: 36 59 115;
+  --color-btn-hover: #e8ebf0;
+  --color-bar-end: #4f6bb0;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%234b5563' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+
+  /* 白いカードは影で区切り、既定の外枠を消す (状態・種類を示す枠の色はそのまま)。 */
+  --color-card-border: transparent;
+  --color-card-border-strong: transparent;
+
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --shadow-rgb: 17 24 39;
+  --shadow-card: 0 1px 2px rgb(17 24 39 / 4%), 0 10px 28px -16px rgb(17 24 39 / 16%);
+  --shadow-card-hover: 0 1px 2px rgb(17 24 39 / 6%), 0 14px 32px -16px rgb(17 24 39 / 24%);
+  --page-glow: none;
 }

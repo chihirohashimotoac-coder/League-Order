@@ -7,7 +7,11 @@ import { createUndoable, undoableReducer } from '../state/orderSession';
 import { generateOrder } from '../optimizer/generateOrder';
 import { createMatchInfo, type OrderInput } from '../domain/types';
 import { previewScenarios } from './scenarios';
+import { applyTheme, readTheme } from '../components/theme';
 import '../styles/app.css';
+
+// アプリ本体と同じ表示テーマ (この端末の設定) で表示する。
+applyTheme(readTheme());
 
 /**
  * Non-production test page for the throw-order model and the underdog plan

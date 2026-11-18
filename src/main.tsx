@@ -4,7 +4,11 @@ import { App } from './App';
 import { AppStoreProvider } from './state/appStore';
 import { ToastProvider } from './components/ui';
 import { initServiceWorker } from './pwa';
+import { applyTheme, readTheme } from './components/theme';
 import './styles/app.css';
+
+// 表示テーマ (この端末の設定) を、最初の描画より前に適用する。
+applyTheme(readTheme());
 
 const container = document.getElementById('root');
 if (!container) throw new Error('#root not found');
