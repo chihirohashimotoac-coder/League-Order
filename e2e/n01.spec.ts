@@ -78,7 +78,7 @@ test.describe('n01 league native sync (Phase 1)', () => {
   test('an n01 team generates an order with the existing optimizer', async ({ page }) => {
     await start(page);
     await createKalavinka(page);
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
     await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -157,7 +157,7 @@ test.describe('n01 league native sync (Phase 1)', () => {
   test('対戦相手最適化 compares four candidates with estimated win probabilities (Phase 4)', async ({ page }) => {
     await start(page);
     await createKalavinka(page);
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     await expect(page.getByTestId('setup-opponent')).toContainText('次戦: vs スピンコブラ');
     await page.getByRole('radio', { name: /対戦相手最適化/ }).click();
     await clickGenerate(page);
@@ -175,7 +175,8 @@ test.describe('throw order in the result (docs/THROW_ORDER_MODEL.md §7)', () =>
   test('Doubles show 1投目 / 2投目 and why; a swap button re-estimates, Undo restores', async ({ page }) => {
     await start(page);
     await createKalavinka(page);
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
+    await expect(page.getByTestId('flow-ready')).toBeVisible();
     await page.getByRole('radio', { name: /対戦相手最適化/ }).click();
     await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -211,29 +212,38 @@ test.describe('throw order in the result (docs/THROW_ORDER_MODEL.md §7)', () =>
   });
 });
 
-test.describe('next match order in one flow (Phase 5)', () => {
-  async function openFlow(page: Page) {
+test.describe('next match order on ORDER SETUP (Phase 5)', () => {
+  async function openSetup(page: Page) {
     await page.getByRole('button', { name: '次戦のオーダーを作る' }).click();
-    return page.getByRole('dialog', { name: '次戦のオーダーを作る' });
+    await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+    return page.getByTestId('match-source');
   }
+  const generate = (page: Page) => page.getByRole('button', { name: 'オーダーを生成' });
+  const box = (page: Page, name: string) => page.getByLabel(`${name} を参加者に含める`);
 
-  test('HOME → 次戦のオーダーを作る → attendance → result, in one flow', async ({ page }) => {
+  test('HOME → 次戦のオーダーを作る → ORDER SETUP (synced there) → result', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await start(page);
     await createKalavinka(page);
     const card = page.getByTestId('next-match-card');
     await expect(card).toContainText('vs スピンコブラ');
     await expect(card).toContainText('10/8');
+    await expect(page.getByRole('button', { name: '新しいオーダーを作る' })).toHaveCount(0);
     await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });
     await audit(page, 'HOME next-match card');
 
-    const flow = await openFlow(page);
-    const attendance = flow.getByTestId('flow-attendance');
-    await expect(attendance).toContainText('本日参加 7 / 7');
-    await audit(page, 'NEXT MATCH attendance');
-    await attendance.getByRole('checkbox', { name: /伊藤 由佳/ }).uncheck();
-    await expect(attendance).toContainText('本日参加 6 / 7');
-    await attendance.getByRole('button', { name: 'このメンバーで作成' }).click();
+    const source = await openSetup(page);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(source.getByTestId('flow-ready')).toContainText('n01 ✓ 最新');
+    await expect(source).toContainText('vs スピンコブラ');
+    await expect(page.getByRole('heading', { name: /参加者 7 \/ 7/ })).toBeVisible();
+    await expect(page.getByRole('radio', { name: /対戦相手最適化/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('setup-opponent')).toContainText('データの信頼度');
+    await expect(page.locator('.match-summary')).toContainText('vs スピンコブラ ・ 2026-10-08');
+    await audit(page, 'NEXT MATCH setup');
+    await box(page, '伊藤 由佳').uncheck();
+    await expect(page.getByRole('heading', { name: /参加者 6 \/ 7/ })).toBeVisible();
+    await clickGenerate(page);
 
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('opponent-panel')).toContainText('スピンコブラ');
@@ -245,21 +255,56 @@ test.describe('next match order in one flow (Phase 5)', () => {
     expect(fielded.some((name) => name.includes('伊藤 由佳'))).toBe(false);
   });
 
+  test('a slow n01: SETUP opens first, locked; a match by hand is never overwritten by the late answer', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const server = await start(page);
+    await createKalavinka(page);
+    await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });
+    server.delayMs = 2500;
+    const source = await openSetup(page);
+    await expect(source.getByTestId('setup-syncing')).toContainText('n01から試合情報を取得中…');
+    await expect(generate(page)).toBeDisabled();
+    await expect(box(page, '伊藤 由佳')).toBeDisabled();
+    await audit(page, 'NEXT MATCH syncing');
+
+    // Keyboard only: to the match by hand, type an opponent, leave a player out.
+    await source.getByRole('button', { name: '別の試合を作る' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(source).toContainText('手動で設定');
+    await expect(source.getByRole('button', { name: 'n01の次戦を使う' })).toBeFocused();
+    await expect(page.getByRole('radio', { name: /対戦相手最適化/ })).toHaveCount(0);
+    await page.locator('details.disclosure > summary').filter({ hasText: '試合情報' }).click();
+    await page.getByLabel('対戦相手 (任意)').fill('手入力クラブ');
+    await box(page, '伊藤 由佳').uncheck();
+    await expect(page.locator('.match-summary')).toContainText('vs 手入力クラブ');
+
+    // Long after n01 has answered, nothing typed or ticked by hand has changed.
+    await page.waitForTimeout(6000);
+    server.delayMs = 0;
+    await expect(source).toContainText('手動で設定');
+    await expect(page.getByLabel('対戦相手 (任意)')).toHaveValue('手入力クラブ');
+    await expect(box(page, '伊藤 由佳')).not.toBeChecked();
+    await expect(page.getByTestId('setup-opponent')).toHaveCount(0);
+    await clickGenerate(page);
+    await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('opponent-panel')).toHaveCount(0);
+  });
+
   test('offline: shows the last sync and continues with that data only when asked', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const server = await start(page);
     await createKalavinka(page);
     await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });
     server.offline = true;
-    const flow = await openFlow(page);
-    const offline = flow.getByTestId('flow-offline');
+    const source = await openSetup(page);
+    const offline = source.getByTestId('flow-offline');
     await expect(offline).toContainText('n01 に接続できませんでした');
     await expect(offline).toContainText('このデータは最新ではありません');
-    await expect(flow.getByTestId('flow-attendance')).toHaveCount(0);
+    await expect(generate(page)).toBeDisabled();
     await audit(page, 'NEXT MATCH offline');
     await offline.getByRole('button', { name: '前回データで続ける' }).click();
-    await expect(flow.getByTestId('flow-stale')).toContainText('最新ではありません');
-    await flow.getByRole('button', { name: 'このメンバーで作成' }).click();
+    await expect(source.getByTestId('flow-stale')).toContainText('最新ではありません');
+    await clickGenerate(page);
     await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 20_000 });
   });
 });
@@ -291,11 +336,13 @@ test.describe('n01 screens at every supported width (Phase 6 §8)', () => {
       await audit(page, `HOME ${width}`);
 
       await page.getByRole('button', { name: '次戦のオーダーを作る' }).click();
-      const flow = page.getByRole('dialog', { name: '次戦のオーダーを作る' });
-      await expect(flow.getByTestId('flow-attendance')).toBeVisible();
-      await overflow('attendance');
-      await audit(page, `NEXT MATCH ${width}`);
-      await flow.getByRole('button', { name: 'このメンバーで作成' }).click();
+      await expect(page.getByTestId('flow-ready')).toBeVisible();
+      await overflow('setup');
+      await audit(page, `NEXT MATCH SETUP ${width}`);
+      // The collapsed match info and detailed conditions still read their summaries.
+      await expect(page.locator('.match-summary')).toContainText('vs スピンコブラ');
+      await expect(page.getByRole('button', { name: /詳細条件/ })).toContainText('公平性');
+      await clickGenerate(page);
       await expect(page.getByTestId('opponent-panel')).toBeVisible({ timeout: 20_000 });
       await overflow('result');
       await audit(page, `RESULT ${width}`);

@@ -45,7 +45,7 @@ const teamSheet = (): Promise<HTMLElement> => screen.findByRole('dialog', { name
 /** ホーム → 新しいオーダーを作る → 生成。保存はしない (= 未保存の作業中オーダー)。 */
 async function makeUnsavedOrder(user: User): Promise<void> {
   await user.click(within(nav()).getByRole('button', { name: 'ホーム' }));
-  await user.click(await screen.findByRole('button', { name: '新しいオーダーを作る' }));
+  await user.click(await screen.findByRole('button', { name: 'オーダーを作る' }));
   await screen.findByRole('heading', { name: 'オーダー設定' });
   const generate = screen.getByRole('button', { name: /オーダーを生成/ });
   await waitFor(() => expect(generate).toBeEnabled());

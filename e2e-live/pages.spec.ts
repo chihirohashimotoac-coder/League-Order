@@ -93,7 +93,7 @@ test('published site: ATDO team → PLAYER / TEAM analytics → one order, again
 
   // One existing feature, as a visitor would use it: generate an order.
   await page.locator('.tab-bar').getByRole('button', { name: 'ホーム', exact: true }).click();
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await page.getByRole('button', { name: 'オーダーを生成' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 90_000 });

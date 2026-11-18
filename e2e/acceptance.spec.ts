@@ -26,7 +26,7 @@ async function openFresh(page: Page): Promise<void> {
 async function generate(page: Page): Promise<void> {
   // "New order" lives on the home screen; these tests reach it from wherever they are.
   await goTab(page, 'ホーム');
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -272,7 +272,7 @@ test.describe('double actions do not write twice (追加要件 §23)', () => {
 
   test('double-tapping generate leaves one usable order', async ({ page }) => {
     await openFresh(page);
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     // State the sample format's appearance caps first, so the double tap lands on generate itself.
     await page.getByTestId('rule-conditions-pending').getByRole('button', { name: '確認する' }).click();
     await answerUnrestricted(page);
@@ -438,7 +438,7 @@ test.describe('realistic league flow (追加要件 §19-§21)', () => {
 
     // 6-7. Today's participants, with 遠藤 barred from the Trios game.
     await goTab(page, 'ホーム');
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
 
     await page

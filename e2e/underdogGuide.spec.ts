@@ -68,7 +68,7 @@ async function makeUnderdogOrder(orders: SavedOrder[]): Promise<{ order: SavedOr
 }
 
 async function generateAndSave(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();

@@ -40,7 +40,7 @@ async function openPlayer(page: Page, name: string): Promise<void> {
 
 async function generate(page: Page): Promise<void> {
   await tab(page, 'ホーム').click();
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -242,7 +242,7 @@ test.describe('strength basis', () => {
     await page.getByRole('button', { name: '保存' }).click();
 
     await tab(page, 'ホーム').click();
-    await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+    await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
     const setupBasis = page.getByTestId('setup-strength-basis');
     await expect(setupBasis).toContainText('STEEL');
     await expect(setupBasis).toContainText('戦力評価 PPR 70% / Rating 30%');

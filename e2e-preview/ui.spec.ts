@@ -67,7 +67,7 @@ test('hamburger menu: every screen, the current one marked, and it closes on the
 
 test('breadcrumbs: the trail to the current screen, and each step leads back', async ({ page }) => {
   await expect(page.getByRole('navigation', { name: 'パンくずリスト' })).toHaveCount(0);
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).first().click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果', level: 1 })).toBeVisible();
 
@@ -149,7 +149,7 @@ test('accordion: settings open one section at a time', async ({ page }) => {
 });
 
 test('radio buttons: presets move with the arrow keys; conditions are radio cards', async ({ page }) => {
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).first().click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   const presets = page.getByRole('radiogroup', { name: 'プリセット' });
   const checked = presets.locator('[role="radio"][aria-checked="true"]');
   const before = await checked.textContent();
@@ -171,7 +171,7 @@ test('radio buttons: presets move with the arrow keys; conditions are radio card
 });
 
 test('pull-downs: history filter and order (view only)', async ({ page }) => {
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).first().click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果', level: 1 })).toBeVisible();
   await page.locator('.action-bar .btn.primary').click();

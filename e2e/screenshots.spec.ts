@@ -60,14 +60,15 @@ test('n01 screens', async ({ page }, testInfo) => {
   // Sync progress, held long enough to see.
   server.delayMs = 600;
   await page.getByRole('button', { name: '次戦のオーダーを作る' }).click();
-  const flow = page.getByRole('dialog', { name: '次戦のオーダーを作る' });
-  await expect(flow.locator('.sync-step').first()).toBeVisible();
+  // ORDER SETUP is on screen at once; the sync runs at its top.
+  await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+  await expect(page.locator('.sync-step').first()).toBeVisible();
   await page.waitForTimeout(900);
   await shot(page, 'next-match-sync');
   server.delayMs = 0;
-  await expect(flow.getByTestId('flow-attendance')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('flow-ready')).toBeVisible({ timeout: 20_000 });
   await shot(page, 'participant-confirm');
-  await flow.getByRole('button', { name: 'このメンバーで作成' }).click();
+  await page.getByRole('button', { name: 'オーダーを生成' }).click();
   await expect(page.getByTestId('opponent-panel')).toBeVisible({ timeout: 20_000 });
   await shot(page, 'result');
   await page.getByRole('group', { name: '候補の比較' }).scrollIntoViewIfNeeded();
@@ -81,7 +82,6 @@ test('n01 screens', async ({ page }, testInfo) => {
   await page.getByRole('button', { name: '次戦のオーダーを作る' }).click();
   await expect(page.getByTestId('flow-offline')).toBeVisible();
   await shot(page, 'offline');
-  await page.keyboard.press('Escape');
   server.offline = false;
 
   await page.getByRole('button', { name: '切替 / 管理', exact: true }).click();

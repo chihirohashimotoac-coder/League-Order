@@ -15,10 +15,7 @@ import { N01TeamWizard, type N01WizardMode } from '../components/n01/N01TeamWiza
 import { N01SyncSheet } from '../components/n01/N01SyncSheet';
 import { freshness, isLatest } from '../domain/n01/freshness';
 import { divisionLabel } from '../domain/n01/division';
-import { NextMatchFlow } from '../components/n01/NextMatchFlow';
-import type { NextMatchOrder } from '../domain/n01/nextMatch';
 import type { N01MatchIntelligenceSnapshot } from '../domain/n01/intelligence';
-import type { ParticipantConfig } from '../domain/types';
 import { useN01Environment } from '../state/n01Environment';
 import type { Page } from '../navigation';
 import { latestVersion } from '../domain/orders/lifecycle';
@@ -40,28 +37,27 @@ export interface WorkingOrderSummary {
 /**
  * HOME — the face of the app.
  *
- * The captain's next match first, then the three things the app is used for — watching (ライブ,
- * 日程・結果・順位), analysis, and the new order — then the active team as a scoreboard and the
- * rest in decreasing weight: members and formats as tiles, pairs / history / settings as rows.
+ * The captain's order first — the next match (n01 teams) or the new order, with the one
+ * button that opens ORDER SETUP — then the things the app is used for besides (watching:
+ * ライブ, 日程・結果・順位; analysis), then the active team as a scoreboard and the rest in
+ * decreasing weight: members and formats as tiles, pairs / history / settings as rows.
  */
 export function HomePage({
   onNavigate,
-  onNewOrder,
+  onStartOrder,
   working,
   onResume,
-  onNextMatch,
-  currentParticipants = null,
   onOpenOrder,
   onOpenTeams,
 }: {
   onNavigate: (page: Page) => void;
-  onNewOrder: () => void;
+  /**
+   * Opens ORDER SETUP for a new order (the next match of an n01 team, or a match set by hand).
+   * The work open in this session is kept until a new order is generated.
+   */
+  onStartOrder: () => void;
   working: WorkingOrderSummary | null;
   onResume: () => void;
-  /** Generates the next match's order (n01 teams). */
-  onNextMatch?: (order: NextMatchOrder) => void;
-  /** Attendance being worked on in this session. */
-  currentParticipants?: readonly ParticipantConfig[] | null;
   /** Opens a saved order (the recent-orders carousel). */
   onOpenOrder?: (order: SavedOrder) => void;
   /** Opens the team manager (switch / edit / add / delete). The same one the header opens. */
@@ -71,7 +67,6 @@ export function HomePage({
   const [confirmLeaveDemo, setConfirmLeaveDemo] = useState(false);
   const [wizard, setWizard] = useState<N01WizardMode | null>(null);
   const [syncing, setSyncing] = useState<Team | null>(null);
-  const [nextMatchFlow, setNextMatchFlow] = useState<Team | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
   const [showStrength, setShowStrength] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState<SavedOrder | null>(null);
@@ -150,8 +145,8 @@ export function HomePage({
 
       <div className="home-grid">
         <div>
-          {team?.n01 ? (
-            <NextMatchCard team={team} onStart={() => setNextMatchFlow(team)} onSync={() => setSyncing(team)} />
+          {team ? (
+            <OrderCard team={team} working={working} onStart={onStartOrder} onResume={onResume} onSync={() => setSyncing(team)} />
           ) : null}
           <section className="watch-strip" aria-labelledby="watch-strip-title">
             <h2 className="section-mini" id="watch-strip-title">
@@ -189,34 +184,6 @@ export function HomePage({
               </button>
             </div>
           </section>
-          <section className="hero" aria-labelledby="hero-title">
-            <span className="kicker">
-              <KineticText text="LEAGUE ORDER" variant="track" step={30} />
-            </span>
-            <h2 className="hero-title" id="hero-title">
-              <KineticText text="試合のオーダーを、" step={34} />
-              <br />
-              <KineticText text="速く・公平に・強く。" variant="drop" delay={320} step={46} className="hero-accent" />
-            </h2>
-            <div className="hero-actions">
-              <button type="button" className={team?.n01 ? 'btn xl' : 'btn primary xl'} onClick={onNewOrder}>
-                <Icon name="plus" size={22} strokeWidth={2.6} />
-                新しいオーダーを作る
-              </button>
-              {working ? (
-                <button type="button" className="resume-card" onClick={onResume}>
-                  <Icon name="target" />
-                  <span className="grow">
-                    <span className="title">作業中のオーダーを開く</span>
-                    <span className="meta">{working.label}</span>
-                  </span>
-                  <StatusBadge tone={STATE_META[working.lifecycle].tone} icon={STATE_META[working.lifecycle].icon}>
-                    {working.lifecycle === 'DRAFT' ? 'DRAFT' : `v${working.version}`}
-                  </StatusBadge>
-                </button>
-              ) : null}
-            </div>
-          </section>
 
           {store.teamOrders.length === 0 && !working && !team?.demo ? (
             <NextStepCard
@@ -224,7 +191,6 @@ export function HomePage({
               formats={store.teamFormats.length}
               allManaged={store.teamFormats.length > 0 && store.teamFormats.every((entry) => entry.source)}
               onNavigate={onNavigate}
-              onNewOrder={onNewOrder}
             />
           ) : null}
 
@@ -266,7 +232,6 @@ export function HomePage({
               formats={store.teamFormats.length}
               managedFormats={store.teamFormats.filter((entry) => entry.source).length}
               onNavigate={onNavigate}
-              onNewOrder={onNewOrder}
             />
           )}
         </div>
@@ -355,26 +320,6 @@ export function HomePage({
         />
       ) : null}
 
-      {nextMatchFlow && onNextMatch ? (
-        <NextMatchFlow
-          team={nextMatchFlow}
-          currentParticipants={currentParticipants}
-          onClose={() => setNextMatchFlow(null)}
-          onGenerate={(order) => {
-            setNextMatchFlow(null);
-            onNextMatch(order);
-          }}
-          onRelink={() => {
-            setWizard({ kind: 'link', team: nextMatchFlow });
-            setNextMatchFlow(null);
-          }}
-          onManual={() => {
-            setNextMatchFlow(null);
-            onNewOrder();
-          }}
-        />
-      ) : null}
-
       {syncing ? (
         <N01SyncSheet
           team={syncing}
@@ -387,7 +332,7 @@ export function HomePage({
       ) : null}
 
       {wizard ? (
-        // 再接続 (次戦・同期シートから)。チーム管理シートからの新規作成・接続は TeamManager が持つ。
+        // 再接続 (同期シートから。次戦の取得中はオーダー設定の画面が持つ)。チーム管理シートからの新規作成・接続は TeamManager が持つ。
         <N01TeamWizard mode={wizard} onClose={() => setWizard(null)} onDone={() => setWizard(null)} />
       ) : null}
 
@@ -452,60 +397,99 @@ function N01TeamStatus({ team }: { team: Team }): React.JSX.Element {
 }
 
 /**
- * NEXT MATCH (MASTER SPEC Phase 5 §1): who, when, how fresh the data is, and the one
- * action that builds the order. "最新" only right after a successful sync in this session.
+ * The order card at the top of HOME. For an n01 team it is NEXT MATCH (MASTER SPEC Phase 5
+ * §1): who, when, how fresh the data is — "最新" only right after a successful sync in this
+ * session — and the re-sync. For any team it holds the one button that opens ORDER SETUP for
+ * a new order (「次戦のオーダーを作る」, or 「オーダーを作る」 when there is no next match to
+ * build for), and the way back to the order open in this session.
  */
-function NextMatchCard({
+function OrderCard({
   team,
+  working,
   onStart,
+  onResume,
   onSync,
 }: {
   team: Team;
+  working: WorkingOrderSummary | null;
   onStart: () => void;
+  onResume: () => void;
   onSync: () => void;
 }): React.JSX.Element {
   const store = useAppStore();
   const env = useN01Environment();
-  const binding = team.n01!;
+  const binding = team.n01;
   const cache = store.n01CacheFor(team.id);
   const synced = cache.find((record) => record.kind === 'sync');
-  const intel = cache.find((record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel');
+  const intel = binding ? cache.find((record): record is N01MatchIntelligenceSnapshot => record.kind === 'intel') : undefined;
   const now = env.now();
-  const latest = isLatest(store.n01SessionSyncAt(team.id), now);
+  const latest = binding ? isLatest(store.n01SessionSyncAt(team.id), now) : false;
   const age = synced ? freshness(synced.fetchedAt, now) : null;
   const match = intel?.nextMatch;
+  // No match left on n01: the same button opens SETUP for a match set by hand. When it is not
+  // known yet (never fetched, several candidates), the button still fetches it.
+  const forNextMatch = !!binding && intel?.nextMatchStatus !== 'none';
   return (
-    <section className="next-match-card" aria-labelledby="next-match-title" data-testid="next-match-card">
-      <span className="kicker">NEXT MATCH</span>
+    <section
+      className="next-match-card"
+      aria-labelledby="next-match-title"
+      data-testid={binding ? 'next-match-card' : 'order-card'}
+    >
+      <span className="kicker">{binding ? 'NEXT MATCH' : 'ORDER'}</span>
       <h2 className="next-match-title" id="next-match-title">
-        {match ? `vs ${match.opponentName}` : intel?.nextMatchStatus === 'none' ? '残りの試合はありません' : intel?.nextMatchStatus === 'ambiguous' ? '次戦の候補が複数あります' : '次戦: 未取得'}
+        {!binding
+          ? 'オーダー作成'
+          : match
+            ? `vs ${match.opponentName}`
+            : intel?.nextMatchStatus === 'none'
+              ? '残りの試合はありません'
+              : intel?.nextMatchStatus === 'ambiguous'
+                ? '次戦の候補が複数あります'
+                : '次戦: 未取得'}
       </h2>
       {match?.date ? <p className="next-match-date">{Number(match.date.slice(5, 7))}/{Number(match.date.slice(8, 10))}</p> : null}
       <p className="next-match-team">
-        {team.name} ・ {binding.leagueTitle}
-        {binding.lastDivisionTitle ? ` ・ ${divisionLabel(binding.lastDivisionTitle)}` : ''}
+        {team.name}
+        {binding ? ` ・ ${binding.leagueTitle}` : team.leagueName ? ` ・ ${team.leagueName}` : ''}
+        {binding?.lastDivisionTitle ? ` ・ ${divisionLabel(binding.lastDivisionTitle)}` : ''}
       </p>
-      <p className={latest ? 'n01-fresh' : `n01-fresh level-${age?.level ?? 'danger'}`} data-testid="n01-freshness">
-        {latest ? (
-          <>
-            <Icon name="checkCircle" size={16} /> n01 ✓ 最新
-          </>
-        ) : (
-          <>
-            <Icon name={age?.level === 'recent' ? 'history' : 'alert'} size={16} /> {age ? `n01 ${age.label}のデータ` : 'n01 未同期'}
-          </>
-        )}
-      </p>
+      {binding ? (
+        <p className={latest ? 'n01-fresh' : `n01-fresh level-${age?.level ?? 'danger'}`} data-testid="n01-freshness">
+          {latest ? (
+            <>
+              <Icon name="checkCircle" size={16} /> n01 ✓ 最新
+            </>
+          ) : (
+            <>
+              <Icon name={age?.level === 'recent' ? 'history' : 'alert'} size={16} /> {age ? `n01 ${age.label}のデータ` : 'n01 未同期'}
+            </>
+          )}
+        </p>
+      ) : null}
       <div className="next-match-actions">
         <button type="button" className="btn primary xl" onClick={onStart}>
           <Icon name="target" size={22} />
-          次戦のオーダーを作る
+          {forNextMatch ? '次戦のオーダーを作る' : 'オーダーを作る'}
         </button>
-        <button type="button" className="btn small" onClick={onSync}>
-          <Icon name="refresh" size={16} />
-          n01を再同期
-        </button>
+        {binding ? (
+          <button type="button" className="btn small" onClick={onSync}>
+            <Icon name="refresh" size={16} />
+            n01を再同期
+          </button>
+        ) : null}
       </div>
+      {working ? (
+        <button type="button" className="resume-card" onClick={onResume}>
+          <Icon name="target" />
+          <span className="grow">
+            <span className="title">作業中のオーダーを開く</span>
+            <span className="meta">{working.label}</span>
+          </span>
+          <StatusBadge tone={STATE_META[working.lifecycle].tone} icon={STATE_META[working.lifecycle].icon}>
+            {working.lifecycle === 'DRAFT' ? 'DRAFT' : `v${working.version}`}
+          </StatusBadge>
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -718,23 +702,22 @@ function RecentOrdersCarousel({
 }
 
 /**
- * What to do next on a team with no order yet: check the format (a starter template is an
- * example, not the league's rules), then make the first order. n01-managed formats come
- * from the league itself and need no check.
+ * What to prepare on a team with no order yet: the members, and the format (a starter
+ * template is an example, not the league's rules). n01-managed formats come from the league
+ * itself and need no check. The order itself is made from the order card's one button.
  */
 function NextStepCard({
   hasPlayers,
   formats,
   allManaged,
   onNavigate,
-  onNewOrder,
 }: {
   hasPlayers: boolean;
   formats: number;
   allManaged: boolean;
   onNavigate: (page: Page) => void;
-  onNewOrder: () => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  if (hasPlayers && formats > 0 && allManaged) return null;
   return (
     <section className="card next-step-card" aria-labelledby="next-step-title" data-testid="next-step">
       <h2 className="card-title" id="next-step-title">
@@ -778,15 +761,6 @@ function NextStepCard({
             </button>
           </li>
         )}
-        <li>
-          <span className="grow">
-            <strong>最初のオーダーを作る</strong>
-            <span className="tiny muted">参加者と条件を選ぶと、最大 3 つの候補を作ります。</span>
-          </span>
-          <button type="button" className="btn small primary" onClick={onNewOrder}>
-            オーダーを作る
-          </button>
-        </li>
       </ol>
     </section>
   );
@@ -798,14 +772,12 @@ function GuideCarousel({
   formats,
   managedFormats,
   onNavigate,
-  onNewOrder,
 }: {
   players: number;
   formats: number;
   /** Formats n01 manages: they come from the league, so they need no checking. */
   managedFormats: number;
   onNavigate: (page: Page) => void;
-  onNewOrder: () => void;
 }): React.JSX.Element {
   const steps: {
     key: string;
@@ -815,8 +787,9 @@ function GuideCarousel({
     /** `done`: nothing left to do; `check`: exists but the captain should look; `todo`: missing. */
     status: 'done' | 'check' | 'todo';
     statusLabel?: string;
-    action: string;
-    onAction: () => void;
+    /** The steps that make the order point to the order card's button instead of a second one. */
+    action?: string;
+    onAction?: () => void;
   }[] = [
     {
       key: 'players',
@@ -842,10 +815,8 @@ function GuideCarousel({
       key: 'setup',
       icon: 'sliders',
       title: '条件を決めて生成',
-      body: '参加者・出場条件・プリセットを選ぶと、最大 3 つの候補を作ります。',
+      body: 'ホーム上部のボタンから、参加者・出場条件・プリセットを選ぶと、最大 3 つの候補を作ります。',
       status: 'todo',
-      action: 'オーダーを作る',
-      onAction: onNewOrder,
     },
     {
       key: 'share',
@@ -853,8 +824,6 @@ function GuideCarousel({
       title: '確定して共有',
       body: '確定すると v1・v2… と版が残り、LINE 向けの画像やテキストで共有できます。',
       status: 'todo',
-      action: 'オーダーを作る',
-      onAction: onNewOrder,
     },
   ];
   return (
@@ -886,9 +855,11 @@ function GuideCarousel({
               ) : (
                 <span />
               )}
-              <button type="button" className="btn small" onClick={step.onAction}>
-                {step.action}
-              </button>
+              {step.action && step.onAction ? (
+                <button type="button" className="btn small" onClick={step.onAction}>
+                  {step.action}
+                </button>
+              ) : null}
             </span>
           </div>
         ),

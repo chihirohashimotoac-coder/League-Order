@@ -66,7 +66,7 @@ test('rules → generate → hand-made breach refuses finalize → undo → v1 k
   await page.getByRole('button', { name: '閉じる' }).first().click();
 
   await tab(page, 'ホーム').click();
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await expect(page.getByTestId('league-rules-summary')).toContainText('Singles: 1人 1 回まで');
   await expect(page.getByTestId('league-rules-summary')).toContainText('助っ人: 1 名まで');
@@ -125,7 +125,7 @@ test('rule screens fit 320 / 390 / 768 / 1440 px with 44px targets and pass the 
   await openSample(page);
   await addRules(page);
   await tab(page, 'ホーム').click();
-  await page.getByRole('button', { name: '新しいオーダーを作る' }).click();
+  await page.getByRole('button', { name: /^(次戦の)?オーダーを作る$/ }).click();
   await page.getByTestId('league-status-notice').getByRole('button', { name: '名簿メンバーを正規登録にする' }).click();
   await clickGenerate(page);
   await expect(page.getByTestId('league-rules-panel')).toBeVisible();

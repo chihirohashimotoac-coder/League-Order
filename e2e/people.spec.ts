@@ -31,22 +31,23 @@ async function add(page: Page, opener: string, dialog: string, name: string, sav
   await expect(editor).toHaveCount(0);
 }
 
-test('a helper and a next-time member, from the next-match flow to a reload', async ({ page }) => {
+test('a helper and a next-time member, from the next match’s SETUP to a reload', async ({ page }) => {
   await createKalavinka(page);
   await page.getByRole('button', { name: '次戦のオーダーを作る' }).click();
-  const flow = page.getByRole('dialog', { name: '次戦のオーダーを作る' });
-  await expect(flow.getByTestId('flow-attendance')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
+  await expect(page.getByTestId('flow-ready')).toBeVisible();
 
   await add(page, '今回だけ助っ人を追加', '今回だけ助っ人を追加', '助っ人 花子', '助っ人として追加');
   await add(page, '次回から参加するメンバーを追加', '次回から参加するメンバーを追加', '新人 次郎', 'メンバーに追加');
-  await expect(flow.getByTestId('flow-attendance')).toContainText('本日参加 9 / 9');
-  await expect(flow.getByTestId('guest-tag')).toHaveText('助っ人 (今回のみ)');
-  await expect(flow.getByTestId('manual-tag')).toHaveText('n01 未連携');
+  await expect(page.getByRole('heading', { name: /参加者 9 \/ 9/ })).toBeVisible();
+  await expect(page.getByTestId('guest-tag')).toHaveText('助っ人 (今回のみ)');
+  await expect(page.getByTestId('manual-tag')).toHaveText('n01 未連携');
+  await expect(page.locator('.toast')).toHaveCount(0, { timeout: 6000 });
 
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
 
-  await flow.getByRole('button', { name: 'このメンバーで作成' }).click();
+  await page.getByRole('button', { name: 'オーダーを生成' }).click();
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible({ timeout: 30_000 });
   const fielded = await page.locator('.order-game select').evaluateAll((selects) =>
     selects.map((select) => (select as HTMLSelectElement).selectedOptions[0]?.textContent ?? ''),

@@ -39,14 +39,13 @@ import { HomePage, type WorkingOrderSummary } from './pages/HomePage';
 import { PlayersPage } from './pages/PlayersPage';
 import { PairsPage } from './pages/PairsPage';
 import { FormatsPage } from './pages/FormatsPage';
-import { SetupPage, activeIntel, hasNextOpponent, type SetupDraft } from './pages/SetupPage';
+import { NewOrderSetup, SetupPage, activeIntel, hasNextOpponent, type SetupDraft } from './pages/SetupPage';
 import { ResultPage } from './pages/ResultPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { MorePage } from './pages/MorePage';
 import { WelcomePage } from './pages/WelcomePage';
 import { ViewerHome, ViewerOrder } from './pages/ViewerPages';
-import type { NextMatchOrder } from './domain/n01/nextMatch';
 import { readWatchLink, replaceWatchLink, useWatchLink } from './features/matches/watchLink';
 
 // Loaded only when the analytics screen is opened: it adds nothing to start-up and makes no
@@ -106,6 +105,23 @@ export function App(): React.JSX.Element {
   /** A format to open in the editor when FORMAT opens (the first-run "自分の構成を作る"). */
   const [formatToEdit, setFormatToEdit] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
+  /**
+   * Set while ORDER SETUP is open for a new order from HOME's one button: the page then holds
+   * conditions of its own (the next match, or a match set by hand) and leaves the working copy
+   * — session, record, draft, match header — untouched until 「オーダーを生成」. The number
+   * re-creates the page each time the button is pressed. Leaving SETUP clears it.
+   */
+  const [newOrderSetup, setNewOrderSetup] = useState<number | null>(null);
+  /**
+   * Which match the working order was made for on the new-order SETUP (null: unknown — an
+   * order opened otherwise). `other` (「別の試合を作る」, or a saved order of an n01 team with
+   * no opponent data): its SETUP and RESULT never take the n01 next match's opponent data
+   * from the team's latest analysis, on any re-generation. `next`: its SETUP keeps offering
+   * only the players on the n01 roster, as when it was made.
+   */
+  const [origin, setOrigin] = useState<'next' | 'other' | null>(null);
+  const handMade = origin === 'other' && !!store.activeTeam?.n01;
+  const newOrderSerial = useRef(0);
 
   // A new build is never applied automatically — the captain decides when.
   useEffect(() => onUpdateAvailable((apply) => setApplyUpdate(() => apply)), []);
@@ -138,6 +154,7 @@ export function App(): React.JSX.Element {
       invalidateGeneration();
       setSession(null);
       setRecord(null);
+      setOrigin(null);
       setDiagnostics([]);
       // One team's one-order helpers are nobody's in the other team.
       setDraft((current) => (current && current.guests.length > 0 ? clearGuests(current) : current));
@@ -149,6 +166,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     window.scrollTo(0, 0);
     if (page !== 'formats') setFormatToEdit(null);
+    if (page !== 'setup') setNewOrderSetup(null);
     // The address names a card only while 観戦 is shown.
     if (page !== 'watch' && page !== 'matches' && page !== 'live' && readWatchLink()) replaceWatchLink(null);
   }, [page]);
@@ -166,6 +184,7 @@ export function App(): React.JSX.Element {
     invalidateGeneration();
     setSession(null);
     setRecord(null);
+    setOrigin(null);
     setDiagnostics([]);
     setDraft(null);
     setPage('home');
@@ -309,6 +328,7 @@ export function App(): React.JSX.Element {
     invalidateGeneration();
     setSession(null);
     setRecord(null);
+    setOrigin(null);
     setDiagnostics([]);
   }, [invalidateGeneration]);
 
@@ -365,29 +385,34 @@ export function App(): React.JSX.Element {
   );
 
   /**
-   * 「次戦のオーダーを作る」 (Phase 5): a new order for the next match, set up exactly as
-   * SETUP would set it up — the managed format, today's attendance, the next opponent in
-   * the match header — so the captain can still go back to SETUP and adjust anything.
+   * HOME's one button (「次戦のオーダーを作る」 / 「オーダーを作る」): ORDER SETUP for a new order
+   * opens at once, with the work in this session still as it was (see `newOrderSetup`).
    */
-  const generateNextMatch = useCallback(
-    (order: NextMatchOrder) => {
+  const startOrderSetup = useCallback(() => {
+    // A generation still running would answer into the page being left (RESULT would replace
+    // SETUP). The order already on screen stays: only its pending re-generation is retired.
+    invalidateGeneration();
+    newOrderSerial.current += 1;
+    setNewOrderSetup(newOrderSerial.current);
+    setPage('setup');
+  }, [invalidateGeneration]);
+
+  /**
+   * 「オーダーを生成」 on the new-order SETUP: a brand-new order with the conditions set there.
+   * It replaces the working copy, so unsaved work is confirmed first; cancelling keeps that
+   * work, and the new-order page, exactly as they were. The new order is never a revision of
+   * the record that was open (`resetWorkingOrder` drops it before generating).
+   */
+  const generateNewOrder = useCallback(
+    (input: OrderInput, nextMatch: MatchInfo, nextDraft: SetupDraft, madeFor: 'next' | 'other') => {
       const start = (): void => {
         resetWorkingOrder();
-        setMatch(order.match);
-        setDraft({
-          formatId: order.input.formatId,
-          participants: order.input.participants,
-          guests: guestsOf(order.input.players),
-          preset: order.input.preset,
-          settings: order.input.settings,
-        });
-        // Caps the league does not state are asked on SETUP before anything is generated.
-        if (order.pendingRules.length > 0) {
-          setPage('setup');
-          toast.show('出場回数の規則が未確認です。確認してから生成してください。');
-          return;
-        }
-        handleGenerate(order.input);
+        setOrigin(madeFor);
+        setMatch(nextMatch);
+        setDraft(nextDraft);
+        // From here SETUP edits this order like any other (back from RESULT, re-generation).
+        setNewOrderSetup(null);
+        handleGenerate(input);
       };
       if (unsaved) {
         setConfirmDiscard(() => start);
@@ -434,6 +459,9 @@ export function App(): React.JSX.Element {
       const baseline = order.match ?? match;
       setMatch(baseline);
       setRecord(order.match ? order : { ...order, match: baseline });
+      // An order of an n01 team saved without opponent data (a match set by hand, or no data
+      // then) never picks up today's next-match analysis when it is generated again.
+      setOrigin(store.activeTeam?.n01 && !order.input.opponent ? 'other' : null);
       // SETUP edits this order from now on: restore the conditions it was generated
       // with, so going back and re-generating revises *this* order's line-up.
       setDraft(draftFor(order.input));
@@ -441,7 +469,7 @@ export function App(): React.JSX.Element {
       setPage('result');
       toast.show('履歴から読み込みました', 'ok');
     },
-    [toast, match, invalidateGeneration, draftFor],
+    [toast, match, invalidateGeneration, draftFor, store.activeTeam],
   );
 
   /**
@@ -766,11 +794,9 @@ export function App(): React.JSX.Element {
         {page === 'home' ? (
           <HomePage
             onNavigate={setPage}
-            onNewOrder={() => startNewOrder()}
+            onStartOrder={startOrderSetup}
             working={working}
             onResume={() => setPage('result')}
-            onNextMatch={generateNextMatch}
-            currentParticipants={draft?.participants ?? null}
             onOpenOrder={openSavedOrder}
             onOpenTeams={() => setTeamManagerOpen(true)}
           />
@@ -778,7 +804,19 @@ export function App(): React.JSX.Element {
         {page === 'players' ? <PlayersPage /> : null}
         {page === 'pairs' ? <PairsPage /> : null}
         {page === 'formats' ? <FormatsPage initialEditId={formatToEdit} /> : null}
-        {page === 'setup' && draft ? (
+        {page === 'setup' && newOrderSetup !== null ? (
+          <NewOrderSetup
+            key={newOrderSetup}
+            baseDraft={draft}
+            currentParticipants={draft?.participants ?? null}
+            working={working}
+            onResume={() => setPage('result')}
+            onGenerate={generateNewOrder}
+            generating={generating}
+            onNavigate={setPage}
+          />
+        ) : null}
+        {page === 'setup' && newOrderSetup === null && draft ? (
           <SetupPage
             draft={draft}
             onDraftChange={setDraft}
@@ -794,6 +832,9 @@ export function App(): React.JSX.Element {
             // Detaching drops the working copy, so it asks first exactly like a new order.
             onDetach={() => startNewOrder()}
             onNavigate={setPage}
+            // A match set by hand keeps clear of the n01 next match on every re-generation.
+            opponentIntel={handMade ? null : undefined}
+            rosterOnly={origin === 'next'}
           />
         ) : null}
         {page === 'result' ? (
@@ -817,7 +858,7 @@ export function App(): React.JSX.Element {
               onCommitSeason={handleCommitSeason}
               onWithdrawSeason={handleWithdrawSeason}
               onOpenSetup={openSetupFromResult}
-              opponentPresetAvailable={hasNextOpponent(activeIntel(store))}
+              opponentPresetAvailable={!handMade && hasNextOpponent(activeIntel(store))}
             />
           ) : (
             <EmptyState

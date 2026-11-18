@@ -61,7 +61,7 @@ async function manualTeam(
 }
 
 async function generateFromNextStep(page: Page): Promise<void> {
-  await page.getByTestId('next-step').getByRole('button', { name: 'オーダーを作る' }).click();
+  await page.getByTestId('order-card').getByRole('button', { name: 'オーダーを作る', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'オーダー設定' })).toBeVisible();
   await clickGenerate(page);
   await expect(page.getByRole('heading', { name: 'オーダー結果' })).toBeVisible();
@@ -128,7 +128,7 @@ test.describe('manual entry, no n01 needed', () => {
     await page.keyboard.press('Escape');
     await tab(page, 'ホーム').click();
 
-    await page.getByTestId('next-step').getByRole('button', { name: 'オーダーを作る' }).click();
+    await page.getByTestId('order-card').getByRole('button', { name: 'オーダーを作る', exact: true }).click();
     await expect(page.getByTestId('setup-strength-basis')).toContainText('戦力評価 PPR 100%');
     await expect(page.getByTestId('setup-strength-basis')).toContainText('PPR (3投平均) だけで評価します');
     await clickGenerate(page);

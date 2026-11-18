@@ -136,7 +136,7 @@ describe('a stored self-contradicting format', () => {
     const user = userEvent.setup();
     renderApp();
     await screen.findByRole('heading', { name: 'チームA', level: 1 });
-    await user.click(screen.getByRole('button', { name: '新しいオーダーを作る' }));
+    await user.click(screen.getByRole('button', { name: 'オーダーを作る' }));
     await screen.findByRole('heading', { name: 'オーダー設定' });
     await user.selectOptions(screen.getByLabelText('使用するフォーマット'), LEGACY.id);
 
