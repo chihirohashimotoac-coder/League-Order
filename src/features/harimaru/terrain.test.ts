@@ -72,6 +72,10 @@ describe('findSegment / visibleSegments', () => {
     expect(findSegment(segments, 200.5, 100)).toBe(segments[0]);
     expect(findSegment(segments, 210, 100)).toBeNull();
     expect(findSegment(segments, 200, 1_000)).toBeNull();
+    // ホバーで 2px 浮いた足場は、許容を広げたときだけ同じ足場とみなす。
+    expect(findSegment(segments, 202, 100)).toBeNull();
+    expect(findSegment(segments, 202, 100, 3)).toBe(segments[0]);
+    expect(findSegment(segments, 204, 100, 3)).toBeNull();
   });
   it('立っている姿が見えている足場だけを登場の候補にする', () => {
     expect(visibleSegments(segments, { top: 0, bottom: 800 })).toHaveLength(1);

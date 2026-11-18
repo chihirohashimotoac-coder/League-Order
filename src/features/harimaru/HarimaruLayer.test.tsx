@@ -90,6 +90,31 @@ describe('HarimaruLayer', () => {
     expect(layer()).toBeNull();
   });
 
+  it('画素密度が変わったら新しい素材だけを反映し、古い要求の結果は無視する', () => {
+    const ratio = vi.spyOn(window, 'devicePixelRatio', 'get').mockReturnValue(1);
+    render(<HarimaruLayer page="home" />);
+    ratio.mockReturnValue(2);
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(FakeImage.instances).toHaveLength(2);
+    // 同じ画素密度での resize は要求し直さない。
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(FakeImage.instances).toHaveLength(2);
+    const sprite = document.body.querySelector<HTMLElement>('[data-testid="harimaru"]')!;
+    act(() => {
+      FakeImage.instances[1].onload?.();
+      // 古い (1x) 要求の失敗・成功は反映しない。
+      FakeImage.instances[0].onerror?.();
+      FakeImage.instances[0].onload?.();
+    });
+    expect(layer()).not.toBeNull();
+    expect(sprite.style.backgroundImage).toContain('@2x');
+    ratio.mockRestore();
+  });
+
   it('読み込めたら素材を表示に使う (登場までは透明)', () => {
     render(<HarimaruLayer page="home" />);
     act(() => {

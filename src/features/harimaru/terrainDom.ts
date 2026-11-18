@@ -111,6 +111,13 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
   }
   range.detach();
 
+  // ピンチズーム中は、実際に見えている範囲 (visual viewport) に狭める。
+  const visual = win.visualViewport;
+  if (visual) {
+    viewTop = Math.max(viewTop, visual.offsetTop);
+    viewBottom = Math.min(viewBottom, visual.offsetTop + visual.height);
+  }
+
   return {
     platforms,
     obstacles,

@@ -111,9 +111,11 @@ export function computeSegments(input: TerrainInput, params: TerrainParams = DEF
   return segments;
 }
 
-/** いまの位置 (足元の y と左端 x) を含む足場。足場が動いた・消えたときは null。 */
-export function findSegment(segments: readonly Segment[], top: number, x: number): Segment | null {
-  return segments.find((s) => Math.abs(s.top - top) <= 1 && x >= s.minX - 1 && x <= s.maxX + 1) ?? null;
+/** いまの位置 (足元の y と左端 x) を含む足場。高さのずれが tolerance を超えた・消えたときは null。 */
+export function findSegment(segments: readonly Segment[], top: number, x: number, tolerance = 1): Segment | null {
+  const near = segments.filter((s) => Math.abs(s.top - top) <= tolerance && x >= s.minX - 1 && x <= s.maxX + 1);
+  // 候補が複数あれば、高さの最も近い足場。
+  return near.sort((a, b) => Math.abs(a.top - top) - Math.abs(b.top - top))[0] ?? null;
 }
 
 /** 縦方向の表示範囲 [top, bottom] (ページ座標) に、立っている姿がすべて収まる足場。 */

@@ -46,16 +46,17 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
     if (!sprite || !root) return undefined;
     let controller: HarimaruController | null = null;
     let disposed = false;
-    let loadedFor = 0;
+    /** いま使っている (または読み込み中の) 素材。古い要求の結果は反映しない。 */
+    let requested = '';
 
     const load = (): void => {
-      const ratio = window.devicePixelRatio || 1;
-      if (ratio === loadedFor) return;
-      loadedFor = ratio;
-      const url = atlasFor(ratio);
+      const url = atlasFor(window.devicePixelRatio || 1);
+      if (url === requested) return;
+      requested = url;
       const image = new Image();
+      const current = (): boolean => !disposed && requested === url;
       image.onload = () => {
-        if (disposed) return;
+        if (!current()) return;
         sprite.style.backgroundImage = `url("${url}")`;
         sprite.dataset.ready = 'true';
         if (!controller) {
@@ -64,7 +65,7 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         }
       };
       image.onerror = () => {
-        if (disposed) return;
+        if (!current()) return;
         // 素材が読めない: キャラクターを休止する (何も描画しない)。
         onFail(true);
       };

@@ -22,7 +22,11 @@ import { framePosition, IDLE_BLINK, IDLE_OPEN, ROW, SLEEP_FRAMES, WALK_FRAMES, t
 import { computeSegments, findSegment, visibleSegments, type Segment } from './terrain';
 import { measureTerrain, type MeasuredTerrain } from './terrainDom';
 
-export type PauseReason = 'hidden' | 'modal' | 'offscreen';
+/**
+ * 休止の理由。hidden = タブ非表示、modal = モーダル・シート表示中、offscreen = キャラクターが画面外、
+ * shift = 足場の近くで位置・大きさの変わるアニメーション中 (ホバーで浮くタイルなど。終わるまで隠す)。
+ */
+export type PauseReason = 'hidden' | 'modal' | 'offscreen' | 'shift';
 
 export interface ControllerOptions {
   /** 動かす要素 (描画レイヤーの子)。 */
@@ -47,6 +51,12 @@ const MODAL_SELECTOR = '[aria-modal="true"], .sheet-backdrop';
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
 const HISTORY_LENGTH = 6;
 const MAX_ANIMATION_WAITS = 10;
+/** この CSS プロパティのトランジションは要素の位置・大きさを変える (色・影は数えない)。 */
+const GEOMETRY_PROPERTY = /^(all|transform|translate|scale|rotate|top|right|bottom|left|inset.*|width|height|min-.*|max-.*|margin.*|padding.*|border(-top|-bottom)?-width|font-size|line-height)$/;
+/** 位置が変わり続けても、この時間で一度計測し直す (終了イベントが届かない場合の保険)。 */
+const SHIFT_FALLBACK_MS = 2_000;
+/** 足場の高さがこの範囲でずれたら、足元を合わせ直して続ける (ホバーで 2px 浮くタイルなど)。 */
+const SNAP_TOLERANCE = 3;
 
 export class HarimaruController {
   private readonly sprite: HTMLElement;
@@ -66,7 +76,10 @@ export class HarimaruController {
   /** 計測・スクロール停止などの補助タイマー。 */
   private remeasureTimer: number | null = null;
   private scrollTimer: number | null = null;
+  private shiftTimer: number | null = null;
   private frame: number | null = null;
+  /** 足場の近くで動いているトランジション・アニメーションの対象。 */
+  private readonly shifting = new Set<EventTarget>();
   private readonly cleanups: (() => void)[] = [];
   private readonly pauses = new Set<PauseReason>();
 
@@ -116,14 +129,13 @@ export class HarimaruController {
     if (this.destroyed) return;
     this.destroyed = true;
     this.interrupt();
-    this.clearTimer('remeasure');
-    this.clearTimer('scroll');
+    this.clearAuxTimers();
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.setVisible(false);
   }
 
   /** テスト・デバッグ用の現在の状態。 */
-  snapshot(): { placed: boolean; action: HarimaruAction | null; x: number; top: number; dir: -1 | 1; paused: PauseReason[]; timers: number; frame: boolean } {
+  snapshot(): { placed: boolean; action: HarimaruAction | null; x: number; top: number; dir: -1 | 1; paused: PauseReason[]; timers: number; auxTimers: number; frame: boolean } {
     return {
       placed: this.placed,
       action: this.action,
@@ -132,6 +144,7 @@ export class HarimaruController {
       dir: this.dir,
       paused: [...this.pauses],
       timers: this.actionTimers.size,
+      auxTimers: [this.remeasureTimer, this.scrollTimer, this.shiftTimer].filter((id) => id !== null).length,
       frame: this.frame !== null,
     };
   }
@@ -150,6 +163,48 @@ export class HarimaruController {
     for (const type of ACTIVITY_EVENTS) add(win, type, onActivity, { passive: true, capture: true });
     add(win, 'scroll', () => this.onScroll(), { passive: true });
     add(win, 'resize', () => this.scheduleRemeasure());
+
+    // ピンチズーム・拡大後のパン (見えている範囲が変わる)。
+    const viewport = win.visualViewport;
+    if (viewport) {
+      const onViewportScroll = (): void => this.onScroll();
+      const onViewportResize = (): void => {
+        this.onScroll();
+        this.scheduleRemeasure();
+      };
+      viewport.addEventListener('scroll', onViewportScroll, { passive: true });
+      viewport.addEventListener('resize', onViewportResize, { passive: true });
+      this.cleanups.push(() => {
+        viewport.removeEventListener('scroll', onViewportScroll);
+        viewport.removeEventListener('resize', onViewportResize);
+      });
+    }
+
+    // 足場の近くで位置の変わるトランジション・アニメーションが始まったら、終わるまで隠す。
+    const onShiftStart = (event: Event): void => {
+      if (event.type === 'transitionrun' && !GEOMETRY_PROPERTY.test((event as TransitionEvent).propertyName ?? '')) return;
+      if (!this.nearSprite(event.target)) return;
+      this.shifting.add(event.target!);
+      this.pause('shift');
+      this.clearTimer('shift');
+      this.shiftTimer = win.setTimeout(() => {
+        this.shiftTimer = null;
+        this.shifting.clear();
+        this.resume('shift');
+      }, SHIFT_FALLBACK_MS);
+    };
+    const onShiftEnd = (event: Event): void => {
+      if (!this.shifting.delete(event.target!) || this.shifting.size > 0) return;
+      this.clearTimer('shift');
+      this.resume('shift');
+    };
+    const root = this.root;
+    for (const type of ['transitionrun', 'animationstart']) root.addEventListener(type, onShiftStart, { capture: true, passive: true });
+    for (const type of ['transitionend', 'transitioncancel', 'animationend', 'animationcancel']) root.addEventListener(type, onShiftEnd, { capture: true, passive: true });
+    this.cleanups.push(() => {
+      for (const type of ['transitionrun', 'animationstart']) root.removeEventListener(type, onShiftStart, { capture: true });
+      for (const type of ['transitionend', 'transitioncancel', 'animationend', 'animationcancel']) root.removeEventListener(type, onShiftEnd, { capture: true });
+    });
 
     const onVisibility = (): void => (doc.hidden ? this.pause('hidden') : this.resume('hidden'));
     doc.addEventListener('visibilitychange', onVisibility);
@@ -176,6 +231,22 @@ export class HarimaruController {
     fonts?.ready.then(() => this.scheduleRemeasure()).catch(() => undefined);
   }
 
+  /** 要素がキャラクターの足元・周囲 (左右 8px、上下 40px) にかかっているか。 */
+  private nearSprite(target: EventTarget | null): boolean {
+    if (!this.placed || !(target instanceof Element)) return false;
+    const rect = target.getBoundingClientRect();
+    const left = this.x - this.win.scrollX - 8;
+    const right = this.x - this.win.scrollX + SPRITE.width + 8;
+    const top = this.top - this.win.scrollY - 40;
+    const bottom = this.top - this.win.scrollY + 40;
+    return rect.right > left && rect.left < right && rect.bottom > top && rect.top < bottom;
+  }
+
+  /** タイマー・計測を止めておく休止 (画面外の休止はスクロール停止の確認だけ続ける)。 */
+  private blocked(): boolean {
+    return this.pauses.has('hidden') || this.pauses.has('modal') || this.pauses.has('shift');
+  }
+
   private modalOpen(): boolean {
     return this.win.document.querySelector(MODAL_SELECTOR) !== null;
   }
@@ -194,6 +265,7 @@ export class HarimaruController {
   private onScroll(): void {
     this.noteActivity();
     this.clearTimer('scroll');
+    if (this.destroyed || this.blocked()) return;
     this.scrollTimer = this.win.setTimeout(() => {
       this.scrollTimer = null;
       this.onScrollEnd();
@@ -201,7 +273,8 @@ export class HarimaruController {
   }
 
   private onScrollEnd(): void {
-    if (this.destroyed || !this.placed) {
+    if (this.destroyed || this.blocked()) return;
+    if (!this.placed) {
       if (!this.placed) this.scheduleEnter(0);
       return;
     }
@@ -227,7 +300,12 @@ export class HarimaruController {
     if (this.destroyed || this.pauses.has(reason)) return;
     this.pauses.add(reason);
     this.interrupt();
-    if (reason !== 'offscreen') this.setVisible(false);
+    if (reason !== 'offscreen') {
+      // 即座に消す (フェードしない)。休止中は計測・スクロールの補助タイマーも残さない。
+      this.setVisible(false);
+      this.clearTimer('remeasure');
+      this.clearTimer('scroll');
+    }
   }
 
   private resume(reason: PauseReason): void {
@@ -251,7 +329,7 @@ export class HarimaruController {
   // ------------------------------------------------------------------ 計測
 
   private scheduleRemeasure(): void {
-    if (this.destroyed) return;
+    if (this.destroyed || this.blocked()) return;
     this.clearTimer('remeasure');
     this.remeasureTimer = this.win.setTimeout(() => {
       this.remeasureTimer = null;
@@ -260,7 +338,7 @@ export class HarimaruController {
   }
 
   private remeasure(): void {
-    if (this.destroyed || this.pauses.has('hidden') || this.pauses.has('modal')) return;
+    if (this.destroyed || this.blocked()) return;
     if (!this.placed) {
       this.scheduleEnter(0);
       return;
@@ -288,8 +366,8 @@ export class HarimaruController {
 
   private currentSegment(): Segment | null {
     const terrain = this.measureFn(this.root, this.selector, this.win);
-    this.segment = findSegment(computeSegments(terrain), this.top, this.x);
-    // 1px 未満のずれ (フォントの読み込み・端数) は、足元を新しい上辺に合わせ直す。
+    this.segment = findSegment(computeSegments(terrain), this.top, this.x, SNAP_TOLERANCE);
+    // 小さなずれ (フォントの読み込み・端数・ホバーで浮くタイル) は、足元を新しい上辺に合わせ直す。
     if (this.segment && this.segment.top !== this.top) {
       this.top = this.segment.top;
       if (this.placed) this.place();
@@ -316,7 +394,7 @@ export class HarimaruController {
   }
 
   private tryEnter(): void {
-    if (this.destroyed || this.placed || this.pauses.has('hidden') || this.pauses.has('modal')) return;
+    if (this.destroyed || this.placed || this.blocked()) return;
     if (this.modalOpen()) {
       this.pause('modal');
       return;
@@ -533,10 +611,17 @@ export class HarimaruController {
     this.cancelFrame();
   }
 
-  private clearTimer(kind: 'remeasure' | 'scroll'): void {
-    const id = kind === 'remeasure' ? this.remeasureTimer : this.scrollTimer;
+  private clearTimer(kind: 'remeasure' | 'scroll' | 'shift'): void {
+    const id = kind === 'remeasure' ? this.remeasureTimer : kind === 'scroll' ? this.scrollTimer : this.shiftTimer;
     if (id !== null) this.win.clearTimeout(id);
     if (kind === 'remeasure') this.remeasureTimer = null;
-    else this.scrollTimer = null;
+    else if (kind === 'scroll') this.scrollTimer = null;
+    else this.shiftTimer = null;
+  }
+
+  private clearAuxTimers(): void {
+    this.clearTimer('remeasure');
+    this.clearTimer('scroll');
+    this.clearTimer('shift');
   }
 }

@@ -27,12 +27,13 @@
   background-size: 120px 60px;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 240ms ease;
   will-change: transform;
 }
 
+/* フェードは登場するときだけ。隠すとき (モーダル・足場の消失など) は残像を残さず即座に消す。 */
 .harimaru-sprite[data-visible='true'][data-ready='true'] {
   opacity: 1;
+  transition: opacity 240ms ease;
 }
 
 /* 「動きを減らす」設定では表示しない (確定仕様)。React 側でも描画そのものを止める。 */

@@ -143,18 +143,56 @@ test('「動きを減らす」設定では描画しない', async ({ page }) => 
   await expect(page.getByTestId('harimaru-layer')).toHaveCount(0);
 });
 
-test('安全な足場が見えない位置では出ず、見える位置へスクロールすると現れる', async ({ page }) => {
+test('安全な足場がなくなると即座に消え、足場が戻ると安全な場所から現れる', async ({ page }) => {
   await page.clock.install();
   await openSampleHome(page);
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await page.clock.runFor(4_000);
-  const shown = await sprite(page).getAttribute('data-visible');
-  if (shown === 'true') {
-    // 画面の下端にも足場がある端末幅では、その場所に立っている (重なりがないことだけ確かめる)。
-    expect(await overlaps(page)).toEqual([]);
-  }
-  await page.evaluate(() => window.scrollTo(0, 0));
+  // フィクスチャ: 枠の付いた透明な板でホーム全体を覆い、すべての足場の上をふさぐ (見た目以外は既存と同じ)。
+  const block = async (): Promise<void> => {
+    await page.evaluate(() => {
+      const cover = document.createElement('div');
+      cover.id = 'harimaru-blocker';
+      cover.style.cssText = 'position:absolute;inset:0;border:1px solid rgb(0 0 0 / 5%);pointer-events:none';
+      const main = document.querySelector<HTMLElement>('.app-main')!;
+      main.style.position = 'relative';
+      main.append(cover);
+    });
+  };
+  await block();
+  await page.clock.runFor(6_000);
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'false');
+  expect(await sprite(page).evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+
+  await page.evaluate(() => document.getElementById('harimaru-blocker')?.remove());
   await page.clock.runFor(4_000);
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
   expect(await overlaps(page)).toEqual([]);
+
+  // 表示中に足場がふさがれたら、フェードを待たずに消える。
+  await block();
+  await page.clock.runFor(400);
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'false');
+  expect(await sprite(page).evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+});
+
+test('PC: 足場のタイルにホバーして浮いても、タイルに重ならない', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'ホバーで浮くのはマウスのある画面だけ');
+  await page.clock.install();
+  await openSampleHome(page);
+  await page.clock.runFor(4_000);
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  for (let i = 0; i < 6; i += 1) {
+    // ハリマルの足元のタイルを指す。
+    const point = await sprite(page).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.bottom + 12 };
+    });
+    await page.mouse.move(point.x, point.y);
+    await page.waitForTimeout(400);
+    await page.clock.runFor(300);
+    if ((await sprite(page).getAttribute('data-visible')) === 'true') expect(await overlaps(page), `hover ${i}`).toEqual([]);
+    await page.mouse.move(5, 300);
+    await page.waitForTimeout(400);
+    await page.clock.runFor(2_000);
+    if ((await sprite(page).getAttribute('data-visible')) === 'true') expect(await overlaps(page), `leave ${i}`).toEqual([]);
+  }
 });

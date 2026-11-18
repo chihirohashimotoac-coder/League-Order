@@ -116,8 +116,50 @@ describe('HarimaruController', () => {
     expect(controller.snapshot().paused).toContain('modal');
     expect(controller.snapshot().timers).toBe(0);
     expect(controller.snapshot().frame).toBe(false);
+    // 休止中はスクロール・DOM の変化があっても計測の予約を残さない。
+    window.dispatchEvent(new Event('scroll'));
+    window.dispatchEvent(new Event('resize'));
+    expect(controller.snapshot().auxTimers).toBe(0);
     dialog.remove();
     await Promise.resolve();
+    expect(sprite.dataset.visible).toBe('true');
+  });
+
+  it('足場の近くで位置の変わるトランジションが始まると即座に隠れ、終わると足元を合わせて戻る', () => {
+    make().start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    const tile = document.createElement('button');
+    root.append(tile);
+    tile.getBoundingClientRect = () => ({ left: x, right: x + 100, top, bottom: top + 80, width: 100, height: 80, x, y: top, toJSON: () => ({}) }) as DOMRect;
+    const run = (type: string, propertyName: string): void => {
+      const event = new Event(type, { bubbles: true });
+      Object.defineProperty(event, 'propertyName', { value: propertyName });
+      tile.dispatchEvent(event);
+    };
+    // 色・影だけのトランジションでは隠れない。
+    run('transitionrun', 'box-shadow');
+    expect(sprite.dataset.visible).toBe('true');
+    run('transitionrun', 'transform');
+    expect(sprite.dataset.visible).toBe('false');
+    expect(controller.snapshot().paused).toContain('shift');
+    // ホバーで 2px 浮いた足場に合わせ直す。
+    current = terrain([{ left: 100, right: 500, top: 298 }]);
+    run('transitionend', 'transform');
+    expect(sprite.dataset.visible).toBe('true');
+    expect(controller.snapshot().top).toBe(298);
+  });
+
+  it('位置の変わるアニメーションの終了が届かなくても、一定時間で戻る', () => {
+    make().start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    const card = document.createElement('div');
+    root.append(card);
+    card.getBoundingClientRect = () => ({ left: x - 50, right: x + 50, top: top - 10, bottom: top + 60, width: 100, height: 70, x: x - 50, y: top - 10, toJSON: () => ({}) }) as DOMRect;
+    card.dispatchEvent(new Event('animationstart', { bubbles: true }));
+    expect(sprite.dataset.visible).toBe('false');
+    advance(2_100);
     expect(sprite.dataset.visible).toBe('true');
   });
 
@@ -146,11 +188,22 @@ describe('HarimaruController', () => {
     expect(sprite.dataset.visible).toBe('true');
   });
 
+  it('離れた場所のアニメーションでは隠れない', () => {
+    make().start();
+    advance(3_000);
+    const far = document.createElement('div');
+    root.append(far);
+    far.getBoundingClientRect = () => ({ left: 0, right: 50, top: 0, bottom: 50, width: 50, height: 50, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    far.dispatchEvent(new Event('animationstart', { bubbles: true }));
+    expect(sprite.dataset.visible).toBe('true');
+  });
+
   it('destroy でタイマー・フレーム・リスナーを残さない', () => {
     make().start();
     advance(3_000);
     controller.destroy();
     expect(controller.snapshot().timers).toBe(0);
+    expect(controller.snapshot().auxTimers).toBe(0);
     expect(controller.snapshot().frame).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
   });
