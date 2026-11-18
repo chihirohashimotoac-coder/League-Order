@@ -6,6 +6,18 @@ const bounds = { left: 0, right: 2_000 };
 const inset = DEFAULT_TERRAIN.cornerInset;
 
 describe('mergePlatforms', () => {
+  it('ホバーで 2px 浮いたタイルも同じ列としてつなぐ (段の高さは最も高い上辺)', () => {
+    const merged = mergePlatforms([
+      { left: 0, right: 100, top: 50 },
+      { left: 110, right: 200, top: 48 },
+      { left: 210, right: 300, top: 54 },
+    ]);
+    expect(merged).toEqual([
+      { left: inset, right: 200 - inset, top: 48 },
+      { left: 210 + inset, right: 300 - inset, top: 54 },
+    ]);
+  });
+
   it('同じ高さで隙間の小さいタイルをつなぎ、外側の角だけ避ける', () => {
     const merged = mergePlatforms([
       { left: 0, right: 100, top: 50 },

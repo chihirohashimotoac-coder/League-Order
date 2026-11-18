@@ -74,6 +74,8 @@ export interface TerrainParams {
   cornerInset: number;
   /** 隣り合う足場を 1 本につなぐ最大の隙間 (CSS px)。同じ高さのタイル列を歩けるようにする。 */
   joinGap: number;
+  /** 同じ高さの段とみなす上辺の差 (CSS px)。ホバーで 2px 浮いたタイルも同じ列のまま歩ける。 */
+  rowTolerance: number;
   /** 足場として使う最小の幅 (可視部分 + 余白)。 */
   minSegmentWidth: number;
 }
@@ -83,6 +85,7 @@ export const DEFAULT_TERRAIN: TerrainParams = {
   clearanceSide: 4,
   cornerInset: 12,
   joinGap: 12,
+  rowTolerance: 3,
   minSegmentWidth: SPRITE.width + 8,
 };
 

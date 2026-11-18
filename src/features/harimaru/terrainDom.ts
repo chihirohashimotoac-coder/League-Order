@@ -10,6 +10,8 @@ import { SPRITE, DEFAULT_TERRAIN } from './params';
 import type { Platform, Rect, TerrainInput } from './terrain';
 
 export interface MeasuredTerrain extends TerrainInput {
+  /** 足場の要素 (platforms と同じ順)。足場がホバーなどで動くとき、上辺に合わせて一緒に動くために使う。 */
+  elements?: readonly Element[];
   /** いま見えている範囲 (ページ座標)。固定ヘッダー・下部ナビ・固定操作バーと、ピンチズームで見えない部分を除く。 */
   view: { top: number; bottom: number; left: number; right: number };
 }
@@ -79,10 +81,12 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
   }
 
   const platforms: Platform[] = [];
+  const elements: Element[] = [];
   for (const el of Array.from(root.querySelectorAll(platformSelector))) {
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) continue;
     platforms.push({ left: rect.left + sx, right: rect.right + sx, top: rect.top + sy });
+    elements.push(el);
   }
 
   const bands = platforms.map((p) => [p.top - SPRITE.height - DEFAULT_TERRAIN.clearanceTop, p.top] as const);
@@ -124,6 +128,7 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
 
   return {
     platforms,
+    elements,
     obstacles,
     bounds: { left: sx + 4, right: sx + viewportWidth - 4 },
     view: { top: sy + viewTop, bottom: sy + viewBottom, left: sx + viewLeft, right: sx + viewRight },

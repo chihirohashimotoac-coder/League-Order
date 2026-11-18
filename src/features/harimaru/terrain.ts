@@ -40,16 +40,16 @@ export interface TerrainInput {
   bounds: { left: number; right: number };
 }
 
-/** 同じ高さ (±1px) で隙間が joinGap 以下の足場をつなぐ。角丸の内側余白はつなぐ前に外側の端にだけ適用する。 */
+/** ほぼ同じ高さ (rowTolerance 以内) で隙間が joinGap 以下の足場をつなぐ。角丸の内側余白はつなぐ前に外側の端にだけ適用する。 */
 export function mergePlatforms(platforms: readonly Platform[], params: TerrainParams = DEFAULT_TERRAIN): Platform[] {
   const byTop = [...platforms]
     .filter((p) => Number.isFinite(p.left) && Number.isFinite(p.right) && Number.isFinite(p.top) && p.right > p.left)
     .sort((a, b) => a.top - b.top);
-  // 高さの差が 1px 以内の足場を 1 つの段にまとめ、段の中で左から順につなぐ。
+  // 高さの差が rowTolerance 以内の足場を 1 つの段にまとめ、段の中で左から順につなぐ (段の高さは最も高い上辺)。
   const rows: Platform[][] = [];
   for (const platform of byTop) {
     const row = rows[rows.length - 1];
-    if (row && platform.top - row[0].top <= 1) row.push(platform);
+    if (row && platform.top - row[0].top <= params.rowTolerance) row.push(platform);
     else rows.push([platform]);
   }
   const merged: Platform[] = [];

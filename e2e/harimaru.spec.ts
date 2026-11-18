@@ -190,50 +190,33 @@ test('安全な足場がなくなると即座に消え、足場が戻ると安�
   expect(await sprite(page).evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
 });
 
-test('PC: 足場のタイルにホバーして浮く間は隠れ、終わると重ならない位置に戻る', async ({ page }, info) => {
+test('PC: 足場のタイルにホバーして浮いても消えず、浮いたタイルに重ならない', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'ホバーで浮くのはマウスのある画面だけ');
-  await page.clock.install();
   await openSampleHome(page);
-  await page.clock.runFor(4_000);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
-  let hovered = 0;
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  // 足元のタイル・同じ列のほかのタイル・列の外を順に指す。トランジションの途中も含めて、
+  // 消えずに (足場を失った場合を除く)、ボタンや文字に重ならないことを確かめる。
+  let onTile = 0;
   for (let i = 0; i < 6; i += 1) {
-    await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
-    // ハリマルの足元を指す。
-    const point = await sprite(page).evaluate((el) => {
+    await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+    const targets = await sprite(page).evaluate((el) => {
       const r = el.getBoundingClientRect();
-      const x = r.left + r.width / 2;
-      const y = r.bottom + 12;
-      return { x, y, tile: !!document.elementFromPoint(x, y)?.closest('.quick-tile') };
+      const feet = { x: r.left + r.width / 2, y: r.bottom + 12 };
+      const row = document.elementFromPoint(feet.x, feet.y)?.closest('.quick-grid');
+      const others = row ? Array.from(row.querySelectorAll('.quick-tile')).map((t) => { const q = t.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 }; }) : [];
+      return { feet, onTile: !!row, others };
     });
-    const hiddenOnHover = await watchHide(page);
-    await page.mouse.move(point.x, point.y);
-    if (point.tile) {
-      hovered += 1;
-      // タイルが浮き始めたら (トランジション中) すぐに、残像なしで隠れる。
-      await expect.poll(hiddenOnHover, { timeout: 1_000 }).toBe('0');
+    if (targets.onTile) onTile += 1;
+    const hidden = await watchHide(page);
+    for (const point of [targets.feet, ...targets.others, { x: 5, y: 300 }]) {
+      await page.mouse.move(point.x, point.y);
+      for (let k = 0; k < 6; k += 1) {
+        await page.waitForTimeout(40);
+        if ((await sprite(page).getAttribute('data-visible')) === 'true') expect(await overlaps(page), `hover ${i}`).toEqual([]);
+      }
     }
-    // 浮き終わったら、浮いたタイルの上辺に合わせて戻る (重ならない)。
-    await page.waitForTimeout(500);
-    await page.clock.runFor(300);
-    await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
-    expect(await overlaps(page), `hover ${i}`).toEqual([]);
-    // まだ同じ (浮いている) タイルの上に立っているか。角に立っていた場合などは、消えて別の安全な場所に
-    // 出直しているので、ホバーを外してもこのタイルの動きとは関係しない。
-    const stillOnTile = await sprite(page).evaluate((el, at) => {
-      const r = el.getBoundingClientRect();
-      const tile = document.elementFromPoint(at.x, at.y)?.closest('.quick-tile');
-      const under = document.elementFromPoint(r.left + r.width / 2, r.bottom + 6)?.closest('.quick-tile');
-      return !!tile && tile === under;
-    }, point);
-    const hiddenOnLeave = await watchHide(page);
-    await page.mouse.move(5, 300);
-    if (point.tile && stillOnTile) await expect.poll(hiddenOnLeave, { timeout: 1_000 }).toBe('0');
-    await page.waitForTimeout(500);
-    await page.clock.runFor(300);
-    await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
-    expect(await overlaps(page), `leave ${i}`).toEqual([]);
-    await page.clock.runFor(2_000);
+    if (targets.onTile) expect(await hidden(), 'ホバーで消えない').toBeNull();
+    await page.waitForTimeout(2_000);
   }
-  expect(hovered, '足元のタイルにホバーした回数').toBeGreaterThan(0);
+  expect(onTile, 'タイル列の上でホバーした回数').toBeGreaterThan(0);
 });

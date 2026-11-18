@@ -188,6 +188,55 @@ describe('HarimaruController', () => {
     expect(sprite.dataset.visible).toBe('true');
   });
 
+  it('乗っている足場がホバーで浮いても消えず、上辺に合わせて一緒に動く', () => {
+    const tile = document.createElement('button');
+    root.append(tile);
+    let tileTop = 300;
+    tile.getBoundingClientRect = () => ({ left: 100, right: 500, top: tileTop, bottom: tileTop + 80, width: 400, height: 80, x: 100, y: tileTop, toJSON: () => ({}) }) as DOMRect;
+    current = { ...terrain([{ left: 100, right: 500, top: 300 }]), elements: [tile] };
+    make().start();
+    advance(3_000);
+    expect(sprite.dataset.visible).toBe('true');
+    const run = (type: string): void => {
+      const event = new Event(type, { bubbles: true });
+      Object.defineProperty(event, 'propertyName', { value: 'transform' });
+      tile.dispatchEvent(event);
+    };
+    run('transitionrun');
+    expect(sprite.dataset.visible).toBe('true');
+    expect(controller.snapshot().paused).toEqual([]);
+    tileTop = 298;
+    advance(50);
+    expect(controller.snapshot().top).toBe(298);
+    expect(sprite.style.transform).toMatch(/, 278px, 0(px)?\)/);
+    run('transitionend');
+    tileTop = 300;
+    run('transitionrun');
+    advance(50);
+    expect(controller.snapshot().top).toBe(300);
+    run('transitionend');
+    expect(sprite.dataset.visible).toBe('true');
+    expect(controller.snapshot().auxTimers).toBeLessThanOrEqual(1);
+  });
+
+  it('歩いて浮いたタイルに乗り移るときも、足元をそのタイルの上辺に合わせる', () => {
+    const low = document.createElement('div');
+    const high = document.createElement('div');
+    root.append(low, high);
+    low.getBoundingClientRect = () => ({ left: 100, right: 295, top: 300, bottom: 380, width: 195, height: 80, x: 100, y: 300, toJSON: () => ({}) }) as DOMRect;
+    high.getBoundingClientRect = () => ({ left: 305, right: 500, top: 298, bottom: 380, width: 195, height: 80, x: 305, y: 298, toJSON: () => ({}) }) as DOMRect;
+    current = { ...terrain([{ left: 100, right: 295, top: 300 }, { left: 305, right: 500, top: 298 }]), elements: [low, high] };
+    make(3).start();
+    for (let i = 0; i < 600; i += 1) {
+      advance(100);
+      const { placed, x, top } = controller.snapshot();
+      if (!placed) continue;
+      const overHigh = x + 30 - 2 > 305;
+      // 浮いたタイルの上に体がかかっていれば、その上辺 (298) に立つ。
+      if (overHigh) expect(top).toBe(298);
+    }
+  });
+
   it('歩いて向かう先 (同じ足場の遠い端) のタイルが動き始めても隠れる', () => {
     make().start();
     advance(3_000);

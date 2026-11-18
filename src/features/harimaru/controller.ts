@@ -82,6 +82,12 @@ export class HarimaruController {
   private frame: number | null = null;
   /** 足場の近くで動いているトランジション・アニメーションの対象。 */
   private readonly shifting = new Map<EventTarget, Set<string>>();
+  /** 動いている足場 (乗ったまま上辺に合わせる) と、その追従のフレーム・保険のタイマー。 */
+  private readonly riding = new Map<EventTarget, Set<string>>();
+  private rideFrame: number | null = null;
+  private rideTimer: number | null = null;
+  /** 最後の計測での足場の要素。 */
+  private platformEls: readonly Element[] = [];
   private shiftChecks = 0;
   private readonly cleanups: (() => void)[] = [];
   private readonly pauses = new Set<PauseReason>();
@@ -135,6 +141,7 @@ export class HarimaruController {
     this.destroyed = true;
     this.interrupt();
     this.clearAuxTimers();
+    this.stopRide();
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.setVisible(false);
   }
@@ -149,7 +156,7 @@ export class HarimaruController {
       dir: this.dir,
       paused: [...this.pauses],
       timers: this.actionTimers.size,
-      auxTimers: [this.remeasureTimer, this.scrollTimer, this.shiftTimer].filter((id) => id !== null).length,
+      auxTimers: [this.remeasureTimer, this.scrollTimer, this.shiftTimer, this.rideTimer].filter((id) => id !== null).length,
       frame: this.frame !== null,
     };
   }
@@ -185,7 +192,9 @@ export class HarimaruController {
       });
     }
 
-    // 足場の近くで位置の変わるトランジション・アニメーションが始まったら、終わるまで隠す。
+    // 位置の変わるトランジション・アニメーションが始まったとき:
+    // - 足場そのもの (ホバーで浮くタイルなど) なら、消さずに上辺に合わせて一緒に動く。
+    // - 足場以外の要素がキャラクターの周りで動くなら、重ならないよう終わるまで隠す。
     // 同じ要素でも、位置のトランジション (プロパティごと) とアニメーション (名前ごと) を別々に数える。
     const shiftKey = (event: Event): string =>
       event.type.startsWith('transition')
@@ -195,7 +204,15 @@ export class HarimaruController {
       if (event.type === 'transitionrun' && !GEOMETRY_PROPERTY.test((event as TransitionEvent).propertyName ?? '')) return;
       // タブ非表示・モーダルの休止中は計測しない (休止が解けたときに計測し直す)。
       if (this.destroyed || this.pauses.has('hidden') || this.pauses.has('modal')) return;
-      if (!event.target || !this.nearSprite(event.target)) return;
+      if (!event.target || !this.placed) return;
+      if (this.isPlatform(event.target)) {
+        const keys = this.riding.get(event.target) ?? new Set<string>();
+        keys.add(shiftKey(event));
+        this.riding.set(event.target, keys);
+        this.ride();
+        return;
+      }
+      if (!this.nearSprite(event.target)) return;
       const keys = this.shifting.get(event.target) ?? new Set<string>();
       keys.add(shiftKey(event));
       this.shifting.set(event.target, keys);
@@ -204,6 +221,11 @@ export class HarimaruController {
       this.armShiftFallback();
     };
     const onShiftEnd = (event: Event): void => {
+      const rideKeys = event.target ? this.riding.get(event.target) : undefined;
+      if (rideKeys?.delete(shiftKey(event))) {
+        if (rideKeys.size === 0) this.riding.delete(event.target!);
+        if (this.riding.size === 0) this.stopRide();
+      }
       const keys = event.target ? this.shifting.get(event.target) : undefined;
       if (!keys || !keys.delete(shiftKey(event))) return;
       if (keys.size === 0) this.shifting.delete(event.target!);
@@ -249,6 +271,78 @@ export class HarimaruController {
     }
     const fonts = (doc as Document & { fonts?: FontFaceSet }).fonts;
     fonts?.ready.then(() => this.scheduleRemeasure()).catch(() => undefined);
+  }
+
+  /** 要素が足場 (またはその中身) か。 */
+  private isPlatform(target: EventTarget): boolean {
+    if (!(target instanceof Node)) return false;
+    return this.platformEls.some((platform) => platform === target || platform.contains(target));
+  }
+
+  /**
+   * いま立っている足場の上辺 (ページ座標)。表示枠の見える部分の真下にある足場の要素のうち、最も高いもの。
+   * 足場の要素が分からない (計測の差し替えなど) ときは null。
+   */
+  private footTop(): number | null {
+    if (this.platformEls.length === 0) return null;
+    const sx = this.win.scrollX;
+    const sy = this.win.scrollY;
+    const left = this.x + SPRITE.sideInset;
+    const right = this.x + SPRITE.width - SPRITE.sideInset;
+    let top: number | null = null;
+    for (const platform of this.platformEls) {
+      const rect = platform.getBoundingClientRect();
+      if (rect.width <= 0 || rect.right + sx <= left || rect.left + sx >= right) continue;
+      const edge = rect.top + sy;
+      // 足元から離れた段 (別のカード) は数えない。
+      if (Math.abs(edge - this.top) > SNAP_TOLERANCE + 1) continue;
+      top = top === null ? edge : Math.min(top, edge);
+    }
+    return top;
+  }
+
+  /** 足元を、真下の足場の上辺に合わせる (足場が浮いても食い込まない)。 */
+  private followFeet(): void {
+    const top = this.footTop();
+    if (top === null || top === this.top) return;
+    this.top = top;
+    this.place();
+  }
+
+  /** 動いている足場に乗ったまま、毎フレーム足元を合わせる。 */
+  private ride(): void {
+    if (this.rideTimer !== null) this.win.clearTimeout(this.rideTimer);
+    // 終了イベントが届かなくても、追従を続けたままにしない。
+    this.rideTimer = this.win.setTimeout(() => {
+      this.rideTimer = null;
+      this.riding.clear();
+      this.stopRide();
+    }, SHIFT_FALLBACK_MS);
+    if (this.rideFrame !== null) return;
+    const step = (): void => {
+      this.rideFrame = null;
+      if (this.destroyed || !this.placed || this.blocked()) return;
+      this.followFeet();
+      if (this.riding.size > 0) this.rideFrame = this.requestFrame(step);
+    };
+    this.rideFrame = this.requestFrame(step);
+  }
+
+  private stopRide(): void {
+    if (this.rideFrame !== null) {
+      if (typeof this.win.cancelAnimationFrame === 'function') this.win.cancelAnimationFrame(this.rideFrame);
+      else this.win.clearTimeout(this.rideFrame);
+      this.rideFrame = null;
+    }
+    if (this.rideTimer !== null) {
+      this.win.clearTimeout(this.rideTimer);
+      this.rideTimer = null;
+    }
+    this.riding.clear();
+    if (this.placed && !this.destroyed && !this.blocked()) {
+      this.followFeet();
+      this.scheduleRemeasure();
+    }
   }
 
   /**
@@ -360,6 +454,8 @@ export class HarimaruController {
     if (this.destroyed || this.pauses.has(reason)) return;
     this.pauses.add(reason);
     this.interrupt();
+    // 足場への追従もやめる (休止が解けたときに計測し直す)。
+    this.stopRide();
     if (reason === 'hidden' || reason === 'modal') {
       // 位置変化の見張りもやめる (休止が解けたときに足場を計測し直すので、ここで待つ必要はない)。
       this.clearTimer('shift');
@@ -447,11 +543,16 @@ export class HarimaruController {
   private currentSegment(): Segment | null {
     const terrain = this.measureFn(this.root, this.selector, this.win);
     this.view = terrain.view;
+    this.platformEls = terrain.elements ?? [];
     this.segment = findSegment(computeSegments(terrain), this.top, this.x, SNAP_TOLERANCE);
     // 小さなずれ (フォントの読み込み・端数・ホバーで浮くタイル) は、足元を新しい上辺に合わせ直す。
-    if (this.segment && this.segment.top !== this.top) {
-      this.top = this.segment.top;
-      if (this.placed) this.place();
+    if (this.segment) {
+      // 段の高さ (最も高い上辺) ではなく、真下の足場の上辺に立つ。
+      const top = this.footTop() ?? this.segment.top;
+      if (top !== this.top) {
+        this.top = top;
+        if (this.placed) this.place();
+      }
     }
     return this.segment;
   }
@@ -487,6 +588,8 @@ export class HarimaruController {
     }
     this.animationWaits = 0;
     const terrain = this.measureFn(this.root, this.selector, this.win);
+    this.view = terrain.view;
+    this.platformEls = terrain.elements ?? [];
     const candidates = visibleSegments(computeSegments(terrain), terrain.view);
     // 安全な足場がない: 表示しない (DOM の変化・リサイズ・スクロールで、もう一度探す)。
     if (candidates.length === 0) return;
@@ -506,6 +609,8 @@ export class HarimaruController {
     this.top = chosen.top;
     this.segment = chosen;
     this.x = chosen.minX + (chosen.maxX - chosen.minX) * this.rng();
+    // 段の高さではなく、真下の足場の上辺に立つ。
+    this.top = this.footTop() ?? chosen.top;
     this.dir = this.rng() < 0.5 ? -1 : 1;
     this.history = [];
     this.run({ action: 'idle', durationMs: between(this.rng, this.behavior.idleMs) });
@@ -597,6 +702,8 @@ export class HarimaruController {
       const bounds = this.segment;
       this.x = startX + distance * progress;
       if (bounds) this.x = clamp(this.x, bounds.minX, bounds.maxX);
+      // 歩いて浮いたタイルに乗り移るときも、足元をそのタイルの上辺に合わせる。
+      this.followFeet();
       this.place();
       if (progress >= 1) {
         this.frame = null;
