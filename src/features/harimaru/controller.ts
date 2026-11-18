@@ -10,7 +10,7 @@
  *   いまの足場が消えた・動いたら、その場で姿を消して安全な場所から出直す。
  * - ユーザーの操作は「最後に操作した時刻」を記録するだけ (受動的なリスナー)。既定の動作は止めない。
  */
-import { decideNext, between, clamp, type Decision, type HarimaruAction, type Rng } from './behavior';
+import { actionWeights, decideNext, between, clamp, type Decision, type HarimaruAction, type Rng } from './behavior';
 import { isAvailable, type MotionId } from './clips';
 import { classifyGesture, cursorReaction, reactionFor, recentTimes, touchZone, type Reaction } from './interaction';
 import {
@@ -284,14 +284,17 @@ export class HarimaruController {
     add(win, 'pointercancel', (event) => this.onPointerCancel(event), { passive: true, capture: true });
     // 入力欄にフォーカスがある間は休む。
     const onFocus = (): void => (this.typing() ? this.pause('input') : this.resume('input'));
-    doc.addEventListener('focusin', onFocus);
-    doc.addEventListener('focusout', onFocus);
+    doc.addEventListener('focusin', onFocus, { passive: true });
+    doc.addEventListener('focusout', onFocus, { passive: true });
     this.cleanups.push(() => {
       doc.removeEventListener('focusin', onFocus);
       doc.removeEventListener('focusout', onFocus);
     });
     add(win, 'scroll', () => this.onScroll(), { passive: true });
-    add(win, 'resize', () => this.scheduleRemeasure());
+    add(win, 'resize', () => {
+      this.abortAirborne();
+      this.scheduleRemeasure();
+    });
 
     // ピンチズーム・拡大後のパン (見えている範囲が変わる)。
     const viewport = win.visualViewport;
@@ -535,7 +538,16 @@ export class HarimaruController {
     }
   }
 
+  /** ジャンプの途中で画面が動いた・変わった: 経路の安全を保てないので、即座に隠れて安全な足場から出直す。 */
+  private abortAirborne(): boolean {
+    if (!this.airborne) return false;
+    this.log('jump:aborted');
+    this.vanish(between(this.rng, this.timing.enterDelayMs));
+    return true;
+  }
+
   private onScroll(): void {
+    this.abortAirborne();
     this.noteActivity();
     // スクロールの速さ (CSS px / 秒) の最大を、止まるまで覚えておく。
     const t = this.now();
@@ -669,6 +681,8 @@ export class HarimaruController {
    * 変化が描画されるより前に確かめられ、ライブの更新のように変化が続いても計測は 1 フレーム 1 回で済む。
    */
   private checkSoon(): void {
+    // 空中にいるときは、変化が描画される前 (いま) に中断して隠れる。
+    if (this.abortAirborne()) return;
     if (this.checkFrame !== null || this.destroyed || !this.placed || this.pauses.size > 0) return;
     const run = (): void => {
       this.checkFrame = null;
@@ -860,23 +874,21 @@ export class HarimaruController {
       this.pause('offscreen');
       return;
     }
-    const jumps = this.available('jump') ? this.safeJumps(segment) : [];
-    const decision = decideNext(
-      {
-        now: this.now(),
-        lastActivityAt: this.lastActivityAt,
-        history: this.history,
-        x: this.x,
-        minX: bounds.minX,
-        maxX: bounds.maxX,
-        canHop: this.available('hop') && this.hopRoom(),
-        canJump: jumps.length > 0,
-        canRelocate: this.available('hide') && this.relocationTargets(segment).length > 0,
-        available: this.available,
-      },
-      this.rng,
-      this.behavior,
-    );
+    const input = {
+      now: this.now(),
+      lastActivityAt: this.lastActivityAt,
+      history: this.history,
+      x: this.x,
+      minX: bounds.minX,
+      maxX: bounds.maxX,
+      canHop: this.available('hop') && this.hopRoom(),
+      canRelocate: this.available('hide') && this.relocationTargets(segment).length > 0,
+      available: this.available,
+    };
+    // ジャンプの経路の計測 (障害物の収集) は重いので、ジャンプが選ばれうるときだけ行う。
+    const jumpPossible = actionWeights({ ...input, canJump: true }, this.behavior).jump > 0;
+    const jumps = jumpPossible ? this.safeJumps(segment) : [];
+    const decision = decideNext({ ...input, canJump: jumps.length > 0 }, this.rng, this.behavior);
     if (decision.action === 'jump') {
       const plan = jumps[Math.floor(this.rng() * jumps.length)];
       this.recordAction('jump');
@@ -1283,6 +1295,11 @@ export class HarimaruController {
     if (!this.placed || this.pauses.size > 0 || this.airborne || this.sink > 0) return;
     const zone = touchZone(point, { x: this.x, top: this.top, dir: this.dir }, this.interaction);
     if (zone === null) return;
+    // 体の外 (近く・背後) へのタップは、文字・操作部品・色の付いた要素のない余白で成立したものだけ。
+    if ((zone === 'near' || zone === 'behind') && !this.emptySpace(point)) {
+      this.log('tap:ignored:content');
+      return;
+    }
     const t = this.now();
     if (zone !== 'near') this.touches = [...recentTimes(this.touches, t, this.interaction.fleeWindowMs), t];
     if (t - this.lastReactionAt < this.interaction.reactionCooldownMs) return;
@@ -1298,6 +1315,14 @@ export class HarimaruController {
     if (!reaction) return;
     this.lastReactionAt = t;
     this.react(reaction, point.x);
+  }
+
+  /** ページ座標の点の周り (指の幅 ±6px) が、文字・操作部品・色の付いた要素のない余白か。 */
+  private emptySpace(point: { x: number; y: number }): boolean {
+    const region: Rect = { left: point.x - 6, right: point.x + 6, top: point.y - 6, bottom: point.y + 6 };
+    return this.obstaclesIn(this.root, [region], this.win).every(
+      (o) => !(o.right > region.left && o.left < region.right && o.bottom > region.top && o.top < region.bottom),
+    );
   }
 
   /** 反応を始める。素材のない反応は見送る (記録だけ残す)。 */

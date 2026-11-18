@@ -444,12 +444,15 @@ describe('HarimaruController (PR2)', () => {
     make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
     let sawAirborne = false;
     let startTop = 0;
+    let lastGroundTop = 0;
     let maxLift = 0;
     for (let i = 0; i < 2_000 && !(sawAirborne && !controller.snapshot().airborne); i += 1) {
       advance(16);
       const state = controller.snapshot();
+      if (!state.airborne && !sawAirborne) lastGroundTop = state.top;
       if (state.airborne) {
-        if (!sawAirborne) startTop = state.top;
+        // 踏み切る直前 (空中に入る前のフレーム) の足元の高さ。
+        if (!sawAirborne) startTop = lastGroundTop;
         sawAirborne = true;
         maxLift = Math.max(maxLift, state.lift);
       }
@@ -465,6 +468,28 @@ describe('HarimaruController (PR2)', () => {
     expect(startTop).not.toBe(landed.top);
     expect(landed.lift).toBe(0);
     expect(landed.airborne).toBe(false);
+  });
+
+  it('ジャンプの途中でスクロール・DOM の変化があったら、古い経路のまま飛ばずに即座に隠れて出直す', async () => {
+    for (const disturb of ['scroll', 'dom'] as const) {
+      current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
+      make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+      for (let i = 0; i < 2_000 && !controller.snapshot().airborne; i += 1) advance(16);
+      expect(controller.snapshot().airborne).toBe(true);
+      if (disturb === 'scroll') window.dispatchEvent(new Event('scroll'));
+      else {
+        root.append(document.createElement('p'));
+        await Promise.resolve();
+      }
+      const state = controller.snapshot();
+      expect(state.events, disturb).toContain('jump:aborted');
+      expect(state.airborne).toBe(false);
+      expect(state.placed).toBe(false);
+      expect(sprite.dataset.visible).toBe('false');
+      advance(5_000);
+      expect(controller.snapshot().placed).toBe(true);
+      controller.destroy();
+    }
   });
 
   it('経路に障害物があればジャンプしない', () => {
@@ -600,6 +625,28 @@ describe('HarimaruController (PR2)', () => {
     advance(10_000);
     const after = controller.snapshot();
     expect(Math.abs(after.x + 15 - target)).toBeLessThan(Math.abs(x + 15 - target));
+  });
+
+  it('本文の文字・操作部品の上をタップしても近づかない (余白のタップだけ)', () => {
+    current = terrain([{ left: 100, right: 700, top: 300 }]);
+    let obstacles: { left: number; right: number; top: number; bottom: number }[] = [];
+    controller = new HarimaruController({
+      sprite, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => current,
+      obstaclesIn: () => obstacles, behavior: only({ idle: 1 }), finePointer: false,
+      interaction: { ...DEFAULT_INTERACTION, approachChance: 1 },
+    });
+    controller.start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    const target = { x: x < 400 ? x + 120 : x - 120, y: top - 5 };
+    obstacles = [{ left: target.x - 20, right: target.x + 20, top: target.y - 8, bottom: target.y + 8 }];
+    tapAt(target.x, target.y);
+    expect(controller.snapshot().events).toContain('tap:ignored:content');
+    expect(controller.snapshot().events).not.toContain('react:approach');
+    obstacles = [];
+    advance(DEFAULT_INTERACTION.reactionCooldownMs + 100);
+    tapAt(target.x, target.y);
+    expect(controller.snapshot().events).toContain('react:approach');
   });
 
   it('PC: 止まったカーソルに近づき、速いカーソルへの「じゃれる」は素材待ちとして見送る', () => {

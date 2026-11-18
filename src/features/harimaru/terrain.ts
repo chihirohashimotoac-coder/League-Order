@@ -175,27 +175,52 @@ export function arcAt(plan: Pick<JumpPlan, 'from' | 'to' | 'height'>, t: number)
   };
 }
 
-/** 経路の全体が通る範囲 (障害物を集める範囲)。 */
+/**
+ * 放物線の最も高い足元 (y が最小)。両端の高さが違うと頂点は t = 0.5 からずれるので、
+ * 微分が 0 になる t を求めて [0, 1] に収める。
+ */
+export function arcPeakFoot(plan: Pick<JumpPlan, 'from' | 'to' | 'height'>): number {
+  const lift = plan.height + Math.abs(plan.from.top - plan.to.top) / 2;
+  const dy = plan.to.top - plan.from.top;
+  const t = lift > 0 ? Math.min(1, Math.max(0, 0.5 - dy / (8 * lift))) : 0;
+  return Math.min(arcAt(plan, t).foot, plan.from.top, plan.to.top);
+}
+
+/** 経路の全体が通る範囲 (障害物を集める範囲)。頂点で頭が届く高さまで含める。 */
 export function arcBounds(plan: Pick<JumpPlan, 'from' | 'to' | 'height'>): Rect {
-  const peak = Math.min(plan.from.top, plan.to.top) - plan.height - SPRITE.height;
   return {
     left: Math.min(plan.from.x, plan.to.x),
     right: Math.max(plan.from.x, plan.to.x) + SPRITE.width,
-    top: peak,
+    top: arcPeakFoot(plan) - SPRITE.height - 1,
     bottom: Math.max(plan.from.top, plan.to.top),
   };
 }
 
-/** 経路の全体 (steps 等分の各位置) で、見える部分が障害物に重ならず、表示範囲の中に収まるか。 */
+function union(a: Rect, b: Rect): Rect {
+  return { left: Math.min(a.left, b.left), right: Math.max(a.right, b.right), top: Math.min(a.top, b.top), bottom: Math.max(a.bottom, b.bottom) };
+}
+
+/**
+ * 経路の全体で、見える部分が障害物に重ならず、表示範囲の中に収まるか。steps 等分した隣り合う 2 点の
+ * 間を通る範囲 (2 つの矩形を包む矩形) で調べるので、点と点の間にある薄い線も見逃さない (保守的)。
+ */
 export function arcIsClear(
   plan: Pick<JumpPlan, 'from' | 'to' | 'height'>,
   obstacles: readonly Rect[],
   view: { top: number; bottom: number; left?: number; right?: number },
   steps = 24,
 ): boolean {
-  for (let i = 0; i <= steps; i += 1) {
+  // 両端は足場の上に立っている姿そのもの。間の区間は、足場の上辺 (着地・踏切の線) をまたがない。
+  let previous = spriteBox(plan.from.x, plan.from.top);
+  if (!boxIsClear(previous, obstacles, view)) return false;
+  for (let i = 1; i <= steps; i += 1) {
     const { x, foot } = arcAt(plan, i / steps);
-    if (!boxIsClear(spriteBox(x, foot), obstacles, view)) return false;
+    const box = spriteBox(x, foot);
+    const swept = union(previous, box);
+    // 掃いた範囲の下端は、両端の足場の上辺より下へ出ない (足場そのものとは重ならない)。
+    swept.bottom = Math.min(swept.bottom, Math.max(plan.from.top, plan.to.top));
+    if (!boxIsClear(swept, obstacles, view)) return false;
+    previous = box;
   }
   return true;
 }
