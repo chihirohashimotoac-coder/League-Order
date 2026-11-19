@@ -1,10 +1,54 @@
 # ハリマル実装 引き継ぎ文書
 
-最終更新：2026-11-18（PR2 作成時点）。秘密情報は記載しない。
+最終更新：2026-11-19（セッション引き継ぎ時点。PR2 ドラフト作成済み・ユーザー確認待ち）。秘密情報は記載しない。
 
 > **本番未反映。** ハリマルは main・gh-pages のどちらにも入っていない。本番公開は PR3 の完成・最終検証・ユーザー承認のあと、統合ブランチから main 向けの最終 PR で行う。
 
-## 1. 確定仕様の参照先
+## 0. 新しいセッションの開始手順（最初に読む）
+
+### 現在の状態（2026-11-19）
+
+| 項目 | 値 |
+|---|---|
+| main | `71bc8ad`（ハリマル未反映。変更しない） |
+| gh-pages | `ca31842`（71bc8ad の公開分。変更しない） |
+| PR1 | [#58](https://github.com/chihirohashimotoac-coder/League-Order/pull/58) `feat/harimaru-pr1-base` → main、HEAD `fd6c147`。**承認済み・マージしない・閉じない** |
+| 統合ブランチ | `feat/harimaru-integration` = `fd6c147` |
+| PR2 | [#59](https://github.com/chihirohashimotoac-coder/League-Order/pull/59)（ドラフト）`feat/harimaru-pr2-behavior` → `feat/harimaru-integration`、HEAD `dc296c4` 以降（本書の更新を含む）。CI 成功。**ユーザー確認待ち・統合ブランチへ未取り込み** |
+| PR3 | 未着手（ブランチ未作成） |
+| プレビュー | PR2：https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX ／ PR1：https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（どちらも非公開の claude.ai Artifact） |
+| Codex 監査の回数 | PR1：3 / 3（上限）、PR2：3 / 3（上限。3 回目の反映 `62386fb` は未再監査。4 回目はユーザー承認が必要） |
+
+### ユーザーの判断待ち（勝手に進めない）
+
+1. PR2 のプレビュー確認と、統合ブランチへの取り込みの承認（承認があれば PR #59 を統合ブランチへマージし、そこから `feat/harimaru-pr3-n01` を分岐して PR3 へ）
+2. 追加素材の制作（[`ASSET_REQUESTS.md`](./ASSET_REQUESTS.md)）と、受領後に描画を実装する段階
+3. 動きの頻度・速さ・隠れ方の見え方（`params.ts` の暫定値）
+4. PR2 の Codex 4 回目の監査の要否
+5. 背後から触れたとき、驚く素材が届くまで「振り向く」にしてよいか
+
+### 作業前の確認
+
+```
+git fetch origin
+git log --oneline -3 origin/feat/harimaru-pr2-behavior origin/feat/harimaru-integration origin/main
+```
+
+- 上の表の SHA と違えば、差異を報告してから進める（他の人・セッションの変更を上書きしない。force push 禁止）。
+- 依存は `npm ci`（ロックファイルどおり。無断で更新しない）。コンテナを作り直すと node_modules がない。
+- Codex CLI：`codex --version`（0.167.0 固定）、`codex login status`。未ログインなら、ユーザーの依頼があるときだけ `codex login --device-auth` を実行し、URL とコードを伝える。
+- Codex の実行は **`< /dev/null` を付ける**（付けないと標準入力の待ちで止まる）：`codex exec --sandbox read-only "<依頼文>" < /dev/null > ログ 2>&1`
+- Codex の監査環境では Vitest が `EROFS` で起動できないことがある。単体テストは Claude 側で実行して結果を伝える。
+
+### 作業のコツ・注意
+
+- E2E は `npx playwright test <spec> --trace off`。webServer は `npm run build && vite preview` を使い、起動中のサーバーを再利用する。コードを変えたら `pkill -f "vite preview"` してから実行する（古いビルドで走らないように）。E2E の実行中に `npm run verify`（build を含む）を走らせると、配信中の `dist/` が置き換わるので避ける。
+- 既存 E2E の回帰一式（約 20 分）：harimaru・browse・setMatch・matches・liveFollow・n01・a11y・order・share・analyticsViewports・start・themes・teamHeader・viewerNav・people。
+- プレビューの Artifact 更新：`PREVIEW_DEMO_N01=1 npm run build:preview` → `dist-preview/index.html` の head から charset・viewport・title を除き、`<title>` を付けて本文に `<div id="root"></div>` だけのページにする → `assets/*` とアイコンを `files` で同じ Artifact に publish（古いハッシュのファイルは `null` で消す）。index.html をダブルクリックで開く（file://）と真っ白になる（モジュールが読めない）のは仕様。
+- サンプル読み込み後、アプリはホームを少し下へスクロールする（既存の動作）。E2E では `scrollTo(0, 0)` してから確かめる。
+- `page.clock` を使うと CSS アニメーションは実時間のまま進む。入場アニメーションの終了は実時間で待つ（1.5 秒）。
+
+
 
 | 資料 | 場所 | 備考 |
 |---|---|---|
