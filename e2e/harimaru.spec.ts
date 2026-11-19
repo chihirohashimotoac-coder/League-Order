@@ -366,3 +366,38 @@ test('速くスクロールしても位置が崩れず、止まったあとも�
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
   expect(await overlaps(page)).toEqual([]);
 });
+
+/** 読み込んだ追加素材 v0.9 (動作ごとのアトラス) のファイル名。 */
+const clipRequests = (page: Page): Promise<string[]> =>
+  page.evaluate(() =>
+    performance
+      .getEntriesByType('resource')
+      .map((e) => e.name.split('/').pop() ?? '')
+      .filter((n) => /^(hang|slip|climb|cursorHang|tumble|sleepyFall|groom|stretch|lookUp|surprise|tilt|play|run|happy)@\dx/.test(n)),
+  );
+
+test('追加素材 v0.9 は登場のあとで画素密度に合う 1 組 (14 動作) だけを読み込み、表示 OFF・動きを減らす設定では読み込まない', async ({ page, browser }, info) => {
+  await openSampleHome(page);
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  await expect.poll(async () => (await clipRequests(page)).length, { timeout: 10_000 }).toBe(14);
+  const density = info.project.name === 'mobile' ? 3 : 1;
+  for (const name of await clipRequests(page)) expect(name).toMatch(new RegExp(`@${density}x`));
+
+  // 動きを減らす設定: 描画しないので、追加素材も要求しない。
+  const reduced = await browser.newContext({ ...info.project.use, reducedMotion: 'reduce' });
+  const other = await reduced.newPage();
+  await openSampleHome(other);
+  await other.waitForTimeout(3_000);
+  await expect(other.getByTestId('harimaru-layer')).toHaveCount(0);
+  expect(await clipRequests(other)).toEqual([]);
+  await reduced.close();
+
+  // 表示 OFF のまま読み込み直しても要求しない。
+  await tab(page, '設定 / バックアップ').click();
+  await page.getByText('ハリマル', { exact: true }).click();
+  await page.getByTestId('harimaru-toggle').uncheck();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
+  await page.waitForTimeout(3_000);
+  expect(await clipRequests(page)).toEqual([]);
+});

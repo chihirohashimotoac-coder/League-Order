@@ -81,8 +81,10 @@ export function movesOnItsOwn(el: Element, root: Element, win: Window): boolean 
 /**
  * 範囲 (ページ座標の矩形の一覧) に重なる障害物を集める。
  * 操作部品・画像・色や枠の付いた要素・スクロール領域・疑似要素の内容がある要素は箱全体、それ以外は直下の文字の矩形。
+ * @param seeThrough カードの内側を調べるとき、そのカード自身 (背景・枠・装飾の疑似要素) は障害物にしない。
+ *   カード直下の文字と、カードの中の要素はふつうに数える。
  */
-export function collectObstacles(root: Element, regions: readonly Rect[], win: Window = window): Rect[] {
+export function collectObstacles(root: Element, regions: readonly Rect[], win: Window = window, seeThrough?: Element): Rect[] {
   const doc = root.ownerDocument;
   const sx = win.scrollX;
   const sy = win.scrollY;
@@ -97,7 +99,7 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
     if (box.right <= box.left || box.bottom <= box.top || !inRegion(box)) continue;
     const style = win.getComputedStyle(el);
     if (style.display === 'contents') continue;
-    if (isSolid(el, style) || hasPseudoContent(el, win)) {
+    if (el !== seeThrough && (isSolid(el, style) || hasPseudoContent(el, win))) {
       obstacles.push(box);
       continue;
     }
@@ -111,6 +113,18 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
   }
   range.detach();
   return obstacles;
+}
+
+/** 要素の上辺の角丸の半径 (左右の大きい方、CSS px)。 */
+export function topCornerRadius(el: Element, win: Window = window): number {
+  const style = win.getComputedStyle(el);
+  const radius = (value: string): number => {
+    // 「12px 8px」(横 縦) は横の半径を使う。% は要素の幅に対する割合。
+    const first = (value || '0').trim().split(/\s+/)[0];
+    const n = parseFloat(first) || 0;
+    return first.endsWith('%') ? (el.getBoundingClientRect().width * n) / 100 : n;
+  };
+  return Math.max(radius(style.borderTopLeftRadius), radius(style.borderTopRightRadius));
 }
 
 /** 計測する。root (例: `.app-main`) の中だけを見る。 */

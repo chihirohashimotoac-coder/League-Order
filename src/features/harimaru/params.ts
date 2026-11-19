@@ -53,6 +53,10 @@ export interface BehaviorParams {
   /** 駆け足の距離 (最小・最大) と速さ。 */
   runDistance: [number, number];
   runSpeed: number;
+  /** 歩き終わりに、カードの縁で足を滑らせてしがみつく確率 (安全に滑れる場所だけ)。 */
+  slipChance: number;
+  /** 眠っている途中に、寝ぼけて落ちそうになる確率 (1 回の眠りにつき 1 回まで)。 */
+  sleepyFallChance: number;
 }
 
 export const DEFAULT_BEHAVIOR: BehaviorParams = {
@@ -72,6 +76,8 @@ export const DEFAULT_BEHAVIOR: BehaviorParams = {
   walkSpeed: 20,
   runDistance: [40, 180],
   runSpeed: 64,
+  slipChance: 0.05,
+  sleepyFallChance: 0.3,
 };
 
 export interface AnimationParams {
@@ -99,6 +105,11 @@ export interface AnimationParams {
   peekVisible: number;
   /** 周囲を見るときに向きを変える間隔 (最小・最大)。 */
   lookTurnMs: [number, number];
+  /** 縁にしがみついている長さ (最小・最大)。後ろ足をバタバタさせてから、よじ登る。 */
+  hangMs: [number, number];
+  /** カーソルにぶら下がっている最長の時間と、跳びついて戻る 1 回の時間。 */
+  cursorHangMs: [number, number];
+  cursorLeapMs: number;
 }
 
 export const DEFAULT_ANIMATION: AnimationParams = {
@@ -117,6 +128,9 @@ export const DEFAULT_ANIMATION: AnimationParams = {
   sinkMs: 420,
   peekVisible: 11,
   lookTurnMs: [900, 1_800],
+  hangMs: [1_100, 2_400],
+  cursorHangMs: [1_600, 3_200],
+  cursorLeapMs: 240,
 };
 
 export interface TerrainParams {
@@ -169,9 +183,10 @@ export interface InteractionParams {
   touchSlop: number;
   /** 背後 (しっぽ側の外) とみなす幅。 */
   behindWidth: number;
-  /** 近くのタップに近づく範囲と確率。 */
+  /** 近くのタップに近づく範囲と確率。近づかないときに首をかしげる確率。 */
   approachRange: number;
   approachChance: number;
+  nearTiltChance: number;
   /** この時間内にこの回数触られたら逃げる。 */
   fleeWindowMs: number;
   fleeTouches: number;
@@ -183,6 +198,8 @@ export interface InteractionParams {
   cursorApproachChance: number;
   cursorPeekChance: number;
   cursorCheckMs: number;
+  /** ぶら下がっている間に、カーソルがこれ以上動いたら放す (CSS px)。 */
+  cursorReleaseMove: number;
   /** 速いカーソル・速いスクロールとみなす速さ (CSS px / 秒)。 */
   fastCursor: number;
   fastScroll: number;
@@ -195,6 +212,7 @@ export const DEFAULT_INTERACTION: InteractionParams = {
   behindWidth: 16,
   approachRange: 160,
   approachChance: 0.5,
+  nearTiltChance: 0.3,
   fleeWindowMs: 5_000,
   fleeTouches: 3,
   reactionCooldownMs: 900,
@@ -203,6 +221,7 @@ export const DEFAULT_INTERACTION: InteractionParams = {
   cursorApproachChance: 0.25,
   cursorPeekChance: 0.12,
   cursorCheckMs: 700,
+  cursorReleaseMove: 4,
   fastCursor: 1_800,
   fastScroll: 2_500,
 };

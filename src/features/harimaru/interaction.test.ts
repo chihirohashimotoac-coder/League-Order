@@ -57,8 +57,9 @@ describe('reactionFor', () => {
     expect(reactionFor('face', P.fleeTouches, always)).toBe('flee');
     expect(reactionFor('back', P.fleeTouches, always)).toBe('flee');
   });
-  it('近くのタップには気まぐれに近づく', () => {
+  it('近くのタップには気まぐれに近づくか、首をかしげる', () => {
     expect(reactionFor('near', 0, always)).toBe('approach');
+    expect(reactionFor('near', 0, () => P.approachChance + 0.01)).toBe('tilt');
     expect(reactionFor('near', 0, never)).toBeNull();
     expect(reactionFor(null, 0, always)).toBeNull();
   });
@@ -74,18 +75,26 @@ describe('cursorReaction (PC のカーソル)', () => {
     expect(cursorReaction({ distance: P.cursorNear * 2 + 1, stillMs: 5_000, speed: 0, available: all }, always)).toBeNull();
     expect(cursorReaction({ distance: 100, stillMs: P.cursorStillMs - 1, speed: 100, available: all }, always)).toBeNull();
   });
-  it('速いカーソルにはじゃれる (素材待ちなら見送る)', () => {
+  it('速いカーソルにはじゃれる (画像を読み込めていなければ見送る)', () => {
     expect(cursorReaction({ distance: 60, stillMs: 0, speed: P.fastCursor, available: all }, always)).toBe('play');
     expect(cursorReaction({ distance: 60, stillMs: 0, speed: P.fastCursor, available: none }, always)).toBeNull();
   });
-  it('すぐ近くで止まったカーソルは見上げる・たまにぶら下がる (素材待ちなら見送る)', () => {
-    expect(cursorReaction({ distance: 30, stillMs: P.cursorStillMs, speed: 0, available: all }, always)).toBe('cursorHang');
-    expect(cursorReaction({ distance: 30, stillMs: P.cursorStillMs, speed: 0, available: (id) => id === 'lookUp' }, always)).toBe('lookUp');
-    expect(cursorReaction({ distance: 30, stillMs: P.cursorStillMs, speed: 0, available: none }, always)).toBeNull();
+  it('すぐ近くで止まったカーソル: 跳びつけるときだけたまにぶら下がり、頭の上なら見上げ、横なら首をかしげる', () => {
+    const near = { distance: 30, stillMs: P.cursorStillMs, speed: 0 };
+    expect(cursorReaction({ ...near, canHang: true, available: all }, always)).toBe('cursorHang');
+    // 跳びつけない (経路に文字がある・高すぎるなど) ときはぶら下がらない。
+    expect(cursorReaction({ ...near, canHang: false, above: true, available: all }, always)).toBe('lookUp');
+    expect(cursorReaction({ ...near, canHang: false, above: true, available: all }, () => 0.45)).toBe('tilt');
+    expect(cursorReaction({ ...near, canHang: false, above: false, available: all }, always)).toBe('tilt');
+    expect(cursorReaction({ ...near, canHang: false, above: false, available: all }, () => 0.5)).toBeNull();
+    expect(cursorReaction({ ...near, canHang: true, above: true, available: (id) => id === 'lookUp' }, always)).toBe('lookUp');
+    expect(cursorReaction({ ...near, canHang: true, above: true, available: none }, always)).toBeNull();
   });
-  it('少し離れて止まったカーソルには近づく・近くから顔を出す', () => {
+  it('少し離れて止まったカーソルには近づく・近くから顔を出す・まれに首をかしげる', () => {
     expect(cursorReaction({ distance: 120, stillMs: P.cursorStillMs, speed: 0, available: all }, () => 0)).toBe('approach');
     expect(cursorReaction({ distance: 120, stillMs: P.cursorStillMs, speed: 0, available: all }, () => P.cursorApproachChance + 0.01)).toBe('peekNear');
-    expect(cursorReaction({ distance: 120, stillMs: P.cursorStillMs, speed: 0, available: all }, never)).toBeNull();
+    expect(cursorReaction({ distance: 120, stillMs: P.cursorStillMs, speed: 0, available: all }, never)).toBe('tilt');
+    expect(cursorReaction({ distance: 120, stillMs: P.cursorStillMs, speed: 0, available: all }, () => 0.6)).toBeNull();
+    expect(cursorReaction({ distance: 120, stillMs: P.cursorStillMs, speed: 0, available: (id) => id !== 'tilt' }, never)).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 # ハリマル実装 引き継ぎ文書
 
-最終更新：2026-11-19（セッション引き継ぎ時点。PR2 ドラフト作成済み・ユーザー確認待ち）。秘密情報は記載しない。
+最終更新：2026-11-19（PR2 に追加素材 v0.9 を組み込み。PR2 ドラフト・ユーザー確認待ち）。秘密情報は記載しない。
 
 > **本番未反映。** ハリマルは main・gh-pages のどちらにも入っていない。本番公開は PR3 の完成・最終検証・ユーザー承認のあと、統合ブランチから main 向けの最終 PR で行う。
 
@@ -14,18 +14,18 @@
 | gh-pages | `ca31842`（71bc8ad の公開分。変更しない） |
 | PR1 | [#58](https://github.com/chihirohashimotoac-coder/League-Order/pull/58) `feat/harimaru-pr1-base` → main、HEAD `fd6c147`。**承認済み・マージしない・閉じない** |
 | 統合ブランチ | `feat/harimaru-integration` = `fd6c147` |
-| PR2 | [#59](https://github.com/chihirohashimotoac-coder/League-Order/pull/59)（ドラフト）`feat/harimaru-pr2-behavior` → `feat/harimaru-integration`、HEAD `dc296c4` 以降（本書の更新を含む）。CI 成功。**ユーザー確認待ち・統合ブランチへ未取り込み** |
+| PR2 | [#59](https://github.com/chihirohashimotoac-coder/League-Order/pull/59)（ドラフト）`feat/harimaru-pr2-behavior` → `feat/harimaru-integration`。追加素材 v0.9 の組み込みコミットまで（SHA は `git log` と PR を参照）。**ユーザー確認待ち・統合ブランチへ未取り込み** |
 | PR3 | 未着手（ブランチ未作成） |
 | プレビュー | PR2：https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX ／ PR1：https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（どちらも非公開の claude.ai Artifact） |
-| Codex 監査の回数 | PR1：3 / 3（上限）、PR2：3 / 3（上限。3 回目の反映 `62386fb` は未再監査。4 回目はユーザー承認が必要） |
+| Codex 監査の回数 | PR1：3 / 3（上限）、PR2：3 / 3（上限。3 回目の反映 `62386fb` と、v0.9 の組み込みは未監査。4 回目はユーザー承認が必要） |
 
 ### ユーザーの判断待ち（勝手に進めない）
 
 1. PR2 のプレビュー確認と、統合ブランチへの取り込みの承認（承認があれば PR #59 を統合ブランチへマージし、そこから `feat/harimaru-pr3-n01` を分岐して PR3 へ）
-2. 追加素材の制作（[`ASSET_REQUESTS.md`](./ASSET_REQUESTS.md)）と、受領後に描画を実装する段階
-3. 動きの頻度・速さ・隠れ方の見え方（`params.ts` の暫定値）
-4. PR2 の Codex 4 回目の監査の要否
-5. 背後から触れたとき、驚く素材が届くまで「振り向く」にしてよいか
+2. 追加素材 v0.9 の採用承認（manifest は `EXTRA_ASSETS_PENDING_USER_ACCEPTANCE`）と、組み込んだ動きの見え方
+3. 動きの頻度・速さ・隠れ方の見え方（`params.ts` の暫定値。滑る `slipChance` 0.05、寝ぼける `sleepyFallChance` 0.3 など）
+4. PR2 の Codex 4 回目の監査の要否（v0.9 の組み込みは未監査）
+5. PWA のプリキャッシュ増加（約 +931 KiB、§6）の扱い
 
 ### 作業前の確認
 
@@ -47,6 +47,7 @@ git log --oneline -3 origin/feat/harimaru-pr2-behavior origin/feat/harimaru-inte
 - プレビューの Artifact 更新：`PREVIEW_DEMO_N01=1 npm run build:preview` → `dist-preview/index.html` の head から charset・viewport・title を除き、`<title>` を付けて本文に `<div id="root"></div>` だけのページにする → `assets/*` とアイコンを `files` で同じ Artifact に publish（古いハッシュのファイルは `null` で消す）。index.html をダブルクリックで開く（file://）と真っ白になる（モジュールが読めない）のは仕様。
 - サンプル読み込み後、アプリはホームを少し下へスクロールする（既存の動作）。E2E では `scrollTo(0, 0)` してから確かめる。
 - `page.clock` を使うと CSS アニメーションは実時間のまま進む。入場アニメーションの終了は実時間で待つ（1.5 秒）。
+- 動作を狙って再生する確認：開発サーバー（`npx vite`）では `window.__harimaru`（`HarimaruController`）が出る（`import.meta.env.DEV` のときだけ。本番ビルドには含まれない）。`__harimaru.trigger('slip')` などで、いつもと同じ安全の確かめを通して動作を始められる（できなければ `false`）。`__harimaru.snapshot()` で状態を読む。E2E は本番ビルドで動くので使えない。
 
 
 
@@ -111,6 +112,19 @@ git log --oneline -3 origin/feat/harimaru-pr2-behavior origin/feat/harimaru-inte
 | `HarimaruLayer.tsx` | 全画面の足場（`.card` など共通のカード部品） |
 | `src/App.tsx` | 閲覧専用シェルにも `<HarimaruLayer page={viewerPage} />` |
 
+### PR2 で追加素材 v0.9 を組み込んだもの（2026-11-19）
+
+| ファイル | 役割 |
+|---|---|
+| `assets/v09/*.png`（新規 42 枚） | 素材 ZIP の `clips/` を無加工で収録（14 動作 × 1x/2x/3x）。`source/`・GIF・プレビュー・`frames/` は入れない。v0.2 のアトラスは変更なし |
+| `sprite.ts` | `CLIPS`（manifest の写し：コマ数・時間・基準点・横のずれ・ループ）、`clipUrlFor`（画素密度別）、`clipOffset`（基準点と左右反転の計算） |
+| `clips.ts` | 全動作 `available: true`。v0.9 の動作は画像を読み込めたときだけ選ぶ |
+| `controller.ts` | v0.9 の再生（`playClip`・`loopClip`・画像の切り替え）、滑る→しがみつく→よじ登る（`trySlip`）、転ぶ、寝ぼける、毛づくろい・伸び、驚く・喜ぶ・見上げる・首をかしげる・じゃれる、カーソルにぶら下がる。カードの内側の安全判定（`edgeClear`）。足場の外に体が出ている途中の休止は、出直し扱い。デバッグ・テスト用の `trigger()` と `setSheet()` |
+| `terrainDom.ts` | `collectObstacles` に `seeThrough`（調べるカード自身は数えない）、`topCornerRadius` |
+| `interaction.ts` | 近くの余白へのタップで首をかしげる、カーソルへの反応に首をかしげる・跳びつけるか（`canHang`）・頭の上か |
+| `params.ts` | `slipChance`・`sleepyFallChance`・`hangMs`・`cursorHangMs`・`cursorLeapMs`・`nearTiltChance`・`cursorReleaseMove` |
+| `HarimaruLayer.tsx` | 登場のあとで画素密度に合う 14 枚だけを読み込み、デコード後に `setSheet`。開発サーバーだけ `window.__harimaru` |
+
 ## 4. PR1 の完了条件（作成時点の自己判定）
 
 | # | 条件 | 判定 | 根拠 |
@@ -145,9 +159,11 @@ git log --oneline -3 origin/feat/harimaru-pr2-behavior origin/feat/harimaru-inte
 ## 6. 未解決・要相談
 
 - 動作の自然さ（速さ・頻度・休む時間）はすべて暫定値（`params.ts`）。プレビューで調整。
-- 素材待ちの動作（`ASSET_REQUESTS.md`）：毛づくろい・伸び・縁で滑る/しがみつく/よじ登る・寝ぼけて落ちそう・転ぶ/復帰・驚く・見上げる・首をかしげる・じゃれる・カーソルにぶら下がる。発生条件だけ実装済みで、素材が届くまで見送る（背後から触れたときは「振り向く」）。
+- 素材待ちだった動作は、追加素材 v0.9 ですべて実装済み（2026-11-19）。v0.9 の画像を読み込めなかった動作だけは選ばない（背後から触れたときは「振り向く」に戻る）。
 - 素材 3 枚（計約 198KB）は PNG のため PWA のプリキャッシュ対象（端末が使うのは 1 枚）。3x 単体 118KB が試作目標 100KB を超過。
 - 足場の余白がない画面（大会のボード・分析の多く・オーダー生成直後のダイアログ等）では出ない（仕様どおり）。
+- 縁にしがみつく・寝ぼけるは、足場のカードそのものがボタン・リンク（ホームの「観戦・分析」タイルなど）の上では起きない（ボタンの面に体を重ねないため）。カードの中の縁の下 10.5px に文字・操作部品・色の付いた要素があるカード、角丸の上、カードの高さが足りない場所でも起きない。
+- 追加素材 v0.9 の PNG 42 枚（約 916KB）も PWA のプリキャッシュ対象。ビルドのプリキャッシュは 19 件 1629 KiB → 61 件 2560 KiB（約 +931 KiB）。端末が実際に表示に使うのは 1 解像度の 14 枚（1x 約 89KB・2x 約 286KB・3x 約 541KB）。2x/3x のプリキャッシュ除外は `vite.config.ts` の変更になるため未対応（要相談）。
 - 更新履歴（`src/data/changelog.ts`）・バージョン番号は未更新。
 - 実機（iPhone Safari / Android Chrome）は未確認。
 

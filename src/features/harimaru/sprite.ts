@@ -40,3 +40,94 @@ export function framePosition(row: SpriteRow, column: number): string {
 }
 
 export const BACKGROUND_SIZE = `${ATLAS.columns * SPRITE.width}px ${ATLAS.rows * SPRITE.height}px`;
+
+// ------------------------------------------------------------------ 追加素材 v0.9 (14 動作・68 コマ)
+
+/**
+ * 追加素材 v0.9 の動作ごとのアトラス (横 1 行、1 コマ 30×20 CSS px、元の絵は左向き)。
+ * 値は素材の manifest.json (v0.9) の写し。画像は素材の `clips/` をそのまま使う (加工しない)。
+ *
+ * - `anchors`: コマの左上から測った描画の基準点 (CSS px)。縁・カーソルの「掴む点」(カードの上辺の線の上の点、
+ *   またはカーソルの先端) に合わせて置く。立ち姿では足元 (y = 20)。null のコマは足元を枠の下端に置く。
+ * - `moveX`: 掴む点に対する、コマごとの横のずれ (CSS px、左向きの絵での右が正)。
+ * - 左右反転 (右向き) では、基準点の x は 30 - x、横のずれは符号を反転する。
+ */
+export type ClipId =
+  | 'hang' | 'slip' | 'climb' | 'cursorHang' | 'tumble' | 'sleepyFall' | 'groom'
+  | 'stretch' | 'lookUp' | 'surprise' | 'tilt' | 'play' | 'run' | 'happy';
+
+export interface ClipSpec {
+  frameCount: number;
+  durationsMs: readonly number[];
+  loop: boolean;
+  anchors: readonly (readonly [number, number] | null)[];
+  moveX?: readonly number[];
+}
+
+const none = (n: number): null[] => Array.from({ length: n }, () => null);
+
+export const CLIPS: Record<ClipId, ClipSpec> = {
+  hang: { frameCount: 4, durationsMs: [95, 115, 115, 95], loop: true, anchors: [[10.1, 11.5], [10.1, 11.5], [10.1, 11.5], [10.1, 11.5]] },
+  slip: {
+    frameCount: 5,
+    durationsMs: [220, 110, 85, 85, 95],
+    loop: false,
+    anchors: [[9.7, 20], [9.7, 18.9], [9.7, 15.7], [10, 15], [10.1, 11.5]],
+    moveX: [3, 2, 1, 0, 0],
+  },
+  climb: {
+    frameCount: 6,
+    durationsMs: [95, 105, 115, 135, 135, 315],
+    loop: false,
+    anchors: [[10.1, 11.5], [10.8, 14.4], [10.6, 15.0], [10.7, 17.2], [10.2, 19.5], [9.7, 20]],
+  },
+  cursorHang: { frameCount: 4, durationsMs: [115, 115, 125, 115], loop: true, anchors: [[9.5, 11.8], [9.5, 11.9], [9.5, 12.2], [9.5, 11.8]] },
+  tumble: { frameCount: 7, durationsMs: [100, 75, 75, 75, 80, 115, 210], loop: false, anchors: none(7), moveX: [5, 3, 1, -1, -3, -5, -6] },
+  sleepyFall: {
+    frameCount: 4,
+    durationsMs: [270, 150, 130, 225],
+    loop: false,
+    anchors: [[15, 20], [15, 18.8], [15, 17.4], [15, 20]],
+    moveX: [2, 1, 0, 2],
+  },
+  groom: { frameCount: 5, durationsMs: [145, 155, 215, 140, 155], loop: false, anchors: none(5) },
+  stretch: { frameCount: 5, durationsMs: [140, 135, 230, 130, 170], loop: false, anchors: none(5) },
+  lookUp: { frameCount: 5, durationsMs: [160, 135, 260, 125, 170], loop: false, anchors: none(5) },
+  surprise: { frameCount: 5, durationsMs: [120, 80, 190, 125, 160], loop: false, anchors: none(5) },
+  tilt: { frameCount: 5, durationsMs: [150, 130, 270, 140, 150], loop: false, anchors: none(5) },
+  play: { frameCount: 5, durationsMs: [130, 100, 95, 120, 155], loop: false, anchors: none(5) },
+  run: { frameCount: 4, durationsMs: [78, 72, 78, 72], loop: true, anchors: none(4) },
+  happy: { frameCount: 4, durationsMs: [120, 125, 275, 175], loop: false, anchors: none(4) },
+};
+
+export const CLIP_IDS = Object.keys(CLIPS) as ClipId[];
+
+/** 素材の URL (ビルド時にハッシュ付きの名前になる)。キーは `${id}@${density}x`。 */
+const CLIP_URLS = import.meta.glob<string>('./assets/v09/*.png', { eager: true, import: 'default', query: '?url' });
+
+/** 画素密度に合う、動作のアトラスの URL。 */
+export function clipUrlFor(id: ClipId, devicePixelRatio: number): string | null {
+  const density = !(devicePixelRatio > 1) ? 1 : devicePixelRatio <= 2 ? 2 : 3;
+  return CLIP_URLS[`./assets/v09/${id}@${density}x.png`] ?? null;
+}
+
+export function clipBackgroundSize(id: ClipId): string {
+  return `${CLIPS[id].frameCount * SPRITE.width}px ${SPRITE.height}px`;
+}
+
+export function clipFramePosition(column: number): string {
+  return `${-column * SPRITE.width}px 0px`;
+}
+
+/**
+ * 基準点を使う動作で、掴む点 (grip) に対するコマの左上の位置。
+ * @param dir 向き (-1 = 左向き = 元の絵、1 = 左右反転)
+ * @returns 表示枠の左上 (left, top) から掴む点までの差を引いた位置 = grip.x + dx, grip.y + dy
+ */
+export function clipOffset(id: ClipId, frame: number, dir: -1 | 1): { dx: number; dy: number } {
+  const spec = CLIPS[id];
+  const anchor = spec.anchors[frame] ?? [SPRITE.width / 2, SPRITE.height];
+  const ax = dir < 0 ? anchor[0] : SPRITE.width - anchor[0];
+  const mx = (spec.moveX?.[frame] ?? 0) * (dir < 0 ? 1 : -1);
+  return { dx: mx - ax, dy: -anchor[1] };
+}

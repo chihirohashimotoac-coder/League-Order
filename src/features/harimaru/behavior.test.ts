@@ -77,7 +77,8 @@ describe('decideNext', () => {
     expect(idle.action).toBe('idle');
     expect(idle.durationMs).toBeGreaterThanOrEqual(DEFAULT_BEHAVIOR.idleMs[0]);
     expect(idle.durationMs).toBeLessThanOrEqual(DEFAULT_BEHAVIOR.idleMs[1]);
-    const sleep = decideNext({ ...base, lastActivityAt: 0 }, fixed(0.99, 0.5));
+    // 抽選の最後の候補を眠りにする (毛づくろい・伸びを除く)。
+    const sleep = decideNext({ ...base, lastActivityAt: 0, available: (id) => id !== 'groom' && id !== 'stretch' }, fixed(0.99, 0.5));
     expect(sleep.action).toBe('sleep');
     expect(sleep.durationMs).toBeGreaterThanOrEqual(DEFAULT_BEHAVIOR.sleepMs[0]);
     expect(sleep.durationMs).toBeLessThanOrEqual(DEFAULT_BEHAVIOR.sleepMs[1]);
@@ -110,15 +111,22 @@ describe('decideNext', () => {
       if (MOVING.has(decision.action)) movingMs += ms;
       else calmMs += ms;
     }
-    // 素材のある行動はすべて現れ、素材待ちの行動 (毛づくろい・伸び) は選ばれない。
-    for (const action of ['idle', 'rest', 'look', 'walk', 'run', 'hop', 'jump', 'hide', 'sleep'] as const) {
+    // 素材のある行動はすべて現れる (v0.9 で毛づくろい・伸びも届いた)。どれも全体の 3 割を超えない。
+    for (const action of ACTIONS) {
       expect(counts[action], action).toBeGreaterThan(20);
+      expect(counts[action], action).toBeLessThan(900);
     }
-    expect(counts.groom).toBe(0);
-    expect(counts.stretch).toBe(0);
     expect(longestRun).toBeLessThanOrEqual(5);
     expect(longestMoving).toBeLessThanOrEqual(2);
     expect(calmMs / (calmMs + movingMs)).toBeGreaterThan(0.75);
+  });
+
+  it('素材のない (読み込めていない) 動作は選ばない', () => {
+    const rng = seededRng(5);
+    for (let i = 0; i < 400; i += 1) {
+      const action = decideNext({ ...base, history: i % 2 ? ['rest'] : [], available: (id) => id !== 'groom' && id !== 'stretch' }, rng).action;
+      expect(['groom', 'stretch']).not.toContain(action);
+    }
   });
 
   it('素材が届いた動作 (毛づくろい・伸び) は、表を変えるだけで選ばれるようになる', () => {

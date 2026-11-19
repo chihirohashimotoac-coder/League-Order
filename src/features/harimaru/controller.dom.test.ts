@@ -608,7 +608,7 @@ describe('HarimaruController (PR2)', () => {
     expect(end.clip).toBe('');
   });
 
-  it('顔に触れると喜び、背中に触れると振り向く。背後から触れると (驚くは素材待ち) 振り向く', () => {
+  it('顔に触れると喜び、背中に触れると振り向く。背後から触れると (驚くの画像がなければ) 振り向く', () => {
     make2({ behavior: only({ idle: 1 }) }).start();
     advance(3_000);
     // 向きに合わせて、顔側 (前) と背中側 (後ろ) の位置を決める。何度も触ると逃げるので、触れるたびに間をあける。
@@ -726,7 +726,7 @@ describe('HarimaruController (PR2)', () => {
     expect(controller.snapshot().events.some((e) => e === 'react:happy' || e === 'react:turn')).toBe(true);
   });
 
-  it('PC: 止まったカーソルに近づき、速いカーソルへの「じゃれる」は素材待ちとして見送る', () => {
+  it('PC: 止まったカーソルに近づき、速いカーソルへの「じゃれる」は画像がなければ見送る', () => {
     current = terrain([{ left: 100, right: 700, top: 300 }]);
     make2({ finePointer: true, interaction: { cursorApproachChance: 1, cursorStillMs: 500 } }).start();
     advance(3_000);
@@ -753,7 +753,7 @@ describe('HarimaruController (PR2)', () => {
     expect(controller.snapshot().auxTimers).toBe(0);
   });
 
-  it('速いスクロールのあと「転ぶ」は素材待ちとして見送る (遅いスクロールでは何もしない)', () => {
+  it('速いスクロールのあと「転ぶ」は画像がなければ見送る (遅いスクロールでは何もしない)', () => {
     make2().start();
     advance(3_000);
     let y = 0;
@@ -790,16 +790,17 @@ describe('HarimaruController (PR2)', () => {
     expect(sprite.dataset.visible).toBe('true');
   });
 
-  it('素材待ちの動作は発生条件だけ動き、記録を残して見送る (足場の端で眠ると寝ぼける・着地に失敗する)', () => {
-    // 狭い足場 (立てる範囲 16px): どこで眠っても端から 8px 以内。
+  it('v0.9 の画像を読み込めていなければ、その動作は始めない (寝ぼける・着地の失敗は見送り、記録だけ残す)', () => {
     current = terrain([{ left: 100, right: 166, top: 300 }]);
-    make2({ behavior: { ...only({ sleep: 1, idle: 0.2 }), sleepWhenInactive: 1, sleepMs: [2_000, 2_500] } }).start();
+    make2({ behavior: { ...only({ sleep: 1, idle: 0.2 }), sleepWhenInactive: 1, sleepMs: [5_000, 6_000] } }).start();
     const seen = new Set<string>();
-    for (let i = 0; i < 3_000 && !seen.has('react:sleepyFall:pending-asset'); i += 1) {
+    for (let i = 0; i < 1_500; i += 1) {
       advance(50);
       for (const e of controller.snapshot().events) seen.add(e);
     }
-    expect(seen.has('react:sleepyFall:pending-asset')).toBe(true);
+    expect(seen.has('action:sleep')).toBe(true);
+    expect(seen.has('action:sleepyFall')).toBe(false);
+    expect(controller.trigger('slip')).toBe(false);
     controller.destroy();
 
     current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
@@ -810,8 +811,9 @@ describe('HarimaruController (PR2)', () => {
       for (const e of controller.snapshot().events) seen.add(e);
     }
     expect(seen.has('react:tumble:pending-asset')).toBe(true);
-    // 素材のない動作は描かない (姿勢は待機のまま)。
+    // 描けない動作は描かない (姿勢は待機のまま、v0.2 の画像のまま)。
     expect(controller.snapshot().lift).toBe(0);
+    expect(controller.snapshot().sheet).toBe('base');
   });
 
   it('いろいろな行動を続けても、タイマー・フレームは destroy で残らない', () => {

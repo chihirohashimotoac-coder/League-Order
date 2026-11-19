@@ -75,10 +75,11 @@ export function touchZone(
   return null;
 }
 
-export type Reaction = 'happy' | 'turn' | 'surprise' | 'flee' | 'approach' | null;
+export type Reaction = 'happy' | 'turn' | 'surprise' | 'flee' | 'approach' | 'tilt' | null;
 
 /**
  * 触れた場所と最近の接触から反応を決める。何度も触られたら (fleeTouches 回) 逃げる。
+ * 近くの余白へのタップには、気まぐれに近づくか、首をかしげる (どちらもしないこともある)。
  * @param recentTouches この接触を含む、fleeWindowMs 以内に体に触れた時刻
  */
 export function reactionFor(
@@ -88,7 +89,11 @@ export function reactionFor(
   params: InteractionParams = DEFAULT_INTERACTION,
 ): Reaction {
   if (zone === null) return null;
-  if (zone === 'near') return rng() < params.approachChance ? 'approach' : null;
+  if (zone === 'near') {
+    const roll = rng();
+    if (roll < params.approachChance) return 'approach';
+    return roll < params.approachChance + (1 - params.approachChance) * params.nearTiltChance ? 'tilt' : null;
+  }
   if (recentTouches >= params.fleeTouches) return 'flee';
   if (zone === 'face') return 'happy';
   if (zone === 'back') return 'turn';
@@ -100,16 +105,27 @@ export function recentTimes(times: readonly number[], now: number, windowMs: num
   return times.filter((t) => now - t <= windowMs);
 }
 
-export type CursorReaction = 'approach' | 'peekNear' | 'lookUp' | 'play' | 'cursorHang' | null;
+export type CursorReaction = 'approach' | 'peekNear' | 'lookUp' | 'tilt' | 'play' | 'cursorHang' | null;
 
 /**
  * PC のカーソルへの反応。カーソルが足元の段の近くにあるときだけ、気まぐれに選ぶ。
- * - 速く動いている → じゃれる (素材待ちなら次の候補へ)
- * - 近くで止まっている → 見上げる (素材待ち) / たまにぶら下がる (素材待ち)
- * - 少し離れて止まっている → 近づく・近くから顔を出す
+ * - 速く動いている → じゃれる
+ * - すぐ近くで止まっている → たまにぶら下がる (跳びつける位置で、経路と周りが安全なとき: canHang) /
+ *   頭の上なら見上げる / 横なら首をかしげる
+ * - 少し離れて止まっている → 近づく・近くから顔を出す・首をかしげる
+ * 素材を読み込めていない反応は選ばない (available)。
  */
 export function cursorReaction(
-  input: { distance: number; stillMs: number; speed: number; available: (id: 'lookUp' | 'play' | 'cursorHang' | 'approach' | 'peekNear') => boolean },
+  input: {
+    distance: number;
+    stillMs: number;
+    speed: number;
+    /** カーソルがキャラクターの頭より上にあるか。 */
+    above?: boolean;
+    /** カーソルの先端に安全に跳びつけるか。 */
+    canHang?: boolean;
+    available: (id: 'lookUp' | 'tilt' | 'play' | 'cursorHang' | 'approach' | 'peekNear') => boolean;
+  },
   rng: () => number,
   params: InteractionParams = DEFAULT_INTERACTION,
 ): CursorReaction {
@@ -119,12 +135,16 @@ export function cursorReaction(
   }
   if (input.stillMs < params.cursorStillMs) return null;
   if (input.distance <= 48) {
-    if (input.available('cursorHang') && rng() < 0.15) return 'cursorHang';
-    return input.available('lookUp') && rng() < 0.5 ? 'lookUp' : null;
+    if (input.canHang && input.available('cursorHang') && rng() < 0.15) return 'cursorHang';
+    const roll = rng();
+    if (input.above && input.available('lookUp') && roll < 0.4) return 'lookUp';
+    if (input.available('tilt') && roll >= (input.above ? 0.4 : 0) && roll < (input.above ? 0.55 : 0.3)) return 'tilt';
+    return null;
   }
   const roll = rng();
   if (roll < params.cursorApproachChance && input.available('approach')) return 'approach';
   if (roll < params.cursorApproachChance + params.cursorPeekChance && input.available('peekNear')) return 'peekNear';
+  if (roll >= 0.92 && input.available('tilt')) return 'tilt';
   return null;
 }
 

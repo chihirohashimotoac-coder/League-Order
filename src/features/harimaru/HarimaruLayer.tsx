@@ -6,13 +6,15 @@
  * - レイヤーは body 直下に 1 つ (portal)。既存カードの DOM 構造・overflow・z-index は変更しない。
  *   `aria-hidden`・`pointer-events: none` で、読み上げ・フォーカス・クリックに関与しない。
  * - 動きは HarimaruController が 1 要素の transform だけで描くので、React は再描画しない。
+ * - 追加素材 v0.9 (14 動作) は、登場のあとで画素密度に合う 1 組だけを読み込む。読み込みとデコードが
+ *   終わった動作から使えるようになり、読み込めなかった動作は選ばれない (待機・歩行・睡眠はそのまま動く)。
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMediaQuery } from '../../components/useMediaQuery';
 import { HarimaruController } from './controller';
 import { useHarimaruEnabled } from './preference';
-import { atlasFor, BACKGROUND_SIZE } from './sprite';
+import { atlasFor, BACKGROUND_SIZE, CLIP_IDS, clipUrlFor, type ClipId } from './sprite';
 import './harimaru.css';
 
 /**
@@ -55,6 +57,33 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
     /** いま使っている (または読み込み中の) 素材と、その要求の番号。古い要求の結果は反映しない。 */
     let requested = '';
     let generation = 0;
+    /** 追加素材: 動作ごとの要求中の URL (画素密度が変わったら要求し直す)。 */
+    const clipRequested = new Map<ClipId, string>();
+    /** 読み込んだ画像を保持して、画像のキャッシュから外れないようにする。 */
+    const keep = new Map<ClipId, HTMLImageElement>();
+
+    const loadClips = (): void => {
+      const dpr = window.devicePixelRatio || 1;
+      for (const id of CLIP_IDS) {
+        const url = clipUrlFor(id, dpr);
+        if (!url || clipRequested.get(id) === url) continue;
+        clipRequested.set(id, url);
+        const image = new Image();
+        const current = (): boolean => !disposed && clipRequested.get(id) === url;
+        image.onload = () => {
+          // デコードを済ませてから使う (初めて切り替えたときのちらつきを防ぐ)。
+          const decoded = typeof image.decode === 'function' ? image.decode().catch(() => undefined) : Promise.resolve();
+          void decoded.then(() => {
+            if (!current() || !controller) return;
+            keep.set(id, image);
+            controller.setSheet(id, url);
+          });
+        };
+        // 読み込めない動作は登録しない (選ばれない)。
+        image.onerror = () => undefined;
+        image.src = url;
+      }
+    };
 
     const load = (): void => {
       const url = atlasFor(window.devicePixelRatio || 1);
@@ -72,7 +101,11 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         if (!controller) {
           controller = new HarimaruController({ sprite, root, watch: root.closest('.app') ?? root.parentElement ?? root, platformSelector: selector });
           controller.start();
+          // 開発サーバーだけ: 動作の確認用に操作口を出す (本番のビルドには含まれない)。
+          if (import.meta.env.DEV) (window as Window & { __harimaru?: HarimaruController }).__harimaru = controller;
         }
+        controller.setSheet('base', url);
+        loadClips();
       };
       image.onerror = () => {
         if (!current()) return;
@@ -89,6 +122,8 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
       window.removeEventListener('resize', load);
       controller?.destroy();
       controller = null;
+      keep.clear();
+      if (import.meta.env.DEV) delete (window as Window & { __harimaru?: HarimaruController }).__harimaru;
     };
   }, [selector, onFail]);
 
