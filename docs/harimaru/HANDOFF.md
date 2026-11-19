@@ -18,7 +18,7 @@
 | 統合ブランチ | `feat/harimaru-integration` = `fd6c147` |
 | PR2 | [#59](https://github.com/chihirohashimotoac-coder/League-Order/pull/59)（ドラフト）`feat/harimaru-pr2-behavior` → `feat/harimaru-integration`、HEAD `05032a4`。**実装完了扱い（ユーザー指示）・未マージ・統合ブランチへ未取り込み** |
 | PR3 | [#60](https://github.com/chihirohashimotoac-coder/League-Order/pull/60)（ドラフト）`feat/harimaru-pr3-n01-reactions` → `feat/harimaru-pr2-behavior`（PR2 が未統合のため積み重ね）。SHA は `git log` と PR を参照。**ユーザー確認待ち・未マージ** |
-| プレビュー | PR3：https://claude.ai/artifact/TtVuLMEMsNztchm91FYMwL（バージョン 2 = `7d996cd` のビルド）／ PR2：https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX（バージョン 4 = `05032a4` のビルド。バージョン 3 は誤って PR3 のビルドを上書きしたもので、4 で戻した）／ PR1：https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（いずれも非公開の claude.ai Artifact、n01 は架空データ） |
+| プレビュー | PR3：https://claude.ai/artifact/TtVuLMEMsNztchm91FYMwL（バージョン 3 = `1f99a1e` のビルド）／ PR2：https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX（バージョン 4 = `05032a4` のビルド。バージョン 3 は誤って PR3 のビルドを上書きしたもので、4 で戻した）／ PR1：https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（いずれも非公開の claude.ai Artifact、n01 は架空データ） |
 | Codex 監査の回数 | PR1：3 / 3（上限）、PR2：3 / 3（上限。3 回目の反映 `62386fb` と、v0.9 の組み込みは未監査）、PR3：4 回（0 から数え直し。4 回目はユーザー承認済み）、§7 の PR3 を参照。PR3 の 4 回目の反映は未監査。PR3 の 5 回目、PR1・PR2 の 4 回目は、新たなユーザー承認が必要 |
 
 ### ユーザーの判断待ち（勝手に進めない）
@@ -277,6 +277,7 @@ git log --oneline -3 origin/feat/harimaru-pr2-behavior origin/feat/harimaru-inte
 - 監査 4 回目のあとの修正（ユーザー指示、Codex 未監査）：過去の Leg の表示による停止を観戦対象（source）ごとにした
   - 再現：単体（`LiveSheet` を描画する reaudit.test.tsx の 4 件）が修正前に失敗。実ブラウザー（開発サーバー・架空の n01 の 2 カードの夜・Chromium PC）で、修正前は右のカードの過去の Leg で左のカードの状態が 0 件（止まる）、修正後は流れる。隠れて保持された一覧の過去の Leg は、修正前は試合のページを開いても停止が残り、修正後は隠れたときに解ける（戻ると再び止める）
   - 試合のページ自身の状態がハリマルへ流れることは、この架空データでは実ブラウザーで確認できていない（単体で確認）
+  - 検証（`1f99a1e`）：`npm run verify`（単体 142 ファイル 1831 件）・`npm run typecheck` 成功。`npm run test:e2e` は 502 件合格・失敗 1（PR2 の `harimaru.spec.ts:336` カーソルの動作。立ち止まるのを待つところで時間切れ。同じテストを `1f99a1e` と修正前の `b2e4192` で各 5 回実行して全て合格。変更した経路を通らないため、動きの乱数による時間の揺れと判断）、`npm run test:e2e:preview` 38 件合格。実画面（プレビューのビルド・架空の n01）：スマホ・PC × ライト・ダークで cheer・panic・anxious・legWin を演出、重なりなし、スクロール・リサイズで停止
 
 ## 8. 次に進める工程
 
