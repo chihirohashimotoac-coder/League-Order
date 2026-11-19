@@ -1,8 +1,10 @@
 # ハリマル実装 引き継ぎ文書
 
-最終更新：2026-11-19（PR2 に追加素材 v0.9 を組み込み。PR2 ドラフト・ユーザー確認待ち）。秘密情報は記載しない。
+最終更新：2026-11-19（PR3 = n01 観戦リアクションを実装。PR3 ドラフト・ユーザー確認待ち）。秘密情報は記載しない。
 
-> **本番未反映。** ハリマルは main・gh-pages のどちらにも入っていない。本番公開は PR3 の完成・最終検証・ユーザー承認のあと、統合ブランチから main 向けの最終 PR で行う。
+> **本番未反映。** ハリマルは main・gh-pages のどちらにも入っていない。本番公開は PR1〜PR3 の最終検証・ユーザー承認のあと、統合ブランチから main 向けの最終 PR で行う。
+>
+> **PR2 はユーザー指示 (2026-11-19) により実装完了扱い。** ただし GitHub 上は PR #59 がドラフト・未マージのまま (統合ブランチ `feat/harimaru-integration` は `fd6c147` で、PR2 は未取り込み)。ブランチへのマージはユーザーの明示指示に従う。
 
 ## 0. 新しいセッションの開始手順（最初に読む）
 
@@ -14,18 +16,18 @@
 | gh-pages | `ca31842`（71bc8ad の公開分。変更しない） |
 | PR1 | [#58](https://github.com/chihirohashimotoac-coder/League-Order/pull/58) `feat/harimaru-pr1-base` → main、HEAD `fd6c147`。**承認済み・マージしない・閉じない** |
 | 統合ブランチ | `feat/harimaru-integration` = `fd6c147` |
-| PR2 | [#59](https://github.com/chihirohashimotoac-coder/League-Order/pull/59)（ドラフト）`feat/harimaru-pr2-behavior` → `feat/harimaru-integration`。追加素材 v0.9 の組み込みコミットまで（SHA は `git log` と PR を参照）。**ユーザー確認待ち・統合ブランチへ未取り込み** |
-| PR3 | 未着手（ブランチ未作成） |
-| プレビュー | PR2：https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX（バージョン 2 = `989bf03` のビルド、v0.9 素材入り）／ PR1：https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（どちらも非公開の claude.ai Artifact） |
-| Codex 監査の回数 | PR1：3 / 3（上限）、PR2：3 / 3（上限。3 回目の反映 `62386fb` と、v0.9 の組み込みは未監査。4 回目はユーザー承認が必要） |
+| PR2 | [#59](https://github.com/chihirohashimotoac-coder/League-Order/pull/59)（ドラフト）`feat/harimaru-pr2-behavior` → `feat/harimaru-integration`、HEAD `05032a4`。**実装完了扱い（ユーザー指示）・未マージ・統合ブランチへ未取り込み** |
+| PR3 | [#60](https://github.com/chihirohashimotoac-coder/League-Order/pull/60)（ドラフト）`feat/harimaru-pr3-n01-reactions` → `feat/harimaru-pr2-behavior`（PR2 が未統合のため積み重ね）。SHA は `git log` と PR を参照。**ユーザー確認待ち・未マージ** |
+| プレビュー | PR3：https://claude.ai/artifact/TtVuLMEMsNztchm91FYMwL（バージョン 3 = `1f99a1e` のビルド）／ PR2：https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX（バージョン 4 = `05032a4` のビルド。バージョン 3 は誤って PR3 のビルドを上書きしたもので、4 で戻した）／ PR1：https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（いずれも非公開の claude.ai Artifact、n01 は架空データ） |
+| Codex 監査の回数 | PR1：3 / 3（上限）、PR2：3 / 3（上限。3 回目の反映 `62386fb` と、v0.9 の組み込みは未監査）、PR3：4 回（0 から数え直し。4 回目はユーザー承認済み）、§7 の PR3 を参照。PR3 の 4 回目の反映は未監査。PR3 の 5 回目、PR1・PR2 の 4 回目は、新たなユーザー承認が必要 |
 
 ### ユーザーの判断待ち（勝手に進めない）
 
-1. PR2 のプレビュー確認と、統合ブランチへの取り込みの承認（承認があれば PR #59 を統合ブランチへマージし、そこから `feat/harimaru-pr3-n01` を分岐して PR3 へ）
-2. 追加素材 v0.9 の採用承認（manifest は `EXTRA_ASSETS_PENDING_USER_ACCEPTANCE`）と、組み込んだ動きの見え方
-3. 動きの頻度・速さ・隠れ方の見え方（`params.ts` の暫定値。滑る `slipChance` 0.05、寝ぼける `sleepyFallChance` 0.3 など）
-4. PR2 の Codex 4 回目の監査の要否（v0.9 の組み込みは未監査）
-5. PWA のプリキャッシュ増加（約 +931 KiB、§6）の扱い
+1. PR3（#60）のプレビュー・動きの確認と承認。PR2・PR3 を統合ブランチへ取り込むか（取り込みはユーザーの明示指示があってから）
+2. 追加素材 v0.9（PR2）と観戦リアクション素材 v0.5（PR3）の採用承認
+3. 動きの頻度・速さの見え方（`params.ts` の暫定値、観戦リアクションは `controller.ts` の `DEFAULT_LIVE`）
+4. PWA のプリキャッシュ増加（PR2 で約 +931 KiB、PR3 で約 +633 KiB、§6）の扱い
+5. Codex 監査の追加（PR3 の 5 回目、PR1・PR2 の 4 回目は、新たなユーザー承認が必要）
 
 ### 作業前の確認
 
@@ -125,6 +127,22 @@ git log --oneline -3 origin/feat/harimaru-pr2-behavior origin/feat/harimaru-inte
 | `params.ts` | `slipChance`・`sleepyFallChance`・`hangMs`・`cursorHangMs`・`cursorLeapMs`・`nearTiltChance`・`cursorReleaseMove` |
 | `HarimaruLayer.tsx` | 登場のあとで画素密度に合う 14 枚だけを読み込み、デコード後に `setSheet`。開発サーバーだけ `window.__harimaru` |
 
+### PR3 で追加・変更したもの（n01 観戦リアクション、2026-11-19）
+
+| ファイル | 役割 |
+|---|---|
+| `liveReactions.ts`（新規） | 判定（`LiveReactionTracker`、純粋なクラス）。味方の側、01 の得点の分類、勝敗・逆転、重複・訂正・後着・取りこぼしの除外、優先度 `LIVE_PRIORITY` |
+| `liveFeed.ts`（新規） | 観戦画面 → ハリマルの購読（`claimLive`・`publishLive`・`rebaseLive`）。流せるのは最後に権利を取った観戦画面だけ。聞き手がいなければ何もしない |
+| `useHarimaruLive.ts`（新規） | 観戦画面から呼ぶフック。味方 = 選択中の登録チームの n01 紐付けがこのシーズンの `tpid` を指すとき（リーグ・大会・チーム ID の一致）だけ。`WatchShown` が false（試合ページの下に隠して保持）・`source` null では流さない。ポーラーの再試行・取得上限・非表示のあと基準化 |
+| `src/features/matches/ui/LiveTab.tsx`・`ResultsTab.tsx` | `useHarimaruLive(...)` を 1 行ずつ（FocusCard は 2 カード表示の左だけ・ユーザーが別のゲームを選んでいない間、MatchCenter はリンクで別のゲームを開いていない間）。取得・表示は変えない |
+| `controller.ts` | `reactLive`（優先順位・得点のクールダウン・休止中は捨てる・足場の外や shift 休止では重要な出来事だけ最大 3 秒待つ）、`playReaction`（本体とエフェクトのコマ）、`reactionRoom`（エフェクトの範囲の安全判定、足元より下は `cardBelowClear`）、`cancelLive`、`setReactionSheets`、要素の `data-live`（最後の結果。E2E 用） |
+| `sprite.ts` | `REACTIONS`（manifest の写しと、1x/2x/3x のアルファ > 0 を包む `effectBox`、180 の `textShift` = 7） |
+| `HarimaruLayer.tsx`・`harimaru.css` | エフェクトの要素（52×42、`pointer-events: none`、演出の間だけ表示、前後の重ね順）、購読・判定・画像の遅延読み込み、対象の変更で `cancelLive` |
+| `terrainDom.ts`（PR2 の判定の調整） | スクロール領域は実際にはみ出しているときだけ箱全体を障害物に。`containersOf` / `collectObstacles(..., containers)`：足場を包む入れ物（操作部品以外、重なる範囲をすべて包むとき、実際にスクロールしない）は箱を数えない。理由：観戦のライブ画面に立てる場所がなかった（本日の対戦の帯・ゲームの切り替えの列がスクロール領域扱い、スコア表が白いカードの中） |
+| `HarimaruLayer.tsx` の足場 | `.n01-sheet`（ライブのスコア表の枠）を追加（同じ理由） |
+| `assets/pr3/body`・`assets/pr3/effect` | 素材 v0.5 の `atlas/body`・`atlas/effect` を無加工で収録（36 枚）。合成済み・GIF・制作元・プレビュー・frames は入れない |
+| テスト | `liveReactions.test.ts`・`controller.live.dom.test.ts`・`liveFeed.dom.test.tsx`、`terrainDom.dom.test.ts` 追加分、E2E `e2e/harimaruLive.spec.ts`（架空の n01・本番ビルド） |
+
 ## 4. PR1 の完了条件（作成時点の自己判定）
 
 | # | 条件 | 判定 | 根拠 |
@@ -163,6 +181,12 @@ git log --oneline -3 origin/feat/harimaru-pr2-behavior origin/feat/harimaru-inte
 - 素材 3 枚（計約 198KB）は PNG のため PWA のプリキャッシュ対象（端末が使うのは 1 枚）。3x 単体 118KB が試作目標 100KB を超過。
 - 足場の余白がない画面（大会のボード・分析の多く・オーダー生成直後のダイアログ等）では出ない（仕様どおり）。
 - 縁にしがみつく・寝ぼけるは、足場のカードそのものがボタン・リンク（ホームの「観戦・分析」タイルなど）の上では起きない（ボタンの面に体を重ねないため）。カードの中の縁の下 10.5px に文字・操作部品・色の付いた要素があるカード、角丸の上、カードの高さが足りない場所でも起きない。
+- 観戦リアクション（PR3）は、エフェクトの範囲（本体より広い）に文字・操作部品があると演出しない。立ち位置はランダムなので、同じ画面でも出る・出ないが変わる。200% ズーム相当（640×450）の観戦ライブ画面では立てる場所がなく出ない（安全判定どおり）。
+- 観戦リアクションは、セット形式・単独の試合のページ（`SetMatchPage`）にも接続済み（監査 3 回目の反映 `dd69da2` から）。閲覧者が前のセットを選んで表示している間（`chosen` が null 以外）は状態を渡さず、反応しない（ライブに戻ると、その時点の状態を基準にし直す）。このページには大会のシーズン情報がないため、味方は状態の大会 ID（`tdid`）が登録チームの紐付けの大会 ID（`lastTournamentId`）と一致し、紐付けのチーム ID（`lastTeamId`）が状態の片方の側の `teamId` と一意に一致するときだけ確定する（`useHarimaruLive.ts` の `allyTeamIdByTournament` と、判定の `allySide`）。確定できなければ中立で、反応しない。（作成時点の記録では「未接続」としていたが、`dd69da2` で接続した。）
+- 観戦画面の Leg のタブで終わった Leg を表示している間（`LiveSheet` の `past`）は、その画面の観戦対象（source）の状態だけを流さない（`liveFeed.ts` の `holdLive(source)`）。表示を始めたときにその観戦対象の演出中・待っている出来事を取り消し、進行中へ戻すと次の状態を基準にし直す（監査 4 回目の反映から）。停止は source ごとに数え、すべて解けたときだけ再開する。状態を流していない画面（2 カード表示の右、別のゲームを開いている間、隠れて保持されている間）の LiveSheet は何も止めない（`useHarimaruLive` の返り値を LiveSheet の `harimaruSource` に渡す）。作成時点（`7d996cd`）は停止が全体共通で、右のカード・隠れた画面の過去の Leg が、ほかの観戦対象まで止めていた（2026-11-19 に修正）。
+- 演出中にスクロール・リサイズ・見えている範囲（`visualViewport`）が変わったら、エフェクトをすぐにやめる（動いている間は重なりを確かめられないため。止まったあとに出し直さない）。スクロールの途中に届いた得点は捨て、勝敗・180 などの重要な出来事は止まってから（待てる時間内なら）演出する。演出中は速いスクロールのあとでも「転ぶ」を始めない（監査 4 回目の反映から）。
+- 味方の判定は、登録チームの n01 紐付け（`lastTournamentId`・`lastTeamId`）がいまのシーズンを指しているときだけ。新しいシーズンで紐付けを再同期していなければ中立（チーム名では推測しない）。
+- PR3 の素材（本体・エフェクト 36 枚、約 624KB）も PWA のプリキャッシュ対象。ビルドのプリキャッシュは 61 件 2560 KiB → 89 件 3193 KiB（約 +633 KiB）。
 - 追加素材 v0.9 の PNG 42 枚（約 916KB）も PWA のプリキャッシュ対象。ビルドのプリキャッシュは 19 件 1629 KiB → 61 件 2560 KiB（約 +931 KiB）。端末が実際に表示に使うのは 1 解像度の 14 枚（1x 約 89KB・2x 約 286KB・3x 約 541KB）。2x/3x のプリキャッシュ除外は `vite.config.ts` の変更になるため未対応（要相談）。
 - 更新履歴（`src/data/changelog.ts`）・バージョン番号は未更新。
 - 実機（iPhone Safari / Android Chrome）は未確認。
@@ -229,9 +253,35 @@ git log --oneline -3 origin/feat/harimaru-pr2-behavior origin/feat/harimaru-inte
 | 11 | キャラクターなしで従来どおり | OK | 表示 OFF・動きを減らす設定の E2E |
 | 12 | 素材不足による未完成動作がない | OK | 全動作の素材あり。画像を読み込めなかった動作は選ばない |
 
+### PR3
+
+- ブランチ：`feat/harimaru-pr3-n01-reactions`（PR2 の `05032a4` から分岐）→ base `feat/harimaru-pr2-behavior`（PR2 が統合ブランチに未取り込みのため積み重ね）。PR：[#60](https://github.com/chihirohashimotoac-coder/League-Order/pull/60)（ドラフト）
+- コミット：`a91771f`（実装）→ `f9d0c4d`（監査 1 回目の反映）→ `6cc3e11`（2 回目）→ `dd69da2`（3 回目）→ `b90cec6`（本書の SetMatchPage の記述の矛盾を修正）→ 監査 4 回目の反映（`git log` 参照）
+- 素材：`HARIMARU_PR3_REACTIONS_v05`（6 種・49 コマ）の `atlas/body`・`atlas/effect` を無加工で収録。開始・終了のコマは v0.2 の待機と一致（検品スクリプト）。effectBox は 1x/2x/3x のアルファ > 0 を包む範囲（Codex も一致を確認）
+- 判定の前提の確認：公開されている実際の n01 の終了済み試合 1 件（9 Leg・113 投てき）で、`(p, r)` が Leg の中で一意、ラウンドは Leg・側ごとに 1 から、バストは `score: 0`、上がりは `finish: 1` を確認（n01 の読み取り 2 回、アプリの通信とは無関係）
+- 検証（`7d996cd`、監査 4 回目の反映後）：`npm run verify`（lint・単体 142 ファイル 1827 件・build）成功、`npm run typecheck` 成功。ハリマルの単体 12 ファイル 209 件。`npm run test:e2e` 503 件合格・失敗 0（スキップ 23 は既存の指定。`e2e/harimaruLive.spec.ts` 4 件を含む）、`npm run test:e2e:preview` 38 件合格・失敗 0（スキップ 2）。プリキャッシュ 89 件 3197.33 KiB（`dd69da2` と同じ件数）
+- CI（`7d996cd`）：Backtest matches the committed baseline 成功、Build and check the preview page 成功
+- 実画面（`7d996cd`、プレビューのビルド・架空の n01・Chromium）：スマホ（Pixel 5 相当）・PC（1280×900）× ライト / ダーク（スタジアム）の 4 通りで、cheer・panic・legWin を演出し、エフェクトは文字・操作部品に重ならない。演出中のスクロール・リサイズでエフェクトがすぐ消える（`stopped:view`）。200% ズーム相当（640×450）は出ず、届いた出来事は捨てる。表示 OFF・動きを減らす設定ではレイヤーがない。架空のライブは Leg 1 だけなので、過去の Leg のタブの実画面確認はできていない（`LiveSheet` を描画する単体テストで確認）。この回の実画面では 180・victory・anxious の演出・frustrated は起きなかった（180・victory・anxious は E2E、frustrated は単体テストで確認）
+- プレビュー（架空の n01）で反応を見る手順：「n01から作成」→ ATDO → kalavinka でチームを作る → 観戦 → ライブ。架空のライブは 4 秒ごとに投てきが進み、約 96 秒で同じ Leg をやり直す（やり直した 2 周目は同じラウンドの繰り返しなので反応しない。再読み込みで基準からやり直せる）
+- 実画面（本番ビルド・架空の n01・Chromium）：スマホ（Pixel 5 相当）・PC（1280×900）・ライト / ダーク（スタジアム）で、味方の高得点・180・勝利を演出（スコア表の枠の上。180 のボードは正しい向き、右向きの cheer はエフェクトも反転）。立ち位置の上に文字があると見送り（スマホのダークでは 3 種とも見送り）。200% ズーム相当（640×450）は立てる場所がなく出ない
+- Codex 監査（CLI、読み取り専用、PR3 から 0 回として数え直し）
+
+| 回 | 指摘（高/中/低） | 反映 | 反映しなかったもの |
+|---|---|---|---|
+| 1 | 4 / 4 / 0 | 新しい mid・通信失敗後の基準化、勝数の訂正、対戦・味方の切替での取り消し、余白の範囲（1x のにじみ・足元より下）、unitDone の持ち越し、後着・欠損ラウンド、別ゲーム選択中・隠れた画面からの配信、180 の右向き | なし（SetMatchPage は 1 回目では「味方を決められない」として未接続 → 3 回目で接続） |
+| 2 | 4 / 3 / 0 | 左右の入れ替わり、終了と合う確定・古い Leg、最大を超えたときだけ、投てきの連続性、終了後の状態、中立での取り消し、1 px のはみ出し | なし |
+| 3 | 3 / 2 / 0 | 決着済みのゲーム・Leg の訂正、古い Leg 付きの対戦終了、消えた・変わった投てき、足場消失での待ちの破棄、SetMatchPage の接続 | なし |
+| 4（ユーザー承認済み） | 4 / 3 / 0 | 1 ゲームの対戦で古い Leg 付きの終了から勝敗を決めない、Leg の飛び越しの勝数、残り点・フィニッシュの訂正と残り 0 の点、スクロール・リサイズ・ズームでエフェクトを止める、過去の Leg の表示中は流さない、同じ対戦の次のゲーム（mid）で取り消す、演出中は転ばない | なし（**4 回目の反映は再監査していない**。5 回目は新たなユーザー承認が必要） |
+
+- GitHub の自動レビュー（Codex のレビューボット等）は CLI の監査とは別。PR #60 の画面で確認する
+- 監査 4 回目のあとの修正（ユーザー指示、Codex 未監査）：過去の Leg の表示による停止を観戦対象（source）ごとにした
+  - 再現：単体（`LiveSheet` を描画する reaudit.test.tsx の 4 件）が修正前に失敗。実ブラウザー（開発サーバー・架空の n01 の 2 カードの夜・Chromium PC）で、修正前は右のカードの過去の Leg で左のカードの状態が 0 件（止まる）、修正後は流れる。隠れて保持された一覧の過去の Leg は、修正前は試合のページを開いても停止が残り、修正後は隠れたときに解ける（戻ると再び止める）
+  - 試合のページ自身の状態がハリマルへ流れることは、この架空データでは実ブラウザーで確認できていない（単体で確認）
+  - 検証（`1f99a1e`）：`npm run verify`（単体 142 ファイル 1831 件）・`npm run typecheck` 成功。`npm run test:e2e` は 502 件合格・失敗 1（PR2 の `harimaru.spec.ts:336` カーソルの動作。立ち止まるのを待つところで時間切れ。同じテストを `1f99a1e` と修正前の `b2e4192` で各 5 回実行して全て合格。変更した経路を通らないため、動きの乱数による時間の揺れと判断）、`npm run test:e2e:preview` 38 件合格。実画面（プレビューのビルド・架空の n01）：スマホ・PC × ライト・ダークで cheer・panic・anxious・legWin を演出、重なりなし、スクロール・リサイズで停止
+
 ## 8. 次に進める工程
 
-1. ユーザーが PR2 のプレビュー（PC・スマホ）を確認し、修正事項を指示する。
-2. ユーザー承認後、PR2 を統合ブランチ `feat/harimaru-integration` に取り込む（Claude は承認なしに取り込まない）。
-3. 取り込み後、統合ブランチから `feat/harimaru-pr3-n01` を分岐して PR3（n01 観戦連動）に着手する。
-4. 追加素材 v0.9 は組み込み済み（`989bf03`）。素材の採用承認と、動きの見え方の確認はユーザー待ち。
+1. ユーザーが PR3（#60）のプレビュー・動きを確認し、修正事項を指示する（PR2 は実装完了扱い）。
+2. ユーザーの明示指示があれば、PR2 → PR3 の順に統合ブランチ `feat/harimaru-integration` へ取り込む（Claude は指示なしに取り込まない）。PR2 をスカッシュで取り込んだ場合は、PR3 の差分が重複しないよう、統合ブランチから新しいブランチを作って PR3 のコミットだけを載せ直す（既存ブランチの force push はしない）。
+3. 統合ブランチで PR1〜PR3 の最終検証（全 E2E・実機）をして、ユーザー承認のあと main 向けの最終 PR を作る（本番公開はそのマージで行われる。Claude は承認なしにマージしない）。
+4. 追加の Codex 監査は、PR3 の 5 回目、PR1・PR2 の 4 回目とも新たなユーザー承認が必要（PR3 の 4 回目の反映は未監査）。

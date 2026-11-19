@@ -8,20 +8,26 @@
  * - 動きは HarimaruController が 1 要素の transform だけで描くので、React は再描画しない。
  * - 追加素材 v0.9 (14 動作) は、登場のあとで画素密度に合う 1 組だけを読み込む。読み込みとデコードが
  *   終わった動作から使えるようになり、読み込めなかった動作は選ばれない (待機・歩行・睡眠はそのまま動く)。
+ * - 観戦リアクション (PR3): 観戦画面が流すライブの状態 (liveFeed) を聞き、新しい出来事を判定して演出する。
+ *   リアクションの画像は、味方の分かる状態が初めて届いたときに読み込む。画面を離れる・表示 OFF で購読をやめる。
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMediaQuery } from '../../components/useMediaQuery';
 import { HarimaruController } from './controller';
 import { useHarimaruEnabled } from './preference';
-import { atlasFor, BACKGROUND_SIZE, CLIP_IDS, clipUrlFor, type ClipId } from './sprite';
+import { atlasFor, BACKGROUND_SIZE, CLIP_IDS, clipUrlFor, REACTION_IDS, reactionUrlFor, type ClipId, type ReactionId } from './sprite';
+import { subscribeLive } from './liveFeed';
+import { allySide, LiveReactionTracker } from './liveReactions';
 import './harimaru.css';
 
 /**
  * 足場にする要素 (カード・タイルの上辺)。どの画面でも、上に文字・操作部品・スコアのない余白だけを使う
  * (terrain.ts)。安全な余白のない画面では表示しない。
+ * `.n01-sheet` (ライブのスコア表の枠) は PR3 で追加: 観戦のライブ画面は、本日の対戦の帯 (横スクロール) が
+ * フォーカスカードの上辺をふさぎ、ほかに立てる場所がなかったため (観戦リアクションを見せる場所)。
  */
-const PLATFORMS = '.card, .next-match-card, .quick-tile, .focus-card, .board-tile, .n01-list, .browse-lobby';
+const PLATFORMS = '.card, .next-match-card, .quick-tile, .focus-card, .board-tile, .n01-list, .browse-lobby, .n01-sheet';
 
 /** 足場を探す画面。登録のない画面には出ない。 */
 export const HARIMARU_PLATFORMS: Partial<Record<string, string>> = Object.fromEntries(
@@ -47,9 +53,11 @@ export function HarimaruLayer({ page }: { page: string }): React.JSX.Element | n
 
 function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (failed: boolean) => void }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
+  const effectRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const sprite = ref.current;
+    const effect = effectRef.current;
     const root = document.querySelector('.app-main');
     if (!sprite || !root) return undefined;
     let controller: HarimaruController | null = null;
@@ -61,6 +69,43 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
     const clipRequested = new Map<ClipId, string>();
     /** 読み込んだ画像を保持して、画像のキャッシュから外れないようにする。 */
     const keep = new Map<ClipId, HTMLImageElement>();
+
+    /** 観戦リアクション: 読み込みを始めたか、動作ごとの要求中の URL (本体とエフェクトの組)。 */
+    let reactionsWanted = false;
+    const reactionRequested = new Map<ReactionId, string>();
+    const keepReactions: HTMLImageElement[] = [];
+    const loadReactions = (): void => {
+      if (!reactionsWanted) return;
+      const dpr = window.devicePixelRatio || 1;
+      for (const id of REACTION_IDS) {
+        const body = reactionUrlFor(id, 'body', dpr);
+        const effectUrl = reactionUrlFor(id, 'effect', dpr);
+        if (!body || !effectUrl) continue;
+        const pairKey = `${body} ${effectUrl}`;
+        if (reactionRequested.get(id) === pairKey) continue;
+        reactionRequested.set(id, pairKey);
+        const images = [body, effectUrl].map((url) => {
+          const image = new Image();
+          image.src = url;
+          return image;
+        });
+        const ready = images.map((image) =>
+          (typeof image.decode === 'function' ? image.decode() : new Promise<void>((resolve, reject) => {
+            image.onload = () => resolve();
+            image.onerror = () => reject(new Error('load'));
+          })),
+        );
+        // 両方を読み込めた反応だけを登録する (読み込めなければ、その反応は演出しない)。
+        void Promise.all(ready).then(
+          () => {
+            if (disposed || reactionRequested.get(id) !== pairKey || !controller) return;
+            keepReactions.push(...images);
+            controller.setReactionSheets(id, body, effectUrl);
+          },
+          () => undefined,
+        );
+      }
+    };
 
     const loadClips = (): void => {
       const dpr = window.devicePixelRatio || 1;
@@ -99,13 +144,14 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         sprite.style.backgroundImage = `url("${url}")`;
         sprite.dataset.ready = 'true';
         if (!controller) {
-          controller = new HarimaruController({ sprite, root, watch: root.closest('.app') ?? root.parentElement ?? root, platformSelector: selector });
+          controller = new HarimaruController({ sprite, effect: effect ?? undefined, root, watch: root.closest('.app') ?? root.parentElement ?? root, platformSelector: selector });
           controller.start();
           // 開発サーバーだけ: 動作の確認用に操作口を出す (本番のビルドには含まれない)。
           if (import.meta.env.DEV) (window as Window & { __harimaru?: HarimaruController }).__harimaru = controller;
         }
         controller.setSheet('base', url);
         loadClips();
+        loadReactions();
       };
       image.onerror = () => {
         if (!current()) return;
@@ -117,8 +163,66 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
     load();
     // ズームで画素密度が変わったら、合う解像度の素材に差し替える。
     window.addEventListener('resize', load);
+
+    // 観戦リアクション: 観戦画面が流すライブの状態を聞く。判定は観戦画面 (source) と味方ごとに作り直す。
+    let tracker: { source: string; allyId: string | null; judge: LiveReactionTracker } | null = null;
+    /** 最後に受け取った状態の対戦の単位とゲーム (mid) (中立の状態も含む)。切り替わったら演出を取り消す。 */
+    let lastUnit: string | null = null;
+    let lastMid: string | null = null;
+    const unsubscribe = subscribeLive((message) => {
+      if (message.kind === 'release') {
+        // 観戦画面を離れた: その対戦の演出中・待っている出来事も取り消す。
+        if (tracker?.source === message.source) {
+          tracker = null;
+          lastUnit = null;
+          lastMid = null;
+          controller?.cancelLive();
+        }
+        return;
+      }
+      if (message.kind === 'hold') {
+        // いま反応している観戦対象の画面が過去の Leg を表示し始めた: 演出中・待っている出来事を取り消す
+        // (解除のあとは基準からやり直す)。ほかの観戦対象の画面の操作では取り消さない。
+        if (tracker?.source === message.source) controller?.cancelLive();
+        return;
+      }
+      if (message.kind === 'rebase') {
+        if (tracker?.source === message.source) tracker.judge.rebaseline();
+        return;
+      }
+      if (!tracker || tracker.source !== message.source || tracker.allyId !== message.allyId) {
+        // 観戦画面・味方が変わった: 判定を作り直し、前の対戦の演出・待っている出来事を取り消す。
+        if (tracker) controller?.cancelLive();
+        tracker = { source: message.source, allyId: message.allyId, judge: new LiveReactionTracker(message.allyId) };
+      }
+      if (message.allyId && !reactionsWanted) {
+        reactionsWanted = true;
+        loadReactions();
+      }
+      // 同じ観戦画面の中で対戦が切り替わった (カードの選び直しなど)、または味方を決められない状態になった:
+      // 前の対戦・味方の演出と待っている出来事を取り消す (判定より先に確かめる)。
+      const state = message.state;
+      const unit = state.tmid ?? state.scid ?? state.mid;
+      // 同じ対戦の次のゲーム・セット (mid) に進んだときも、前のゲームの演出・待っている出来事を取り消す
+      // (その応答で確定した前のゲームの結果は、取り消したあとの判定で演出する)。
+      if ((lastUnit !== null && unit !== lastUnit) || (lastMid !== null && state.mid !== lastMid) || allySide(state, message.allyId) === null) controller?.cancelLive();
+      lastUnit = unit;
+      lastMid = state.mid;
+      const event = tracker.judge.update(state);
+      if (event && controller) controller.reactLive(event.reaction);
+    });
+    // タブが非表示から戻ったとき: その間に起きたこと (戻った直後の取得で届く) には反応しない。
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') tracker?.judge.rebaseline();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     return () => {
       disposed = true;
+      unsubscribe();
+      document.removeEventListener('visibilitychange', onVisibility);
+      tracker = null;
+      keepReactions.length = 0;
       window.removeEventListener('resize', load);
       controller?.destroy();
       controller = null;
@@ -128,12 +232,16 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
   }, [selector, onFail]);
 
   return (
-    <div
-      ref={ref}
-      className="harimaru-sprite"
-      data-testid="harimaru"
-      data-visible="false"
-      style={{ backgroundSize: BACKGROUND_SIZE }}
-    />
+    <>
+      <div
+        ref={ref}
+        className="harimaru-sprite"
+        data-testid="harimaru"
+        data-visible="false"
+        style={{ backgroundSize: BACKGROUND_SIZE }}
+      />
+      {/* 観戦リアクションのエフェクト (本体より広い 52×42 CSS px)。演出の間だけ表示する。 */}
+      <div ref={effectRef} className="harimaru-effect" data-testid="harimaru-effect" data-active="false" />
+    </>
   );
 }

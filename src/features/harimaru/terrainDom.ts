@@ -12,6 +12,8 @@ import type { Platform, Rect, TerrainInput } from './terrain';
 export interface MeasuredTerrain extends TerrainInput {
   /** 足場の要素 (platforms と同じ順)。足場がホバーなどで動くとき、上辺に合わせて一緒に動くために使う。 */
   elements?: readonly Element[];
+  /** 足場を包む入れ物 (containersOf)。経路・余白の障害物を集めるときに渡す。 */
+  containers?: ReadonlySet<Element>;
   /** いま見えている範囲 (ページ座標)。固定ヘッダー・下部ナビ・固定操作バーと、ピンチズームで見えない部分を除く。 */
   view: { top: number; bottom: number; left: number; right: number };
 }
@@ -45,8 +47,10 @@ export function isSolid(el: Element, style: CSSStyleDeclaration): boolean {
   const tabindex = el.getAttribute('tabindex');
   if (tabindex !== null && Number(tabindex) >= 0) return true;
   if ((el as HTMLElement).isContentEditable) return true;
-  // 中身がスクロールする領域は、見えている文字が入れ替わるので箱全体を障害物にする。
-  if (/(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`)) return true;
+  // 中身がスクロールする領域は、見えている文字が入れ替わるので箱全体を障害物にする。中身が収まっていて
+  // スクロールできない領域 (はみ出していない) は動かないので、ふつうの入れ物と同じく中身だけを数える
+  // (PR3: 観戦のライブ画面の、1 枚だけのカードの帯・ゲームの切り替えの列)。はみ出すようになれば DOM の変化で計測し直す。
+  if (/(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`) && overflows(el, style)) return true;
   if (style.backgroundImage && style.backgroundImage !== 'none') return true;
   if (style.backgroundColor && !transparent(style.backgroundColor)) return true;
   for (const side of ['Top', 'Right', 'Bottom', 'Left'] as const) {
@@ -55,6 +59,16 @@ export function isSolid(el: Element, style: CSSStyleDeclaration): boolean {
     if (width > 0 && style.getPropertyValue(`border-${side.toLowerCase()}-style`) !== 'none' && !transparent(color)) return true;
   }
   return false;
+}
+
+/** スクロールできる (中身がはみ出している) か。スクロールしない向きは数えない。 */
+function overflows(el: Element, style: CSSStyleDeclaration): boolean {
+  // 1 px でもはみ出していればスクロールできる (scrollWidth・clientWidth は整数)。
+  const scrollsX = /(auto|scroll)/.test(style.overflowX ?? '') && el.scrollWidth > el.clientWidth;
+  const scrollsY = /(auto|scroll)/.test(style.overflowY ?? '') && el.scrollHeight > el.clientHeight;
+  // overflow を 1 つの値で指定した古い書き方 (overflowX / Y が空) は、どちらの向きでも数える。
+  const either = !style.overflowX && !style.overflowY && (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight);
+  return scrollsX || scrollsY || either;
 }
 
 function hasPseudoContent(el: Element, win: Window): boolean {
@@ -78,13 +92,40 @@ export function movesOnItsOwn(el: Element, root: Element, win: Window): boolean 
   return false;
 }
 
+/** 操作部品・役割のある要素か (足場を包んでいても、箱全体を障害物にする)。 */
+function interactive(el: Element): boolean {
+  if (SOLID_TAGS.has(el.tagName.toUpperCase())) return true;
+  const role = el.getAttribute('role');
+  if (role && INTERACTIVE_ROLES.has(role)) return true;
+  const tabindex = el.getAttribute('tabindex');
+  if (tabindex !== null && Number(tabindex) >= 0) return true;
+  return (el as HTMLElement).isContentEditable === true;
+}
+
+/**
+ * 足場を包む入れ物 (足場の要素の祖先のうち、root より内側で、操作部品でないもの)。足場はその入れ物の上に
+ * 描かれているので、入れ物の背景・枠は足場の上の帯をふさがない (中の文字・部品はふつうに数える)。
+ * PR3: 観戦のライブ画面で、白いカードの中のスコア表の上辺に立てるようにするため。
+ */
+export function containersOf(elements: readonly Element[], root: Element): Set<Element> {
+  const containers = new Set<Element>();
+  for (const element of elements) {
+    for (let node = element.parentElement; node && node !== root && root.contains(node); node = node.parentElement) {
+      if (!interactive(node)) containers.add(node);
+    }
+  }
+  return containers;
+}
+
 /**
  * 範囲 (ページ座標の矩形の一覧) に重なる障害物を集める。
  * 操作部品・画像・色や枠の付いた要素・スクロール領域・疑似要素の内容がある要素は箱全体、それ以外は直下の文字の矩形。
  * @param seeThrough カードの内側を調べるとき、そのカード自身 (背景・枠・装飾の疑似要素) は障害物にしない。
  *   カード直下の文字と、カードの中の要素はふつうに数える。
+ * @param containers 足場を包む入れ物 (containersOf)。色・枠・スクロール領域でも箱全体は数えない (疑似要素の内容が
+ *   ある入れ物は数える)。直下の文字はふつうに数える。
  */
-export function collectObstacles(root: Element, regions: readonly Rect[], win: Window = window, seeThrough?: Element): Rect[] {
+export function collectObstacles(root: Element, regions: readonly Rect[], win: Window = window, seeThrough?: Element, containers?: ReadonlySet<Element>): Rect[] {
   const doc = root.ownerDocument;
   const sx = win.scrollX;
   const sy = win.scrollY;
@@ -99,7 +140,12 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
     if (box.right <= box.left || box.bottom <= box.top || !inRegion(box)) continue;
     const style = win.getComputedStyle(el);
     if (style.display === 'contents') continue;
-    if (el !== seeThrough && (isSolid(el, style) || hasPseudoContent(el, win))) {
+    // 入れ物を数えないのは、重なっている範囲をすべて包んでいるときだけ (帯の一部にかかるだけの別の色付きの枠は数える)。
+    const behind = containers?.has(el) === true && regions.every((g) => !(box.bottom > g.top && box.top < g.bottom && box.right > g.left && box.left < g.right) || (box.left <= g.left && box.right >= g.right && box.top <= g.top && box.bottom >= g.bottom));
+    // 実際にスクロールする入れ物 (中身が動く) は、包んでいても箱全体を数える。
+    const scrolling = /(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`) && overflows(el, style);
+    const solid = isSolid(el, style) && (!behind || scrolling);
+    if (el !== seeThrough && (solid || hasPseudoContent(el, win))) {
       obstacles.push(box);
       continue;
     }
@@ -160,7 +206,8 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
     top: p.top - SPRITE.height - DEFAULT_TERRAIN.clearanceTop,
     bottom: p.top,
   }));
-  const obstacles = collectObstacles(root, bands, win);
+  const containers = containersOf(elements, root);
+  const obstacles = collectObstacles(root, bands, win, undefined, containers);
 
   // ピンチズーム中は、実際に見えている範囲 (visual viewport) に狭める。
   let viewLeft = 0;
@@ -176,6 +223,7 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
   return {
     platforms,
     elements,
+    containers,
     obstacles,
     bounds: { left: sx + 4, right: sx + viewportWidth - 4 },
     view: { top: sy + viewTop, bottom: sy + viewBottom, left: sx + viewLeft, right: sx + viewRight },

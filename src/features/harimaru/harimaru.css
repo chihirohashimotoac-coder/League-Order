@@ -36,6 +36,35 @@
   transition: opacity 240ms ease;
 }
 
+/*
+ * 観戦リアクションのエフェクト (本体の左上から -11, -18 の 52×42 CSS px)。演出の間だけ表示する。
+ * 本体の前 (星・汗・渦など) か後ろ (180 のボード) に重ねる。クリック・タップは受け取らない。
+ */
+.harimaru-effect {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 52px;
+  height: 42px;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 0;
+  will-change: transform;
+}
+
+.harimaru-sprite {
+  z-index: 1;
+}
+
+.harimaru-effect[data-active='true'] {
+  opacity: 1;
+}
+
+.harimaru-effect[data-front='true'] {
+  z-index: 2;
+}
+
 /* 「動きを減らす」設定では表示しない (確定仕様)。React 側でも描画そのものを止める。 */
 @media (prefers-reduced-motion: reduce) {
   .harimaru-layer {

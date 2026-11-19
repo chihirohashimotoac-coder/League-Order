@@ -23,6 +23,7 @@ import { Highlights } from './Highlights';
 import { CardTrail } from './CardTrail';
 import { outlookTrail, slotChances } from '../cardTrail';
 import type { HighlightFocus } from './Highlights';
+import { useHarimaruLive } from '../../harimaru/useHarimaruLive';
 
 /**
  * 日程・結果. The next round to be played comes first (the cards still to come are one tap away,
@@ -268,6 +269,9 @@ function MatchCenter({
   const followed = live?.schid && playable.some((entry) => entry.slot.schid === live.schid) ? live.schid : null;
   const fallback = liveSchid ?? followed ?? (playable.find((entry) => entry.state === 'live') ?? playable[playable.length - 1])?.slot.schid ?? null;
   const game = linked ?? fallback;
+  // ハリマル (観戦リアクション): 表示している状態を渡すだけ (取得は増やさない)。ライブに追従している間だけ
+  // (リンクで別のゲームを開いている間は渡さない)。
+  const harimaruSource = useHarimaruLive(linked !== null && linked !== live?.schid ? null : 'watch-results', live, data.season, status);
   const [focus, setFocus] = useState<HighlightFocus | null>(null);
   const names: [string, string] = [card.teams[0].name, card.teams[1].name];
   const here: WatchLink = { ...base, card: card.key };
@@ -352,7 +356,7 @@ function MatchCenter({
       ) : null}
       {showsLive && live ? (
         <section className="game-panel" aria-label={`${slotLabelOf(card, live.schid)} の詳細`} data-testid="game-panel">
-          <LiveSheet key={live.mid} api={api} live={live} title={slotLabelOf(card, live.schid)} status={{ ...liveStatusText(status, card.state !== 'live'), updated: new Date(live.updateTime).toLocaleTimeString('ja-JP') }} />
+          <LiveSheet key={live.mid} api={api} live={live} harimaruSource={harimaruSource} title={slotLabelOf(card, live.schid)} status={{ ...liveStatusText(status, card.state !== 'live'), updated: new Date(live.updateTime).toLocaleTimeString('ja-JP') }} />
         </section>
       ) : chosen ? (
         <section className="game-panel" id={`game-${chosen.slot.schid}`} aria-label={`${chosen.slot.label} の詳細`} data-testid="game-panel">
