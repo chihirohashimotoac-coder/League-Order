@@ -49,7 +49,9 @@ describe('スクロール領域', () => {
   it('中身がはみ出してスクロールできるときだけ、箱全体を障害物にする (収まっていれば中身だけを数える)', () => {
     expect(isSolid(box(900, 400), style({ overflowX: 'auto' }))).toBe(true);
     expect(isSolid(box(400, 400), style({ overflowX: 'auto' }))).toBe(false);
-    expect(isSolid(box(401, 400), style({ overflowX: 'scroll' }))).toBe(false);
+    // 1 px のはみ出しでもスクロールできる。
+    expect(isSolid(box(401, 400), style({ overflowX: 'scroll' }))).toBe(true);
+    expect(isSolid(box(401, 400), style({ overflowX: 'auto' }))).toBe(true);
     expect(isSolid(box(900, 400), style({ overflowX: 'hidden' }))).toBe(false);
   });
 });

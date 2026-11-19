@@ -63,10 +63,11 @@ export function isSolid(el: Element, style: CSSStyleDeclaration): boolean {
 
 /** スクロールできる (中身がはみ出している) か。スクロールしない向きは数えない。 */
 function overflows(el: Element, style: CSSStyleDeclaration): boolean {
-  const scrollsX = /(auto|scroll)/.test(style.overflowX ?? '') && el.scrollWidth > el.clientWidth + 1;
-  const scrollsY = /(auto|scroll)/.test(style.overflowY ?? '') && el.scrollHeight > el.clientHeight + 1;
+  // 1 px でもはみ出していればスクロールできる (scrollWidth・clientWidth は整数)。
+  const scrollsX = /(auto|scroll)/.test(style.overflowX ?? '') && el.scrollWidth > el.clientWidth;
+  const scrollsY = /(auto|scroll)/.test(style.overflowY ?? '') && el.scrollHeight > el.clientHeight;
   // overflow を 1 つの値で指定した古い書き方 (overflowX / Y が空) は、どちらの向きでも数える。
-  const either = !style.overflowX && !style.overflowY && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1);
+  const either = !style.overflowX && !style.overflowY && (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight);
   return scrollsX || scrollsY || either;
 }
 

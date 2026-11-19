@@ -18,7 +18,7 @@ import { HarimaruController } from './controller';
 import { useHarimaruEnabled } from './preference';
 import { atlasFor, BACKGROUND_SIZE, CLIP_IDS, clipUrlFor, REACTION_IDS, reactionUrlFor, type ClipId, type ReactionId } from './sprite';
 import { subscribeLive } from './liveFeed';
-import { LiveReactionTracker } from './liveReactions';
+import { allySide, LiveReactionTracker } from './liveReactions';
 import './harimaru.css';
 
 /**
@@ -166,11 +166,14 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
 
     // 観戦リアクション: 観戦画面が流すライブの状態を聞く。判定は観戦画面 (source) と味方ごとに作り直す。
     let tracker: { source: string; allyId: string | null; judge: LiveReactionTracker } | null = null;
+    /** 最後に受け取った状態の対戦の単位 (中立の状態も含む)。切り替わったら演出を取り消す。 */
+    let lastUnit: string | null = null;
     const unsubscribe = subscribeLive((message) => {
       if (message.kind === 'release') {
         // 観戦画面を離れた: その対戦の演出中・待っている出来事も取り消す。
         if (tracker?.source === message.source) {
           tracker = null;
+          lastUnit = null;
           controller?.cancelLive();
         }
         return;
@@ -188,10 +191,13 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         reactionsWanted = true;
         loadReactions();
       }
-      const unitBefore = tracker.judge.currentUnit;
-      const event = tracker.judge.update(message.state);
-      // 同じ観戦画面の中で対戦が切り替わった (カードの選び直しなど): 前の対戦の演出を取り消す。
-      if (unitBefore !== null && tracker.judge.currentUnit !== unitBefore) controller?.cancelLive();
+      // 同じ観戦画面の中で対戦が切り替わった (カードの選び直しなど)、または味方を決められない状態になった:
+      // 前の対戦・味方の演出と待っている出来事を取り消す (判定より先に確かめる)。
+      const state = message.state;
+      const unit = state.tmid ?? state.scid ?? state.mid;
+      if ((lastUnit !== null && unit !== lastUnit) || allySide(state, message.allyId) === null) controller?.cancelLive();
+      lastUnit = unit;
+      const event = tracker.judge.update(state);
       if (event && controller) controller.reactLive(event.reaction);
     });
     // タブが非表示から戻ったとき: その間に起きたこと (戻った直後の取得で届く) には反応しない。

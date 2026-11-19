@@ -3,8 +3,8 @@ import type { LiveState, LiveThrow } from '../matches/parse';
 import { allySide, LiveReactionTracker, scoreReaction } from './liveReactions';
 
 /** 味方 = A (tpid 'A')、相手 = B。既定は 01・チーム対戦 (isSchedule) の 1 ゲーム目、Leg 0。 */
-function live(over: Partial<LiveState> & { throws?: LiveThrow[]; legIndex?: number; legEnded?: boolean } = {}): LiveState {
-  const { throws = [], legIndex = 0, legEnded = false, ...rest } = over;
+function live(over: Partial<LiveState> & { throws?: LiveThrow[]; legIndex?: number; legEnded?: boolean; legWinner?: 0 | 1 | null } = {}): LiveState {
+  const { throws = [], legIndex = 0, legEnded = false, legWinner = null, ...rest } = over;
   return {
     changed: true,
     mid: 'm1',
@@ -36,7 +36,7 @@ function live(over: Partial<LiveState> & { throws?: LiveThrow[]; legIndex?: numb
       index: legIndex,
       first: 0,
       ended: legEnded,
-      winner: null,
+      winner: legWinner,
       thrower: 0,
       round: 1,
       member: null,
@@ -226,9 +226,15 @@ describe('LiveReactionTracker: 勝敗・逆転', () => {
     expect(after(live({ ...single, legs: [1, 0] }), live({ ...single, legs: [1, 1], gameEnded: true }))).toBeNull();
   });
 
-  it('Leg の勝ち (同じゲームの Leg の勝数が 1 増えた) は legWin、負けには反応しない。フィニッシュの投てきで二重に反応しない', () => {
-    expect(after(live({ legs: [0, 0], throws: [v(0, 1, 100)] }), live({ legs: [1, 0], throws: [v(0, 1, 100), v(0, 2, 120, { finish: true, left: 0 })] }))).toBe('legWin');
-    expect(after(live({ legs: [0, 0] }), live({ legs: [0, 1], throws: [v(1, 1, 140, { finish: true, left: 0 })] }))).toBeNull();
+  it('Leg の勝ち (Leg の勝数が 1 増え、その Leg の終了と合う) は legWin、負けには反応しない。フィニッシュの投てきで二重に反応しない', () => {
+    // 終わった Leg の勝者が味方 (同じ Leg の状態)。
+    expect(after(live({ legs: [0, 0], throws: [v(0, 1, 100)] }), live({ legs: [1, 0], legEnded: true, legWinner: 0, throws: [v(0, 1, 100), v(0, 2, 120, { finish: true, left: 0 })] }))).toBe('legWin');
+    // 次の Leg へ 1 つ進んだ。
+    expect(after(live({ legs: [0, 0] }), live({ legs: [1, 0], legIndex: 1 }))).toBe('legWin');
+    expect(after(live({ legs: [0, 0] }), live({ legs: [0, 1], legEnded: true, legWinner: 1, throws: [v(1, 1, 140, { finish: true, left: 0 })] }))).toBeNull();
+    // 勝数だけが増えて、Leg の終了が分からない (勝者なし・同じ Leg) ときは確定させない。
+    expect(after(live({ legs: [0, 0] }), live({ legs: [1, 0] }))).toBeNull();
+    expect(after(live({ legs: [0, 0] }), live({ legs: [1, 0], legEnded: true, legWinner: null }))).toBeNull();
   });
 
   it('逆転: 確定した勝数で負けていた状態を見たあとに勝ち越したら 1 回だけ。対戦の勝利と同時なら勝利を優先', () => {
@@ -251,9 +257,60 @@ describe('LiveReactionTracker: 勝敗・逆転', () => {
 
   it('ゲームの中の逆転 (Leg の数): 0-1 → 1-1 → 2-1', () => {
     const tracker = new LiveReactionTracker('A');
-    tracker.update(live({ legs: [0, 1] }));
-    expect(tracker.update(live({ legs: [1, 1] }))?.reaction).toBe('legWin');
-    expect(tracker.update(live({ legs: [2, 1] }))?.reaction).toBe('comeback');
+    tracker.update(live({ legs: [0, 1], legIndex: 1 }));
+    expect(tracker.update(live({ legs: [1, 1], legIndex: 2 }))?.reaction).toBe('legWin');
+    expect(tracker.update(live({ legs: [2, 1], legIndex: 3 }))?.reaction).toBe('comeback');
+  });
+
+  it('ゲームが切り替わって左右の並びが入れ替わっても、味方・相手を取り違えない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ sets: [0, 1] }));
+    const swapped = { sides: [live().sides[1], live().sides[0]] as LiveState['sides'] };
+    // 味方 (A) が勝って 1-1。新しいゲームでは A が右 (sides[1]) なので sets は [B, A] = [1, 1]。
+    expect(tracker.update(live({ ...swapped, mid: 'm2', sets: [1, 1] }))?.reaction).toBe('gameWin');
+    expect(tracker.update(live({ mid: 'm3', sets: [2, 1] }))?.reaction).toBe('comeback');
+  });
+
+  it('ゲームの終了と合わない勝数の増加は確定させず、終了が届いたら 1 回だけ。表示中より前の Leg の状態は丸ごと無視', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ sets: [0, 0] }));
+    expect(tracker.update(live({ sets: [1, 0] }))).toBeNull();
+    expect(tracker.update(live({ sets: [1, 0], gameEnded: true }))?.reaction).toBe('gameWin');
+    expect(tracker.update(live({ mid: 'm2', sets: [1, 0] }))).toBeNull();
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live({ legIndex: 2, legs: [1, 1] }));
+    expect(t2.update(live({ legIndex: 1, legs: [2, 1], legEnded: true, legWinner: 0, throws: [v(0, 1, 180)] }))).toBeNull();
+  });
+
+  it('対戦の終了を見たあとに届いた状態 (訂正など) からは、ゲームの勝敗も出さない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ sets: [1, 0], cardEnded: true }));
+    expect(tracker.update(live({ sets: [2, 0], cardEnded: true, gameEnded: true }))).toBeNull();
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live({ sets: [2, 1] }));
+    expect(t2.update(live({ sets: [3, 1], cardEnded: true }))?.reaction).toBe('victory');
+    expect(t2.update(live({ sets: [3, 2], cardEnded: true, gameEnded: true }))).toBeNull();
+  });
+
+  it('投てきの欠落 (ラウンドの飛び)・Leg の飛び越しのあとの投てきには反応しない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ throws: [v(0, 1, 60)] }));
+    expect(tracker.update(live({ throws: [v(0, 1, 60), v(0, 5, 180)] }))).toBeNull();
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live({ legIndex: 0, throws: [v(0, 1, 60)] }));
+    expect(t2.update(live({ legIndex: 3, throws: [v(0, 1, 180)] }))).toBeNull();
+    // 次の Leg (1 つの進み) の最初の投てきには反応する。
+    const t3 = new LiveReactionTracker('A');
+    t3.update(live({ legIndex: 0, throws: [v(0, 1, 60)] }));
+    expect(t3.update(live({ legIndex: 1, throws: [v(1, 1, 140)] }))?.reaction).toBe('anxious');
+  });
+
+  it('基準で見た結果は、訂正から復元されても演出しない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ legs: [1, 0], legIndex: 1 }));
+    expect(tracker.update(live({ legs: [0, 0], legIndex: 1 }))).toBeNull();
+    expect(tracker.update(live({ legs: [1, 0], legIndex: 2 }))).toBeNull();
+    expect(tracker.update(live({ legs: [2, 0], legIndex: 3 }))?.reaction).toBe('legWin');
   });
 
   it('古い mid の遅れた応答・別の対戦への切り替え・味方の切り替え', () => {
@@ -290,9 +347,9 @@ describe('LiveReactionTracker: 勝敗・逆転', () => {
   it('勝数の訂正 (減る・両方変わる) では反応せず、同じ結果に 2 回反応しない。訂正の前後をつないで逆転にしない', () => {
     const tracker = new LiveReactionTracker('A');
     tracker.update(live({ legs: [0, 0] }));
-    expect(tracker.update(live({ legs: [1, 0] }))?.reaction).toBe('legWin');
-    expect(tracker.update(live({ legs: [0, 0] }))).toBeNull();
-    expect(tracker.update(live({ legs: [1, 0] }))).toBeNull();
+    expect(tracker.update(live({ legs: [1, 0], legIndex: 1 }))?.reaction).toBe('legWin');
+    expect(tracker.update(live({ legs: [0, 0], legIndex: 1 }))).toBeNull();
+    expect(tracker.update(live({ legs: [1, 0], legIndex: 1, legEnded: true, legWinner: 0 }))).toBeNull();
     const t2 = new LiveReactionTracker('A');
     t2.update(live({ sets: [0, 1] }));
     // 0-1 → 1-0 (両方変わった = 訂正)。
