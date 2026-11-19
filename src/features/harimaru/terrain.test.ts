@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TERRAIN, SPRITE } from './params';
-import { computeSegments, findSegment, mergePlatforms, subtractIntervals, visibleSegments } from './terrain';
+import { arcAt, arcBounds, arcIsClear, arcPeakFoot, boxIsClear, computeSegments, findSegment, jumpCandidates, mergePlatforms, spriteBox, subtractIntervals, visibleSegments } from './terrain';
 
 const bounds = { left: 0, right: 2_000 };
 const inset = DEFAULT_TERRAIN.cornerInset;
@@ -99,5 +99,80 @@ describe('findSegment / visibleSegments', () => {
     expect(clipped.minX + SPRITE.sideInset).toBeGreaterThanOrEqual(200);
     expect(clipped.maxX + SPRITE.width - SPRITE.sideInset).toBeLessThanOrEqual(300);
     expect(visibleSegments(segments, { top: 0, bottom: 800, left: 380, right: 600 })).toHaveLength(0);
+  });
+});
+
+describe('ジャンプの経路', () => {
+  const plan = { from: { x: 100, top: 300 }, to: { x: 200, top: 280 }, height: 14 };
+  it('放物線の両端は踏切・着地の足元、頂点は高い方の上辺からさらに上', () => {
+    expect(arcAt(plan, 0)).toEqual({ x: 100, foot: 300 });
+    expect(arcAt(plan, 1)).toEqual({ x: 200, foot: 280 });
+    expect(arcAt(plan, 0.5).foot).toBeCloseTo(280 - 14);
+    const bounds = arcBounds(plan);
+    expect(bounds.top).toBeLessThanOrEqual(280 - 14 - SPRITE.height);
+    expect(bounds.right).toBe(200 + SPRITE.width);
+  });
+  it('経路のどこかで障害物・表示範囲の外に触れたら安全でない', () => {
+    const view = { top: 0, bottom: 1_000 };
+    expect(arcIsClear(plan, [], view)).toBe(true);
+    // 経路の真ん中あたりの上に文字がある。
+    expect(arcIsClear(plan, [{ left: 140, right: 170, top: 240, bottom: 262 }], view)).toBe(false);
+    // 経路の外 (はるか上) の文字は関係ない。
+    expect(arcIsClear(plan, [{ left: 140, right: 170, top: 100, bottom: 120 }], view)).toBe(true);
+    // 頂点が固定ヘッダーの下に隠れる位置は使わない。
+    expect(arcIsClear(plan, [], { top: 250, bottom: 1_000 })).toBe(false);
+  });
+  it('段差のあるジャンプでも、頂点 (t = 0.5 からずれる) まで障害物を集める範囲に入れる', () => {
+    const steep = { from: { x: 0, top: 340 }, to: { x: 100, top: 300 }, height: 14 };
+    let highest = Infinity;
+    for (let i = 0; i <= 1_000; i += 1) highest = Math.min(highest, arcAt(steep, i / 1_000).foot);
+    expect(arcPeakFoot(steep)).toBeCloseTo(highest, 3);
+    expect(highest).toBeLessThan(300 - 14);
+    expect(arcBounds(steep).top).toBeLessThanOrEqual(highest - SPRITE.height);
+    // 頂点で頭がかすめる高さにある細い罫線も見逃さない。
+    const peakHead = highest - SPRITE.height;
+    expect(arcIsClear(steep, [{ left: 0, right: 200, top: peakHead + 0.6, bottom: peakHead + 1.6 }], { top: 0, bottom: 1_000 })).toBe(false);
+  });
+
+  it('頂点が判定点の間にあっても、表示範囲の上端をはみ出すジャンプは通さない', () => {
+    const steep = { from: { x: 0, top: 340 }, to: { x: 100, top: 300 }, height: 14 };
+    const steps = 4;
+    let sampledHead = Infinity;
+    for (let i = 0; i <= steps; i += 1) sampledHead = Math.min(sampledHead, arcAt(steep, i / steps).foot - SPRITE.height);
+    const trueHead = arcPeakFoot(steep) - SPRITE.height;
+    expect(trueHead).toBeLessThan(sampledHead - 0.5);
+    // 表示範囲の上端が、本当の頂点と等分の点の最高点の間にある。
+    const viewTop = (trueHead + sampledHead) / 2;
+    expect(arcIsClear(steep, [], { top: viewTop, bottom: 1_000 }, steps)).toBe(false);
+    expect(arcIsClear(steep, [], { top: trueHead - 1, bottom: 1_000 }, steps)).toBe(true);
+  });
+
+  it('判定する点と点の間にある細い障害物も見逃さない', () => {
+    const flat = { from: { x: 0, top: 300 }, to: { x: 240, top: 300 }, height: 14 };
+    // 24 等分の点 (10px ごと) の、ちょうど間に立つ 2px 幅の縦線。
+    const between = { left: 2 + 10 * 12 + 25.5, right: 2 + 10 * 12 + 26.5, top: 270, bottom: 299 };
+    expect(arcIsClear(flat, [between], { top: 0, bottom: 1_000 }, 24)).toBe(false);
+  });
+
+  it('spriteBox / boxIsClear は見える部分だけを使う', () => {
+    expect(spriteBox(100, 200)).toEqual({ left: 102, right: 128, top: 180, bottom: 200 });
+    expect(boxIsClear(spriteBox(100, 200), [{ left: 128, right: 140, top: 180, bottom: 200 }], { top: 0, bottom: 999 })).toBe(true);
+    expect(boxIsClear(spriteBox(100, 200), [{ left: 120, right: 140, top: 180, bottom: 200 }], { top: 0, bottom: 999 })).toBe(false);
+  });
+  it('候補は横に並ぶ足場だけ。隙間・上り・下りの上限を超えるものは除く', () => {
+    const segment = (left: number, right: number, top: number) => ({ top, left, right, minX: left, maxX: right - SPRITE.width });
+    const current = segment(0, 200, 300);
+    const near = segment(230, 400, 290);
+    const farGap = segment(200 + DEFAULT_TERRAIN.jumpMaxGap + 40, 700, 300);
+    const tooHigh = segment(240, 400, 300 - DEFAULT_TERRAIN.jumpMaxRise - 1);
+    const tooLow = segment(240, 400, 300 + DEFAULT_TERRAIN.jumpMaxDrop + 1);
+    const stacked = segment(0, 200, 380);
+    const plans = jumpCandidates(current, [current, near, farGap, tooHigh, tooLow, stacked], 14);
+    expect(plans.map((p) => p.target)).toEqual([near]);
+    expect(plans[0].from.x).toBe(current.maxX);
+    expect(plans[0].to.x).toBeGreaterThan(near.minX);
+    const back = jumpCandidates(near, [current], 14);
+    expect(back[0].from.x).toBe(near.minX);
+    expect(back[0].to.x).toBeLessThan(current.maxX);
   });
 });

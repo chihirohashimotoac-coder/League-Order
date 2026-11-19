@@ -1,32 +1,83 @@
 /**
- * ハリマルの動作エンジン (命令的な小さなクラス)。React の外で 1 つの要素の transform と
+ * ハリマルの動作エンジン (命令的な小さなクラス)。React の外で 1 つの要素の transform・clip-path・
  * background-position だけを書き換え、アプリ全体を再描画しない。
  *
- * - 状態: 登場前 / 待機 / 歩行 / 睡眠 / 休止。休止中はタイマー・requestAnimationFrame を残さない。
- * - 休止の条件: 画面が非表示、モーダル・シート表示中、キャラクターが画面外 (スクロール)。
+ * - 行動: 待機・休む・周囲を見る・歩く・駆け足・跳ねる・ジャンプ (カード間)・カード裏に隠れて別の場所から
+ *   顔を出す・眠る/目覚める・毛づくろい・伸び。ハプニング: 縁で滑ってしがみつき、よじ登る・転ぶ・寝ぼけて
+ *   落ちそうになる。触れ合い: 喜ぶ・振り向く・驚く・逃げる・近づく・首をかしげる、PC のカーソルを見上げる・
+ *   じゃれる・ぶら下がる。素材のない (読み込めていない) 動作は選ばない (clips.ts)。
+ * - 足場の外に体が出る動作 (ジャンプ・しがみつき・カーソルへのぶら下がり) の途中で画面が動いた・変わったら、
+ *   その場で姿を消して安全な足場から出直す (足場へ瞬間移動して見せない)。
+ * - 休止の条件: 画面が非表示、モーダル・シート表示中、入力中、キャラクターが画面外 (スクロール)。
+ *   休止中はタイマー・requestAnimationFrame を残さない。
  * - 足場は実 DOM を計測して決める (terrainDom)。DOM の変化・リサイズ・スクロール停止で計測し直し、
  *   いまの足場が消えた・動いたら、その場で姿を消して安全な場所から出直す。
  * - ユーザーの操作は「最後に操作した時刻」を記録するだけ (受動的なリスナー)。既定の動作は止めない。
  */
-import { decideNext, between, clamp, type Decision, type HarimaruAction, type Rng } from './behavior';
+import { actionWeights, decideNext, between, clamp, type Decision, type HarimaruAction, type Rng } from './behavior';
+import { isAvailable, type MotionId } from './clips';
+import { classifyGesture, cursorReaction, intersects, reactionFor, recentTimes, touchZone, type Reaction } from './interaction';
 import {
   DEFAULT_ANIMATION,
   DEFAULT_BEHAVIOR,
+  DEFAULT_INTERACTION,
+  DEFAULT_TERRAIN,
   DEFAULT_TIMING,
   SPRITE,
   type AnimationParams,
   type BehaviorParams,
+  type InteractionParams,
   type TimingParams,
 } from './params';
-import { framePosition, IDLE_BLINK, IDLE_OPEN, ROW, SLEEP_FRAMES, WALK_FRAMES, type SpriteRow } from './sprite';
-import { computeSegments, findSegment, visibleSegments, type Segment } from './terrain';
-import { measureTerrain, type MeasuredTerrain } from './terrainDom';
+import {
+  BACKGROUND_SIZE,
+  CLIPS,
+  clipBackgroundSize,
+  clipFramePosition,
+  clipOffset,
+  framePosition,
+  IDLE_BLINK,
+  IDLE_LOOK,
+  IDLE_OPEN,
+  REST_BLINK,
+  REST_OPEN,
+  ROW,
+  SLEEP_FRAMES,
+  WALK_AIR,
+  WALK_FRAMES,
+  type ClipId,
+  type SpriteRow,
+} from './sprite';
+import {
+  arcAt,
+  arcBounds,
+  arcIsClear,
+  boxIsClear,
+  computeSegments,
+  findSegment,
+  jumpCandidates,
+  spriteBox,
+  visibleSegments,
+  type JumpPlan,
+  type Rect,
+  type Segment,
+} from './terrain';
+import { collectObstacles, measureTerrain, topCornerRadius, type MeasuredTerrain } from './terrainDom';
 
 /**
  * 休止の理由。hidden = タブ非表示、modal = モーダル・シート表示中、offscreen = キャラクターが画面外、
  * shift = 足場の近くで位置・大きさの変わるアニメーション中 (ホバーで浮くタイルなど。終わるまで隠す)。
  */
-export type PauseReason = 'hidden' | 'modal' | 'offscreen' | 'shift';
+export type PauseReason = 'hidden' | 'modal' | 'offscreen' | 'shift' | 'input';
+
+/** 行動中の状態 (自分から選ぶ行動と、触れ合いの反応)。 */
+export type ActionState =
+  | HarimaruAction
+  | 'happy' | 'turn' | 'flee' | 'approach' | 'peek' | 'enter'
+  | 'slip' | 'hang' | 'climb' | 'cursorHang' | 'tumble' | 'sleepyFall' | 'lookUp' | 'tilt' | 'play' | 'surprise';
+
+/** 外から (デバッグ・テスト) 始められる動作。いつもと同じ安全の確かめを通り、できなければ false。 */
+export type TriggerName = 'slip' | 'tumble' | 'sleepyFall' | 'groom' | 'stretch' | 'lookUp' | 'tilt' | 'play' | 'surprise' | 'happy' | 'run' | 'cursorHang';
 
 export interface ControllerOptions {
   /** 動かす要素 (描画レイヤーの子)。 */
@@ -45,9 +96,44 @@ export interface ControllerOptions {
   behavior?: BehaviorParams;
   animation?: AnimationParams;
   timing?: TimingParams;
+  interaction?: InteractionParams;
+  /** テスト用: 素材のある動作か (既定: clips.ts の表で available かつ、v0.9 の動作はその画像を読み込めている)。 */
+  available?: (id: MotionId) => boolean;
+  /** テスト用: マウスでホバーできる画面か (既定: matchMedia で判定)。 */
+  finePointer?: boolean;
+  /** テスト用: 経路の障害物の集め方の差し替え (seeThrough = 内側を調べるカード自身は数えない)。 */
+  obstaclesIn?: (root: Element, regions: readonly Rect[], win: Window, seeThrough?: Element) => Rect[];
+}
+
+type ObstaclesIn = NonNullable<ControllerOptions['obstaclesIn']>;
+
+/** PC のカーソル (ページ座標)、静止し始めた時刻、なめらかにした速さ、操作部品の上か、押しているボタン。 */
+interface CursorState {
+  x: number;
+  y: number;
+  t: number;
+  stillSince: number;
+  speed: number;
+  onControl: boolean;
+  buttons: number;
 }
 
 const MODAL_SELECTOR = '[aria-modal="true"], .sheet-backdrop';
+/** 押しても反応しない (既存の操作に任せる) 要素。 */
+const CONTROL_SELECTOR =
+  'a[href], button, input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], [role="slider"], [contenteditable=""], [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
+/** 入力中は休む (文字入力・選択の邪魔をしない)。 */
+const INPUT_SELECTOR = 'input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable=""], [contenteditable="true"]';
+/** 記録しておく出来事 (テスト・調整用) の数。 */
+const EVENT_LOG = 20;
+/** 着地の失敗・縁で足を滑らせる確率。 */
+const MISHAP_CHANCE = 0.12;
+/** v0.9 の画像がないと描けない動作 (駆け足・喜ぶは v0.2 のコマで代わりに描けるので含めない)。 */
+const NEEDS_SHEET: ReadonlySet<MotionId> = new Set<MotionId>([
+  'hang', 'slip', 'climb', 'cursorHang', 'tumble', 'sleepyFall', 'groom', 'stretch', 'lookUp', 'surprise', 'tilt', 'play',
+]);
+/** カードの縁の下 (カードの内側) で、体の下にさらに空ける余白 (CSS px)。 */
+const EDGE_CLEARANCE = 2;
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
 const HISTORY_LENGTH = 6;
 const MAX_ANIMATION_WAITS = 10;
@@ -72,6 +158,13 @@ export class HarimaruController {
   private readonly behavior: BehaviorParams;
   private readonly animation: AnimationParams;
   private readonly timing: TimingParams;
+  private readonly interaction: InteractionParams;
+  private readonly available: (id: MotionId) => boolean;
+  private readonly finePointer: boolean;
+  private readonly obstaclesIn: ObstaclesIn;
+  /** 読み込めた画像 (base = v0.2 のアトラス、ほかは v0.9 の動作ごとのアトラス) と、いま表示している画像。 */
+  private readonly sheets = new Map<'base' | ClipId, string>();
+  private sheetKey: 'base' | ClipId = 'base';
 
   /** 行動に属するタイマー (中断で消す)。 */
   private readonly actionTimers = new Set<number>();
@@ -85,6 +178,8 @@ export class HarimaruController {
   /** 動いている足場 (乗ったまま上辺に合わせる) と、その追従のフレーム・保険のタイマー。 */
   private readonly riding = new Map<EventTarget, Set<string>>();
   private rideFrame: number | null = null;
+  /** DOM の変化・リサイズの確認 (1 フレームに 1 回にまとめる)。 */
+  private checkFrame: number | null = null;
   private rideTimer: number | null = null;
   /** 最後の計測での足場の要素。 */
   private platformEls: readonly Element[] = [];
@@ -103,10 +198,43 @@ export class HarimaruController {
   private segment: Segment | null = null;
   private view: MeasuredTerrain['view'] | null = null;
   private dir: -1 | 1 = -1;
-  private action: HarimaruAction | null = null;
+  /** 跳ねる・ジャンプで足元から浮いている高さ、カード裏へ沈んでいる深さ (CSS px)。 */
+  private lift = 0;
+  private sink = 0;
+  /** 基準点を使う動作 (しがみつき・転ぶなど) で、立っている位置から描く位置までのずれ (CSS px)。 */
+  private poseX = 0;
+  private poseY = 0;
+  /** 足場の外に体が出ている途中 (ジャンプ・縁へのしがみつき・カーソルへのぶら下がり)。 */
+  private airborne = false;
+  /** カーソルにぶら下がったときの、カーソルの先端 (ページ座標)。 */
+  private grip: { x: number; y: number } | null = null;
+  /** いまの足場の一覧 (最後の計測)。 */
+  private segments: readonly Segment[] = [];
+  private action: ActionState | null = null;
   private history: HarimaruAction[] = [];
   private lastActivityAt: number;
   private wakeRolled = false;
+  /** 触れ合い: 押している指、体に触れた時刻、最後の反応の時刻、カーソル、スクロールの速さ。 */
+  private gesture: {
+    id: number;
+    x: number;
+    y: number;
+    t: number;
+    maxMove: number;
+    pointers: number;
+    cancelled: boolean;
+    secondary: boolean;
+    onControl: boolean;
+  } | null = null;
+  private readonly activePointers = new Set<number>();
+  private touches: number[] = [];
+  private lastReactionAt = -Infinity;
+  private cursor: CursorState | null = null;
+  private cursorTimer: number | null = null;
+  private lastScroll: { y: number; t: number } | null = null;
+  private scrollPeak = 0;
+  /** 最近の出来事 (行動・反応・素材待ちで見送った反応)。テストと調整に使う。 */
+  private readonly events: string[] = [];
 
   constructor(options: ControllerOptions) {
     this.sprite = options.sprite;
@@ -120,6 +248,12 @@ export class HarimaruController {
     this.behavior = options.behavior ?? DEFAULT_BEHAVIOR;
     this.animation = options.animation ?? DEFAULT_ANIMATION;
     this.timing = options.timing ?? DEFAULT_TIMING;
+    this.interaction = options.interaction ?? DEFAULT_INTERACTION;
+    this.available = options.available ?? ((id) => isAvailable(id) && (!NEEDS_SHEET.has(id) || this.sheets.has(id as ClipId)));
+    this.finePointer =
+      options.finePointer ??
+      (typeof this.win.matchMedia === 'function' && this.win.matchMedia('(hover: hover) and (pointer: fine)').matches);
+    this.obstaclesIn = options.obstaclesIn ?? collectObstacles;
     this.lastActivityAt = this.now();
   }
 
@@ -132,6 +266,7 @@ export class HarimaruController {
     this.listen();
     if (this.win.document.hidden) this.pauses.add('hidden');
     if (this.modalOpen()) this.pauses.add('modal');
+    if (this.typing()) this.pauses.add('input');
     // 休止中は登場を予約しない (休止が解けたときに予約する)。
     if (!this.blocked()) this.scheduleEnter(between(this.rng, this.timing.enterDelayMs));
   }
@@ -141,24 +276,100 @@ export class HarimaruController {
     this.destroyed = true;
     this.interrupt();
     this.clearAuxTimers();
+    this.cancelCheck();
+    this.stopCursorWatch();
     this.stopRide();
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.setVisible(false);
   }
 
+  /**
+   * 読み込めた画像を登録する (描画レイヤーが、画像の読み込みとデコードが終わってから呼ぶ)。
+   * v0.9 の動作は、その画像が登録されてから選ばれる。画素密度が変わって差し替えたときも呼ぶ。
+   */
+  setSheet(key: 'base' | ClipId, url: string): void {
+    this.sheets.set(key, url);
+    if (this.sheetKey === key) this.sprite.style.backgroundImage = `url("${url}")`;
+  }
+
+  /**
+   * デバッグ・テスト用: 動作を始める。いつもの行動と同じ安全の確かめ (足場・カードの内側・経路) を通り、
+   * 素材がない・安全でない・立っていないときは何もしないで false を返す。
+   */
+  trigger(name: TriggerName): boolean {
+    if (this.destroyed || !this.placed || this.pauses.size > 0 || this.airborne) return false;
+    switch (name) {
+      case 'slip':
+        return this.trySlip();
+      case 'sleepyFall':
+        if (!this.available('sleepyFall')) return false;
+        this.recordAction('sleep');
+        this.render(ROW.sleep, SLEEP_FRAMES - 1);
+        if (this.trySleepyFall()) return true;
+        this.idle(between(this.rng, this.behavior.idleMs));
+        return false;
+      case 'groom':
+      case 'stretch':
+        if (!this.available(name)) return false;
+        this.run({ action: name, durationMs: between(this.rng, this.behavior.idleMs) });
+        return true;
+      case 'run': {
+        const segment = this.segment;
+        if (!segment) return false;
+        const target = this.x - segment.minX > segment.maxX - this.x ? segment.minX : segment.maxX;
+        this.run({ action: 'run', durationMs: 0, targetX: target });
+        return true;
+      }
+      case 'cursorHang':
+        return this.cursor !== null && this.tryCursorHang(this.cursor);
+      default:
+        if (!this.available(name)) return false;
+        return this.react(name, this.cursor?.x ?? this.x + SPRITE.width / 2);
+    }
+  }
+
   /** テスト・デバッグ用の現在の状態。 */
-  snapshot(): { placed: boolean; action: HarimaruAction | null; x: number; top: number; dir: -1 | 1; paused: PauseReason[]; timers: number; auxTimers: number; frame: boolean } {
+  snapshot(): {
+    placed: boolean;
+    action: ActionState | null;
+    x: number;
+    top: number;
+    dir: -1 | 1;
+    lift: number;
+    sink: number;
+    poseX: number;
+    poseY: number;
+    airborne: boolean;
+    sheet: 'base' | ClipId;
+    paused: PauseReason[];
+    timers: number;
+    auxTimers: number;
+    frame: boolean;
+    events: string[];
+  } {
     return {
       placed: this.placed,
       action: this.action,
       x: this.x,
       top: this.top,
       dir: this.dir,
+      lift: this.lift,
+      sink: this.sink,
+      poseX: this.poseX,
+      poseY: this.poseY,
+      airborne: this.airborne,
+      sheet: this.sheetKey,
       paused: [...this.pauses],
       timers: this.actionTimers.size,
-      auxTimers: [this.remeasureTimer, this.scrollTimer, this.shiftTimer, this.rideTimer].filter((id) => id !== null).length,
+      auxTimers: [this.remeasureTimer, this.scrollTimer, this.shiftTimer, this.rideTimer, this.cursorTimer, this.checkFrame].filter((id) => id !== null).length,
       frame: this.frame !== null,
+      events: [...this.events],
     };
+  }
+
+  private log(event: string): void {
+    this.events.push(event);
+    if (this.events.length > EVENT_LOG) this.events.shift();
   }
 
   // ------------------------------------------------------------------ 監視
@@ -173,8 +384,29 @@ export class HarimaruController {
 
     const onActivity = (): void => this.noteActivity();
     for (const type of ACTIVITY_EVENTS) add(win, type, onActivity, { passive: true, capture: true });
+    // 触れ合い: すべて受動的なリスナーで位置と時刻を読むだけ (既定の動作・伝播は止めない)。
+    add(win, 'pointerdown', (event) => this.onPointerDown(event), { passive: true, capture: true });
+    add(win, 'pointermove', (event) => this.onPointerMove(event), { passive: true, capture: true });
+    add(win, 'pointerup', (event) => this.onPointerUp(event), { passive: true, capture: true });
+    add(win, 'pointercancel', (event) => this.onPointerCancel(event), { passive: true, capture: true });
+    // カーソルがウィンドウの外へ出た・ウィンドウが非アクティブになった: ぶら下がっていれば放す。
+    add(win, 'pointerout', (event) => {
+      if (event.relatedTarget === null && event.pointerType === 'mouse') this.releaseCursor();
+    }, { passive: true, capture: true });
+    add(win, 'blur', () => this.releaseCursor(), { passive: true });
+    // 入力欄にフォーカスがある間は休む。
+    const onFocus = (): void => (this.typing() ? this.pause('input') : this.resume('input'));
+    doc.addEventListener('focusin', onFocus, { passive: true });
+    doc.addEventListener('focusout', onFocus, { passive: true });
+    this.cleanups.push(() => {
+      doc.removeEventListener('focusin', onFocus);
+      doc.removeEventListener('focusout', onFocus);
+    });
     add(win, 'scroll', () => this.onScroll(), { passive: true });
-    add(win, 'resize', () => this.scheduleRemeasure());
+    add(win, 'resize', () => {
+      this.abortAirborne();
+      this.scheduleRemeasure();
+    });
 
     // ピンチズーム・拡大後のパン (見えている範囲が変わる)。
     const viewport = win.visualViewport;
@@ -205,6 +437,8 @@ export class HarimaruController {
       // タブ非表示・モーダルの休止中は計測しない (休止が解けたときに計測し直す)。
       if (this.destroyed || this.pauses.has('hidden') || this.pauses.has('modal')) return;
       if (!event.target || !this.placed) return;
+      // 空中では、着地先の足場が浮く・沈むと着地の高さが合わなくなる: 位置の変わる動きがあれば中断して出直す。
+      if (this.abortAirborne()) return;
       if (this.isPlatform(event.target)) {
         const keys = this.riding.get(event.target) ?? new Set<string>();
         keys.add(shiftKey(event));
@@ -249,7 +483,7 @@ export class HarimaruController {
     if (RO) {
       // ResizeObserver の通知は描画の前に届く: その場で確かめ、立てなくなっていれば描画される前に消す。
       const observer = new RO(() => {
-        this.checkNow();
+        this.checkSoon();
         this.scheduleRemeasure();
       });
       observer.observe(this.root);
@@ -263,7 +497,7 @@ export class HarimaruController {
         else this.resume('modal');
         // DOM の変化 (MutationObserver の通知は描画の前) で足場が消えた・動いた・ボタンが入ったら、
         // 再計測のまとめ待ちをせず、変化が描画される前に消す。
-        this.checkNow();
+        this.checkSoon();
         this.scheduleRemeasure();
       });
       observer.observe(this.watch, { childList: true, subtree: true });
@@ -394,7 +628,13 @@ export class HarimaruController {
 
   /** タイマー・計測を止めておく休止 (画面外の休止はスクロール停止の確認だけ続ける)。 */
   private blocked(): boolean {
-    return this.pauses.has('hidden') || this.pauses.has('modal') || this.pauses.has('shift');
+    return this.pauses.has('hidden') || this.pauses.has('modal') || this.pauses.has('shift') || this.pauses.has('input');
+  }
+
+  /** 入力欄にフォーカスがあるか (focusout の直後は、まだ次の要素に移っていないことがあるので activeElement で見る)。 */
+  private typing(): boolean {
+    const active = this.win.document.activeElement;
+    return active instanceof Element && active.matches(INPUT_SELECTOR);
   }
 
   private modalOpen(): boolean {
@@ -412,8 +652,44 @@ export class HarimaruController {
     }
   }
 
+  /** ジャンプの途中で画面が動いた・変わった: 経路の安全を保てないので、即座に隠れて安全な足場から出直す。 */
+  private abortAirborne(): boolean {
+    if (this.airborne) {
+      this.log('jump:aborted');
+      this.vanish(between(this.rng, this.timing.enterDelayMs));
+      return true;
+    }
+    // その場で跳ねている途中: 頭の上の余白を確かめ直せないので、足場に降りて立ち止まる (立ち姿は呼ぶ側で確かめる)。
+    if (this.lift > 0 && this.placed) {
+      this.log('hop:aborted');
+      this.interrupt();
+      this.action = 'idle';
+      this.render(ROW.idle, IDLE_OPEN);
+      this.after(between(this.rng, this.behavior.idleMs), () => this.nextAction());
+    }
+    return false;
+  }
+
+  /** 足場 (またはその近く) で、位置の変わるアニメーション・トランジションが動いている途中か。 */
+  private platformsMoving(): boolean {
+    if (this.riding.size > 0 || this.shifting.size > 0) return true;
+    return this.platformEls.some((el) => {
+      const animations = (el as Element & { getAnimations?: () => Animation[] }).getAnimations?.() ?? [];
+      return animations.some((a) => a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity);
+    });
+  }
+
   private onScroll(): void {
+    this.abortAirborne();
     this.noteActivity();
+    // スクロールの速さ (CSS px / 秒) の最大を、止まるまで覚えておく。
+    const t = this.now();
+    const y = this.win.scrollY;
+    if (this.lastScroll && t > this.lastScroll.t) {
+      const speed = (Math.abs(y - this.lastScroll.y) / (t - this.lastScroll.t)) * 1000;
+      this.scrollPeak = Math.max(this.scrollPeak, speed);
+    }
+    this.lastScroll = { y, t };
     this.clearTimer('scroll');
     if (this.destroyed || this.blocked()) return;
     this.scrollTimer = this.win.setTimeout(() => {
@@ -423,6 +699,9 @@ export class HarimaruController {
   }
 
   private onScrollEnd(): void {
+    const fast = this.scrollPeak >= this.interaction.fastScroll;
+    this.scrollPeak = 0;
+    this.lastScroll = null;
     if (this.destroyed || this.blocked()) return;
     if (!this.placed) {
       if (!this.placed) this.scheduleEnter(0);
@@ -436,6 +715,8 @@ export class HarimaruController {
       this.x + SPRITE.width - SPRITE.sideInset <= terrain.view.right;
     if (inView) {
       this.resume('offscreen');
+      // 速いスクロールのあとは転ぶ (素材待ち。素材がなければ見送る)。
+      if (fast && this.placed && this.pauses.size === 0) this.react('tumble');
       return;
     }
     // 見えない場所にいる: 見える足場があれば、そこへこっそり移る。なければ休む。
@@ -453,7 +734,17 @@ export class HarimaruController {
   private pause(reason: PauseReason): void {
     if (this.destroyed || this.pauses.has(reason)) return;
     this.pauses.add(reason);
+    // 足場の外に体が出ている途中 (しがみつき・ぶら下がり・ジャンプ) なら、立っていた位置へ戻して見せずに、
+    // 休止が解けたら安全な足場から出直す。
+    const offFoot = this.airborne;
     this.interrupt();
+    if (offFoot) {
+      this.setVisible(false);
+      this.placed = false;
+      this.segment = null;
+    }
+    this.cancelCheck();
+    this.stopCursorWatch();
     // 足場への追従もやめる (休止が解けたときに計測し直す)。
     this.stopRide();
     if (reason === 'hidden' || reason === 'modal') {
@@ -526,6 +817,28 @@ export class HarimaruController {
     }
   }
 
+  /**
+   * DOM の変化の確認を、次の描画の直前 (requestAnimationFrame) に 1 回だけ行う。
+   * 変化が描画されるより前に確かめられ、ライブの更新のように変化が続いても計測は 1 フレーム 1 回で済む。
+   */
+  private checkSoon(): void {
+    // 空中にいるときは、変化が描画される前 (いま) に中断して隠れる。
+    if (this.abortAirborne()) return;
+    if (this.checkFrame !== null || this.destroyed || !this.placed || this.pauses.size > 0) return;
+    const run = (): void => {
+      this.checkFrame = null;
+      this.checkNow();
+    };
+    this.checkFrame = typeof this.win.requestAnimationFrame === 'function' ? this.win.requestAnimationFrame(run) : this.win.setTimeout(run, 0);
+  }
+
+  private cancelCheck(): void {
+    if (this.checkFrame === null) return;
+    if (typeof this.win.cancelAnimationFrame === 'function') this.win.cancelAnimationFrame(this.checkFrame);
+    else this.win.clearTimeout(this.checkFrame);
+    this.checkFrame = null;
+  }
+
   /** いまの位置にまだ立てるかを、その場で確かめる (立てなければ即座に消えて出直す)。 */
   private checkNow(): void {
     if (this.destroyed || !this.placed || this.pauses.size > 0) return;
@@ -544,7 +857,8 @@ export class HarimaruController {
     const terrain = this.measureFn(this.root, this.selector, this.win);
     this.view = terrain.view;
     this.platformEls = terrain.elements ?? [];
-    this.segment = findSegment(computeSegments(terrain), this.top, this.x, SNAP_TOLERANCE);
+    this.segments = computeSegments(terrain);
+    this.segment = findSegment(this.segments, this.top, this.x, SNAP_TOLERANCE);
     // 小さなずれ (フォントの読み込み・端数・ホバーで浮くタイル) は、足元を新しい上辺に合わせ直す。
     if (this.segment) {
       // 段の高さ (最も高い上辺) ではなく、真下の足場の上辺に立つ。
@@ -590,7 +904,8 @@ export class HarimaruController {
     const terrain = this.measureFn(this.root, this.selector, this.win);
     this.view = terrain.view;
     this.platformEls = terrain.elements ?? [];
-    const candidates = visibleSegments(computeSegments(terrain), terrain.view);
+    this.segments = computeSegments(terrain);
+    const candidates = visibleSegments(this.segments, terrain.view);
     // 安全な足場がない: 表示しない (DOM の変化・リサイズ・スクロールで、もう一度探す)。
     if (candidates.length === 0) return;
     // 広い足場ほど選ばれやすい。
@@ -613,6 +928,20 @@ export class HarimaruController {
     this.top = this.footTop() ?? chosen.top;
     this.dir = this.rng() < 0.5 ? -1 : 1;
     this.history = [];
+    this.lift = 0;
+    this.airborne = false;
+    // 画面に着いたとき: ふわっと現れるか、カード裏からひょっこり顔を出す (気まぐれ)。
+    if (this.available('peek') && this.rng() < 0.5) {
+      this.sink = SPRITE.height + 2;
+      this.setVisible(true);
+      this.action = 'enter';
+      this.log('enter:peek');
+      this.place();
+      this.emerge();
+      return;
+    }
+    this.sink = 0;
+    this.log('enter:fade');
     this.run({ action: 'idle', durationMs: between(this.rng, this.behavior.idleMs) });
     this.setVisible(true);
   }
@@ -622,11 +951,55 @@ export class HarimaruController {
     this.interrupt();
     this.setVisible(false);
     this.placed = false;
+    this.airborne = false;
+    this.lift = 0;
+    this.sink = 0;
     this.segment = null;
     this.after(this.animation.fadeMs + delay, () => this.tryEnter());
   }
 
   // ------------------------------------------------------------------ 行動
+
+  /** いまの足場で、横方向に見えている範囲 (ピンチズーム) に収めた左端 x の範囲。見えなければ null。 */
+  private walkBounds(segment: Segment): { minX: number; maxX: number } | null {
+    const viewLeft = this.view?.left ?? -Infinity;
+    const viewRight = this.view?.right ?? Infinity;
+    const minX = Math.max(segment.minX, viewLeft - SPRITE.sideInset);
+    const maxX = Math.min(segment.maxX, viewRight - SPRITE.width + SPRITE.sideInset);
+    if (maxX < minX || this.x < minX - 1 || this.x > maxX + 1) return null;
+    return { minX, maxX };
+  }
+
+  /** その場で跳ねる空き (頭の上 hopHeight + 2px に障害物がなく、見える範囲) があるか。 */
+  private hopRoom(height = this.animation.hopHeight): boolean {
+    const region: Rect = {
+      left: this.x + SPRITE.sideInset,
+      right: this.x + SPRITE.width - SPRITE.sideInset,
+      top: this.top - SPRITE.height - height - 2,
+      bottom: this.top - SPRITE.height,
+    };
+    if (!this.view) return false;
+    return boxIsClear(region, this.obstaclesIn(this.root, [region], this.win), this.view);
+  }
+
+  /** 安全なジャンプの候補 (経路の全体で障害物に重ならず、見える範囲に収まるもの)。 */
+  private safeJumps(segment: Segment): JumpPlan[] {
+    if (!this.view) return [];
+    const view = this.view;
+    const targets = visibleSegments(this.segments, view);
+    const plans = jumpCandidates(segment, targets, this.animation.jumpApex, DEFAULT_TERRAIN);
+    if (plans.length === 0) return [];
+    const obstacles = this.obstaclesIn(this.root, plans.map(arcBounds), this.win);
+    return plans.filter((plan) => arcIsClear(plan, obstacles, view));
+  }
+
+  /** 隠れて移れる場所 (見えている別の足場、または同じ足場の 40px 以上離れた位置)。 */
+  private relocationTargets(segment: Segment): Segment[] {
+    if (!this.view) return [];
+    return visibleSegments(this.segments, this.view).filter(
+      (s) => s.top !== segment.top || s.minX !== segment.minX || Math.abs(s.maxX - s.minX) >= 40,
+    );
+  }
 
   private nextAction(): void {
     if (this.destroyed || this.pauses.size > 0 || !this.placed) return;
@@ -637,31 +1010,80 @@ export class HarimaruController {
       return;
     }
     // ピンチズーム中は、横方向に見えている範囲の中だけを歩く。見えない位置にいれば休む (スクロールで再開)。
-    const viewLeft = this.view?.left ?? -Infinity;
-    const viewRight = this.view?.right ?? Infinity;
-    const minX = Math.max(segment.minX, viewLeft - SPRITE.sideInset);
-    const maxX = Math.min(segment.maxX, viewRight - SPRITE.width + SPRITE.sideInset);
-    if (maxX < minX || this.x < minX - 1 || this.x > maxX + 1) {
+    const bounds = this.walkBounds(segment);
+    if (!bounds) {
       this.pause('offscreen');
       return;
     }
-    const decision = decideNext(
-      { now: this.now(), lastActivityAt: this.lastActivityAt, history: this.history, x: this.x, minX, maxX },
-      this.rng,
-      this.behavior,
-    );
+    const input = {
+      now: this.now(),
+      lastActivityAt: this.lastActivityAt,
+      history: this.history,
+      x: this.x,
+      minX: bounds.minX,
+      maxX: bounds.maxX,
+      canHop: this.available('hop') && this.hopRoom(),
+      canRelocate: this.available('hide') && this.relocationTargets(segment).length > 0,
+      available: this.available,
+    };
+    // ジャンプの経路の計測 (障害物の収集) は重いので、ジャンプが選ばれうるときだけ行う。
+    const jumpPossible = actionWeights({ ...input, canJump: true }, this.behavior).jump > 0;
+    const jumps = jumpPossible ? this.safeJumps(segment) : [];
+    const decision = decideNext({ ...input, canJump: jumps.length > 0 }, this.rng, this.behavior);
+    if (decision.action === 'jump') {
+      const plan = jumps[Math.floor(this.rng() * jumps.length)];
+      this.recordAction('jump');
+      this.jump(plan);
+      return;
+    }
     this.run(decision);
   }
 
-  private run(decision: Decision): void {
+  private recordAction(action: HarimaruAction): void {
     this.interrupt();
-    this.action = decision.action;
-    this.history = [...this.history, decision.action].slice(-HISTORY_LENGTH);
-    if (decision.action === 'walk' && decision.targetX !== undefined) this.walk(decision.targetX);
-    else if (decision.action === 'sleep') this.sleep(decision.durationMs);
-    else this.idle(decision.durationMs);
+    this.action = action;
+    this.history = [...this.history, action].slice(-HISTORY_LENGTH);
+    this.log(`action:${action}`);
   }
 
+  private run(decision: Decision): void {
+    this.recordAction(decision.action);
+    switch (decision.action) {
+      case 'walk':
+      case 'run': {
+        const running = decision.action === 'run';
+        this.walk(decision.targetX ?? this.x, running, () => {
+          // 歩き終わりに、ときどきカードの縁で足を滑らせる (安全に滑れる場所だけ)。
+          if (!running && this.rng() < this.behavior.slipChance && this.trySlip()) return;
+          this.idle(between(this.rng, this.behavior.idleMs));
+        });
+        return;
+      }
+      case 'groom':
+      case 'stretch':
+        this.playClip(decision.action, () => this.idle(decision.durationMs));
+        return;
+      case 'sleep':
+        this.sleep(decision.durationMs);
+        return;
+      case 'rest':
+        this.rest(decision.durationMs);
+        return;
+      case 'look':
+        this.look(decision.durationMs);
+        return;
+      case 'hop':
+        this.hop(1, () => this.idle(between(this.rng, this.behavior.idleMs)));
+        return;
+      case 'hide':
+        this.hideAndMove(decision.durationMs, decision.walkToEdge === true);
+        return;
+      default:
+        this.idle(decision.durationMs);
+    }
+  }
+
+  /** 立ち止まる (ときどき瞬き)。 */
   private idle(durationMs: number): void {
     this.render(ROW.idle, IDLE_OPEN);
     const blink = (): void => {
@@ -677,25 +1099,63 @@ export class HarimaruController {
     this.after(durationMs, () => this.nextAction());
   }
 
-  private walk(targetX: number): void {
+  /** 何もせず伏せて休む (目を開けたまま、ときどき瞬き)。 */
+  private rest(durationMs: number): void {
+    this.render(ROW.sleep, REST_OPEN);
+    const blink = (): void => {
+      this.after(between(this.rng, this.animation.blinkEveryMs), () => {
+        this.render(ROW.sleep, REST_BLINK);
+        this.after(this.animation.blinkMs * 2, () => {
+          this.render(ROW.sleep, REST_OPEN);
+          blink();
+        });
+      });
+    };
+    blink();
+    this.after(durationMs, () => this.nextAction());
+  }
+
+  /** 周囲を見る (少し正面を向いたり、左右に向きを変えたり)。 */
+  private look(durationMs: number): void {
+    this.render(ROW.idle, IDLE_LOOK);
+    const turn = (): void => {
+      this.after(between(this.rng, this.animation.lookTurnMs), () => {
+        if (this.rng() < 0.6) this.dir = this.dir > 0 ? -1 : 1;
+        this.render(ROW.idle, this.rng() < 0.5 ? IDLE_LOOK : IDLE_OPEN);
+        turn();
+      });
+    };
+    turn();
+    this.after(durationMs, () => this.nextAction());
+  }
+
+  /** 歩く・駆け足で targetX まで行き、done を呼ぶ。 */
+  private walk(targetX: number, running: boolean, done: () => void): void {
     const startX = this.x;
     const distance = targetX - startX;
     if (Math.abs(distance) < 0.5) {
-      this.idle(between(this.rng, this.behavior.idleMs));
+      done();
       return;
     }
     this.dir = distance > 0 ? 1 : -1;
-    const durationMs = (Math.abs(distance) / this.behavior.walkSpeed) * 1000;
-    let column = 0;
-    this.render(ROW.walk, column);
-    const step = (): void => {
-      this.after(this.animation.walkFrameMs, () => {
-        column = (column + 1) % WALK_FRAMES;
-        this.render(ROW.walk, column);
-        step();
-      });
-    };
-    step();
+    const speed = running ? this.behavior.runSpeed : this.behavior.walkSpeed;
+    const frameMs = running ? this.animation.runFrameMs : this.animation.walkFrameMs;
+    const durationMs = (Math.abs(distance) / speed) * 1000;
+    if (running && this.sheets.has('run')) {
+      // 駆け足は専用の走りコマ (v0.9) をループする。
+      this.loopClip('run');
+    } else {
+      let column = 0;
+      this.render(ROW.walk, column);
+      const step = (): void => {
+        this.after(frameMs, () => {
+          column = (column + 1) % WALK_FRAMES;
+          this.render(ROW.walk, column);
+          step();
+        });
+      };
+      step();
+    }
     const startedAt = this.now();
     const tick = (): void => {
       const progress = Math.min(1, (this.now() - startedAt) / durationMs);
@@ -708,7 +1168,7 @@ export class HarimaruController {
       if (progress >= 1) {
         this.frame = null;
         this.clearActionTimers();
-        this.idle(between(this.rng, this.behavior.idleMs));
+        done();
         return;
       }
       this.frame = this.requestFrame(tick);
@@ -716,12 +1176,195 @@ export class HarimaruController {
     this.frame = this.requestFrame(tick);
   }
 
+  /**
+   * その場で times 回跳ねて、done を呼ぶ (頭の上の空きは呼ぶ側で確かめる)。
+   * keepFrame のときはコマを変えない (喜ぶ・驚くのコマを再生しながら跳ねる)。
+   */
+  private hop(times: number, done: () => void, keepFrame = false, height = this.animation.hopHeight): void {
+    let count = 0;
+    const once = (): void => {
+      const startedAt = this.now();
+      if (!keepFrame) this.render(ROW.idle, IDLE_OPEN);
+      const tick = (): void => {
+        const t = Math.min(1, (this.now() - startedAt) / this.animation.hopMs);
+        this.lift = 4 * height * t * (1 - t);
+        this.place();
+        if (t >= 1) {
+          this.lift = 0;
+          this.place();
+          this.frame = null;
+          count += 1;
+          if (count < times) once();
+          else done();
+          return;
+        }
+        this.frame = this.requestFrame(tick);
+      };
+      this.frame = this.requestFrame(tick);
+    };
+    once();
+  }
+
+  /** 踏切の位置まで歩いてから、放物線で別の足場へ跳ぶ (経路の安全は確かめ済み)。 */
+  private jump(plan: JumpPlan): void {
+    this.walk(plan.from.x, false, () => {
+      // 足場が動いている途中 (ホバーで浮く途中など) は、動いたあとの高さが分からないので跳ばない。
+      if (this.platformsMoving()) {
+        this.log('jump:skipped:moving');
+        this.idle(between(this.rng, this.behavior.idleMs));
+        return;
+      }
+      // 歩いている間に画面が変わったかもしれない: 経路をもう一度確かめる。
+      const current = this.currentSegment();
+      const again = current ? this.safeJumps(current).find((p) => p.target.top === plan.target.top && p.target.minX === plan.target.minX) : undefined;
+      if (!again) {
+        this.idle(between(this.rng, this.behavior.idleMs));
+        return;
+      }
+      this.dir = again.to.x > again.from.x ? 1 : -1;
+      const durationMs = Math.max(this.animation.jumpMinMs, Math.abs(again.to.x - again.from.x) * this.animation.jumpMsPerPx);
+      const startedAt = this.now();
+      this.airborne = true;
+      this.render(ROW.walk, WALK_AIR);
+      const tick = (): void => {
+        const t = Math.min(1, (this.now() - startedAt) / durationMs);
+        const point = arcAt(again, t);
+        this.x = point.x;
+        this.top = again.to.top;
+        this.lift = again.to.top - point.foot;
+        this.place();
+        if (t >= 1) {
+          this.frame = null;
+          this.airborne = false;
+          this.lift = 0;
+          this.top = again.to.top;
+          this.segment = again.target;
+          this.action = 'idle';
+          this.render(ROW.idle, IDLE_OPEN);
+          this.idle(between(this.rng, this.behavior.idleMs));
+          // ときどき着地に失敗して転ぶ (素材待ち: 素材がなければ記録だけ)。
+          if (this.rng() < MISHAP_CHANCE) this.react('tumble');
+          return;
+        }
+        this.frame = this.requestFrame(tick);
+      };
+      this.frame = this.requestFrame(tick);
+    });
+  }
+
+  /** カード上辺の線より下へ沈む (下の部分は切り取って見せない = カードの裏に隠れる)。 */
+  private sinkTo(target: number, durationMs: number, done: () => void): void {
+    const from = this.sink;
+    const startedAt = this.now();
+    const tick = (): void => {
+      const t = durationMs > 0 ? Math.min(1, (this.now() - startedAt) / durationMs) : 1;
+      // ゆっくり始まり、ゆっくり止まる。
+      const eased = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
+      this.sink = from + (target - from) * eased;
+      this.place();
+      if (t >= 1) {
+        this.frame = null;
+        done();
+        return;
+      }
+      this.frame = this.requestFrame(tick);
+    };
+    this.frame = this.requestFrame(tick);
+  }
+
+  /** カード裏に隠れて、別の安全な場所から顔を出す。端まで歩いてから隠れることもある (画面の外へ消えるように)。 */
+  private hideAndMove(hiddenMs: number, walkToEdge: boolean): void {
+    const segment = this.segment;
+    const go = (): void => {
+      this.render(ROW.idle, IDLE_OPEN);
+      this.sinkTo(SPRITE.height + 2, this.animation.sinkMs, () => {
+        this.after(hiddenMs, () => this.reappear());
+      });
+    };
+    if (walkToEdge && segment) {
+      const edge = this.x - segment.minX < segment.maxX - this.x ? segment.minX : segment.maxX;
+      this.walk(edge, false, () => {
+        // 端でときどき足を滑らせて、縁にしがみつく (安全に滑れないときは、そのまま隠れる)。
+        if (this.rng() < MISHAP_CHANCE && this.trySlip()) return;
+        go();
+      });
+      return;
+    }
+    go();
+  }
+
+  /** 隠れたまま、見えている安全な足場の別の位置へ移って顔を出す。移れる先がなければ同じ場所から出る。 */
+  private reappear(near?: number): void {
+    if (this.destroyed || this.pauses.size > 0) return;
+    const current = this.currentSegment();
+    const targets = current ? this.relocationTargets(current) : visibleSegments(this.segments, this.view ?? { top: -Infinity, bottom: Infinity });
+    if (targets.length === 0 && !current) {
+      this.vanish(between(this.rng, this.timing.enterDelayMs));
+      return;
+    }
+    if (targets.length > 0) {
+      let target: Segment;
+      let x: number;
+      if (near !== undefined && current) {
+        target = current;
+        x = clamp(near - SPRITE.width / 2, current.minX, current.maxX);
+      } else {
+        target = targets[Math.floor(this.rng() * targets.length)];
+        // 同じ足場なら、いまの位置から離れたところへ。
+        const far = target === current;
+        x = target.minX + (target.maxX - target.minX) * this.rng();
+        if (far && Math.abs(x - this.x) < 40) x = this.x - target.minX > target.maxX - this.x ? target.minX : target.maxX;
+      }
+      this.top = target.top;
+      this.segment = target;
+      this.x = x;
+      this.top = this.footTop() ?? target.top;
+      this.dir = this.rng() < 0.5 ? -1 : 1;
+      this.place();
+    }
+    this.peekThenEmerge();
+  }
+
+  /** 耳と目だけを出してしばらく様子を見て、出てくる (たまにまた引っ込む)。 */
+  private peekThenEmerge(): void {
+    this.action = 'peek';
+    this.log('action:peek');
+    this.render(ROW.idle, IDLE_LOOK);
+    this.sinkTo(SPRITE.height - this.animation.peekVisible, this.animation.sinkMs / 2, () => {
+      this.after(between(this.rng, [800, 2_200]), () => {
+        if (this.rng() < 0.6) this.dir = this.dir > 0 ? -1 : 1;
+        this.render(ROW.idle, IDLE_OPEN);
+        this.after(between(this.rng, [400, 1_200]), () => this.emerge());
+      });
+    });
+  }
+
+  /** カード裏から出てくる (沈んだ深さ → 0)。 */
+  private emerge(): void {
+    this.render(ROW.idle, IDLE_OPEN);
+    this.sinkTo(0, this.animation.sinkMs, () => {
+      this.sink = 0;
+      this.action = 'idle';
+      this.place();
+      this.idle(between(this.rng, this.behavior.idleMs));
+    });
+  }
+
   private sleep(durationMs: number): void {
     this.wakeRolled = false;
     let column = 0;
     this.render(ROW.sleep, column);
     const curl = (): void => {
-      if (column >= SLEEP_FRAMES - 1) return;
+      if (column >= SLEEP_FRAMES - 1) {
+        // 眠っている途中で、ときどき寝ぼけて縁から落ちそうになる (1 回の眠りに 1 回まで。安全なときだけ)。
+        const latest = durationMs - 1_500;
+        if (latest > 2_500 && this.available('sleepyFall') && this.rng() < this.behavior.sleepyFallChance) {
+          this.after(between(this.rng, [2_500, Math.min(latest, 12_000)]), () => {
+            if (!this.trySleepyFall()) this.log('sleepyFall:skipped');
+          });
+        }
+        return;
+      }
       this.after(this.animation.sleepFrameMs, () => {
         column += 1;
         this.render(ROW.sleep, column);
@@ -736,6 +1379,7 @@ export class HarimaruController {
     if (this.destroyed || this.pauses.size > 0) return;
     this.clearActionTimers();
     this.action = 'sleep';
+    this.log('wake');
     let column = SLEEP_FRAMES - 1;
     this.render(ROW.sleep, column);
     const uncurl = (): void => {
@@ -753,21 +1397,671 @@ export class HarimaruController {
     uncurl();
   }
 
+  // ------------------------------------------------------------------ 触れ合い
+
+  /** 押し始め: 指の数と、押した要素が操作部品かを覚える。 */
+  private onPointerDown(event: PointerEvent): void {
+    this.activePointers.add(event.pointerId);
+    // クリック・ドラッグが始まったら、カーソルにぶら下がっていても放す (操作の邪魔をしない)。
+    this.releaseCursor();
+    if (this.gesture) {
+      this.gesture.pointers = Math.max(this.gesture.pointers, this.activePointers.size);
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    this.gesture = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      t: this.now(),
+      maxMove: 0,
+      pointers: this.activePointers.size,
+      cancelled: false,
+      secondary: event.pointerType === 'mouse' && event.button !== 0,
+      onControl: !!target?.closest(CONTROL_SELECTOR),
+    };
+  }
+
+  private onPointerMove(event: PointerEvent): void {
+    if (this.gesture && event.pointerId === this.gesture.id) {
+      this.gesture.maxMove = Math.max(this.gesture.maxMove, Math.hypot(event.clientX - this.gesture.x, event.clientY - this.gesture.y));
+    }
+    if (event.pointerType === 'mouse' && this.finePointer) this.trackCursor(event);
+  }
+
+  private onPointerCancel(event: PointerEvent): void {
+    this.activePointers.delete(event.pointerId);
+    if (this.gesture && event.pointerId === this.gesture.id) this.gesture.cancelled = true;
+    if (this.activePointers.size === 0) this.gesture = null;
+  }
+
+  /** 離したとき: 短いタップ・クリックだけを採用して、触れた場所に応じて反応する。 */
+  private onPointerUp(event: PointerEvent): void {
+    this.activePointers.delete(event.pointerId);
+    const gesture = this.gesture;
+    if (!gesture || event.pointerId !== gesture.id) return;
+    this.gesture = null;
+    const rejected = classifyGesture(
+      {
+        durationMs: this.now() - gesture.t,
+        maxMove: Math.max(gesture.maxMove, Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y)),
+        pointers: gesture.pointers,
+        cancelled: gesture.cancelled,
+        secondaryButton: gesture.secondary,
+        onControl: gesture.onControl,
+        selectedText: !!this.win.getSelection?.()?.toString().trim(),
+      },
+      this.interaction,
+    );
+    if (rejected) {
+      this.log(`tap:ignored:${rejected}`);
+      return;
+    }
+    this.onTap({ x: event.clientX + this.win.scrollX, y: event.clientY + this.win.scrollY });
+  }
+
+  /** 採用したタップ (ページ座標)。 */
+  private onTap(point: { x: number; y: number }): void {
+    // 跳ねている・飛んでいる・沈んでいる間は、描かれている位置と足場の位置がずれるので反応しない。
+    if (!this.placed || this.pauses.size > 0 || this.airborne || this.sink > 0 || this.lift > 0 || this.poseX !== 0 || this.poseY !== 0) return;
+    const zone = touchZone(point, { x: this.x, top: this.top, dir: this.dir }, this.interaction);
+    if (zone === null) return;
+    // 見えている体の外 (近く・背後、体の周りの余裕の部分) へのタップは、文字・操作部品・色の付いた要素
+    // (足元のカード面など) のない余白で成立したものだけ。
+    const box = spriteBox(this.x, this.top);
+    const onBody = point.x >= box.left && point.x <= box.right && point.y >= box.top && point.y <= box.bottom;
+    if (!onBody && !this.emptySpace(point)) {
+      this.log('tap:ignored:content');
+      return;
+    }
+    const t = this.now();
+    if (zone !== 'near') this.touches = [...recentTimes(this.touches, t, this.interaction.fleeWindowMs), t];
+    if (t - this.lastReactionAt < this.interaction.reactionCooldownMs) return;
+    // 眠っていたら、触れると目を覚ます (反応はそのあと)。
+    if (this.action === 'sleep' && zone !== 'near') {
+      this.log('tap:wake');
+      this.lastReactionAt = t;
+      this.interrupt();
+      this.wake();
+      return;
+    }
+    const reaction = reactionFor(zone, this.touches.length, this.rng, this.interaction);
+    if (!reaction) return;
+    this.lastReactionAt = t;
+    this.react(reaction, point.x);
+  }
+
+  /** ページ座標の点の周り (指の幅 ±6px) が、文字・操作部品・色の付いた要素のない余白か。 */
+  private emptySpace(point: { x: number; y: number }): boolean {
+    const region: Rect = { left: point.x - 6, right: point.x + 6, top: point.y - 6, bottom: point.y + 6 };
+    return this.obstaclesIn(this.root, [region], this.win).every(
+      (o) => !(o.right > region.left && o.left < region.right && o.bottom > region.top && o.top < region.bottom),
+    );
+  }
+
+  /** 反応を始める。素材のない反応・安全にできない反応は見送る (記録だけ残す)。始めたら true。 */
+  private react(
+    reaction: Exclude<Reaction, null> | 'tumble' | 'peekNear' | 'lookUp' | 'play' | 'cursorHang',
+    pointX?: number,
+  ): boolean {
+    // 背後から触れたときの「驚く」は、画像を読み込めていなければ振り向く反応にする。
+    let chosen: string = reaction;
+    if (reaction === 'surprise' && !this.available('surprise')) {
+      this.log('react:surprise:pending-asset');
+      chosen = 'turn';
+    }
+    const motion: MotionId = chosen === 'peekNear' ? 'peek' : (chosen as MotionId);
+    if (!this.available(motion)) {
+      this.log(`react:${chosen}:pending-asset`);
+      return false;
+    }
+    if (chosen === 'cursorHang') return this.cursor !== null && this.tryCursorHang(this.cursor);
+    if (chosen === 'tumble') return this.tumble();
+    this.log(`react:${chosen}`);
+    this.interrupt();
+    this.lift = 0;
+    const settle = (): void => {
+      this.stopHop();
+      this.action = 'idle';
+      this.idle(between(this.rng, this.behavior.idleMs));
+    };
+    /** 触れた点・カーソルの方を向く。 */
+    const face = (): void => {
+      if (pointX !== undefined) this.dir = pointX > this.x + SPRITE.width / 2 ? 1 : -1;
+    };
+    switch (chosen) {
+      case 'happy':
+        this.action = 'happy';
+        if (this.sheets.has('happy')) {
+          // 喜ぶコマ (目を細めて笑う) を再生しながら、上に空きがあれば小さく 2 回跳ねる。
+          if (this.hopRoom()) this.hop(2, () => undefined, true);
+          this.playClip('happy', settle);
+        } else if (this.hopRoom()) this.hop(2, settle);
+        else settle();
+        return true;
+      case 'surprise': {
+        this.action = 'surprise';
+        // 驚いて小さく跳び上がり (上に空きがあれば)、落ち着いたら触れた方へ振り向く。
+        if (this.hopRoom(4)) this.hop(1, () => undefined, true, 4);
+        this.playClip('surprise', () => {
+          this.stopHop();
+          this.dir = this.dir > 0 ? -1 : 1;
+          this.render(ROW.idle, IDLE_OPEN);
+          this.after(400, settle);
+        });
+        return true;
+      }
+      case 'turn':
+        this.action = 'turn';
+        this.dir = this.dir > 0 ? -1 : 1;
+        this.render(ROW.idle, IDLE_OPEN);
+        this.after(500, settle);
+        return true;
+      case 'lookUp':
+      case 'tilt':
+      case 'play':
+        // 見上げる・首をかしげる・じゃれる: カーソル (触れた点) の方を向いて、その場で 1 回。
+        this.action = chosen;
+        face();
+        this.playClip(chosen, settle);
+        return true;
+      case 'flee': {
+        this.action = 'flee';
+        this.touches = [];
+        const segment = this.segment;
+        if (!segment) {
+          settle();
+          return true;
+        }
+        // 触れた側と反対の端へ駆けていき、カード裏に隠れて別の場所へ。
+        const away = pointX !== undefined && pointX > this.x + SPRITE.width / 2 ? segment.minX : segment.maxX;
+        this.walk(away, true, () => {
+          this.render(ROW.idle, IDLE_OPEN);
+          this.sinkTo(SPRITE.height + 2, this.animation.sinkMs / 2, () => this.after(between(this.rng, this.behavior.hiddenMs), () => this.reappear()));
+        });
+        return true;
+      }
+      case 'approach': {
+        this.action = 'approach';
+        const segment = this.segment;
+        if (!segment || pointX === undefined) {
+          settle();
+          return true;
+        }
+        // 少し手前で止まって、そちらを向く。
+        const center = this.x + SPRITE.width / 2;
+        const stop = pointX > center ? pointX - SPRITE.width - 6 : pointX + 6;
+        const target = clamp(stop, segment.minX, segment.maxX);
+        this.walk(target, false, () => {
+          this.dir = pointX > this.x + SPRITE.width / 2 ? 1 : -1;
+          this.render(ROW.idle, IDLE_LOOK);
+          this.after(between(this.rng, this.behavior.idleMs), () => this.nextAction());
+        });
+        return true;
+      }
+      case 'peekNear':
+        this.action = 'peek';
+        this.render(ROW.idle, IDLE_OPEN);
+        this.sinkTo(SPRITE.height + 2, this.animation.sinkMs, () => this.after(600, () => this.reappear(pointX)));
+        return true;
+      default:
+        settle();
+        return true;
+    }
+  }
+
+  /** 並行して跳ねている途中なら、足元へ戻して止める。 */
+  private stopHop(): void {
+    if (this.lift === 0) return;
+    this.cancelFrame();
+    this.lift = 0;
+    this.place();
+  }
+
+  // ------------------------------------------------------------------ 縁・転ぶ・寝ぼける (v0.9)
+
+  /**
+   * カードの縁の下 (カードの内側) に体を出しても安全か。
+   * - 表示枠の左端 x が、どのコマでもいまの足場の立てる範囲 (と、見えている範囲) に収まる。
+   * - 体を出す範囲 (縁の線から depth + 余白の深さ) が、足元のカード 1 枚の上辺の直線部分 (角丸を除く) の中にあり、
+   *   カードの中の文字・スコア・操作部品・色の付いた要素に重ならず、見えている範囲に収まる。
+   * - 足元のカードそのものが操作部品 (ボタン・リンク) ではない。
+   */
+  private edgeClear(lefts: readonly number[], depth: number): Element | null {
+    const segment = this.segment;
+    const view = this.view;
+    if (!segment || !view) return null;
+    const bounds = this.walkBounds(segment);
+    if (!bounds || lefts.some((left) => left < bounds.minX - 0.5 || left > bounds.maxX + 0.5)) return null;
+    const box: Rect = {
+      left: Math.min(...lefts) + SPRITE.sideInset,
+      right: Math.max(...lefts) + SPRITE.width - SPRITE.sideInset,
+      top: this.top,
+      bottom: this.top + depth + EDGE_CLEARANCE,
+    };
+    if (box.bottom > view.bottom) return null;
+    const sx = this.win.scrollX;
+    const sy = this.win.scrollY;
+    const card = this.platformEls.find((el) => {
+      const rect = el.getBoundingClientRect();
+      if (Math.abs(rect.top + sy - this.top) > 1) return false;
+      const inset = Math.max(DEFAULT_TERRAIN.cornerInset, topCornerRadius(el, this.win));
+      return rect.left + sx + inset <= box.left && box.right <= rect.right + sx - inset && rect.bottom + sy >= box.bottom + 1;
+    });
+    // 足場そのものが操作部品 (ボタンのタイル・リンクのカードなど) なら、その面に体を重ねない。
+    if (!card || card.closest(CONTROL_SELECTOR)) return null;
+    return this.obstaclesIn(this.root, [box], this.win, card).every((o) => !intersects(box, o)) ? card : null;
+  }
+
+  /**
+   * 掴んでいるカードが、掴んだときと同じ場所にまだあるか (コマごとに確かめる)。DOM の構造が変わらない消え方
+   * (スタイルだけで隠れる・動く) でも、カードの上辺がずれたら false。
+   */
+  private holdIntact(card: Element, top: number, left: number): boolean {
+    if (!card.isConnected) return false;
+    const rect = card.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    return Math.abs(rect.top + this.win.scrollY - top) <= 1 && Math.abs(rect.left + this.win.scrollX - left) <= 1;
+  }
+
+  /** 縁の下に体を出している間、毎フレーム (描画の前に) 掴んでいるカードを確かめる。 */
+  private watchHold(card: Element, top: number, left: number): void {
+    const step = (): void => {
+      this.frame = null;
+      if (!this.holdIntact(card, top, left)) {
+        this.holdLost();
+        return;
+      }
+      this.frame = this.requestFrame(step);
+    };
+    this.frame = this.requestFrame(step);
+  }
+
+  /** 縁の下に体を出す動作の途中で、掴んでいる足場が消えた・動いた: 即座に隠れて安全な場所から出直す。 */
+  private holdLost(): false {
+    this.log('hold:lost');
+    this.vanish(between(this.rng, this.timing.enterDelayMs));
+    return false;
+  }
+
+  /** 基準点を使う動作のコマの描く位置 (立っている位置 this.x / this.top からのずれ)。grip = 縁の線の上の掴む点の x。 */
+  private poseAt(id: ClipId, frame: number, gripX: number, gripY = this.top): { dx: number; dy: number } {
+    const o = clipOffset(id, frame, this.dir);
+    return { dx: gripX + o.dx - this.x, dy: gripY + o.dy - (this.top - SPRITE.height) };
+  }
+
+  /**
+   * 縁で足を滑らせ (slip)、前足で縁にしがみついて後ろ足をバタバタさせ (hang)、よじ登って (climb) 立つ。
+   * 掴む点 (縁の線の上) をコマごとの基準点に合わせて描くので、コマが変わっても前足の位置は跳ねない。
+   * 最初のコマ (待機コマ 1) はいまの立ち姿と同じ位置、最後のコマ (待機コマ 1) は掴む点の上に立つ位置。
+   * 安全に滑れない場所 (カードの角丸・下に文字や操作部品・見えない範囲) では何もしないで false。
+   */
+  private trySlip(): boolean {
+    if (!this.available('slip') || !this.available('hang') || !this.available('climb')) return false;
+    if (this.airborne || this.platformsMoving()) return false;
+    // 掴む点: 最初のコマがいまの立ち姿にぴったり重なる位置。
+    const gripX = this.x - clipOffset('slip', 0, this.dir).dx;
+    const frames: [ClipId, number][] = [];
+    for (const id of ['slip', 'hang', 'climb'] as const) for (let k = 0; k < CLIPS[id].frameCount; k += 1) frames.push([id, k]);
+    const poses = frames.map(([id, k]) => this.poseAt(id, k, gripX));
+    const depth = Math.max(...poses.map((p) => p.dy));
+    const card = this.edgeClear(poses.map((p) => this.x + p.dx), depth);
+    if (!card) return false;
+    const held = card.getBoundingClientRect();
+    const holdTop = held.top + this.win.scrollY;
+    const holdLeft = held.left + this.win.scrollX;
+    this.interrupt();
+    this.action = 'slip';
+    this.log('action:slip');
+    this.airborne = true;
+    this.watchHold(card, holdTop, holdLeft);
+    const pose = (id: ClipId) => (frame: number): boolean => {
+      if (!this.holdIntact(card, holdTop, holdLeft)) return this.holdLost();
+      const p = this.poseAt(id, frame, gripX);
+      this.poseX = p.dx;
+      this.poseY = p.dy;
+      return true;
+    };
+    this.playClip('slip', () => {
+      this.action = 'hang';
+      this.log('action:hang');
+      this.loopClip('hang', pose('hang'));
+      this.after(between(this.rng, this.animation.hangMs), () => {
+        this.clearActionTimers();
+        this.action = 'climb';
+        this.log('action:climb');
+        this.playClip('climb', () => {
+          // 最後のコマ (待機コマ 1) の位置に立つ。
+          const last = this.poseAt('climb', CLIPS.climb.frameCount - 1, gripX);
+          this.cancelFrame();
+          this.x += last.dx;
+          this.poseX = 0;
+          this.poseY = 0;
+          this.airborne = false;
+          this.action = 'idle';
+          this.render(ROW.idle, IDLE_OPEN);
+          this.idle(between(this.rng, this.behavior.idleMs));
+        }, pose('climb'));
+      });
+    }, pose('slip'));
+    return true;
+  }
+
+  /** 転んで起き上がる (着地の失敗・速いスクロールのあと)。前へ転がるぶんの足場がなければ見送る。 */
+  private tumble(): boolean {
+    const segment = this.segment;
+    const bounds = segment ? this.walkBounds(segment) : null;
+    if (!bounds || this.airborne) return false;
+    const base = clipOffset('tumble', 0, this.dir).dx;
+    const offsets = Array.from({ length: CLIPS.tumble.frameCount }, (_, k) => clipOffset('tumble', k, this.dir).dx - base);
+    if (offsets.some((dx) => this.x + dx < bounds.minX || this.x + dx > bounds.maxX)) {
+      this.log('tumble:skipped:room');
+      return false;
+    }
+    this.interrupt();
+    this.action = 'tumble';
+    this.log('react:tumble');
+    this.playClip('tumble', () => {
+      this.x += offsets[offsets.length - 1];
+      this.poseX = 0;
+      this.action = 'idle';
+      this.render(ROW.idle, IDLE_OPEN);
+      this.idle(between(this.rng, this.behavior.idleMs));
+    }, (frame) => {
+      this.poseX = offsets[frame];
+    });
+    return true;
+  }
+
+  /** 眠ったまま縁でぐらっと傾き、はっと目を開けて踏みとどまる。そのあと伏せて目覚める。 */
+  private trySleepyFall(): boolean {
+    if (!this.available('sleepyFall') || this.airborne) return false;
+    const gripX = this.x - clipOffset('sleepyFall', 0, this.dir).dx;
+    const poses = Array.from({ length: CLIPS.sleepyFall.frameCount }, (_, k) => this.poseAt('sleepyFall', k, gripX));
+    const depth = Math.max(...poses.map((p) => p.dy));
+    const card = this.edgeClear(poses.map((p) => this.x + p.dx), depth);
+    if (!card) return false;
+    const held = card.getBoundingClientRect();
+    const holdTop = held.top + this.win.scrollY;
+    const holdLeft = held.left + this.win.scrollX;
+    this.interrupt();
+    this.action = 'sleepyFall';
+    this.log('action:sleepyFall');
+    this.watchHold(card, holdTop, holdLeft);
+    this.playClip('sleepyFall', () => {
+      this.cancelFrame();
+      this.poseX = 0;
+      this.poseY = 0;
+      // 目を開けて伏せた姿 (休むコマ) で少し様子を見てから起きる。
+      this.action = 'sleep';
+      this.render(ROW.sleep, REST_OPEN);
+      this.after(700, () => {
+        this.log('wake');
+        this.nextAction();
+      });
+    }, (frame) => {
+      if (!this.holdIntact(card, holdTop, holdLeft)) return this.holdLost();
+      const p = poses[frame];
+      this.poseX = p.dx;
+      this.poseY = p.dy;
+      return true;
+    });
+    return true;
+  }
+
+  // ------------------------------------------------------------------ カーソルにぶら下がる (v0.9, PC)
+
+  /**
+   * カーソルの先端に跳びついてぶら下がれるか (位置と安全)。ぶら下がりのコマは左右反転して、体を先端の左に出す。
+   * 先端が頭の少し上にあり、跳びつく経路とぶら下がる姿の全体が文字・操作部品に重ならず、見えている範囲に収まること。
+   */
+  private cursorHangPlan(cursor: CursorState): { dx: number; dy: number }[] | null {
+    if (!this.placed || this.airborne || !this.view || this.sink > 0 || this.lift > 0) return null;
+    // 押している・ドラッグ中・操作部品の上・文字の選択中は跳びつかない。
+    if (cursor.onControl || cursor.buttons !== 0 || this.activePointers.size > 0) return null;
+    if (this.win.getSelection?.()?.toString().trim()) return null;
+    const flipped = 1 as const;
+    const poses = Array.from({ length: CLIPS.cursorHang.frameCount }, (_, k) => {
+      const o = clipOffset('cursorHang', k, flipped);
+      return { dx: cursor.x + o.dx - this.x, dy: cursor.y + o.dy - (this.top - SPRITE.height) };
+    });
+    const lefts = poses.map((p) => this.x + p.dx);
+    const tops = poses.map((p) => this.top - SPRITE.height + p.dy);
+    const hangBox: Rect = {
+      left: Math.min(...lefts) + SPRITE.sideInset,
+      right: Math.max(...lefts) + SPRITE.width - SPRITE.sideInset,
+      top: Math.min(...tops),
+      bottom: Math.max(...tops) + SPRITE.height,
+    };
+    // 足元の段より上で、跳びつける高さ (2〜28px 上) と横のずれ (24px 以内)。
+    const rise = this.top - hangBox.bottom;
+    if (rise < 2 || rise > 28 || Math.abs(lefts[0] - this.x) > 24) return null;
+    const stand = spriteBox(this.x, this.top);
+    const path: Rect = {
+      left: Math.min(stand.left, hangBox.left),
+      right: Math.max(stand.right, hangBox.right),
+      top: hangBox.top,
+      bottom: this.top,
+    };
+    // 経路の下端は足場の上辺 (足場そのものとは重ならない)。
+    const obstacles = this.obstaclesIn(this.root, [path], this.win);
+    if (!boxIsClear({ ...path, bottom: this.top - 0.5 }, obstacles, this.view)) return null;
+    return poses;
+  }
+
+  private tryCursorHang(cursor: CursorState): boolean {
+    if (!this.available('cursorHang')) return false;
+    const poses = this.cursorHangPlan(cursor);
+    if (!poses) return false;
+    this.interrupt();
+    this.action = 'cursorHang';
+    this.log('react:cursorHang');
+    this.airborne = true;
+    this.grip = { x: cursor.x, y: cursor.y };
+    this.dir = 1;
+    // 跳びつく (空中のコマで、立ち姿の位置からぶら下がる位置へ)。
+    this.render(ROW.walk, WALK_AIR);
+    this.tween(poses[0], this.animation.cursorLeapMs, () => {
+      this.loopClip('cursorHang', (frame) => {
+        this.poseX = poses[frame].dx;
+        this.poseY = poses[frame].dy;
+      });
+      this.after(between(this.rng, this.animation.cursorHangMs), () => this.releaseCursor());
+    });
+    return true;
+  }
+
+  /** カーソルを放して、立っていた位置へ降りる (同じ経路を戻る)。ぶら下がっていなければ何もしない。 */
+  private releaseCursor(): void {
+    if (this.action !== 'cursorHang' || !this.airborne) return;
+    this.clearActionTimers();
+    this.cancelFrame();
+    this.grip = null;
+    this.action = 'idle';
+    this.log('cursorHang:release');
+    this.render(ROW.walk, WALK_AIR);
+    this.tween({ dx: 0, dy: 0 }, this.animation.cursorLeapMs, () => {
+      this.airborne = false;
+      this.render(ROW.idle, IDLE_OPEN);
+      this.idle(between(this.rng, this.behavior.idleMs));
+    });
+  }
+
+  /** 描く位置のずれを、いまの値から to へなめらかに動かす。 */
+  private tween(to: { dx: number; dy: number }, durationMs: number, done: () => void): void {
+    const fromX = this.poseX;
+    const fromY = this.poseY;
+    const startedAt = this.now();
+    const tick = (): void => {
+      const t = durationMs > 0 ? Math.min(1, (this.now() - startedAt) / durationMs) : 1;
+      const eased = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
+      this.poseX = fromX + (to.dx - fromX) * eased;
+      this.poseY = fromY + (to.dy - fromY) * eased;
+      this.place();
+      if (t >= 1) {
+        this.frame = null;
+        done();
+        return;
+      }
+      this.frame = this.requestFrame(tick);
+    };
+    this.frame = this.requestFrame(tick);
+  }
+
+  /** PC のカーソル: 位置と速さを覚え、近くにいる間だけ低い頻度で反応を考える。 */
+  private trackCursor(event: PointerEvent): void {
+    const t = this.now();
+    const x = event.clientX + this.win.scrollX;
+    const y = event.clientY + this.win.scrollY;
+    const previous = this.cursor;
+    let speed = 0;
+    if (previous && t > previous.t) speed = (Math.hypot(x - previous.x, y - previous.y) / (t - previous.t)) * 1000;
+    const moved = !previous || Math.hypot(x - previous.x, y - previous.y) > 2;
+    const target = event.target instanceof Element ? event.target : null;
+    this.cursor = {
+      x,
+      y,
+      t,
+      stillSince: moved ? t : previous.stillSince,
+      // なめらかにした速さ (ぶれを抑える)。
+      speed: previous ? previous.speed * 0.6 + speed * 0.4 : speed,
+      onControl: !!target?.closest(CONTROL_SELECTOR),
+      buttons: event.buttons ?? 0,
+    };
+    // ぶら下がっている間にカーソルが動いた (急に動いた・操作部品へ向かった・ドラッグを始めた): 放して降りる。
+    if (this.grip && (Math.hypot(x - this.grip.x, y - this.grip.y) > this.interaction.cursorReleaseMove || this.cursor.buttons !== 0)) {
+      this.releaseCursor();
+    }
+    if (this.cursorTimer === null && this.placed && this.pauses.size === 0) {
+      this.cursorTimer = this.win.setTimeout(() => this.considerCursor(), this.interaction.cursorCheckMs);
+    }
+  }
+
+  private considerCursor(): void {
+    this.cursorTimer = null;
+    const cursor = this.cursor;
+    if (!cursor || this.destroyed || !this.placed || this.pauses.size > 0 || this.airborne || this.sink > 0 || this.poseX !== 0 || this.poseY !== 0) return;
+    const t = this.now();
+    // カーソルが 10 秒動かなければ見張りをやめる (次に動いたら再開)。
+    const stillMs = t - cursor.stillSince;
+    if (stillMs > 10_000) return;
+    const centerX = this.x + SPRITE.width / 2;
+    const centerY = this.top - SPRITE.height / 2;
+    const distance = Math.hypot(cursor.x - centerX, cursor.y - centerY);
+    // 静かな行動の間だけ、気まぐれに反応する (歩いている途中や反応の直後は見送る)。
+    const calm = this.action === 'idle' || this.action === 'look' || this.action === 'rest';
+    if (calm && t - this.lastReactionAt >= this.interaction.reactionCooldownMs * 3) {
+      const near = distance <= 48 && stillMs >= this.interaction.cursorStillMs;
+      const reaction = cursorReaction(
+        {
+          distance,
+          stillMs,
+          speed: cursor.speed,
+          above: cursor.y < this.top - SPRITE.height,
+          // 跳びつけるか (経路の障害物の計測) は、すぐ近くで止まっているときだけ確かめる。
+          canHang: near && this.available('cursorHang') && this.cursorHangPlan(cursor) !== null,
+          available: (id) => (id === 'peekNear' ? this.available('peek') && this.available('hide') : this.available(id)),
+        },
+        this.rng,
+        this.interaction,
+      );
+      // 足場の段から縦に離れたカーソルには近づかない (横に寄るだけ)。
+      if (reaction && this.react(reaction, cursor.x)) {
+        this.lastReactionAt = t;
+        return;
+      }
+    }
+    this.cursorTimer = this.win.setTimeout(() => this.considerCursor(), this.interaction.cursorCheckMs);
+  }
+
+  private stopCursorWatch(): void {
+    if (this.cursorTimer !== null) this.win.clearTimeout(this.cursorTimer);
+    this.cursorTimer = null;
+  }
+
   // ------------------------------------------------------------------ 描画
 
   private render(row: SpriteRow, column: number): void {
+    this.useSheet('base');
     this.sprite.style.backgroundPosition = framePosition(row, column);
     this.sprite.dataset.action = this.action ?? 'idle';
+    this.sprite.dataset.frame = `base:${row}:${column}`;
     this.place();
+  }
+
+  /** v0.9 の動作のコマを描く。 */
+  private drawClip(id: ClipId, frame: number): void {
+    this.useSheet(id);
+    this.sprite.style.backgroundPosition = clipFramePosition(frame);
+    this.sprite.dataset.action = this.action ?? 'idle';
+    this.sprite.dataset.frame = `${id}:${frame}`;
+    this.place();
+  }
+
+  /** 描く画像を切り替える (読み込み済みの画像だけを使うので、切り替えでちらつかない)。 */
+  private useSheet(key: 'base' | ClipId): void {
+    if (this.sheetKey === key) return;
+    this.sheetKey = key;
+    const url = this.sheets.get(key);
+    if (url) this.sprite.style.backgroundImage = `url("${url}")`;
+    this.sprite.style.backgroundSize = key === 'base' ? BACKGROUND_SIZE : clipBackgroundSize(key);
+  }
+
+  /**
+   * 動作のコマを 1 回再生して done を呼ぶ。pose は各コマを描く前に呼ぶ (描く位置のずれを決める)。
+   * pose が false を返したら (足場が消えたなど)、そこで再生をやめる (呼ぶ側が姿を消している)。
+   */
+  private playClip(id: ClipId, done: () => void, pose?: (frame: number) => boolean | void): void {
+    const spec = CLIPS[id];
+    let frame = 0;
+    const show = (): boolean => {
+      if (pose?.(frame) === false) return false;
+      this.drawClip(id, frame);
+      return true;
+    };
+    const next = (): void => {
+      this.after(spec.durationsMs[frame], () => {
+        frame += 1;
+        if (frame >= spec.frameCount) {
+          done();
+          return;
+        }
+        if (show()) next();
+      });
+    };
+    if (show()) next();
+  }
+
+  /** 動作のコマを止められるまでループする (しがみつき・ぶら下がり・駆け足)。pose の扱いは playClip と同じ。 */
+  private loopClip(id: ClipId, pose?: (frame: number) => boolean | void): void {
+    const spec = CLIPS[id];
+    let frame = 0;
+    const show = (): boolean => {
+      if (pose?.(frame) === false) return false;
+      this.drawClip(id, frame);
+      return true;
+    };
+    const next = (): void => {
+      this.after(spec.durationsMs[frame], () => {
+        frame = (frame + 1) % spec.frameCount;
+        if (show()) next();
+      });
+    };
+    if (show()) next();
   }
 
   private place(): void {
     const dpr = this.win.devicePixelRatio || 1;
-    const x = Math.round(this.x * dpr) / dpr;
-    // 足元が足場に食い込まないよう、上側の画素へ切り捨てる。
-    const y = Math.floor((this.top - SPRITE.height) * dpr + 1e-6) / dpr;
+    const x = Math.round((this.x + this.poseX) * dpr) / dpr;
+    // 足元が足場に食い込まないよう、上側の画素へ切り捨てる。跳ねている間は lift だけ上、沈んでいる間は sink だけ下。
+    // 縁にしがみつく・ぶら下がるなどの間は、コマの基準点に合わせたずれ (poseX / poseY) だけ動かす。
+    const y = Math.floor((this.top - SPRITE.height - this.lift + this.sink + this.poseY) * dpr + 1e-6) / dpr;
     // 元の絵は左向き。右へ向くときだけ左右反転する。
     this.sprite.style.transform = `translate3d(${x}px, ${y}px, 0) scaleX(${this.dir > 0 ? -1 : 1})`;
+    // カードの裏に沈んでいる部分 (足場の上辺より下) は描かない。
+    const hidden = Math.min(SPRITE.height, Math.max(0, this.sink));
+    this.sprite.style.clipPath = hidden > 0 ? `inset(0 0 ${hidden.toFixed(2)}px 0)` : '';
+    this.sprite.dataset.sunk = hidden >= SPRITE.height ? 'true' : 'false';
   }
 
   private setVisible(visible: boolean): void {
@@ -802,10 +2096,22 @@ export class HarimaruController {
     this.actionTimers.clear();
   }
 
-  /** いまの行動を止める (タイマー・フレームを残さない)。 */
+  /**
+   * いまの行動を止める (タイマー・フレームを残さない)。跳ねた高さ・沈んだ深さ・描く位置のずれ・空中の状態も戻す。
+   * 足場の外に出ていた途中で止めるときは、呼ぶ側が姿を消す (vanish・pause)。
+   */
   private interrupt(): void {
     this.clearActionTimers();
     this.cancelFrame();
+    this.grip = null;
+    if (this.lift !== 0 || this.sink !== 0 || this.poseX !== 0 || this.poseY !== 0 || this.airborne) {
+      this.lift = 0;
+      this.sink = 0;
+      this.poseX = 0;
+      this.poseY = 0;
+      this.airborne = false;
+      if (this.placed) this.place();
+    }
   }
 
   private clearTimer(kind: 'remeasure' | 'scroll' | 'shift'): void {

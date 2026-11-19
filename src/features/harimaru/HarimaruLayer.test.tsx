@@ -46,6 +46,11 @@ afterEach(() => {
 const layer = (): Element | null => document.body.querySelector('[data-testid="harimaru-layer"]');
 
 describe('HarimaruLayer', () => {
+  it.each(['home', 'watch', 'live', 'matches', 'analytics', 'setup', 'result', 'players', 'settings'])('%s では足場を探す (安全な余白がなければコントローラーが出さない)', (page) => {
+    render(<HarimaruLayer page={page} />);
+    expect(document.body.querySelectorAll('[data-testid="harimaru-layer"]')).toHaveLength(1);
+  });
+
   it('ホームでは body 直下に aria-hidden の描画レイヤーを 1 つだけ置く', () => {
     render(<HarimaruLayer page="home" />);
     expect(document.body.querySelectorAll('[data-testid="harimaru-layer"]')).toHaveLength(1);
@@ -56,8 +61,8 @@ describe('HarimaruLayer', () => {
     expect(FakeImage.instances).toHaveLength(1);
   });
 
-  it('足場のない画面では何も描画しない', () => {
-    render(<HarimaruLayer page="setup" />);
+  it('足場を登録していない画面 (初回案内など) では何も描画しない', () => {
+    render(<HarimaruLayer page="welcome" />);
     expect(layer()).toBeNull();
     expect(FakeImage.instances).toHaveLength(0);
   });

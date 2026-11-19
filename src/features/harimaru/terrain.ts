@@ -138,3 +138,124 @@ export function visibleSegments(
   }
   return visible;
 }
+
+// ------------------------------------------------------------------ 経路 (ジャンプ・跳ねる)
+
+/** 表示枠の見える部分 (左右の透明な余白を除く)。足元 foot から全高ぶん上。 */
+export function spriteBox(x: number, foot: number): Rect {
+  return { left: x + SPRITE.sideInset, right: x + SPRITE.width - SPRITE.sideInset, top: foot - SPRITE.height, bottom: foot };
+}
+
+function overlaps(a: Rect, b: Rect): boolean {
+  return a.right > b.left + 0.5 && a.left < b.right - 0.5 && a.bottom > b.top + 0.5 && a.top < b.bottom - 0.5;
+}
+
+/** 矩形が障害物に重ならず、表示範囲の中に収まっているか。 */
+export function boxIsClear(box: Rect, obstacles: readonly Rect[], view: { top: number; bottom: number; left?: number; right?: number }): boolean {
+  if (box.top < view.top || box.bottom > view.bottom) return false;
+  if (view.left !== undefined && box.left < view.left) return false;
+  if (view.right !== undefined && box.right > view.right) return false;
+  return !obstacles.some((o) => overlaps(box, o));
+}
+
+export interface JumpPlan {
+  from: { x: number; top: number };
+  to: { x: number; top: number };
+  /** 頂点の高さ (踏切・着地の高い方の上辺からさらに上へ)。 */
+  height: number;
+  target: Segment;
+}
+
+/** 放物線の途中の位置 (t = 0〜1)。頂点は高い方の端から height だけ上。 */
+export function arcAt(plan: Pick<JumpPlan, 'from' | 'to' | 'height'>, t: number): { x: number; foot: number } {
+  const lift = plan.height + Math.abs(plan.from.top - plan.to.top) / 2;
+  return {
+    x: plan.from.x + (plan.to.x - plan.from.x) * t,
+    foot: plan.from.top + (plan.to.top - plan.from.top) * t - 4 * lift * t * (1 - t),
+  };
+}
+
+/**
+ * 放物線の最も高い足元 (y が最小)。両端の高さが違うと頂点は t = 0.5 からずれるので、
+ * 微分が 0 になる t を求めて [0, 1] に収める。
+ */
+export function arcPeakFoot(plan: Pick<JumpPlan, 'from' | 'to' | 'height'>): number {
+  const lift = plan.height + Math.abs(plan.from.top - plan.to.top) / 2;
+  const dy = plan.to.top - plan.from.top;
+  const t = lift > 0 ? Math.min(1, Math.max(0, 0.5 - dy / (8 * lift))) : 0;
+  return Math.min(arcAt(plan, t).foot, plan.from.top, plan.to.top);
+}
+
+/** 経路の全体が通る範囲 (障害物を集める範囲)。頂点で頭が届く高さまで含める。 */
+export function arcBounds(plan: Pick<JumpPlan, 'from' | 'to' | 'height'>): Rect {
+  return {
+    left: Math.min(plan.from.x, plan.to.x),
+    right: Math.max(plan.from.x, plan.to.x) + SPRITE.width,
+    top: arcPeakFoot(plan) - SPRITE.height - 1,
+    bottom: Math.max(plan.from.top, plan.to.top),
+  };
+}
+
+function union(a: Rect, b: Rect): Rect {
+  return { left: Math.min(a.left, b.left), right: Math.max(a.right, b.right), top: Math.min(a.top, b.top), bottom: Math.max(a.bottom, b.bottom) };
+}
+
+/**
+ * 経路の全体で、見える部分が障害物に重ならず、表示範囲の中に収まるか。steps 等分した隣り合う 2 点の
+ * 間を通る範囲 (2 つの矩形を包む矩形) で調べるので、点と点の間にある薄い線も見逃さない (保守的)。
+ */
+export function arcIsClear(
+  plan: Pick<JumpPlan, 'from' | 'to' | 'height'>,
+  obstacles: readonly Rect[],
+  view: { top: number; bottom: number; left?: number; right?: number },
+  steps = 24,
+): boolean {
+  // 両端は足場の上に立っている姿そのもの。間の区間は、足場の上辺 (着地・踏切の線) をまたがない。
+  let previous = spriteBox(plan.from.x, plan.from.top);
+  if (!boxIsClear(previous, obstacles, view)) return false;
+  // 等分の点に、頂点 (いちばん高い位置) の点を加える。
+  const lift = plan.height + Math.abs(plan.from.top - plan.to.top) / 2;
+  const peakT = lift > 0 ? Math.min(1, Math.max(0, 0.5 - (plan.to.top - plan.from.top) / (8 * lift))) : 0;
+  const ts = Array.from({ length: steps }, (_, i) => (i + 1) / steps);
+  if (peakT > 0 && peakT < 1) ts.push(peakT);
+  ts.sort((a, b) => a - b);
+  for (const t of ts) {
+    const { x, foot } = arcAt(plan, t);
+    const box = spriteBox(x, foot);
+    const swept = union(previous, box);
+    // 掃いた範囲の下端は、両端の足場の上辺より下へ出ない (足場そのものとは重ならない)。
+    swept.bottom = Math.min(swept.bottom, Math.max(plan.from.top, plan.to.top));
+    if (!boxIsClear(swept, obstacles, view)) return false;
+    previous = box;
+  }
+  return true;
+}
+
+/**
+ * いまの足場から、横に並ぶ別の足場へのジャンプの候補 (経路の安全はまだ確かめない)。
+ * 横の隙間が jumpMaxGap 以下、上りは jumpMaxRise 以下、下りは jumpMaxDrop 以下のものだけ。
+ */
+export function jumpCandidates(
+  current: Segment,
+  segments: readonly Segment[],
+  height: number,
+  params: TerrainParams = DEFAULT_TERRAIN,
+): JumpPlan[] {
+  const plans: JumpPlan[] = [];
+  for (const target of segments) {
+    if (target.top === current.top && target.minX === current.minX && target.maxX === current.maxX) continue;
+    const rise = current.top - target.top;
+    if (rise > params.jumpMaxRise || -rise > params.jumpMaxDrop) continue;
+    const inset = Math.min(16, (target.maxX - target.minX) / 2);
+    if (target.minX > current.maxX) {
+      const gap = target.minX - current.maxX;
+      if (gap > params.jumpMaxGap || gap < 4) continue;
+      plans.push({ from: { x: current.maxX, top: current.top }, to: { x: target.minX + inset, top: target.top }, height, target });
+    } else if (target.maxX < current.minX) {
+      const gap = current.minX - target.maxX;
+      if (gap > params.jumpMaxGap || gap < 4) continue;
+      plans.push({ from: { x: current.minX, top: current.top }, to: { x: target.maxX - inset, top: target.top }, height, target });
+    }
+  }
+  return plans;
+}

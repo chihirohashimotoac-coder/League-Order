@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seededRng } from './behavior';
 import { HarimaruController } from './controller';
-import { DEFAULT_TIMING } from './params';
+import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, DEFAULT_TIMING } from './params';
 import type { MeasuredTerrain } from './terrainDom';
 
 const VIEW = { top: 0, bottom: 800, left: 0, right: 1_000 };
@@ -333,6 +333,8 @@ describe('HarimaruController', () => {
     current = { ...terrain([{ left: 100, right: 500, top: 300 }]), obstacles: [{ left: 0, right: 1_000, top: 285, bottom: 299 }] };
     root.append(document.createElement('button'));
     await Promise.resolve();
+    // 確認は次の描画の直前 (requestAnimationFrame) に 1 回: 変化が描画される前に消えている。
+    vi.advanceTimersByTime(17);
     expect(sprite.dataset.visible).toBe('false');
     expect(controller.snapshot().placed).toBe(false);
   });
@@ -392,6 +394,439 @@ describe('HarimaruController', () => {
     expect(controller.snapshot().timers).toBe(0);
     expect(controller.snapshot().auxTimers).toBe(0);
     expect(controller.snapshot().frame).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------- PR2: 行動・アスレチック・触れ合い
+
+const only = (weights: Partial<typeof DEFAULT_BEHAVIOR.weights>): typeof DEFAULT_BEHAVIOR => ({
+  ...DEFAULT_BEHAVIOR,
+  weights: { idle: 0, rest: 0, look: 0, walk: 0, run: 0, hop: 0, jump: 0, hide: 0, sleep: 0, groom: 0, stretch: 0, ...weights },
+  sleepWhenInactive: 0,
+  repeatPenalty: 1,
+  repeatTwicePenalty: 1,
+  afterMovingPenalty: 1,
+});
+
+function make2(options: { seed?: number; behavior?: typeof DEFAULT_BEHAVIOR; finePointer?: boolean; interaction?: Partial<typeof DEFAULT_INTERACTION> } = {}): HarimaruController {
+  controller = new HarimaruController({
+    sprite,
+    root,
+    watch: app,
+    platformSelector: '.x',
+    rng: seededRng(options.seed ?? 1),
+    now: () => now,
+    measure: () => current,
+    obstaclesIn: () => [],
+    behavior: options.behavior,
+    finePointer: options.finePointer ?? false,
+    interaction: { ...DEFAULT_INTERACTION, ...options.interaction },
+  });
+  return controller;
+}
+
+function pointer(type: string, x: number, y: number, extra: Record<string, unknown> = {}, target: EventTarget = window): void {
+  const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
+  for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', ...extra })) Object.defineProperty(event, key, { value });
+  target.dispatchEvent(event);
+}
+
+function tapAt(x: number, y: number, holdMs = 80, extra: Record<string, unknown> = {}, target: EventTarget = window): void {
+  pointer('pointerdown', x, y, extra, target);
+  advance(holdMs);
+  pointer('pointerup', x, y, extra, target);
+}
+
+describe('HarimaruController (PR2)', () => {
+  it('隣の足場へ安全な経路があればジャンプし、空中では足元から浮き、着地すると隣の足場に立つ', () => {
+    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
+    make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    let sawAirborne = false;
+    let startTop = 0;
+    let lastGroundTop = 0;
+    let maxLift = 0;
+    for (let i = 0; i < 2_000 && !(sawAirborne && !controller.snapshot().airborne); i += 1) {
+      advance(16);
+      const state = controller.snapshot();
+      if (!state.airborne && !sawAirborne) lastGroundTop = state.top;
+      if (state.airborne) {
+        // 踏み切る直前 (空中に入る前のフレーム) の足元の高さ。
+        if (!sawAirborne) startTop = lastGroundTop;
+        sawAirborne = true;
+        maxLift = Math.max(maxLift, state.lift);
+      }
+    }
+    expect(sawAirborne).toBe(true);
+    expect(maxLift).toBeGreaterThan(10);
+    // どちらの足場から跳んでも、もう一方の足場に着地して立つ。
+    const landed = controller.snapshot();
+    expect([300, 290]).toContain(landed.top);
+    if (landed.top === 290) expect(landed.x).toBeGreaterThan(340);
+    else expect(landed.x).toBeLessThan(300);
+    // 跳んだ足場とは別の足場に着地している。
+    expect(startTop).not.toBe(landed.top);
+    expect(landed.lift).toBe(0);
+    expect(landed.airborne).toBe(false);
+  });
+
+  it('ジャンプの途中でスクロール・DOM の変化があったら、古い経路のまま飛ばずに即座に隠れて出直す', async () => {
+    for (const disturb of ['scroll', 'dom'] as const) {
+      current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
+      make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+      for (let i = 0; i < 2_000 && !controller.snapshot().airborne; i += 1) advance(16);
+      expect(controller.snapshot().airborne).toBe(true);
+      if (disturb === 'scroll') window.dispatchEvent(new Event('scroll'));
+      else {
+        root.append(document.createElement('p'));
+        await Promise.resolve();
+      }
+      const state = controller.snapshot();
+      expect(state.events, disturb).toContain('jump:aborted');
+      expect(state.airborne).toBe(false);
+      expect(state.placed).toBe(false);
+      expect(sprite.dataset.visible).toBe('false');
+      advance(5_000);
+      expect(controller.snapshot().placed).toBe(true);
+      controller.destroy();
+    }
+  });
+
+  it('ジャンプの途中で足場がホバーなどで動き始めたら、着地の高さが合わないので中断して出直す', () => {
+    const tile = document.createElement('div');
+    root.append(tile);
+    tile.getBoundingClientRect = () => ({ left: 340, right: 600, top: 290, bottom: 380, width: 260, height: 90, x: 340, y: 290, toJSON: () => ({}) }) as DOMRect;
+    current = { ...terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]), elements: [] };
+    make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    for (let i = 0; i < 2_000 && !controller.snapshot().airborne; i += 1) advance(16);
+    expect(controller.snapshot().airborne).toBe(true);
+    const event = new Event('transitionrun', { bubbles: true });
+    Object.defineProperty(event, 'propertyName', { value: 'transform' });
+    tile.dispatchEvent(event);
+    expect(controller.snapshot().events).toContain('jump:aborted');
+    expect(controller.snapshot().airborne).toBe(false);
+    expect(sprite.dataset.visible).toBe('false');
+  });
+
+  it('踏切の前から足場が動いている途中なら跳ばない (動いたあとの高さが分からない)', () => {
+    const target = document.createElement('div');
+    const start = document.createElement('div');
+    root.append(target, start);
+    target.getBoundingClientRect = () => ({ left: 340, right: 600, top: 290, bottom: 380, width: 260, height: 90, x: 340, y: 290, toJSON: () => ({}) }) as DOMRect;
+    start.getBoundingClientRect = () => ({ left: 100, right: 300, top: 300, bottom: 380, width: 200, height: 80, x: 100, y: 300, toJSON: () => ({}) }) as DOMRect;
+    current = { ...terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]), elements: [start, target] };
+    make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    // 「ジャンプ」を選んで踏切へ歩き始めたところで、着地先の足場がホバーで浮き始める (終わらない)。
+    for (let i = 0; i < 4_000 && !controller.snapshot().events.includes('action:jump'); i += 1) advance(16);
+    expect(controller.snapshot().events).toContain('action:jump');
+    const event = new Event('transitionrun', { bubbles: true });
+    Object.defineProperty(event, 'propertyName', { value: 'transform' });
+    target.dispatchEvent(event);
+    // 浮く途中のトランジションが動いている。
+    (target as unknown as { getAnimations: () => unknown[] }).getAnimations = () => [{ playState: 'running', effect: { getTiming: () => ({ iterations: 1 }) } }];
+    for (let i = 0; i < 1_500 && !controller.snapshot().events.includes('jump:skipped:moving'); i += 1) {
+      advance(16);
+      expect(controller.snapshot().airborne).toBe(false);
+    }
+    expect(controller.snapshot().events).toContain('jump:skipped:moving');
+  });
+
+  it('その場で跳ねている途中に画面が変わったら、足場に降りて確かめ直す。跳ねている間のタップには反応しない', async () => {
+    make2({ behavior: only({ hop: 1, idle: 0.0001 }), finePointer: false }).start();
+    controller = controller as HarimaruController;
+    // 跳ねる余地あり (障害物なし) なので、そのうち跳ねる。
+    for (let i = 0; i < 4_000 && !(controller.snapshot().lift > 0); i += 1) advance(8);
+    expect(controller.snapshot().lift).toBeGreaterThan(0);
+    const { x, top } = controller.snapshot();
+    pointer('pointerdown', x + 15, top - 10);
+    pointer('pointerup', x + 15, top - 10);
+    expect(controller.snapshot().events.some((e) => e.startsWith('react:'))).toBe(false);
+    root.append(document.createElement('p'));
+    await Promise.resolve();
+    const state = controller.snapshot();
+    expect(state.events).toContain('hop:aborted');
+    expect(state.lift).toBe(0);
+  });
+
+  it('経路に障害物があればジャンプしない', () => {
+    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
+    controller = new HarimaruController({
+      sprite, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => current,
+      // 2 つの足場の間の上に文字がある。
+      obstaclesIn: () => [{ left: 270, right: 340, top: 200, bottom: 300 }],
+      behavior: only({ jump: 1, idle: 0.0001 }), finePointer: false,
+    });
+    controller.start();
+    for (let i = 0; i < 200; i += 1) {
+      advance(50);
+      expect(controller.snapshot().airborne).toBe(false);
+    }
+    expect(controller.snapshot().events.some((e) => e === 'action:jump')).toBe(false);
+  });
+
+  it('ジャンプの途中でモーダルが開いたら即座に隠れて空中の状態を残さず、閉じると安全な足場から出直す', async () => {
+    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
+    make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    for (let i = 0; i < 2_000 && !controller.snapshot().airborne; i += 1) advance(16);
+    expect(controller.snapshot().airborne).toBe(true);
+    const dialog = document.createElement('div');
+    dialog.setAttribute('aria-modal', 'true');
+    app.append(dialog);
+    await Promise.resolve();
+    const paused = controller.snapshot();
+    expect(sprite.dataset.visible).toBe('false');
+    expect(paused.airborne).toBe(false);
+    expect(paused.lift).toBe(0);
+    expect(paused.frame).toBe(false);
+    expect(paused.timers).toBe(0);
+    dialog.remove();
+    await Promise.resolve();
+    advance(4_000);
+    const after = controller.snapshot();
+    expect(after.placed).toBe(true);
+    expect([300, 290]).toContain(after.top);
+  });
+
+  it('カード裏に隠れる: 上辺より下へ沈んで見えなくなり、別の場所で耳と目だけ出してから出てくる', () => {
+    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 400, right: 700, top: 250 }]);
+    make2({ behavior: only({ hide: 1, idle: 0.0001 }) }).start();
+    const states: { sink: number; top: number; x: number; clip: string; sunk: string | undefined }[] = [];
+    for (let i = 0; i < 2_000; i += 1) {
+      advance(16);
+      const s = controller.snapshot();
+      states.push({ sink: s.sink, top: s.top, x: s.x, clip: sprite.style.clipPath, sunk: sprite.dataset.sunk });
+      if (s.events.includes('action:peek') && s.sink === 0 && s.action === 'idle') break;
+    }
+    const hidden = states.filter((s) => s.sunk === 'true');
+    expect(hidden.length).toBeGreaterThan(0);
+    // 沈んだ分は切り取って描かない (カードの裏に入る)。
+    expect(states.some((s) => s.clip.startsWith('inset(0px 0px') || s.clip.startsWith('inset(0 0'))).toBe(true);
+    // 耳と目だけを出す深さで止まる時間がある。
+    expect(states.some((s) => Math.abs(s.sink - (20 - DEFAULT_ANIMATION.peekVisible)) < 0.01)).toBe(true);
+    const end = states[states.length - 1];
+    expect(end.sink).toBe(0);
+    expect(end.clip).toBe('');
+  });
+
+  it('顔に触れると喜び、背中に触れると振り向く。背後から触れると (驚くの画像がなければ) 振り向く', () => {
+    make2({ behavior: only({ idle: 1 }) }).start();
+    advance(3_000);
+    // 向きに合わせて、顔側 (前) と背中側 (後ろ) の位置を決める。何度も触ると逃げるので、触れるたびに間をあける。
+    const at = (part: 'face' | 'back') => {
+      const { x, top, dir } = controller.snapshot();
+      const front = dir < 0 ? 0.1 : 0.9;
+      const fraction = part === 'face' ? front : 1 - front;
+      return { x: x + 2 + 26 * fraction, y: top - 10 };
+    };
+    let p = at('face');
+    tapAt(p.x, p.y);
+    expect(controller.snapshot().events.at(-1)).toBe('react:happy');
+    advance(DEFAULT_INTERACTION.fleeWindowMs + 100);
+    p = at('back');
+    const before = controller.snapshot().dir;
+    tapAt(p.x, p.y);
+    expect(controller.snapshot().events.at(-1)).toBe('react:turn');
+    expect(controller.snapshot().dir).toBe(before > 0 ? -1 : 1);
+    advance(DEFAULT_INTERACTION.fleeWindowMs + 100);
+    const { x, top, dir } = controller.snapshot();
+    const behindX = dir < 0 ? x + 30 + 8 : x - 8;
+    tapAt(behindX, top - 10);
+    const events = controller.snapshot().events;
+    expect(events.slice(-2)).toEqual(['react:surprise:pending-asset', 'react:turn']);
+  });
+
+  it('何度も触られると逃げる (駆けて離れ、隠れて別の場所へ)', () => {
+    current = terrain([{ left: 100, right: 700, top: 300 }]);
+    make2({ behavior: only({ idle: 1 }) }).start();
+    advance(3_000);
+    for (let i = 0; i < 3; i += 1) {
+      const { x, top } = controller.snapshot();
+      tapAt(x + 15, top - 10);
+      advance(1_000);
+    }
+    expect(controller.snapshot().events).toContain('react:flee');
+  });
+
+  it('長押し・スワイプ・2 本指・キャンセル・ボタンの上は反応しない', () => {
+    make2({ behavior: only({ idle: 1 }) }).start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    tapAt(x + 15, top - 10, 600);
+    pointer('pointerdown', x + 15, top - 10);
+    pointer('pointermove', x + 45, top - 10);
+    pointer('pointerup', x + 45, top - 10);
+    pointer('pointerdown', x + 15, top - 10);
+    pointer('pointerdown', x + 20, top - 10, { pointerId: 2 });
+    pointer('pointerup', x + 20, top - 10, { pointerId: 2 });
+    pointer('pointerup', x + 15, top - 10);
+    pointer('pointerdown', x + 15, top - 10);
+    pointer('pointercancel', x + 15, top - 10);
+    pointer('pointerup', x + 15, top - 10);
+    const button = document.createElement('button');
+    root.append(button);
+    tapAt(x + 15, top - 10, 80, {}, button);
+    const events = controller.snapshot().events;
+    expect(events).toEqual(expect.arrayContaining(['tap:ignored:long', 'tap:ignored:moved', 'tap:ignored:multi', 'tap:ignored:control']));
+    expect(events.some((e) => e.startsWith('react:'))).toBe(false);
+  });
+
+  it('近くの余白をタップすると、気まぐれに近づいてそちらを向く', () => {
+    current = terrain([{ left: 100, right: 700, top: 300 }]);
+    make2({ interaction: { approachChance: 1 } }).start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    const target = x < 400 ? x + 120 : x - 120;
+    tapAt(target, top - 5);
+    expect(controller.snapshot().events).toContain('react:approach');
+    advance(10_000);
+    const after = controller.snapshot();
+    expect(Math.abs(after.x + 15 - target)).toBeLessThan(Math.abs(x + 15 - target));
+  });
+
+  it('本文の文字・操作部品の上をタップしても近づかない (余白のタップだけ)', () => {
+    current = terrain([{ left: 100, right: 700, top: 300 }]);
+    let obstacles: { left: number; right: number; top: number; bottom: number }[] = [];
+    controller = new HarimaruController({
+      sprite, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => current,
+      obstaclesIn: () => obstacles, behavior: only({ idle: 1 }), finePointer: false,
+      interaction: { ...DEFAULT_INTERACTION, approachChance: 1 },
+    });
+    controller.start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    const target = { x: x < 400 ? x + 120 : x - 120, y: top - 5 };
+    obstacles = [{ left: target.x - 20, right: target.x + 20, top: target.y - 8, bottom: target.y + 8 }];
+    tapAt(target.x, target.y);
+    expect(controller.snapshot().events).toContain('tap:ignored:content');
+    expect(controller.snapshot().events).not.toContain('react:approach');
+    obstacles = [];
+    advance(DEFAULT_INTERACTION.reactionCooldownMs + 100);
+    tapAt(target.x, target.y);
+    expect(controller.snapshot().events).toContain('react:approach');
+  });
+
+  it('足元のすぐ下 (カードの面) をタップしても、体に触れたことにしない', () => {
+    current = terrain([{ left: 100, right: 700, top: 300 }]);
+    let obstacles: { left: number; right: number; top: number; bottom: number }[] = [];
+    controller = new HarimaruController({
+      sprite, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => current,
+      obstaclesIn: () => obstacles, behavior: only({ idle: 1 }), finePointer: false,
+    });
+    controller.start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    // 足場のカード (上辺 300 から下) の面。
+    obstacles = [{ left: 100, right: 700, top, bottom: top + 80 }];
+    tapAt(x + 15, top + 3);
+    expect(controller.snapshot().events).toContain('tap:ignored:content');
+    expect(controller.snapshot().events.some((e) => e.startsWith('react:'))).toBe(false);
+    // 体そのもの (見えている枠の中) へのタップは反応する。
+    advance(DEFAULT_INTERACTION.reactionCooldownMs + 100);
+    tapAt(x + 15, top - 10);
+    expect(controller.snapshot().events.some((e) => e === 'react:happy' || e === 'react:turn')).toBe(true);
+  });
+
+  it('PC: 止まったカーソルに近づき、速いカーソルへの「じゃれる」は画像がなければ見送る', () => {
+    current = terrain([{ left: 100, right: 700, top: 300 }]);
+    make2({ finePointer: true, interaction: { cursorApproachChance: 1, cursorStillMs: 500 } }).start();
+    advance(3_000);
+    const { x, top } = controller.snapshot();
+    const cx = x < 400 ? x + 130 : x - 100;
+    pointer('pointermove', cx, top - 30, { pointerType: 'mouse' });
+    advance(2_500);
+    expect(controller.snapshot().events).toContain('react:approach');
+    advance(15_000);
+    // 速く動くカーソル
+    for (let i = 0; i < 12; i += 1) {
+      const s = controller.snapshot();
+      pointer('pointermove', s.x + 15 + (i % 2 ? 60 : -60), s.top - 20, { pointerType: 'mouse' });
+      advance(16);
+    }
+    advance(1_500);
+    expect(controller.snapshot().events.some((e) => e === 'react:play:pending-asset' || e === 'react:approach')).toBe(true);
+  });
+
+  it('タッチの端末ではカーソルの反応を見張らない', () => {
+    make2({ finePointer: false }).start();
+    advance(3_000);
+    pointer('pointermove', 200, 200, { pointerType: 'mouse' });
+    expect(controller.snapshot().auxTimers).toBe(0);
+  });
+
+  it('速いスクロールのあと「転ぶ」は画像がなければ見送る (遅いスクロールでは何もしない)', () => {
+    make2().start();
+    advance(3_000);
+    let y = 0;
+    const scrollY = vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => y);
+    for (let i = 0; i < 5; i += 1) {
+      y += 2;
+      window.dispatchEvent(new Event('scroll'));
+      advance(16);
+    }
+    advance(400);
+    expect(controller.snapshot().events.some((e) => e.startsWith('react:tumble'))).toBe(false);
+    for (let i = 0; i < 5; i += 1) {
+      y += 120;
+      window.dispatchEvent(new Event('scroll'));
+      advance(16);
+    }
+    y = 0;
+    advance(400);
+    scrollY.mockRestore();
+    expect(controller.snapshot().events).toContain('react:tumble:pending-asset');
+  });
+
+  it('入力欄にフォーカスがある間は隠れて休み、離れると戻る', () => {
+    make2().start();
+    advance(3_000);
+    const input = document.createElement('input');
+    root.append(input);
+    input.focus();
+    expect(controller.snapshot().paused).toContain('input');
+    expect(sprite.dataset.visible).toBe('false');
+    expect(controller.snapshot().timers).toBe(0);
+    input.blur();
+    advance(50);
+    expect(sprite.dataset.visible).toBe('true');
+  });
+
+  it('v0.9 の画像を読み込めていなければ、その動作は始めない (寝ぼける・着地の失敗は見送り、記録だけ残す)', () => {
+    current = terrain([{ left: 100, right: 166, top: 300 }]);
+    make2({ behavior: { ...only({ sleep: 1, idle: 0.2 }), sleepWhenInactive: 1, sleepMs: [5_000, 6_000] } }).start();
+    const seen = new Set<string>();
+    for (let i = 0; i < 1_500; i += 1) {
+      advance(50);
+      for (const e of controller.snapshot().events) seen.add(e);
+    }
+    expect(seen.has('action:sleep')).toBe(true);
+    expect(seen.has('action:sleepyFall')).toBe(false);
+    expect(controller.trigger('slip')).toBe(false);
+    controller.destroy();
+
+    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
+    make2({ seed: 4, behavior: only({ jump: 1, idle: 0.3 }) }).start();
+    seen.clear();
+    for (let i = 0; i < 12_000 && !seen.has('react:tumble:pending-asset'); i += 1) {
+      advance(16);
+      for (const e of controller.snapshot().events) seen.add(e);
+    }
+    expect(seen.has('react:tumble:pending-asset')).toBe(true);
+    // 描けない動作は描かない (姿勢は待機のまま、v0.2 の画像のまま)。
+    expect(controller.snapshot().lift).toBe(0);
+    expect(controller.snapshot().sheet).toBe('base');
+  });
+
+  it('いろいろな行動を続けても、タイマー・フレームは destroy で残らない', () => {
+    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
+    make2({ seed: 9, behavior: { ...DEFAULT_BEHAVIOR, inactiveSleepAfterMs: 20_000 } }).start();
+    const seen = new Set<string>();
+    for (let i = 0; i < 3_000; i += 1) {
+      advance(50);
+      const a = controller.snapshot().action;
+      if (a) seen.add(a);
+    }
+    for (const action of ['idle', 'walk', 'look', 'rest', 'sleep']) expect(seen.has(action), action).toBe(true);
+    controller.destroy();
     expect(vi.getTimerCount()).toBe(0);
   });
 });

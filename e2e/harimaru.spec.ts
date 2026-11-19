@@ -43,7 +43,11 @@ async function overlaps(page: Page): Promise<string[]> {
     const el = document.querySelector('[data-testid="harimaru"]');
     if (!el) return ['no sprite'];
     const r = el.getBoundingClientRect();
-    const box = { left: r.left + 2.5, right: r.right - 2.5, top: r.top + 0.5, bottom: r.bottom - 0.5 };
+    // カードの裏に沈んで切り取られている部分 (clip-path の下側) は描かれていないので数えない。
+    const clip = /inset\(0(?:px)? 0(?:px)? ([\d.]+)px/.exec((el as HTMLElement).style.clipPath || '');
+    const clipped = clip ? parseFloat(clip[1]) : 0;
+    const box = { left: r.left + 2.5, right: r.right - 2.5, top: r.top + 0.5, bottom: r.bottom - 0.5 - clipped };
+    if (box.bottom <= box.top) return [];
     const hit = (q: { left: number; right: number; top: number; bottom: number }): boolean =>
       q.right > box.left && q.left < box.right && q.bottom > box.top && q.top < box.bottom;
     const found: string[] = [];
@@ -98,13 +102,14 @@ test('ホームに 1 体だけ現れ、UI に重ならずに歩き、クリッ�
   expect(below).toBe(true);
 });
 
-test('既存のボタンはハリマルの有無で同じように動く (ライブへの移動)', async ({ page }) => {
+test('既存のボタンはハリマルの有無で同じように動く (日程・結果への移動と、ホームへの戻り)', async ({ page }) => {
   await page.clock.install();
   await openSampleHome(page);
   await page.clock.runFor(4_000);
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
   await page.getByTestId('home-results').click();
-  await expect(page.getByTestId('harimaru-layer')).toHaveCount(0);
+  // ボタンの操作はそのまま届き、画面が移る (ハリマルは移った先で足場を探し直す)。
+  await expect(page.locator('.app-header h1')).not.toHaveText('サンプルチーム');
   await tab(page, 'ホーム').click();
   await page.clock.runFor(4_000);
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
@@ -219,4 +224,180 @@ test('PC: 足場のタイルにホバーして浮いても消えず、浮いた�
     await page.waitForTimeout(2_000);
   }
   expect(onTile, 'タイル列の上でホバーした回数').toBeGreaterThan(0);
+});
+
+// ---------------------------------------------------------------- PR2: 触れ合い・全画面
+
+/** data-action の移り変わりを記録し始める (短い反応もポーリングで取りこぼさない)。 */
+async function watchActions(page: Page): Promise<() => Promise<string[]>> {
+  await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>('[data-testid="harimaru"]')!;
+    const w = window as unknown as { __harimaruActions: string[]; __harimaruActionObserver?: MutationObserver };
+    w.__harimaruActions = [];
+    w.__harimaruActionObserver?.disconnect();
+    w.__harimaruActionObserver = new MutationObserver(() => w.__harimaruActions.push(el.dataset.action ?? ''));
+    w.__harimaruActionObserver.observe(el, { attributes: true, attributeFilter: ['data-action'] });
+  });
+  return () => page.evaluate(() => (window as unknown as { __harimaruActions: string[] }).__harimaruActions);
+}
+
+/** ハリマルの体の中心 (画面座標)。 */
+async function body(page: Page): Promise<{ x: number; y: number; faceX: number; dir: number }> {
+  return sprite(page).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const dir = /scaleX\(-1\)/.test(el.style.transform) ? 1 : -1;
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, faceX: dir < 0 ? r.left + 7 : r.right - 7, dir };
+  });
+}
+
+async function waitStanding(page: Page): Promise<void> {
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  // 隠れている・跳ねている間は待つ。
+  await expect.poll(async () => sprite(page).evaluate((el) => !el.style.clipPath && ['idle', 'look', 'rest'].includes(el.dataset.action ?? '')), { timeout: 20_000 }).toBe(true);
+}
+
+test('顔をタップ・クリックすると喜び、下の画面の操作には何も起きない', async ({ page }) => {
+  await openSampleHome(page);
+  await waitStanding(page);
+  const url = page.url();
+  const actions = await watchActions(page);
+  const point = await body(page);
+  if (page.viewportSize()!.width < 600) await page.touchscreen.tap(point.faceX, point.y);
+  else await page.mouse.click(point.faceX, point.y);
+  await expect.poll(actions, { timeout: 3_000 }).toContain('happy');
+  // 画面は変わらず、ダイアログも開かない。
+  expect(page.url()).toBe(url);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await overlaps(page)).toEqual([]);
+});
+
+test('長押し・ドラッグでは反応しない', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'マウスで押す長さ・動きを正確に操作できる PC で確かめる (判定の境界値は単体テスト)');
+  await openSampleHome(page);
+  await waitStanding(page);
+  const actions = await watchActions(page);
+  const point = await body(page);
+  await page.mouse.move(point.faceX, point.y);
+  await page.mouse.down();
+  await page.waitForTimeout(700);
+  await page.mouse.up();
+  await page.mouse.move(point.faceX, point.y);
+  await page.mouse.down();
+  await page.mouse.move(point.faceX + 40, point.y + 30, { steps: 5 });
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+  expect(await actions()).not.toContain('happy');
+  expect(await actions()).not.toContain('turn');
+});
+
+test('どの画面でも、出るときは文字・操作部品・固定バーに重ならない (メンバー・フォーマット・履歴・設定・その他・観戦)', async ({ page }) => {
+  test.setTimeout(180_000);
+  await openSampleHome(page);
+  const screens: [string, () => Promise<void>][] = [
+    ['メンバー', () => tab(page, 'メンバー').click()],
+    ['フォーマット', () => tab(page, 'フォーマット').click()],
+    ['履歴', () => tab(page, '履歴').click()],
+    ['設定', () => tab(page, '設定 / バックアップ').click()],
+    ['その他', () => tab(page, 'その他').click()],
+    ['観戦', () => tab(page, '観戦').click()],
+    ['オーダー', () => tab(page, 'オーダー').click()],
+  ];
+  let shownSomewhere = 0;
+  for (const [label, open] of screens) {
+    await open();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    let shown = 0;
+    for (let i = 0; i < 8; i += 1) {
+      await page.waitForTimeout(700);
+      if ((await sprite(page).count()) === 0 || (await sprite(page).getAttribute('data-visible')) !== 'true') continue;
+      shown += 1;
+      expect(await overlaps(page), `${label} ${i}`).toEqual([]);
+    }
+    if (shown > 0) shownSomewhere += 1;
+    // 画面に 1 体だけ。
+    expect(await page.getByTestId('harimaru').count()).toBeLessThanOrEqual(1);
+  }
+  expect(shownSomewhere, '足場のある画面のうち、いくつかには出る').toBeGreaterThan(2);
+});
+
+test('入力欄にフォーカスがある間は休み、離れると戻る', async ({ page }) => {
+  await openSampleHome(page);
+  await tab(page, 'メンバー').click();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  const field = page.locator('.page-view input:not([type="checkbox"]):not([type="radio"]):visible').first();
+  await field.focus();
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'false');
+  await field.blur();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+});
+
+test('PC: 近くで止まったカーソルに、気まぐれに近づくか顔を出す (カーソルは捕まえない)', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'ホバーできる PC だけ');
+  test.setTimeout(120_000);
+  await openSampleHome(page);
+  await waitStanding(page);
+  const actions = await watchActions(page);
+  let reacted = false;
+  for (let i = 0; i < 8 && !reacted; i += 1) {
+    await waitStanding(page);
+    const point = await body(page);
+    // 体の横 90px あたりで止める (ボタンの上かどうかは問わない: カーソルの見た目・操作は変えない)。
+    await page.mouse.move(point.x + (point.x > 300 ? -90 : 90), point.y - 10, { steps: 4 });
+    await page.waitForTimeout(4_000);
+    const seen = await actions();
+    reacted = seen.includes('approach') || seen.includes('peek');
+  }
+  expect(reacted).toBe(true);
+  expect(await overlaps(page)).toEqual([]);
+});
+
+test('速くスクロールしても位置が崩れず、止まったあとも重ならない', async ({ page }) => {
+  await openSampleHome(page);
+  await waitStanding(page);
+  for (let i = 0; i < 6; i += 1) {
+    await page.mouse.wheel(0, i % 2 ? -1_200 : 1_200);
+    await page.waitForTimeout(60);
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(1_500);
+  if ((await sprite(page).getAttribute('data-visible')) === 'true') expect(await overlaps(page)).toEqual([]);
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  expect(await overlaps(page)).toEqual([]);
+});
+
+/** 読み込んだ追加素材 v0.9 (動作ごとのアトラス) のファイル名。 */
+const clipRequests = (page: Page): Promise<string[]> =>
+  page.evaluate(() =>
+    performance
+      .getEntriesByType('resource')
+      .map((e) => e.name.split('/').pop() ?? '')
+      .filter((n) => /^(hang|slip|climb|cursorHang|tumble|sleepyFall|groom|stretch|lookUp|surprise|tilt|play|run|happy)@\dx/.test(n)),
+  );
+
+test('追加素材 v0.9 は登場のあとで画素密度に合う 1 組 (14 動作) だけを読み込み、表示 OFF・動きを減らす設定では読み込まない', async ({ page, browser }, info) => {
+  await openSampleHome(page);
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  await expect.poll(async () => (await clipRequests(page)).length, { timeout: 10_000 }).toBe(14);
+  const density = info.project.name === 'mobile' ? 3 : 1;
+  for (const name of await clipRequests(page)) expect(name).toMatch(new RegExp(`@${density}x`));
+
+  // 動きを減らす設定: 描画しないので、追加素材も要求しない。
+  const reduced = await browser.newContext({ ...info.project.use, reducedMotion: 'reduce' });
+  const other = await reduced.newPage();
+  await openSampleHome(other);
+  await other.waitForTimeout(3_000);
+  await expect(other.getByTestId('harimaru-layer')).toHaveCount(0);
+  expect(await clipRequests(other)).toEqual([]);
+  await reduced.close();
+
+  // 表示 OFF のまま読み込み直しても要求しない。
+  await tab(page, '設定 / バックアップ').click();
+  await page.getByText('ハリマル', { exact: true }).click();
+  await page.getByTestId('harimaru-toggle').uncheck();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
+  await page.waitForTimeout(3_000);
+  expect(await clipRequests(page)).toEqual([]);
 });
