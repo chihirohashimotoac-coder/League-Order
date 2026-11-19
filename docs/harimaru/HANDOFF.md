@@ -18,7 +18,7 @@
 | 統合ブランチ | `feat/harimaru-integration` = `fd6c147` |
 | PR2 | [#59](https://github.com/chihirohashimotoac-coder/League-Order/pull/59)（ドラフト）`feat/harimaru-pr2-behavior` → `feat/harimaru-integration`、HEAD `05032a4`。**実装完了扱い（ユーザー指示）・未マージ・統合ブランチへ未取り込み** |
 | PR3 | [#60](https://github.com/chihirohashimotoac-coder/League-Order/pull/60)（ドラフト）`feat/harimaru-pr3-n01-reactions` → `feat/harimaru-pr2-behavior`（PR2 が未統合のため積み重ね）。SHA は `git log` と PR を参照。**ユーザー確認待ち・未マージ** |
-| プレビュー | PR3：https://claude.ai/artifact/TtVuLMEMsNztchm91FYMwL（`dd69da2` のビルド）／ PR2：https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX（バージョン 4 = `05032a4` のビルド。バージョン 3 は誤って PR3 のビルドを上書きしたもので、4 で戻した）／ PR1：https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（いずれも非公開の claude.ai Artifact、n01 は架空データ） |
+| プレビュー | PR3：https://claude.ai/artifact/TtVuLMEMsNztchm91FYMwL（バージョン 2 = `7d996cd` のビルド）／ PR2：https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX（バージョン 4 = `05032a4` のビルド。バージョン 3 は誤って PR3 のビルドを上書きしたもので、4 で戻した）／ PR1：https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（いずれも非公開の claude.ai Artifact、n01 は架空データ） |
 | Codex 監査の回数 | PR1：3 / 3（上限）、PR2：3 / 3（上限。3 回目の反映 `62386fb` と、v0.9 の組み込みは未監査）、PR3：4 回（0 から数え直し。4 回目はユーザー承認済み）、§7 の PR3 を参照。PR3 の 4 回目の反映は未監査。PR3 の 5 回目、PR1・PR2 の 4 回目は、新たなユーザー承認が必要 |
 
 ### ユーザーの判断待ち（勝手に進めない）
@@ -259,8 +259,9 @@ git log --oneline -3 origin/feat/harimaru-pr2-behavior origin/feat/harimaru-inte
 - コミット：`a91771f`（実装）→ `f9d0c4d`（監査 1 回目の反映）→ `6cc3e11`（2 回目）→ `dd69da2`（3 回目）→ `b90cec6`（本書の SetMatchPage の記述の矛盾を修正）→ 監査 4 回目の反映（`git log` 参照）
 - 素材：`HARIMARU_PR3_REACTIONS_v05`（6 種・49 コマ）の `atlas/body`・`atlas/effect` を無加工で収録。開始・終了のコマは v0.2 の待機と一致（検品スクリプト）。effectBox は 1x/2x/3x のアルファ > 0 を包む範囲（Codex も一致を確認）
 - 判定の前提の確認：公開されている実際の n01 の終了済み試合 1 件（9 Leg・113 投てき）で、`(p, r)` が Leg の中で一意、ラウンドは Leg・側ごとに 1 から、バストは `score: 0`、上がりは `finish: 1` を確認（n01 の読み取り 2 回、アプリの通信とは無関係）
-- 検証（`dd69da2`）：`npm run verify`（lint・単体 142 ファイル 1818 件・build）成功、`npm run typecheck` 成功。ハリマルの単体 201 件。`npm run test:e2e` 503 件合格・失敗 0（スキップ 23 は既存の指定。`e2e/harimaruLive.spec.ts` 4 件を含む）、`npm run test:e2e:preview` 38 件合格・失敗 0（スキップ 2）
-- CI（`ef424b6`）：Backtest baseline check 成功、Build and check the preview page 成功
+- 検証（`7d996cd`、監査 4 回目の反映後）：`npm run verify`（lint・単体 142 ファイル 1827 件・build）成功、`npm run typecheck` 成功。ハリマルの単体 12 ファイル 209 件。`npm run test:e2e` 503 件合格・失敗 0（スキップ 23 は既存の指定。`e2e/harimaruLive.spec.ts` 4 件を含む）、`npm run test:e2e:preview` 38 件合格・失敗 0（スキップ 2）。プリキャッシュ 89 件 3197.33 KiB（`dd69da2` と同じ件数）
+- CI（`7d996cd`）：Backtest matches the committed baseline 成功、Build and check the preview page 成功
+- 実画面（`7d996cd`、プレビューのビルド・架空の n01・Chromium）：スマホ（Pixel 5 相当）・PC（1280×900）× ライト / ダーク（スタジアム）の 4 通りで、cheer・panic・legWin を演出し、エフェクトは文字・操作部品に重ならない。演出中のスクロール・リサイズでエフェクトがすぐ消える（`stopped:view`）。200% ズーム相当（640×450）は出ず、届いた出来事は捨てる。表示 OFF・動きを減らす設定ではレイヤーがない。架空のライブは Leg 1 だけなので、過去の Leg のタブの実画面確認はできていない（`LiveSheet` を描画する単体テストで確認）。この回の実画面では 180・victory・anxious の演出・frustrated は起きなかった（180・victory・anxious は E2E、frustrated は単体テストで確認）
 - プレビュー（架空の n01）で反応を見る手順：「n01から作成」→ ATDO → kalavinka でチームを作る → 観戦 → ライブ。架空のライブは 4 秒ごとに投てきが進み、約 96 秒で同じ Leg をやり直す（やり直した 2 周目は同じラウンドの繰り返しなので反応しない。再読み込みで基準からやり直せる）
 - 実画面（本番ビルド・架空の n01・Chromium）：スマホ（Pixel 5 相当）・PC（1280×900）・ライト / ダーク（スタジアム）で、味方の高得点・180・勝利を演出（スコア表の枠の上。180 のボードは正しい向き、右向きの cheer はエフェクトも反転）。立ち位置の上に文字があると見送り（スマホのダークでは 3 種とも見送り）。200% ズーム相当（640×450）は立てる場所がなく出ない
 - Codex 監査（CLI、読み取り専用、PR3 から 0 回として数え直し）
