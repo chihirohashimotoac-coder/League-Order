@@ -271,12 +271,53 @@ describe('LiveReactionTracker: 勝敗・逆転', () => {
     expect(other.update(live({ throws: [v(1, 1, 180), v(0, 1, 140)] }))?.reaction).toBe('anxious');
   });
 
-  it('セット形式 (scid) のセットの切り替え: 新しいセットの投てきは新しい Leg として扱う', () => {
+  it('セット形式 (scid) のセットの切り替え: 新しいセット (mid) の最初の状態は基準 (いつ投げたか分からない投てきには反応しない)', () => {
     const set = { tmid: null, scid: 'sc1', isSchedule: false };
     const tracker = new LiveReactionTracker('A');
     tracker.update(live({ ...set, mid: 'set1', throws: [v(0, 1, 60)] }));
-    expect(tracker.update(live({ ...set, mid: 'set2', throws: [v(0, 1, 140)] }))?.reaction).toBe('cheer');
+    expect(tracker.update(live({ ...set, mid: 'set2', throws: [v(0, 1, 140)] }))).toBeNull();
+    expect(tracker.update(live({ ...set, mid: 'set2', throws: [v(0, 1, 140), v(1, 1, 60), v(0, 2, 120)] }))?.reaction).toBe('cheer');
     expect(tracker.update(live({ ...set, mid: 'set1', throws: [v(0, 1, 60), v(0, 2, 180)] }))).toBeNull();
+  });
+
+  it('対戦の次のゲーム (新しい mid) の最初の状態にすでにある投てき (味方の 180 など) には反応しない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ mid: 'g1' }));
+    expect(tracker.update(live({ mid: 'g2', throws: [v(0, 1, 180)] }))).toBeNull();
+    expect(tracker.update(live({ mid: 'g2', throws: [v(0, 1, 180), v(1, 1, 60), v(0, 2, 180)] }))?.reaction).toBe('surprise180');
+  });
+
+  it('勝数の訂正 (減る・両方変わる) では反応せず、同じ結果に 2 回反応しない。訂正の前後をつないで逆転にしない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ legs: [0, 0] }));
+    expect(tracker.update(live({ legs: [1, 0] }))?.reaction).toBe('legWin');
+    expect(tracker.update(live({ legs: [0, 0] }))).toBeNull();
+    expect(tracker.update(live({ legs: [1, 0] }))).toBeNull();
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live({ sets: [0, 1] }));
+    // 0-1 → 1-0 (両方変わった = 訂正)。
+    expect(t2.update(live({ mid: 'm2', sets: [1, 0] }))).toBeNull();
+    expect(t2.update(live({ mid: 'm3', sets: [2, 0] }))?.reaction).toBe('gameWin');
+    const t3 = new LiveReactionTracker('A');
+    t3.update(live({ sets: [0, 1] }));
+    // 2 つ増えた (取りこぼし) も確かな出来事ではない。
+    expect(t3.update(live({ mid: 'm2', sets: [2, 1] }))).toBeNull();
+  });
+
+  it('対戦が変わったら、前の対戦の「終了済み」を持ち越さない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ tmid: 'A1', sets: [3, 1], cardEnded: true }));
+    tracker.update(live({ tmid: 'B1', mid: 'b1', sets: [2, 2] }));
+    expect(tracker.update(live({ tmid: 'B1', mid: 'b1', sets: [3, 2], cardEnded: true }))?.reaction).toBe('victory');
+  });
+
+  it('終わったのを見た Leg に後から届いた投てき・ラウンドの分からない投てきには反応しない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ legEnded: true, throws: [v(0, 1, 60)] }));
+    expect(tracker.update(live({ legEnded: true, throws: [v(0, 1, 60), v(0, 2, 180)] }))).toBeNull();
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live());
+    expect(t2.update(live({ throws: [v(0, 0, 180)] }))).toBeNull();
   });
 
   it('セット形式: 1 セットの終了 (end_match) は試合の終了ではない。セットの勝ちは控えめ、end_schedule でセット数の勝敗', () => {

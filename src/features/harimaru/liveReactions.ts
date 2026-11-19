@@ -87,14 +87,34 @@ export const MAX_NEW_VISITS = 2;
 /** 覚えておく `mid` の数 (古い応答の判定用)。 */
 const MID_HISTORY = 16;
 
+interface LegMemory {
+  /** 見た投てき (`side:round`) と、側ごとの最大ラウンド。 */
+  seen: Set<string>;
+  maxRound: [number, number];
+  /** 終わった (`end`) のを見た Leg: そのあとに届いた投てきは後着 (反応しない)。 */
+  ended: boolean;
+}
+
 interface GameMemory {
   legs: [number, number];
-  /** 味方が Leg の数で負けている状態を見たか / 逆転を演出したか。 */
+  /** 味方が Leg の数で負けている状態を、確かな変化 (1 ずつの増加) の流れの中で見たか / 逆転を演出したか。 */
   trailed: boolean;
   comeback: boolean;
-  /** 投てき: Leg ごとの見た投てき (`side:round`) と、側ごとの最大ラウンド。 */
-  visits: Map<number, { seen: Set<string>; maxRound: [number, number] }>;
+  visits: Map<number, LegMemory>;
   maxLeg: number;
+}
+
+/**
+ * 勝数の変化が「どちらか片方がちょうど 1 増えた」か。減った・両方変わった・2 以上増えたのは訂正や取りこぼし
+ * (確かな出来事ではない) として null。変わっていなければ 'same'。
+ */
+function step(before: readonly [number, number], after: readonly [number, number]): 0 | 1 | 'same' | null {
+  const d0 = after[0] - before[0];
+  const d1 = after[1] - before[1];
+  if (d0 === 0 && d1 === 0) return 'same';
+  if (d0 === 1 && d1 === 0) return 0;
+  if (d1 === 1 && d0 === 0) return 1;
+  return null;
 }
 
 export class LiveReactionTracker {
@@ -108,6 +128,8 @@ export class LiveReactionTracker {
   private unitComeback = false;
   private readonly mids: string[] = [];
   private readonly games = new Map<string, GameMemory>();
+  /** 反応した (または基準で見た) 出来事。同じ結果に 2 回反応しない。 */
+  private readonly consumed = new Set<string>();
 
   constructor(allyId: string | null) {
     this.allyId = allyId;
@@ -116,6 +138,11 @@ export class LiveReactionTracker {
   /** 次に受け取る状態を基準にし直す (それまでの出来事には反応しない)。 */
   rebaseline(): void {
     this.needBaseline = true;
+  }
+
+  /** いま見ている対戦の単位 (切り替わったら、演出中・待っている出来事を取り消すために使う)。 */
+  get currentUnit(): string | null {
+    return this.unit;
   }
 
   /** 新しい状態を受け取り、反応すべき出来事のうち最も優先度の高い 1 つを返す。 */
@@ -135,6 +162,11 @@ export class LiveReactionTracker {
       return null;
     }
     const events: LiveEvent[] = [];
+    const push = (reaction: LiveReaction, key: string): void => {
+      if (this.consumed.has(key)) return;
+      this.consumed.add(key);
+      events.push({ reaction, key });
+    };
     const other = (1 - side) as 0 | 1;
     const sets = usesSets(state);
     const matchEnded = state.cardEnded || (!sets && state.gameEnded);
@@ -143,53 +175,61 @@ export class LiveReactionTracker {
     if (matchEnded && !this.unitDone) {
       this.unitDone = true;
       const score = sets ? state.sets : state.legs;
-      if (score[side] > score[other]) events.push({ reaction: 'victory', key: `${unit}:result` });
-      else if (score[side] < score[other]) events.push({ reaction: 'frustrated', key: `${unit}:result` });
+      if (score[side] > score[other]) push('victory', `${unit}:result`);
+      else if (score[side] < score[other]) push('frustrated', `${unit}:result`);
     }
 
-    // 個別のゲーム (セット) の勝敗 (勝数がちょうど 1 増えたとき) と、対戦の逆転。
+    // 個別のゲーム (セット) の勝敗と、対戦の逆転。勝数がちょうど 1 増えたときだけ確かな出来事とみなす。
     if (sets && this.sets) {
-      const gained: [number, number] = [state.sets[0] - this.sets[0], state.sets[1] - this.sets[1]];
-      if (gained[side] === 1 && gained[other] === 0) events.push({ reaction: 'gameWin', key: `${unit}:game:${state.sets.join('-')}` });
-      else if (gained[other] === 1 && gained[side] === 0) events.push({ reaction: 'gameLoss', key: `${unit}:game:${state.sets.join('-')}` });
-    }
-    if (sets) {
-      const diff = state.sets[side] - state.sets[other];
-      if (diff < 0) this.unitTrailed = true;
-      else if (diff > 0 && this.unitTrailed && !this.unitComeback) {
-        this.unitComeback = true;
-        events.push({ reaction: 'comeback', key: `${unit}:comeback` });
+      const change = step(this.sets, state.sets);
+      if (change === null) {
+        // 訂正・取りこぼし: 前後をつないで逆転とみなさない。
+        this.unitTrailed = false;
+      } else if (change !== 'same') {
+        push(change === side ? 'gameWin' : 'gameLoss', `${unit}:game:${state.sets.join('-')}`);
+        const diff = state.sets[side] - state.sets[other];
+        if (diff < 0) this.unitTrailed = true;
+        else if (diff > 0 && this.unitTrailed && !this.unitComeback) {
+          this.unitComeback = true;
+          push('comeback', `${unit}:comeback`);
+        }
       }
-      this.sets = [state.sets[0], state.sets[1]];
     }
+    if (sets) this.sets = [state.sets[0], state.sets[1]];
 
     // 同じゲームの Leg の勝敗と、ゲームの中の逆転。
     let game = this.games.get(state.mid);
     if (!game) {
-      // 新しいゲーム (対戦の次のゲーム): いまの Leg の数を基準にする (比べるものがない)。
+      // 新しいゲーム (対戦の次のゲーム): いまの状態を基準にする (投てきも、いつ投げられたか分からないので見たことにする)。
       game = this.rememberGame(state, side);
       this.pushMid(state.mid);
-    } else {
-      const gained: [number, number] = [state.legs[0] - game.legs[0], state.legs[1] - game.legs[1]];
-      if (gained[side] === 1 && gained[other] === 0) events.push({ reaction: 'legWin', key: `${state.mid}:leg:${state.legs.join('-')}` });
+      return this.pick(events);
+    }
+    const change = step(game.legs, state.legs);
+    if (change === null) {
+      game.trailed = false;
+    } else if (change !== 'same') {
+      if (change === side) push('legWin', `${state.mid}:leg:${state.legs.join('-')}`);
       const diff = state.legs[side] - state.legs[other];
       if (diff < 0) game.trailed = true;
       else if (diff > 0 && game.trailed && !game.comeback) {
         game.comeback = true;
-        events.push({ reaction: 'comeback', key: `${state.mid}:comeback` });
+        push('comeback', `${state.mid}:comeback`);
       }
-      game.legs = [state.legs[0], state.legs[1]];
     }
+    game.legs = [state.legs[0], state.legs[1]];
 
     // 01 の得点。
-    const visit = this.newVisits(state, game);
-    for (const entry of visit) {
+    for (const entry of this.newVisits(state, game)) {
       const reaction = scoreReaction(entry, entry.side === side);
-      if (reaction) events.push({ reaction, key: `${state.mid}:${state.leg?.index ?? 0}:${entry.side}:${entry.round}` });
+      if (reaction) push(reaction, `${state.mid}:${state.leg?.index ?? 0}:${entry.side}:${entry.round}`);
     }
+    return this.pick(events);
+  }
 
+  /** 優先度の高いもの。同じ優先度では先に見つけたもの (結果 → 得点の順に積んである)。 */
+  private pick(events: readonly LiveEvent[]): LiveEvent | null {
     if (events.length === 0) return null;
-    // 優先度の高いもの。同じ優先度では、味方の出来事・先に見つけたものを選ぶ。
     return events.reduce((best, event) => (LIVE_PRIORITY[event.reaction] < LIVE_PRIORITY[best.reaction] ? event : best));
   }
 
@@ -201,26 +241,28 @@ export class LiveReactionTracker {
       this.games.clear();
       this.unitComeback = false;
       this.unitTrailed = false;
+      this.unitDone = false;
     }
     const sets = usesSets(state);
     const matchEnded = state.cardEnded || (!sets && state.gameEnded);
-    // 最初から終わっていた試合には、勝敗の演出をしない。
+    // 最初から終わっていた試合には、勝敗の演出をしない (同じ対戦の基準の取り直しでは、終わった記録を残す)。
     this.unitDone = this.unitDone || matchEnded;
     this.sets = sets ? [state.sets[0], state.sets[1]] : null;
-    if (sets && state.sets[side] < state.sets[1 - side]) this.unitTrailed = true;
+    // 基準の取り直しでは、前後をつないで逆転とみなさない。基準で負けていれば、そこからの流れを見る。
+    this.unitTrailed = sets && state.sets[side] < state.sets[1 - side];
     const game = this.games.get(state.mid);
     if (game) {
       game.legs = [state.legs[0], state.legs[1]];
-      if (state.legs[side] < state.legs[1 - side]) game.trailed = true;
-      // 基準にする: いまの投てきはすべて見たことにする。
+      game.trailed = state.legs[side] < state.legs[1 - side];
       this.markSeen(state, game);
     } else {
-      this.rememberGame(state, side, true);
+      this.rememberGame(state, side);
       this.pushMid(state.mid);
     }
   }
 
-  private rememberGame(state: LiveState, side: 0 | 1, markAll = false): GameMemory {
+  /** 初めて見るゲーム: いまの Leg の数と投てきを基準にする。 */
+  private rememberGame(state: LiveState, side: 0 | 1): GameMemory {
     const game: GameMemory = {
       legs: [state.legs[0], state.legs[1]],
       trailed: state.legs[side] < state.legs[1 - side],
@@ -229,7 +271,7 @@ export class LiveReactionTracker {
       maxLeg: state.leg?.index ?? 0,
     };
     this.games.set(state.mid, game);
-    if (markAll) this.markSeen(state, game);
+    this.markSeen(state, game);
     return game;
   }
 
@@ -242,10 +284,10 @@ export class LiveReactionTracker {
     }
   }
 
-  private legMemory(game: GameMemory, index: number): { seen: Set<string>; maxRound: [number, number] } {
+  private legMemory(game: GameMemory, index: number): LegMemory {
     let memory = game.visits.get(index);
     if (!memory) {
-      memory = { seen: new Set(), maxRound: [-Infinity, -Infinity] };
+      memory = { seen: new Set(), maxRound: [-Infinity, -Infinity], ended: false };
       game.visits.set(index, memory);
     }
     return memory;
@@ -260,24 +302,29 @@ export class LiveReactionTracker {
       memory.seen.add(`${entry.side}:${entry.round}`);
       memory.maxRound[entry.side] = Math.max(memory.maxRound[entry.side], entry.round);
     }
+    if (leg.ended) memory.ended = true;
   }
 
-  /** 新しい 01 の投てき (初めて見た `side:round` で、その側のこれまでのラウンドより後のもの)。 */
+  /**
+   * 新しい 01 の投てき (初めて見た `side:round` で、その側のこれまでのラウンドより後のもの)。終わったのを見た Leg への
+   * 後着・ラウンドの分からない投てき (欠損は 0 に補われる)・過去の Leg・取りこぼしのあとは、記録だけして返さない。
+   */
   private newVisits(state: LiveState, game: GameMemory): LiveThrow01[] {
     const leg = state.leg;
     if (!leg) return [];
-    // 過去の Leg (いまより前の Leg の状態) の投てきには反応しない。
     if (leg.index < game.maxLeg) return [];
     game.maxLeg = leg.index;
     const memory = this.legMemory(game, leg.index);
+    const settled = memory.ended;
     const fresh = leg.throws.filter((entry) => !memory.seen.has(`${entry.side}:${entry.round}`));
-    const later = fresh.filter((entry) => entry.round > memory.maxRound[entry.side]);
+    const later = fresh.filter((entry) => Number.isInteger(entry.round) && entry.round >= 1 && entry.round > memory.maxRound[entry.side]);
     for (const entry of fresh) {
       memory.seen.add(`${entry.side}:${entry.round}`);
       memory.maxRound[entry.side] = Math.max(memory.maxRound[entry.side], entry.round);
     }
-    // Cricket の得点は対象外。取りこぼしのあと (一度に多く届いた) は新しさを保証できない。
-    if (state.matchType !== '01' || fresh.length > MAX_NEW_VISITS) return [];
+    if (leg.ended) memory.ended = true;
+    // Cricket の得点は対象外。取りこぼしのあと (一度に多く届いた)・終わった Leg への後着は新しさを保証できない。
+    if (state.matchType !== '01' || settled || fresh.length > MAX_NEW_VISITS) return [];
     return later.filter((entry): entry is LiveThrow01 => entry.kind === '01');
   }
 }

@@ -258,8 +258,6 @@ function MatchCenter({
   // A late live state of a game the list has gone past (its slot replayed) is neither shown nor
   // followed: the list's newer game is.
   const live = polled && !liveSuperseded(listed, polled) ? polled : null;
-  // ハリマル (観戦リアクション): 表示している状態を渡すだけ (取得は増やさない)。
-  useHarimaruLive('watch-results', live, data.season);
   // The same view as every other match (MatchParts): the games as chips on top, the chosen game
   // under them — on a phone and on a PC alike. Opened on the game a link names, else the game
   // being played, else the last one played.
@@ -271,6 +269,9 @@ function MatchCenter({
   const followed = live?.schid && playable.some((entry) => entry.slot.schid === live.schid) ? live.schid : null;
   const fallback = liveSchid ?? followed ?? (playable.find((entry) => entry.state === 'live') ?? playable[playable.length - 1])?.slot.schid ?? null;
   const game = linked ?? fallback;
+  // ハリマル (観戦リアクション): 表示している状態を渡すだけ (取得は増やさない)。ライブに追従している間だけ
+  // (リンクで別のゲームを開いている間は渡さない)。
+  useHarimaruLive(linked !== null && linked !== live?.schid ? null : 'watch-results', live, data.season, status);
   const [focus, setFocus] = useState<HighlightFocus | null>(null);
   const names: [string, string] = [card.teams[0].name, card.teams[1].name];
   const here: WatchLink = { ...base, card: card.key };

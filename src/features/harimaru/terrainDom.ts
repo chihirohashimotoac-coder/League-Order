@@ -141,7 +141,9 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
     if (style.display === 'contents') continue;
     // 入れ物を数えないのは、重なっている範囲をすべて包んでいるときだけ (帯の一部にかかるだけの別の色付きの枠は数える)。
     const behind = containers?.has(el) === true && regions.every((g) => !(box.bottom > g.top && box.top < g.bottom && box.right > g.left && box.left < g.right) || (box.left <= g.left && box.right >= g.right && box.top <= g.top && box.bottom >= g.bottom));
-    const solid = isSolid(el, style) && !behind;
+    // 実際にスクロールする入れ物 (中身が動く) は、包んでいても箱全体を数える。
+    const scrolling = /(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`) && overflows(el, style);
+    const solid = isSolid(el, style) && (!behind || scrolling);
     if (el !== seeThrough && (solid || hasPseudoContent(el, win))) {
       obstacles.push(box);
       continue;

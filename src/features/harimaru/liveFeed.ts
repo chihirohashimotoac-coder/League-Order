@@ -9,6 +9,8 @@ import type { LiveState } from '../matches/parse';
 
 export type LiveFeedMessage =
   | { kind: 'state'; source: string; state: LiveState; allyId: string | null }
+  /** 次の状態を基準にし直す (通信の失敗・取得上限・非表示のあと: その間の出来事には反応しない)。 */
+  | { kind: 'rebase'; source: string }
   | { kind: 'release'; source: string };
 
 type Listener = (message: LiveFeedMessage) => void;
@@ -42,4 +44,9 @@ export function activeLiveSource(): string | null {
 export function publishLive(source: string, state: LiveState, allyId: string | null): void {
   if (listeners.size === 0 || activeLiveSource() !== source) return;
   for (const listener of [...listeners]) listener({ kind: 'state', source, state, allyId });
+}
+
+export function rebaseLive(source: string): void {
+  if (listeners.size === 0 || activeLiveSource() !== source) return;
+  for (const listener of [...listeners]) listener({ kind: 'rebase', source });
 }

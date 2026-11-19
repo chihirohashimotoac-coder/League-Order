@@ -1743,6 +1743,19 @@ export class HarimaruController {
     return this.playLive(kind);
   }
 
+  /**
+   * 観戦の対象が変わった・観戦画面を離れた: 待っている出来事を捨て、演出中のリアクションを (エフェクトを残さずに)
+   * やめて待機に戻る。演出していなければ何もしない。
+   */
+  cancelLive(): void {
+    if (this.destroyed) return;
+    this.dropPendingLive();
+    if (this.liveNow && this.placed) {
+      this.log('live:cancelled');
+      this.endLive();
+    }
+  }
+
   private waitLive(kind: LiveReaction): void {
     const held = this.pendingLive;
     if (held && LIVE_PRIORITY[held.kind] <= LIVE_PRIORITY[kind]) return;
@@ -1841,14 +1854,11 @@ export class HarimaruController {
       this.log(`live:${kind}:skipped:asset`);
       return false;
     }
-    // 文字 (「180」) のあるリアクションは、反転しないよう左向き (元の絵の向き) で演出する。
-    const dir: -1 | 1 = REACTIONS[id].textFrames ? -1 : this.dir;
-    if (!this.reactionRoom(id, dir)) {
+    if (!this.reactionRoom(id, this.dir)) {
       this.log(`live:${kind}:skipped:room`);
       return false;
     }
     this.startLive(kind, priority, id);
-    this.dir = dir;
     const spec = REACTIONS[id];
     let frame = 0;
     const next = (): void => {
@@ -1891,25 +1901,34 @@ export class HarimaruController {
     if (!view || !this.placed) return false;
     const spec = REACTIONS[id];
     const top = this.top - SPRITE.height;
+    // 本体: 枠いっぱい (1x の縮小のにじみ・画素への丸めを含めて左右 1px の余裕) を、移動量ごとに包む。
     let left = Infinity;
     let right = -Infinity;
     let upper = Infinity;
     for (const [ox, oy] of spec.bodyOffsets) {
       const dx = dir < 0 ? ox : -ox;
-      left = Math.min(left, this.x + dx + SPRITE.sideInset);
-      right = Math.max(right, this.x + dx + SPRITE.width - SPRITE.sideInset);
-      upper = Math.min(upper, top + oy);
+      left = Math.min(left, this.x + dx - 1);
+      right = Math.max(right, this.x + dx + SPRITE.width + 1);
+      upper = Math.min(upper, top + oy - 1);
     }
+    // エフェクト: 右向きでは本体の中心 (x = 15) で左右反転する。文字のあるものは反転せずにずらす。
     const box = spec.effectBox;
-    // 右向きでは本体の中心 (x = 15) で左右反転する。
-    const effectLeft = dir < 0 ? box.left : SPRITE.width - box.right;
-    const effectRight = dir < 0 ? box.right : SPRITE.width - box.left;
-    left = Math.min(left, this.x + effectLeft) - 1;
-    right = Math.max(right, this.x + effectRight) + 1;
-    upper = Math.min(upper, top + box.top) - 1;
+    const shift = spec.textShift !== undefined && dir > 0 ? spec.textShift : 0;
+    const mirror = dir > 0 && spec.textShift === undefined;
+    const effectLeft = (mirror ? SPRITE.width - box.right : box.left) + shift;
+    const effectRight = (mirror ? SPRITE.width - box.left : box.right) + shift;
+    left = Math.min(left, this.x + effectLeft - 1);
+    right = Math.max(right, this.x + effectRight + 1);
+    upper = Math.min(upper, top + box.top - 1);
     const region: Rect = { left, right, top: upper, bottom: this.top };
     const obstacles = this.obstaclesIn(this.root, [region], this.win, undefined, this.containers);
-    return boxIsClear({ ...region, bottom: this.top - 0.5 }, obstacles, view);
+    if (!boxIsClear({ ...region, bottom: this.top - 0.5 }, obstacles, view)) return false;
+    // 足元より下 (カードの面) に出るエフェクト (敗北の砂ぼこり): その範囲がカードの内側の余白に収まるときだけ。
+    if (box.bottom > SPRITE.height) {
+      const below: Rect = { left: this.x + effectLeft - 1, right: this.x + effectRight + 1, top: this.top, bottom: this.top + (box.bottom - SPRITE.height) + 1 };
+      if (!this.cardBelowClear(below)) return false;
+    }
+    return true;
   }
 
   // ------------------------------------------------------------------ 縁・転ぶ・寝ぼける (v0.9)
@@ -1933,7 +1952,17 @@ export class HarimaruController {
       top: this.top,
       bottom: this.top + depth + EDGE_CLEARANCE,
     };
-    if (box.bottom > view.bottom) return null;
+    return this.cardBelowClear(box);
+  }
+
+  /**
+   * 足場の上辺より下 (カードの面) の範囲 box が、足元のカード 1 枚の上辺の直線部分 (角丸を除く) の中にあり、
+   * カードの中の文字・スコア・操作部品・色の付いた要素に重ならず、見えている範囲に収まるか。そのカード (なければ null)。
+   * 足場そのものが操作部品 (ボタンのタイルなど) なら null。
+   */
+  private cardBelowClear(box: Rect): Element | null {
+    const view = this.view;
+    if (!view || box.bottom > view.bottom) return null;
     const sx = this.win.scrollX;
     const sy = this.win.scrollY;
     const card = this.platformEls.find((el) => {
@@ -2366,15 +2395,19 @@ export class HarimaruController {
 
   /**
    * エフェクトの位置: 本体の動く前の左上から (-11, -18)。右向きでは本体の中心で左右反転する (52 px の枠の中心 =
-   * 本体の中心)。文字のあるリアクション (180) は、始める前に左向きにしてあるので反転しない。
+   * 本体の中心)。文字のあるリアクション (180) は本体だけを反転し、ボードは反転せずに textShift だけずらす。
    */
   private placeEffect(): void {
     const effect = this.effect;
     if (!effect || !this.effectOn) return;
     const dpr = this.win.devicePixelRatio || 1;
-    const x = Math.round(this.x * dpr) / dpr + EFFECT_CELL.offsetX;
+    const spec = REACTIONS[this.effectOn.id];
+    // 文字のあるエフェクト (180 のボード) は反転せず、右向きでは本体の中心で折り返した位置へずらす。
+    const keepText = spec.textShift !== undefined;
+    const shift = keepText && this.dir > 0 ? spec.textShift! : 0;
+    const x = Math.round(this.x * dpr) / dpr + EFFECT_CELL.offsetX + shift;
     const y = Math.floor((this.top - SPRITE.height) * dpr + 1e-6) / dpr + EFFECT_CELL.offsetY;
-    effect.style.transform = `translate3d(${x}px, ${y}px, 0) scaleX(${this.dir > 0 ? -1 : 1})`;
+    effect.style.transform = `translate3d(${x}px, ${y}px, 0) scaleX(${this.dir > 0 && !keepText ? -1 : 1})`;
   }
 
   private setVisible(visible: boolean): void {

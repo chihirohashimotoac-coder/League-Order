@@ -168,17 +168,30 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
     let tracker: { source: string; allyId: string | null; judge: LiveReactionTracker } | null = null;
     const unsubscribe = subscribeLive((message) => {
       if (message.kind === 'release') {
-        if (tracker?.source === message.source) tracker = null;
+        // 観戦画面を離れた: その対戦の演出中・待っている出来事も取り消す。
+        if (tracker?.source === message.source) {
+          tracker = null;
+          controller?.cancelLive();
+        }
+        return;
+      }
+      if (message.kind === 'rebase') {
+        if (tracker?.source === message.source) tracker.judge.rebaseline();
         return;
       }
       if (!tracker || tracker.source !== message.source || tracker.allyId !== message.allyId) {
+        // 観戦画面・味方が変わった: 判定を作り直し、前の対戦の演出・待っている出来事を取り消す。
+        if (tracker) controller?.cancelLive();
         tracker = { source: message.source, allyId: message.allyId, judge: new LiveReactionTracker(message.allyId) };
       }
       if (message.allyId && !reactionsWanted) {
         reactionsWanted = true;
         loadReactions();
       }
+      const unitBefore = tracker.judge.currentUnit;
       const event = tracker.judge.update(message.state);
+      // 同じ観戦画面の中で対戦が切り替わった (カードの選び直しなど): 前の対戦の演出を取り消す。
+      if (unitBefore !== null && tracker.judge.currentUnit !== unitBefore) controller?.cancelLive();
       if (event && controller) controller.reactLive(event.reaction);
     });
     // タブが非表示から戻ったとき: その間に起きたこと (戻った直後の取得で届く) には反応しない。

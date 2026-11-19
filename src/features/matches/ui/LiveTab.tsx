@@ -442,8 +442,6 @@ function FocusCard({
   // 1 ゲームの対戦の終了)。ゲームの合間も保持し、再試行中は最後に確認した状態に従う。
   // ポーラーが取得上限 (`budget`) で止まったら解除する。
   useScreenWake(!card.finished && status.kind !== 'finished' && status.kind !== 'budget' && !(live && (live.cardEnded || (!live.isSchedule && live.gameEnded))));
-  // ハリマル (観戦リアクション): 同じ状態を渡すだけ (取得は増やさない)。2 カード表示では左 (主たる対象) だけ。
-  useHarimaruLive(pane === 'right' ? null : 'watch-live', live, data.season);
 
   // Who plays which game: read once, again every 2 minutes while the card runs.
   useEffect(() => {
@@ -467,6 +465,9 @@ function FocusCard({
   const bySchid = new Map(card.games.map((game) => [game.schid, game]));
   const currentSchid = live && !live.gameEnded ? live.schid : card.current?.schid ?? null;
   const selected = picked ?? currentSchid ?? card.games[card.games.length - 1]?.schid ?? null;
+  // ハリマル (観戦リアクション): 同じ状態を渡すだけ (取得は増やさない)。2 カード表示では左 (主たる対象) だけ。
+  // ライブに追従している間だけ (別のゲームを選んで開いている間は渡さない。ゲームの終了・対戦の終了も追従のまま渡す)。
+  useHarimaruLive(pane === 'right' || (picked !== null && picked !== live?.schid) ? null : 'watch-live', live, data.season, status);
   const selectedGame = selected ? bySchid.get(selected) ?? null : null;
 
   // Card score: n01's live count when there is one (it includes the game just won), else the board's.

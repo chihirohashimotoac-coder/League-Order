@@ -141,8 +141,11 @@ export function clipOffset(id: ClipId, frame: number, dir: -1 | 1): { dx: number
  *
  * - `bodyOffsets`: 本体だけを動かす量 (CSS px)。エフェクトは本体の動く前の位置に固定する (manifest の composite と同じ)。
  * - `effectsInFront`: エフェクトを本体の前に重ねるか (180 のボードは本体の後ろ)。
- * - `effectBox`: エフェクトの描かれる範囲 (左向き、本体の左上から、CSS px)。3x 素材の不透明度 16/255 以上の
- *   画素を全コマで包む範囲を外側へ丸めた値 (検品スクリプトで測定)。安全な余白の判定に使う。
+ * - `effectBox`: エフェクトの描かれる範囲 (左向き、本体の左上から、CSS px)。1x・2x・3x の素材それぞれで、
+ *   少しでも不透明な画素 (アルファ > 0) を全コマで包む範囲の和を外側へ丸めた値 (検品スクリプトで測定。1x は縮小の
+ *   にじみで広い)。安全な余白の判定に使う。bottom が 20 を超えるものは足元より下 (カードの面) に出る。
+ * - `textShift`: 文字のあるエフェクト (180 のボード) を右向きで出すとき、反転せずに右へずらす量 (CSS px)。
+ *   ボード (全コマで x = -1.33〜24.33、中心 11.5) を本体の中心 (15) で折り返した位置 = 30 - 2 × 11.5。
  */
 export type ReactionId = 'victory' | 'cheer' | 'panic' | 'anxious' | 'frustrated' | 'surprise180';
 
@@ -154,6 +157,7 @@ export interface ReactionSpec {
   effectBox: { left: number; top: number; right: number; bottom: number };
   /** 文字を描いたコマ (左右反転してはいけない)。 */
   textFrames?: readonly number[];
+  textShift?: number;
 }
 
 export const EFFECT_CELL = { width: 52, height: 42, offsetX: -11, offsetY: -18 } as const;
@@ -164,43 +168,44 @@ export const REACTIONS: Record<ReactionId, ReactionSpec> = {
     durationsMs: [70, 110, 100, 170, 100, 80, 150, 100, 190, 120],
     bodyOffsets: [[0, 0], [0, 0], [0, -4], [0, -7], [0, 0], [0, 0], [0, -5], [0, 0], [0, 0], [0, 0]],
     effectsInFront: true,
-    effectBox: { left: -7, top: -12, right: 35, bottom: 9 },
+    effectBox: { left: -9, top: -14, right: 37, bottom: 11 },
   },
   cheer: {
     frameCount: 6,
     durationsMs: [70, 100, 90, 160, 120, 120],
     bodyOffsets: [[0, 0], [0, 0], [-1, 0], [-1, 0], [0, 0], [0, 0]],
     effectsInFront: true,
-    effectBox: { left: -6, top: 0, right: 3, bottom: 14 },
+    effectBox: { left: -8, top: -2, right: 5, bottom: 16 },
   },
   panic: {
     frameCount: 8,
     durationsMs: [70, 90, 140, 190, 100, 100, 130, 120],
     bodyOffsets: [[0, 0], [1, 0], [0, 0], [-1, 0], [0, 0], [1, 0], [0, 0], [0, 0]],
     effectsInFront: true,
-    effectBox: { left: 6, top: -11, right: 20, bottom: 0 },
+    effectBox: { left: 3, top: -13, right: 22, bottom: 2 },
   },
   anxious: {
     frameCount: 8,
     durationsMs: [80, 120, 130, 140, 130, 180, 170, 130],
     bodyOffsets: [[0, 0], [1, 0], [0, 0], [1, 0], [-1, 0], [1, 0], [0, 0], [0, 0]],
     effectsInFront: true,
-    effectBox: { left: 16, top: -6, right: 35, bottom: 12 },
+    effectBox: { left: 14, top: -9, right: 37, bottom: 14 },
   },
   frustrated: {
     frameCount: 8,
     durationsMs: [100, 120, 110, 160, 320, 290, 170, 140],
     bodyOffsets: [[0, 0], [0, 0], [0, 0], [-1, 0], [-1, 0], [-1, 0], [0, 0], [0, 0]],
     effectsInFront: true,
-    effectBox: { left: -5, top: 13, right: 9, bottom: 20 },
+    effectBox: { left: -7, top: 10, right: 11, bottom: 23 },
   },
   surprise180: {
     frameCount: 9,
     durationsMs: [80, 130, 150, 170, 390, 310, 160, 170, 110],
     bodyOffsets: [[0, 0], [0, 0], [0, 0], [0, -1], [0, -2], [0, -1], [0, 0], [0, 0], [0, 0]],
     effectsInFront: false,
-    effectBox: { left: -8, top: -14, right: 35, bottom: 16 },
+    effectBox: { left: -10, top: -16, right: 37, bottom: 18 },
     textFrames: [2, 3, 4, 5, 6],
+    textShift: 7,
   },
 };
 

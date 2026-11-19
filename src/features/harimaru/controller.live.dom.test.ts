@@ -166,7 +166,7 @@ describe('観戦リアクションの再生', () => {
     expect(sprite.style.width).toBe('');
   });
 
-  it('右向きではエフェクトも本体の中心で左右反転する。180 は文字が反転しないよう左向きで掲げる', () => {
+  it('右向きではエフェクトも本体の中心で左右反転する。180 は本体だけ反転し、ボードは反転せず本体の中心で折り返した位置へずらす', () => {
     for (let seed = 1; seed < 20; seed += 1) {
       standing({ seed });
       if (controller.snapshot().dir > 0) break;
@@ -180,12 +180,15 @@ describe('観戦リアクションの再生', () => {
     const moved = cheer.find((f) => f.body === 'rx:cheer:2')!;
     expect(moved.poseX).toBe(1);
     for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
+    const { x } = controller.snapshot();
     controller.reactLive('surprise180');
     const board = record(1_800).filter((f) => f.effect);
     expect(board.length).toBeGreaterThan(0);
     for (const f of board) {
       expect(f.effectAt!.flipped, f.effect).toBe(false);
-      expect(f.bodyAt.flipped, f.body).toBe(false);
+      expect(f.bodyAt.flipped, f.body).toBe(true);
+      // ボード (x = -1.33〜24.33) を本体の中心で折り返す: 7px 右へ。
+      expect(f.effectAt!.left).toBeCloseTo(Math.round(x) - 11 + 7, 6);
     }
     expect(new Set(board.map((f) => f.effect))).toEqual(new Set(REACTIONS.surprise180.durationsMs.map((_, k) => `surprise180:${k}`)));
   });
@@ -285,6 +288,51 @@ describe('優先順位・割り込み・クールダウン', () => {
 });
 
 describe('安全: エフェクトの範囲・素材の読み込み・後片付け', () => {
+  it('足元より下に出るエフェクト (敗北の砂ぼこり) は、カードの面の文字・カードの角に重なるなら演出しない', () => {
+    standing();
+    const { x, top } = controller.snapshot();
+    // カードの面 (足元のすぐ下) に、左右どちらの向きの砂ぼこりにもかかる幅の文字。
+    const inside = (_root: Element, _regions: readonly Rect[], _win: Window, seeThrough?: Element) => (seeThrough ? [{ left: x - 20, right: x + 50, top: top + 1, bottom: top + 3 }] : []);
+    // 演出するかは obstaclesIn の差し替えで決まる: ここでは controller を作り直す。
+    controller.destroy();
+    controller = new HarimaruController({
+      sprite, effect, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => terrain(),
+      obstaclesIn: inside, behavior: quiet, finePointer: false, interaction: DEFAULT_INTERACTION,
+    });
+    controller.setSheet('base', 'base.png');
+    for (const id of REACTION_IDS) controller.setReactionSheets(id, `${id}-body.png`, `${id}-effect.png`);
+    controller.start();
+    advance(DEFAULT_TIMING.enterDelayMs[1] + DEFAULT_ANIMATION.sinkMs * 2 + 3_000);
+    for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
+    const at = controller.snapshot();
+    expect(at.x).toBe(x);
+    expect(controller.reactLive('frustrated')).toBe(false);
+    expect(controller.snapshot().events.at(-1)).toBe('live:frustrated:skipped:room');
+    // 砂ぼこりの出ない演出は、カードの面を調べない。
+    expect(controller.reactLive('victory')).toBe(true);
+  });
+
+  it('観戦の対象が変わった (cancelLive): 演出中のリアクションをエフェクトごとやめ、待っている出来事を捨てる', () => {
+    standing();
+    controller.reactLive('victory');
+    advance(100);
+    controller.cancelLive();
+    expect(controller.snapshot().live).toBeNull();
+    expect(effect.dataset.active).toBe('false');
+    expect(controller.snapshot().action).toBe('idle');
+    for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
+    controller.trigger('slip');
+    advance(700);
+    controller.reactLive('victory');
+    expect(controller.snapshot().pendingLive).toBe('victory');
+    controller.cancelLive();
+    expect(controller.snapshot().pendingLive).toBeNull();
+    for (let i = 0; i < 250; i += 1) {
+      advance(16);
+      expect(controller.snapshot().live).toBeNull();
+    }
+  });
+
   it('エフェクトの範囲 (本体より広い) に文字・操作部品があれば演出しない。演出中に入ってきたらやめる', async () => {
     standing();
     const { x, top } = controller.snapshot();
