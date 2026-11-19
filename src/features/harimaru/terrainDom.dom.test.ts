@@ -3,6 +3,8 @@ import { isSolid } from './terrainDom';
 
 const style = (values: Record<string, string>): CSSStyleDeclaration =>
   ({
+    overflowX: values.overflowX ?? 'visible',
+    overflowY: values.overflowY ?? 'visible',
     backgroundImage: values.backgroundImage ?? 'none',
     backgroundColor: values.backgroundColor ?? 'rgba(0, 0, 0, 0)',
     getPropertyValue: (name: string) => values[name] ?? '',
@@ -35,6 +37,23 @@ describe('isSolid (箱全体を障害物にする要素)', () => {
   });
 });
 
+describe('スクロール領域', () => {
+  const box = (scroll: number, client: number): HTMLElement => {
+    const el = document.createElement('ul');
+    Object.defineProperty(el, 'scrollWidth', { value: scroll });
+    Object.defineProperty(el, 'clientWidth', { value: client });
+    Object.defineProperty(el, 'scrollHeight', { value: 40 });
+    Object.defineProperty(el, 'clientHeight', { value: 40 });
+    return el;
+  };
+  it('中身がはみ出してスクロールできるときだけ、箱全体を障害物にする (収まっていれば中身だけを数える)', () => {
+    expect(isSolid(box(900, 400), style({ overflowX: 'auto' }))).toBe(true);
+    expect(isSolid(box(400, 400), style({ overflowX: 'auto' }))).toBe(false);
+    expect(isSolid(box(401, 400), style({ overflowX: 'scroll' }))).toBe(false);
+    expect(isSolid(box(900, 400), style({ overflowX: 'hidden' }))).toBe(false);
+  });
+});
+
 describe('collectObstacles の seeThrough (カードの内側を調べる)', () => {
   const rect = (left: number, top: number, right: number, bottom: number) => () =>
     ({ left, top, right, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
@@ -61,6 +80,39 @@ describe('collectObstacles の seeThrough (カードの内側を調べる)', () 
     expect(inside).toContainEqual({ left: 120, top: 304, right: 160, bottom: 318 });
     // 範囲の外のボタンは数えない。
     expect(inside).not.toContainEqual({ left: 300, top: 350, right: 360, bottom: 380 });
+    root.remove();
+  });
+
+  it('足場を包む入れ物 (色付きのカード) は、帯を完全に包むときだけ数えない。中の文字・部品・帯の一部にかかる枠は数える', async () => {
+    const { collectObstacles, containersOf } = await import('./terrainDom');
+    const root = document.createElement('main');
+    const outer = document.createElement('section');
+    outer.style.backgroundColor = 'rgb(255, 255, 255)';
+    outer.getBoundingClientRect = rect(0, 100, 400, 900);
+    const sheet = document.createElement('div');
+    sheet.getBoundingClientRect = rect(20, 300, 380, 600);
+    const tab = document.createElement('button');
+    tab.getBoundingClientRect = rect(20, 260, 80, 290);
+    const panel = document.createElement('div');
+    panel.style.backgroundColor = 'rgb(240, 240, 240)';
+    panel.getBoundingClientRect = rect(200, 250, 300, 285);
+    outer.append(tab, panel, sheet);
+    root.append(outer);
+    document.body.append(root);
+    const containers = containersOf([sheet], root);
+    expect(containers.has(outer)).toBe(true);
+    const band = { left: 20, right: 380, top: 277, bottom: 300 };
+    const found = collectObstacles(root, [band], window, undefined, containers);
+    expect(found).not.toContainEqual({ left: 0, top: 100, right: 400, bottom: 900 });
+    expect(found).toContainEqual({ left: 20, top: 260, right: 80, bottom: 290 });
+    expect(found).toContainEqual({ left: 200, top: 250, right: 300, bottom: 285 });
+    // 入れ物を渡さなければ、ふつうに色付きの箱として数える (PR2 までと同じ)。
+    expect(collectObstacles(root, [band], window)).toContainEqual({ left: 0, top: 100, right: 400, bottom: 900 });
+    // 操作部品は入れ物にしない。
+    const link = document.createElement('a');
+    link.append(document.createElement('div'));
+    root.append(link);
+    expect(containersOf([link.firstElementChild!], root).has(link)).toBe(false);
     root.remove();
   });
 

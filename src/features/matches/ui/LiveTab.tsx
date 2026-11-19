@@ -8,6 +8,7 @@ import type { LiveStatus } from '../livePoller';
 import { LivePoller, medianMs } from '../livePoller';
 import type { LiveEvent } from '../gameStats';
 import { throwEvents } from '../gameStats';
+import { useHarimaruLive } from '../../harimaru/useHarimaruLive';
 import { outlookTrail, slotChances } from '../cardTrail';
 import { checkReproduction, projectMany } from '../standings';
 import type { SeasonData } from './useMatchContext';
@@ -441,6 +442,8 @@ function FocusCard({
   // 1 ゲームの対戦の終了)。ゲームの合間も保持し、再試行中は最後に確認した状態に従う。
   // ポーラーが取得上限 (`budget`) で止まったら解除する。
   useScreenWake(!card.finished && status.kind !== 'finished' && status.kind !== 'budget' && !(live && (live.cardEnded || (!live.isSchedule && live.gameEnded))));
+  // ハリマル (観戦リアクション): 同じ状態を渡すだけ (取得は増やさない)。2 カード表示では左 (主たる対象) だけ。
+  useHarimaruLive(pane === 'right' ? null : 'watch-live', live, data.season);
 
   // Who plays which game: read once, again every 2 minutes while the card runs.
   useEffect(() => {

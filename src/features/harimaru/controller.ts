@@ -45,9 +45,13 @@ import {
   SLEEP_FRAMES,
   WALK_AIR,
   WALK_FRAMES,
+  EFFECT_CELL,
+  REACTIONS,
   type ClipId,
+  type ReactionId,
   type SpriteRow,
 } from './sprite';
+import { LIVE_PRIORITY, type LiveReaction } from './liveReactions';
 import {
   arcAt,
   arcBounds,
@@ -74,10 +78,16 @@ export type PauseReason = 'hidden' | 'modal' | 'offscreen' | 'shift' | 'input';
 export type ActionState =
   | HarimaruAction
   | 'happy' | 'turn' | 'flee' | 'approach' | 'peek' | 'enter'
-  | 'slip' | 'hang' | 'climb' | 'cursorHang' | 'tumble' | 'sleepyFall' | 'lookUp' | 'tilt' | 'play' | 'surprise';
+  | 'slip' | 'hang' | 'climb' | 'cursorHang' | 'tumble' | 'sleepyFall' | 'lookUp' | 'tilt' | 'play' | 'surprise'
+  | `live:${LiveReaction}`;
+
+/** 描く画像: v0.2 のアトラス、v0.9 の動作、PR3 のリアクションの本体。 */
+type SheetKey = 'base' | ClipId | `rx:${ReactionId}`;
 
 /** 外から (デバッグ・テスト) 始められる動作。いつもと同じ安全の確かめを通り、できなければ false。 */
-export type TriggerName = 'slip' | 'tumble' | 'sleepyFall' | 'groom' | 'stretch' | 'lookUp' | 'tilt' | 'play' | 'surprise' | 'happy' | 'run' | 'cursorHang';
+export type TriggerName =
+  | 'slip' | 'tumble' | 'sleepyFall' | 'groom' | 'stretch' | 'lookUp' | 'tilt' | 'play' | 'surprise' | 'happy' | 'run' | 'cursorHang'
+  | `live:${LiveReaction}`;
 
 export interface ControllerOptions {
   /** 動かす要素 (描画レイヤーの子)。 */
@@ -101,11 +111,29 @@ export interface ControllerOptions {
   available?: (id: MotionId) => boolean;
   /** テスト用: マウスでホバーできる画面か (既定: matchMedia で判定)。 */
   finePointer?: boolean;
+  /** 観戦リアクションのエフェクトを描く要素 (描画レイヤーの子。本体と同じく pointer-events: none)。 */
+  effect?: HTMLElement;
+  /** 観戦リアクションの調整値。 */
+  live?: LiveParams;
   /** テスト用: 経路の障害物の集め方の差し替え (seeThrough = 内側を調べるカード自身は数えない)。 */
-  obstaclesIn?: (root: Element, regions: readonly Rect[], win: Window, seeThrough?: Element) => Rect[];
+  obstaclesIn?: (root: Element, regions: readonly Rect[], win: Window, seeThrough?: Element, containers?: ReadonlySet<Element>) => Rect[];
 }
 
 type ObstaclesIn = NonNullable<ControllerOptions['obstaclesIn']>;
+
+/** 観戦リアクションの調整値 (暫定値)。 */
+export interface LiveParams {
+  /** 通常の得点 (優先度 5) の反応のあと、次の得点に反応するまで空ける時間。勝敗などの重要な出来事には効かない。 */
+  scoreCooldownMs: number;
+  /** 重要な出来事 (優先度 4 以上) を、足場の外にいる途中などで始められないとき、待つ最長の時間。 */
+  pendingMs: number;
+  /** 待っている間の確かめの間隔。 */
+  pendingCheckMs: number;
+}
+
+export const DEFAULT_LIVE: LiveParams = { scoreCooldownMs: 4_000, pendingMs: 3_000, pendingCheckMs: 200 };
+/** この優先度以下 (数が小さい) は重要な出来事: 得点のクールダウンを受けず、少し待ってでも演出する。 */
+const IMPORTANT_PRIORITY = 4;
 
 /** PC のカーソル (ページ座標)、静止し始めた時刻、なめらかにした速さ、操作部品の上か、押しているボタン。 */
 interface CursorState {
@@ -163,8 +191,17 @@ export class HarimaruController {
   private readonly finePointer: boolean;
   private readonly obstaclesIn: ObstaclesIn;
   /** 読み込めた画像 (base = v0.2 のアトラス、ほかは v0.9 の動作ごとのアトラス) と、いま表示している画像。 */
-  private readonly sheets = new Map<'base' | ClipId, string>();
-  private sheetKey: 'base' | ClipId = 'base';
+  private readonly sheets = new Map<SheetKey, string>();
+  private sheetKey: SheetKey = 'base';
+  /** 観戦リアクション: エフェクトの要素・画像、再生中の反応、最後の得点の反応の時刻、待っている重要な出来事。 */
+  private readonly effect: HTMLElement | null;
+  private readonly liveParams: LiveParams;
+  private readonly effectSheets = new Map<ReactionId, string>();
+  private effectOn: { id: ReactionId; frame: number } | null = null;
+  private liveNow: { kind: LiveReaction; priority: number; id: ReactionId | null } | null = null;
+  private lastScoreAt = -Infinity;
+  private pendingLive: { kind: LiveReaction; until: number } | null = null;
+  private pendingTimer: number | null = null;
 
   /** 行動に属するタイマー (中断で消す)。 */
   private readonly actionTimers = new Set<number>();
@@ -181,8 +218,9 @@ export class HarimaruController {
   /** DOM の変化・リサイズの確認 (1 フレームに 1 回にまとめる)。 */
   private checkFrame: number | null = null;
   private rideTimer: number | null = null;
-  /** 最後の計測での足場の要素。 */
+  /** 最後の計測での足場の要素と、それを包む入れ物 (経路・余白の障害物から入れ物の箱を除く)。 */
   private platformEls: readonly Element[] = [];
+  private containers: ReadonlySet<Element> | undefined;
   private shiftChecks = 0;
   private readonly cleanups: (() => void)[] = [];
   private readonly pauses = new Set<PauseReason>();
@@ -254,6 +292,8 @@ export class HarimaruController {
       options.finePointer ??
       (typeof this.win.matchMedia === 'function' && this.win.matchMedia('(hover: hover) and (pointer: fine)').matches);
     this.obstaclesIn = options.obstaclesIn ?? collectObstacles;
+    this.effect = options.effect ?? null;
+    this.liveParams = options.live ?? DEFAULT_LIVE;
     this.lastActivityAt = this.now();
   }
 
@@ -275,6 +315,7 @@ export class HarimaruController {
     if (this.destroyed) return;
     this.destroyed = true;
     this.interrupt();
+    this.dropPendingLive();
     this.clearAuxTimers();
     this.cancelCheck();
     this.stopCursorWatch();
@@ -292,6 +333,13 @@ export class HarimaruController {
     if (this.sheetKey === key) this.sprite.style.backgroundImage = `url("${url}")`;
   }
 
+  /** 観戦リアクションの本体・エフェクトの画像を登録する (両方を読み込めた反応だけを演出する)。 */
+  setReactionSheets(id: ReactionId, body: string, effect: string): void {
+    this.sheets.set(`rx:${id}`, body);
+    this.effectSheets.set(id, effect);
+    if (this.sheetKey === `rx:${id}`) this.sprite.style.backgroundImage = `url("${body}")`;
+    if (this.effect && this.effectOn?.id === id) this.effect.style.backgroundImage = `url("${effect}")`;
+  }
   /**
    * デバッグ・テスト用: 動作を始める。いつもの行動と同じ安全の確かめ (足場・カードの内側・経路) を通り、
    * 素材がない・安全でない・立っていないときは何もしないで false を返す。
@@ -322,6 +370,17 @@ export class HarimaruController {
       }
       case 'cursorHang':
         return this.cursor !== null && this.tryCursorHang(this.cursor);
+      case 'live:victory':
+      case 'live:frustrated':
+      case 'live:surprise180':
+      case 'live:comeback':
+      case 'live:gameWin':
+      case 'live:gameLoss':
+      case 'live:legWin':
+      case 'live:cheer':
+      case 'live:panic':
+      case 'live:anxious':
+        return this.reactLive(name.slice(5) as LiveReaction);
       default:
         if (!this.available(name)) return false;
         return this.react(name, this.cursor?.x ?? this.x + SPRITE.width / 2);
@@ -340,7 +399,10 @@ export class HarimaruController {
     poseX: number;
     poseY: number;
     airborne: boolean;
-    sheet: 'base' | ClipId;
+    sheet: SheetKey;
+    live: LiveReaction | null;
+    effect: string | null;
+    pendingLive: LiveReaction | null;
     paused: PauseReason[];
     timers: number;
     auxTimers: number;
@@ -359,9 +421,12 @@ export class HarimaruController {
       poseY: this.poseY,
       airborne: this.airborne,
       sheet: this.sheetKey,
+      live: this.liveNow?.kind ?? null,
+      effect: this.effectOn ? `${this.effectOn.id}:${this.effectOn.frame}` : null,
+      pendingLive: this.pendingLive?.kind ?? null,
       paused: [...this.pauses],
       timers: this.actionTimers.size,
-      auxTimers: [this.remeasureTimer, this.scrollTimer, this.shiftTimer, this.rideTimer, this.cursorTimer, this.checkFrame].filter((id) => id !== null).length,
+      auxTimers: [this.remeasureTimer, this.scrollTimer, this.shiftTimer, this.rideTimer, this.cursorTimer, this.checkFrame, this.pendingTimer].filter((id) => id !== null).length,
       frame: this.frame !== null,
       events: [...this.events],
     };
@@ -370,6 +435,8 @@ export class HarimaruController {
   private log(event: string): void {
     this.events.push(event);
     if (this.events.length > EVENT_LOG) this.events.shift();
+    // 観戦リアクションの最後の結果 (演出した・見送った理由) を要素に残す (E2E・調整用。読み上げ対象外のレイヤー)。
+    if (event.startsWith('live:')) this.sprite.dataset.live = event.slice(5);
   }
 
   // ------------------------------------------------------------------ 監視
@@ -738,6 +805,8 @@ export class HarimaruController {
     // 休止が解けたら安全な足場から出直す。
     const offFoot = this.airborne;
     this.interrupt();
+    // 休止中に届いた・待っていた出来事は、休止が解けてもまとめて再生しない。
+    this.dropPendingLive();
     if (offFoot) {
       this.setVisible(false);
       this.placed = false;
@@ -850,6 +919,13 @@ export class HarimaruController {
     if (this.x < segment.minX || this.x > segment.maxX) {
       this.x = clamp(this.x, segment.minX, segment.maxX);
       this.run({ action: 'idle', durationMs: between(this.rng, this.behavior.idleMs) });
+      return;
+    }
+    // エフェクトを出している途中に、その範囲へ文字・操作部品が入ってきたら、演出をやめる (重ねない)。
+    const showing = this.liveNow?.id;
+    if (showing && !this.reactionRoom(showing, this.dir)) {
+      this.log('live:stopped:room');
+      this.endLive();
     }
   }
 
@@ -857,6 +933,7 @@ export class HarimaruController {
     const terrain = this.measureFn(this.root, this.selector, this.win);
     this.view = terrain.view;
     this.platformEls = terrain.elements ?? [];
+    this.containers = terrain.containers;
     this.segments = computeSegments(terrain);
     this.segment = findSegment(this.segments, this.top, this.x, SNAP_TOLERANCE);
     // 小さなずれ (フォントの読み込み・端数・ホバーで浮くタイル) は、足元を新しい上辺に合わせ直す。
@@ -904,6 +981,7 @@ export class HarimaruController {
     const terrain = this.measureFn(this.root, this.selector, this.win);
     this.view = terrain.view;
     this.platformEls = terrain.elements ?? [];
+    this.containers = terrain.containers;
     this.segments = computeSegments(terrain);
     const candidates = visibleSegments(this.segments, terrain.view);
     // 安全な足場がない: 表示しない (DOM の変化・リサイズ・スクロールで、もう一度探す)。
@@ -979,7 +1057,7 @@ export class HarimaruController {
       bottom: this.top - SPRITE.height,
     };
     if (!this.view) return false;
-    return boxIsClear(region, this.obstaclesIn(this.root, [region], this.win), this.view);
+    return boxIsClear(region, this.obstaclesIn(this.root, [region], this.win, undefined, this.containers), this.view);
   }
 
   /** 安全なジャンプの候補 (経路の全体で障害物に重ならず、見える範囲に収まるもの)。 */
@@ -989,7 +1067,7 @@ export class HarimaruController {
     const targets = visibleSegments(this.segments, view);
     const plans = jumpCandidates(segment, targets, this.animation.jumpApex, DEFAULT_TERRAIN);
     if (plans.length === 0) return [];
-    const obstacles = this.obstaclesIn(this.root, plans.map(arcBounds), this.win);
+    const obstacles = this.obstaclesIn(this.root, plans.map(arcBounds), this.win, undefined, this.containers);
     return plans.filter((plan) => arcIsClear(plan, obstacles, view));
   }
 
@@ -1463,6 +1541,8 @@ export class HarimaruController {
   /** 採用したタップ (ページ座標)。 */
   private onTap(point: { x: number; y: number }): void {
     // 跳ねている・飛んでいる・沈んでいる間は、描かれている位置と足場の位置がずれるので反応しない。
+    // 観戦リアクションの途中は、触れ合いより観戦の出来事を優先する (一度に 1 つ)。
+    if (this.liveNow) return;
     if (!this.placed || this.pauses.size > 0 || this.airborne || this.sink > 0 || this.lift > 0 || this.poseX !== 0 || this.poseY !== 0) return;
     const zone = touchZone(point, { x: this.x, top: this.top, dir: this.dir }, this.interaction);
     if (zone === null) return;
@@ -1618,6 +1698,220 @@ export class HarimaruController {
     this.place();
   }
 
+  // ------------------------------------------------------------------ 観戦リアクション (PR3)
+
+  /**
+   * n01 観戦の出来事に反応する (判定は liveReactions.ts。ここは演出だけ)。始めたら true。
+   * - 休止中 (タブ非表示・モーダル・入力中・画面外など)・登場前は捨てる (あとでまとめて再生しない)。
+   * - 一度に 1 つだけ。再生中の反応より優先度の高い出来事だけが割り込む (同じか低いものは捨てる)。
+   * - 通常の得点 (優先度 5) は、前の得点の反応から scoreCooldownMs の間は捨てる。重要な出来事 (勝敗・180・逆転・
+   *   Leg やゲームの結果) には効かない。
+   * - 足場の外 (ジャンプ・しがみつき・ぶら下がり)・カード裏・跳ねている途中では、重要な出来事だけ少し待つ
+   *   (pendingMs まで。途中で休止したら捨てる)。
+   * - エフェクトの範囲 (本体より広い) に文字・操作部品があるときや、画像を読み込めていないときは演出しない。
+   */
+  reactLive(kind: LiveReaction): boolean {
+    if (this.destroyed) return false;
+    const priority = LIVE_PRIORITY[kind];
+    // 周りの要素が動いている間 (shift) だけの休止は一時的: 重要な出来事は待つ。ほかの休止 (タブ非表示・モーダル・
+    // 入力中・画面外) では捨てる。
+    const onlyShift = this.pauses.size === 1 && this.pauses.has('shift');
+    if (this.placed && onlyShift && priority <= IMPORTANT_PRIORITY) {
+      this.waitLive(kind);
+      return false;
+    }
+    if (!this.placed || this.pauses.size > 0) {
+      this.log(`live:${kind}:dropped:paused`);
+      return false;
+    }
+    if (this.liveNow) {
+      if (priority >= this.liveNow.priority) {
+        this.log(`live:${kind}:dropped:busy`);
+        return false;
+      }
+    } else if (priority > IMPORTANT_PRIORITY && this.now() - this.lastScoreAt < this.liveParams.scoreCooldownMs) {
+      this.log(`live:${kind}:dropped:cooldown`);
+      return false;
+    }
+    // 体が足場の外・カード裏・宙・ずれた姿勢の途中 (再生中のリアクションの姿勢を除く) では、すぐには始めない。
+    const unsettled = this.airborne || this.sink > 0 || this.lift > 0 || (!this.liveNow && (this.poseX !== 0 || this.poseY !== 0));
+    if (unsettled) {
+      if (priority <= IMPORTANT_PRIORITY) this.waitLive(kind);
+      else this.log(`live:${kind}:dropped:busy`);
+      return false;
+    }
+    return this.playLive(kind);
+  }
+
+  private waitLive(kind: LiveReaction): void {
+    const held = this.pendingLive;
+    if (held && LIVE_PRIORITY[held.kind] <= LIVE_PRIORITY[kind]) return;
+    this.pendingLive = { kind, until: this.now() + this.liveParams.pendingMs };
+    this.log(`live:${kind}:waiting`);
+    if (this.pendingTimer !== null) return;
+    const check = (): void => {
+      this.pendingTimer = null;
+      const pending = this.pendingLive;
+      if (!pending || this.destroyed) return;
+      if (this.now() > pending.until) {
+        this.log(`live:${pending.kind}:dropped:expired`);
+        this.pendingLive = null;
+        return;
+      }
+      const ready = this.placed && this.pauses.size === 0 && !this.airborne && this.sink === 0 && this.lift === 0 && this.poseX === 0 && this.poseY === 0;
+      if (ready) {
+        this.pendingLive = null;
+        this.reactLive(pending.kind);
+        return;
+      }
+      this.pendingTimer = this.win.setTimeout(check, this.liveParams.pendingCheckMs);
+    };
+    this.pendingTimer = this.win.setTimeout(check, this.liveParams.pendingCheckMs);
+  }
+
+  private dropPendingLive(): void {
+    this.pendingLive = null;
+    if (this.pendingTimer !== null) this.win.clearTimeout(this.pendingTimer);
+    this.pendingTimer = null;
+  }
+
+  /** 出来事 → 演出。PR3 の素材のある 6 種は本体とエフェクト、逆転・Leg やゲームの結果は PR2 の動作を組み合わせる。 */
+  private playLive(kind: LiveReaction): boolean {
+    const priority = LIVE_PRIORITY[kind];
+    switch (kind) {
+      case 'victory':
+      case 'frustrated':
+      case 'surprise180':
+      case 'cheer':
+      case 'panic':
+      case 'anxious':
+        return this.playReaction(kind, kind, priority);
+      case 'comeback':
+      case 'gameWin':
+      case 'legWin': {
+        // 喜ぶコマ (読み込めていなければ待機コマ) で、上に空きがあれば跳ねる。Leg は控えめに跳ねない。
+        // 逆転は 2 回跳ねたあと、もう一度跳ねる。
+        const hops = kind === 'legWin' ? 0 : 2;
+        const room = hops > 0 && this.hopRoom();
+        this.startLive(kind, priority, null);
+        const settle = (): void => {
+          this.stopHop();
+          if (kind === 'comeback' && room) {
+            this.render(ROW.idle, IDLE_OPEN);
+            this.hop(1, () => this.endLive());
+            return;
+          }
+          this.endLive();
+        };
+        if (this.sheets.has('happy')) {
+          if (room) this.hop(hops, () => undefined, true);
+          this.playClip('happy', settle);
+        } else if (room) this.hop(hops, settle);
+        else {
+          this.render(ROW.idle, IDLE_LOOK);
+          this.after(600, settle);
+        }
+        return true;
+      }
+      case 'gameLoss':
+        // 個別のゲームを落としたとき: 大きな敗北の演出はせず、首をかしげるだけ (画像がなければ何もしない)。
+        if (!this.sheets.has('tilt') && !this.available('tilt')) {
+          this.log('live:gameLoss:skipped:asset');
+          return false;
+        }
+        this.startLive(kind, priority, null);
+        this.playClip('tilt', () => this.endLive());
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private startLive(kind: LiveReaction, priority: number, id: ReactionId | null): void {
+    this.interrupt();
+    this.lift = 0;
+    this.action = `live:${kind}`;
+    this.liveNow = { kind, priority, id };
+    this.log(`live:${kind}`);
+  }
+
+  /** リアクションの画像 (本体・エフェクト) を 1 回再生する。安全な余白・画像がなければ演出しない。 */
+  private playReaction(kind: LiveReaction, id: ReactionId, priority: number): boolean {
+    if (!this.sheets.has(`rx:${id}`) || !this.effectSheets.has(id)) {
+      this.log(`live:${kind}:skipped:asset`);
+      return false;
+    }
+    // 文字 (「180」) のあるリアクションは、反転しないよう左向き (元の絵の向き) で演出する。
+    const dir: -1 | 1 = REACTIONS[id].textFrames ? -1 : this.dir;
+    if (!this.reactionRoom(id, dir)) {
+      this.log(`live:${kind}:skipped:room`);
+      return false;
+    }
+    this.startLive(kind, priority, id);
+    this.dir = dir;
+    const spec = REACTIONS[id];
+    let frame = 0;
+    const next = (): void => {
+      this.after(spec.durationsMs[frame], () => {
+        frame += 1;
+        if (frame >= spec.frameCount) {
+          this.endLive();
+          return;
+        }
+        this.drawReaction(id, frame);
+        next();
+      });
+    };
+    this.drawReaction(id, 0);
+    next();
+    return true;
+  }
+
+  /** リアクションを終えて (途中で終えても) 待機に戻る。エフェクトの残像を残さない。 */
+  private endLive(): void {
+    const ending = this.liveNow;
+    this.clearActionTimers();
+    this.stopHop();
+    this.hideEffect();
+    this.poseX = 0;
+    this.poseY = 0;
+    this.liveNow = null;
+    if (ending && ending.priority > IMPORTANT_PRIORITY) this.lastScoreAt = this.now();
+    this.action = 'idle';
+    this.render(ROW.idle, IDLE_OPEN);
+    this.idle(between(this.rng, this.behavior.idleMs));
+  }
+
+  /**
+   * リアクションを出す余白: 全コマの本体 (移動を含む) とエフェクトの描かれる範囲を包む矩形が、見えている範囲に
+   * 収まり、文字・操作部品・色の付いた要素に重ならないか。範囲の下端は足場の上辺 (エフェクトは足元より下に出ない)。
+   */
+  private reactionRoom(id: ReactionId, dir: -1 | 1): boolean {
+    const view = this.view;
+    if (!view || !this.placed) return false;
+    const spec = REACTIONS[id];
+    const top = this.top - SPRITE.height;
+    let left = Infinity;
+    let right = -Infinity;
+    let upper = Infinity;
+    for (const [ox, oy] of spec.bodyOffsets) {
+      const dx = dir < 0 ? ox : -ox;
+      left = Math.min(left, this.x + dx + SPRITE.sideInset);
+      right = Math.max(right, this.x + dx + SPRITE.width - SPRITE.sideInset);
+      upper = Math.min(upper, top + oy);
+    }
+    const box = spec.effectBox;
+    // 右向きでは本体の中心 (x = 15) で左右反転する。
+    const effectLeft = dir < 0 ? box.left : SPRITE.width - box.right;
+    const effectRight = dir < 0 ? box.right : SPRITE.width - box.left;
+    left = Math.min(left, this.x + effectLeft) - 1;
+    right = Math.max(right, this.x + effectRight) + 1;
+    upper = Math.min(upper, top + box.top) - 1;
+    const region: Rect = { left, right, top: upper, bottom: this.top };
+    const obstacles = this.obstaclesIn(this.root, [region], this.win, undefined, this.containers);
+    return boxIsClear({ ...region, bottom: this.top - 0.5 }, obstacles, view);
+  }
+
   // ------------------------------------------------------------------ 縁・転ぶ・寝ぼける (v0.9)
 
   /**
@@ -1650,7 +1944,7 @@ export class HarimaruController {
     });
     // 足場そのものが操作部品 (ボタンのタイル・リンクのカードなど) なら、その面に体を重ねない。
     if (!card || card.closest(CONTROL_SELECTOR)) return null;
-    return this.obstaclesIn(this.root, [box], this.win, card).every((o) => !intersects(box, o)) ? card : null;
+    return this.obstaclesIn(this.root, [box], this.win, card, this.containers).every((o) => !intersects(box, o)) ? card : null;
   }
 
   /**
@@ -1844,7 +2138,7 @@ export class HarimaruController {
       bottom: this.top,
     };
     // 経路の下端は足場の上辺 (足場そのものとは重ならない)。
-    const obstacles = this.obstaclesIn(this.root, [path], this.win);
+    const obstacles = this.obstaclesIn(this.root, [path], this.win, undefined, this.containers);
     if (!boxIsClear({ ...path, bottom: this.top - 0.5 }, obstacles, this.view)) return null;
     return poses;
   }
@@ -1999,12 +2293,17 @@ export class HarimaruController {
   }
 
   /** 描く画像を切り替える (読み込み済みの画像だけを使うので、切り替えでちらつかない)。 */
-  private useSheet(key: 'base' | ClipId): void {
+  private useSheet(key: SheetKey): void {
     if (this.sheetKey === key) return;
     this.sheetKey = key;
     const url = this.sheets.get(key);
     if (url) this.sprite.style.backgroundImage = `url("${url}")`;
-    this.sprite.style.backgroundSize = key === 'base' ? BACKGROUND_SIZE : clipBackgroundSize(key);
+    this.sprite.style.backgroundSize =
+      key === 'base'
+        ? BACKGROUND_SIZE
+        : key.startsWith('rx:')
+          ? `${REACTIONS[key.slice(3) as ReactionId].frameCount * SPRITE.width}px ${SPRITE.height}px`
+          : clipBackgroundSize(key as ClipId);
   }
 
   /**
@@ -2062,10 +2361,59 @@ export class HarimaruController {
     const hidden = Math.min(SPRITE.height, Math.max(0, this.sink));
     this.sprite.style.clipPath = hidden > 0 ? `inset(0 0 ${hidden.toFixed(2)}px 0)` : '';
     this.sprite.dataset.sunk = hidden >= SPRITE.height ? 'true' : 'false';
+    this.placeEffect();
+  }
+
+  /**
+   * エフェクトの位置: 本体の動く前の左上から (-11, -18)。右向きでは本体の中心で左右反転する (52 px の枠の中心 =
+   * 本体の中心)。文字のあるリアクション (180) は、始める前に左向きにしてあるので反転しない。
+   */
+  private placeEffect(): void {
+    const effect = this.effect;
+    if (!effect || !this.effectOn) return;
+    const dpr = this.win.devicePixelRatio || 1;
+    const x = Math.round(this.x * dpr) / dpr + EFFECT_CELL.offsetX;
+    const y = Math.floor((this.top - SPRITE.height) * dpr + 1e-6) / dpr + EFFECT_CELL.offsetY;
+    effect.style.transform = `translate3d(${x}px, ${y}px, 0) scaleX(${this.dir > 0 ? -1 : 1})`;
   }
 
   private setVisible(visible: boolean): void {
     this.sprite.dataset.visible = visible ? 'true' : 'false';
+    if (!visible) this.hideEffect();
+  }
+
+  private hideEffect(): void {
+    this.effectOn = null;
+    if (!this.effect) return;
+    this.effect.dataset.active = 'false';
+    this.effect.dataset.frame = '';
+  }
+
+  /** リアクションのコマ (本体とエフェクト) を描く。 */
+  private drawReaction(id: ReactionId, frame: number): void {
+    const spec = REACTIONS[id];
+    const [ox, oy] = spec.bodyOffsets[frame] ?? [0, 0];
+    // 本体の移動量は左向きの値。右向きでは横の向きを反転する。
+    this.poseX = this.dir < 0 ? ox : -ox;
+    this.poseY = oy;
+    this.useSheet(`rx:${id}`);
+    this.sprite.style.backgroundPosition = clipFramePosition(frame);
+    this.sprite.dataset.action = this.action ?? 'idle';
+    this.sprite.dataset.frame = `rx:${id}:${frame}`;
+    const effect = this.effect;
+    if (effect) {
+      const url = this.effectSheets.get(id);
+      if (this.effectOn?.id !== id) {
+        if (url) effect.style.backgroundImage = `url("${url}")`;
+        effect.style.backgroundSize = `${spec.frameCount * EFFECT_CELL.width}px ${EFFECT_CELL.height}px`;
+        effect.dataset.front = spec.effectsInFront ? 'true' : 'false';
+      }
+      effect.style.backgroundPosition = `${-frame * EFFECT_CELL.width}px 0px`;
+      effect.dataset.frame = `${id}:${frame}`;
+      effect.dataset.active = 'true';
+    }
+    this.effectOn = { id, frame };
+    this.place();
   }
 
   // ------------------------------------------------------------------ タイマー
@@ -2104,6 +2452,8 @@ export class HarimaruController {
     this.clearActionTimers();
     this.cancelFrame();
     this.grip = null;
+    this.hideEffect();
+    this.liveNow = null;
     if (this.lift !== 0 || this.sink !== 0 || this.poseX !== 0 || this.poseY !== 0 || this.airborne) {
       this.lift = 0;
       this.sink = 0;

@@ -23,6 +23,7 @@ import { Highlights } from './Highlights';
 import { CardTrail } from './CardTrail';
 import { outlookTrail, slotChances } from '../cardTrail';
 import type { HighlightFocus } from './Highlights';
+import { useHarimaruLive } from '../../harimaru/useHarimaruLive';
 
 /**
  * 日程・結果. The next round to be played comes first (the cards still to come are one tap away,
@@ -257,6 +258,8 @@ function MatchCenter({
   // A late live state of a game the list has gone past (its slot replayed) is neither shown nor
   // followed: the list's newer game is.
   const live = polled && !liveSuperseded(listed, polled) ? polled : null;
+  // ハリマル (観戦リアクション): 表示している状態を渡すだけ (取得は増やさない)。
+  useHarimaruLive('watch-results', live, data.season);
   // The same view as every other match (MatchParts): the games as chips on top, the chosen game
   // under them — on a phone and on a PC alike. Opened on the game a link names, else the game
   // being played, else the last one played.
