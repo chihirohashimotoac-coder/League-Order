@@ -240,7 +240,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
   const following = live !== null && live.mid === shownMid;
   // ハリマル (観戦リアクション): 表示している状態を渡すだけ (取得は増やさない)。ライブに追従している間だけ
   // (閲覧者が前のセットを選んでいる間は渡さない)。シーズンの情報がないので、味方は大会 ID とチーム ID の一致だけで決める。
-  useHarimaruLive(chosen === null || chosen === undefined ? 'watch-match' : null, live, null, status);
+  const harimaruSource = useHarimaruLive(chosen === null || chosen === undefined ? 'watch-match' : null, live, null, status);
   const betweenSets = scid !== null && live !== null && live.gameEnded && !live.cardEnded && status.kind !== 'finished';
   const ended = status.kind === 'finished' || (live?.cardEnded ?? false) || (!scid && (row?.finished ?? false));
   const updated = live ? new Date(live.updateTime).toLocaleTimeString('ja-JP') : null;
@@ -342,7 +342,7 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
           </p>
         ) : null}
         {liveOn && live ? (
-          <LiveSheet key={live.mid} api={api} live={live} title={scid && shown ? shown.label : undefined} status={{ ...statusLine, updated }} />
+          <LiveSheet key={live.mid} api={api} live={live} harimaruSource={harimaruSource} title={scid && shown ? shown.label : undefined} status={{ ...statusLine, updated }} />
         ) : (
           <GameView key={shownMid} api={api} mid={shownMid} cricket={shown?.cricket ?? row.matchType === 'cricket'} finished={shown?.finished ?? row.finished} names={names} flip={false} openPlayedLeg />
         )}

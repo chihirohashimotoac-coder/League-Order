@@ -18,6 +18,8 @@ import { LiveSheet } from './LiveSheet';
 import { GameView } from './GameView';
 import { SYNC_RETRY_MS } from './useGameLegs';
 import { claimLive, subscribeLive, type LiveFeedMessage } from '../../harimaru/liveFeed';
+import { useHarimaruLive } from '../../harimaru/useHarimaruLive';
+import { WatchShown } from './useScreenWake';
 
 /**
  * Re-audit of 2026-11-09, R02: the legs of a live game held against what the game has ended.
@@ -528,18 +530,132 @@ describe('ハリマル (観戦リアクション): 過去の Leg の表示', () 
     const heard: LiveFeedMessage[] = [];
     const stop = subscribeLive((m) => heard.push(m));
     const release = claimLive('watch-live');
-    render(<LiveSheet api={api} live={liveAt('gameA', 1, [1, 0])} />);
+    render(<LiveSheet api={api} live={liveAt('gameA', 1, [1, 0])} harimaruSource="watch-live" />);
     await flush();
     expect(heard).toHaveLength(0);
     const tabs = screen.getByTestId('leg-tabs');
     const [first, current] = [...tabs.querySelectorAll('button')];
     fireEvent.click(first);
     expect(first.getAttribute('aria-pressed')).toBe('true');
-    expect(heard.map((m) => m.kind)).toEqual(['hold']);
+    expect(heard).toEqual([{ kind: 'hold', source: 'watch-live' }]);
     fireEvent.click(current);
     expect(current.getAttribute('aria-pressed')).toBe('true');
     expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
     release();
+    stop();
+  });
+});
+
+/**
+ * 観戦画面 (LiveTab の FocusCard・ResultsTab・SetMatchPage) と同じつなぎ方: ハリマルへ状態を流す権利 (source) を
+ * 取り、その source を自分の LiveSheet に渡す。source が null の画面 (2 カード表示の右・隠れた画面) は流さない。
+ */
+function Watching({ api, source, live }: { api: MatchesApi; source: string | null; live: LiveState }): React.JSX.Element {
+  const harimaruSource = useHarimaruLive(source, live, null);
+  return <LiveSheet api={api} live={live} harimaruSource={harimaruSource} />;
+}
+
+describe('ハリマル: 過去の Leg の表示による停止は、その画面の観戦対象 (source) だけ', () => {
+  const twoLegs = () => apiOf((params) => throwsReply(params.mid, 20, 1, [endedLeg(0, 20)]));
+  const states = (heard: LiveFeedMessage[], source: string) => heard.filter((m) => m.kind === 'state' && m.source === source).length;
+  const tabsOf = (index: number) => [...screen.getAllByTestId('leg-tabs')[index].querySelectorAll('button')];
+
+  it('2 カード表示: 右のカードで過去の Leg を選んでも、左 (主たる対象) の状態は流れ続ける', async () => {
+    const { api } = twoLegs();
+    const heard: LiveFeedMessage[] = [];
+    const stop = subscribeLive((m) => heard.push(m));
+    const pair = (time: number) => (
+      <>
+        <Watching api={api} source="watch-live" live={liveAt('gameA', 1, [1, 0], { updateTime: time })} />
+        <Watching api={api} source={null} live={liveAt('gameB', 1, [1, 0], { updateTime: time })} />
+      </>
+    );
+    const view = render(pair(1_000));
+    await flush();
+    expect(states(heard, 'watch-live')).toBe(1);
+    fireEvent.click(tabsOf(1)[0]);
+    expect(tabsOf(1)[0].getAttribute('aria-pressed')).toBe('true');
+    expect(heard.some((m) => m.kind === 'hold')).toBe(false);
+    view.rerender(pair(2_000));
+    expect(states(heard, 'watch-live')).toBe(2);
+    view.unmount();
+    stop();
+  });
+
+  it('主たる対象で過去の Leg を選んだら止め、進行中へ戻したら基準からやり直してから流す', async () => {
+    const { api } = twoLegs();
+    const heard: LiveFeedMessage[] = [];
+    const stop = subscribeLive((m) => heard.push(m));
+    const view = render(<Watching api={api} source="watch-live" live={liveAt('gameA', 1, [1, 0], { updateTime: 1_000 })} />);
+    await flush();
+    fireEvent.click(tabsOf(0)[0]);
+    expect(heard.at(-1)).toEqual({ kind: 'hold', source: 'watch-live' });
+    view.rerender(<Watching api={api} source="watch-live" live={liveAt('gameA', 1, [1, 0], { updateTime: 2_000 })} />);
+    expect(states(heard, 'watch-live')).toBe(1);
+    fireEvent.click(tabsOf(0)[1]);
+    expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
+    view.rerender(<Watching api={api} source="watch-live" live={liveAt('gameA', 1, [1, 0], { updateTime: 3_000 })} />);
+    expect(states(heard, 'watch-live')).toBe(2);
+    view.unmount();
+    stop();
+  });
+
+  it('過去の Leg を表示したまま隠れて保持された画面は、開いた試合 (別の source) を止めない。戻ると再び止める', async () => {
+    const { api } = twoLegs();
+    const heard: LiveFeedMessage[] = [];
+    const stop = subscribeLive((m) => heard.push(m));
+    const page = (open: boolean, time: number) => (
+      <>
+        <WatchShown shown={!open}>
+          <Watching api={api} source="watch-live" live={liveAt('gameA', 1, [1, 0], { updateTime: time })} />
+        </WatchShown>
+        {open ? <Watching api={api} source="watch-match" live={liveAt('gameB', 1, [1, 0], { updateTime: time })} /> : null}
+      </>
+    );
+    const view = render(page(false, 1_000));
+    await flush();
+    fireEvent.click(tabsOf(0)[0]);
+    view.rerender(page(true, 2_000));
+    await flush();
+    expect(states(heard, 'watch-match')).toBe(1);
+    view.rerender(page(true, 3_000));
+    expect(states(heard, 'watch-match')).toBe(2);
+    // 試合を閉じて戻る: 過去の Leg を表示したままなので、また止める。
+    view.rerender(page(false, 4_000));
+    expect(tabsOf(0)[0].getAttribute('aria-pressed')).toBe('true');
+    const before = states(heard, 'watch-live');
+    view.rerender(page(false, 5_000));
+    expect(states(heard, 'watch-live')).toBe(before);
+    view.unmount();
+    stop();
+  });
+
+  it('観戦対象 (source) が変わったら、停止は新しい source に移り、古い source には残らない。アンマウントで残らない', async () => {
+    const { api } = twoLegs();
+    const heard: LiveFeedMessage[] = [];
+    const stop = subscribeLive((m) => heard.push(m));
+    const other = claimLive('watch-results');
+    const view = render(<Watching api={api} source="watch-live" live={liveAt('gameA', 1, [1, 0], { updateTime: 1_000 })} />);
+    await flush();
+    fireEvent.click(tabsOf(0)[0]);
+    // この画面が流す権利を手放す (例: 右のカードになった)。
+    view.rerender(<Watching api={api} source={null} live={liveAt('gameA', 1, [1, 0], { updateTime: 2_000 })} />);
+    const results = (time: number) => liveAt('gameC', 1, [1, 0], { updateTime: time });
+    const ResultsScreen = ({ time }: { time: number }) => {
+      useHarimaruLive('watch-results', results(time), null);
+      return null;
+    };
+    const second = render(<ResultsScreen time={1_000} />);
+    expect(states(heard, 'watch-results')).toBe(1);
+    second.rerender(<ResultsScreen time={2_000} />);
+    expect(states(heard, 'watch-results')).toBe(2);
+    view.unmount();
+    second.unmount();
+    other();
+    // アンマウント後に停止が残らない: 同じ source の新しい画面は流せる。
+    const third = render(<ResultsScreen time={3_000} />);
+    expect(states(heard, 'watch-results')).toBe(3);
+    third.unmount();
     stop();
   });
 });

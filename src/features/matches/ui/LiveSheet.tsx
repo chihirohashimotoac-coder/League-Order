@@ -66,6 +66,7 @@ export function LiveSheet({
   levels,
   onPlayer,
   status,
+  harimaruSource,
 }: {
   api: MatchesApi;
   live: LiveState;
@@ -77,6 +78,8 @@ export function LiveSheet({
   onPlayer?: (player: { oid: string; name: string; teamId: string | null }) => void;
   /** Whether the score is being refreshed, and n01's time of the last change: shown under the score. */
   status?: LiveSheetStatus;
+  /** ハリマル: この画面が状態を流している観戦対象 (useHarimaruLive の返り値)。過去の Leg の表示で、これだけを止める。 */
+  harimaruSource?: string | null;
 }): React.JSX.Element {
   const cricket = live.matchType === 'cricket';
   const leg = live.leg;
@@ -94,8 +97,8 @@ export function LiveSheet({
   // An ended leg the viewer chose to look at; `null` = the leg in progress.
   const [pickedLeg, setPickedLeg] = useState<number | null>(null);
   const past = pickedLeg !== null && pickedLeg !== legIndex ? (all.find((entry) => entry.index === pickedLeg && entry.ended) ?? null) : null;
-  // ハリマル (観戦リアクション): 過去の Leg を表示している間は、進行中の Leg の出来事に反応しない。
-  useHarimaruHold(past !== null);
+  // ハリマル (観戦リアクション): 過去の Leg を表示している間は、この画面の観戦対象の進行中の出来事に反応しない。
+  useHarimaruHold(harimaruSource, past !== null);
   // The score sheet's own box follows the newest visit while the viewer is at it (01 only).
   const follow = useFollowLatest<HTMLDivElement>({ enabled: !cricket && leg !== null, game: live.mid, update: leg });
   const toLive = (): void => {

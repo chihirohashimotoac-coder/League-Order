@@ -181,8 +181,9 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         return;
       }
       if (message.kind === 'hold') {
-        // 観戦画面が過去の Leg を表示し始めた: 演出中・待っている出来事を取り消す (解除のあとは基準からやり直す)。
-        controller?.cancelLive();
+        // いま反応している観戦対象の画面が過去の Leg を表示し始めた: 演出中・待っている出来事を取り消す
+        // (解除のあとは基準からやり直す)。ほかの観戦対象の画面の操作では取り消さない。
+        if (tracker?.source === message.source) controller?.cancelLive();
         return;
       }
       if (message.kind === 'rebase') {

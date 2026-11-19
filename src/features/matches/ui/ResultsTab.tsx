@@ -271,7 +271,7 @@ function MatchCenter({
   const game = linked ?? fallback;
   // ハリマル (観戦リアクション): 表示している状態を渡すだけ (取得は増やさない)。ライブに追従している間だけ
   // (リンクで別のゲームを開いている間は渡さない)。
-  useHarimaruLive(linked !== null && linked !== live?.schid ? null : 'watch-results', live, data.season, status);
+  const harimaruSource = useHarimaruLive(linked !== null && linked !== live?.schid ? null : 'watch-results', live, data.season, status);
   const [focus, setFocus] = useState<HighlightFocus | null>(null);
   const names: [string, string] = [card.teams[0].name, card.teams[1].name];
   const here: WatchLink = { ...base, card: card.key };
@@ -356,7 +356,7 @@ function MatchCenter({
       ) : null}
       {showsLive && live ? (
         <section className="game-panel" aria-label={`${slotLabelOf(card, live.schid)} の詳細`} data-testid="game-panel">
-          <LiveSheet key={live.mid} api={api} live={live} title={slotLabelOf(card, live.schid)} status={{ ...liveStatusText(status, card.state !== 'live'), updated: new Date(live.updateTime).toLocaleTimeString('ja-JP') }} />
+          <LiveSheet key={live.mid} api={api} live={live} harimaruSource={harimaruSource} title={slotLabelOf(card, live.schid)} status={{ ...liveStatusText(status, card.state !== 'live'), updated: new Date(live.updateTime).toLocaleTimeString('ja-JP') }} />
         </section>
       ) : chosen ? (
         <section className="game-panel" id={`game-${chosen.slot.schid}`} aria-label={`${chosen.slot.label} の詳細`} data-testid="game-panel">

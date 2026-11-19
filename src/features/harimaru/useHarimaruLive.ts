@@ -44,7 +44,12 @@ function useOptionalStore(): ReturnType<typeof useAppStore> | null {
   }
 }
 
-export function useHarimaruLive(requested: string | null, state: LiveState | null, season: SeasonDocument | null, status?: LiveStatus): void {
+/**
+ * 観戦画面から 1 行で呼ぶ。返り値は、この画面がいまハリマルへ状態を流す観戦対象 (source)。流さない画面 (2 カード表示の
+ * 右・別のゲームを開いている間・隠れて保持されている間) は null。画面の LiveSheet へ渡し、過去の Leg の表示による停止を
+ * この観戦対象だけに限る (useHarimaruHold)。
+ */
+export function useHarimaruLive(requested: string | null, state: LiveState | null, season: SeasonDocument | null, status?: LiveStatus): string | null {
   const store = useOptionalStore();
   const shown = useContext(WatchShownContext);
   const source = shown ? requested : null;
@@ -61,9 +66,14 @@ export function useHarimaruLive(requested: string | null, state: LiveState | nul
     const ally = season ? (state.tdid && state.tdid !== season.tournamentId ? null : allyId) : allyTeamIdByTournament(state.tdid, binding);
     publishLive(source, state, ally);
   }, [source, state, allyId, season, binding]);
+  return source;
 }
 
-/** 観戦画面が過去の Leg を表示している間 (active)、ハリマルへ状態を流さない (LiveSheet から 1 行で呼ぶ)。 */
-export function useHarimaruHold(active: boolean): void {
-  useEffect(() => (active ? holdLive() : undefined), [active]);
+/**
+ * 観戦画面の LiveSheet が過去の Leg を表示している間 (active)、その画面の観戦対象 (source) の状態をハリマルへ流さない
+ * (LiveSheet から 1 行で呼ぶ)。source が null (流していない画面) なら何もしない。
+ */
+export function useHarimaruHold(source: string | null | undefined, active: boolean): void {
+  const held = active && source ? source : null;
+  useEffect(() => (held ? holdLive(held) : undefined), [held]);
 }

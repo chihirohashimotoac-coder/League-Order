@@ -467,7 +467,7 @@ function FocusCard({
   const selected = picked ?? currentSchid ?? card.games[card.games.length - 1]?.schid ?? null;
   // ハリマル (観戦リアクション): 同じ状態を渡すだけ (取得は増やさない)。2 カード表示では左 (主たる対象) だけ。
   // ライブに追従している間だけ (別のゲームを選んで開いている間は渡さない。ゲームの終了・対戦の終了も追従のまま渡す)。
-  useHarimaruLive(pane === 'right' || (picked !== null && picked !== live?.schid) ? null : 'watch-live', live, data.season, status);
+  const harimaruSource = useHarimaruLive(pane === 'right' || (picked !== null && picked !== live?.schid) ? null : 'watch-live', live, data.season, status);
   const selectedGame = selected ? bySchid.get(selected) ?? null : null;
 
   // Card score: n01's live count when there is one (it includes the game just won), else the board's.
@@ -586,6 +586,7 @@ function FocusCard({
             api={api}
             live={live}
             title={liveLabel ?? undefined}
+            harimaruSource={harimaruSource}
             levels={levels}
             onPlayer={onPlayer}
             status={{ ...liveStatusText(status, card.finished), updated: new Date(live.updateTime).toLocaleTimeString('ja-JP') }}

@@ -63,25 +63,40 @@ describe('liveFeed (観戦画面 → ハリマル)', () => {
     expect(activeLiveSource()).toBeNull();
   });
 
-  it('過去の Leg を表示している間 (hold) は状態を流さず、すべて解除したら流す権利を持つ画面の次の状態を基準にし直す', () => {
+  it('過去の Leg の表示による停止 (hold) は観戦対象 (source) ごと: すべて解除したときだけ基準からやり直して再開し、ほかの source は止めない', () => {
     const heard: LiveFeedMessage[] = [];
     const stop = subscribeLive((m) => heard.push(m));
-    const release = claimLive('watch-live');
-    const unholdA = holdLive();
-    const unholdB = holdLive();
-    expect(heard.map((m) => m.kind)).toEqual(['hold', 'hold']);
+    const releaseLive = claimLive('watch-live');
+    const unholdA = holdLive('watch-live');
+    const unholdB = holdLive('watch-live');
+    expect(heard).toEqual([
+      { kind: 'hold', source: 'watch-live' },
+      { kind: 'hold', source: 'watch-live' },
+    ]);
     publishLive('watch-live', state(), 'A');
     expect(heard.filter((m) => m.kind === 'state')).toHaveLength(0);
+    // 片方だけ解除 (2 回呼んでも 1 回分): まだ止めたまま、基準のやり直しもしない。
     unholdA();
     unholdA();
     expect(heard.filter((m) => m.kind === 'rebase')).toHaveLength(0);
     publishLive('watch-live', state(), 'A');
     expect(heard.filter((m) => m.kind === 'state')).toHaveLength(0);
+    // 別の source の停止は、watch-live を止めない (いま流す権利がない source の解除で基準もやり直さない)。
+    const unholdOther = holdLive('watch-results');
     unholdB();
     expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
     publishLive('watch-live', state(), 'A');
     expect(heard.at(-1)?.kind).toBe('state');
-    release();
+    const rebases = heard.filter((m) => m.kind === 'rebase').length;
+    unholdOther();
+    unholdOther();
+    expect(heard.filter((m) => m.kind === 'rebase')).toHaveLength(rebases);
+    // 解除済みの source は、権利を取れば流せる (停止が残らない)。
+    const releaseResults = claimLive('watch-results');
+    publishLive('watch-results', state(), 'A');
+    expect(heard.at(-1)).toMatchObject({ kind: 'state', source: 'watch-results' });
+    releaseResults();
+    releaseLive();
     stop();
   });
 
@@ -167,9 +182,15 @@ describe('HarimaruLayer の購読', () => {
     expect(cancel).not.toHaveBeenCalled();
     act(() => publishLive('watch-live', state({ mid: 'm2', updateTime: 3 }), 'A'));
     expect(cancel).toHaveBeenCalledTimes(1);
+    // ほかの観戦対象の画面が過去の Leg を表示しても取り消さない。反応している観戦対象の画面なら取り消す。
     let unhold = (): void => undefined;
     act(() => {
-      unhold = holdLive();
+      unhold = holdLive('watch-results');
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    act(() => unhold());
+    act(() => {
+      unhold = holdLive('watch-live');
     });
     expect(cancel).toHaveBeenCalledTimes(2);
     act(() => unhold());
