@@ -305,6 +305,39 @@ describe('LiveReactionTracker: 勝敗・逆転', () => {
     expect(t3.update(live({ legIndex: 1, throws: [v(1, 1, 140)] }))?.reaction).toBe('anxious');
   });
 
+  it('決着済みのゲーム・Leg の勝数の訂正を、新しい勝利として扱わない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ sets: [0, 0] }));
+    expect(tracker.update(live({ sets: [1, 0], gameEnded: true }))?.reaction).toBe('gameWin');
+    // 同じ mid (決着済み) の勝数が 1-0 → 2-0 に訂正。
+    expect(tracker.update(live({ sets: [2, 0], gameEnded: true }))).toBeNull();
+    // 次のゲームへ切り替わっても、決着済みのゲームの訂正を拾わない。
+    expect(tracker.update(live({ mid: 'm2', sets: [2, 0] }))).toBeNull();
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live({ legs: [0, 0] }));
+    expect(t2.update(live({ legs: [1, 0], legEnded: true, legWinner: 0 }))?.reaction).toBe('legWin');
+    expect(t2.update(live({ legs: [2, 0], legEnded: true, legWinner: 0 }))).toBeNull();
+  });
+
+  it('付いている Leg が古い応答でも、対戦の終了は見落とさない (Leg の結果・投てきは見ない)', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ legIndex: 2, sets: [2, 1] }));
+    expect(tracker.update(live({ legIndex: 1, sets: [3, 1], cardEnded: true, gameEnded: true, throws: [v(0, 1, 180)] }))?.reaction).toBe('victory');
+  });
+
+  it('前に見た投てきが消えた・点が変わった応答では、新しく現れた投てきにも反応しない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ throws: [v(0, 1, 60)] }));
+    // 第 1 ラウンドが消えて、第 2 ラウンドの 180 だけが載る。
+    expect(tracker.update(live({ throws: [v(0, 2, 180)] }))).toBeNull();
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live({ throws: [v(0, 1, 60)] }));
+    // 第 1 ラウンドの点が 60 → 45 に訂正され、同時に第 2 ラウンドが届く。
+    expect(t2.update(live({ throws: [v(0, 1, 45), v(0, 2, 140)] }))).toBeNull();
+    // そのあと、ふつうに続けば反応する。
+    expect(t2.update(live({ throws: [v(0, 1, 45), v(0, 2, 140), v(1, 1, 60), v(0, 3, 26)] }))?.reaction).toBe('panic');
+  });
+
   it('基準で見た結果は、訂正から復元されても演出しない', () => {
     const tracker = new LiveReactionTracker('A');
     tracker.update(live({ legs: [1, 0], legIndex: 1 }));

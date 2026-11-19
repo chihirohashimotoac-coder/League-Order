@@ -23,11 +23,32 @@ export function allyTeamIdIn(season: Pick<SeasonDocument, 'tournamentId' | 'leag
   return binding.lastTeamId && season.teams.has(binding.lastTeamId) ? binding.lastTeamId : null;
 }
 
+/**
+ * シーズンの情報がない画面 (試合の詳細): 状態の大会 ID (`tdid`) が紐付けの大会 ID と一致するときだけ、紐付けのチーム ID。
+ * チーム ID が実際に状態の側に一致するかは判定 (allySide) が確かめる。
+ */
+export function allyTeamIdByTournament(tdid: string | null, binding: { lastTournamentId: string; lastTeamId: string } | null | undefined): string | null {
+  if (!tdid || !binding?.lastTournamentId || binding.lastTournamentId !== tdid) return null;
+  return binding.lastTeamId || null;
+}
+
+/**
+ * アプリのストア。ストアの外で描画された画面 (画面単体のテストなど) では null = 登録チームの紐付けなし (中立)。
+ * useAppStore はストアの外で例外を投げるので、ここで受け止める (フックは毎回同じ順で呼ばれる)。
+ */
+function useOptionalStore(): ReturnType<typeof useAppStore> | null {
+  try {
+    return useAppStore();
+  } catch {
+    return null;
+  }
+}
+
 export function useHarimaruLive(requested: string | null, state: LiveState | null, season: SeasonDocument | null, status?: LiveStatus): void {
-  const store = useAppStore();
+  const store = useOptionalStore();
   const shown = useContext(WatchShownContext);
   const source = shown ? requested : null;
-  const binding = store.activeTeam?.n01 ?? null;
+  const binding = store?.activeTeam?.n01 ?? null;
   const allyId = useMemo(() => allyTeamIdIn(season, binding), [season, binding]);
   useEffect(() => (source ? claimLive(source) : undefined), [source]);
   const interrupted = status !== undefined && (status.kind === 'retrying' || status.kind === 'budget' || status.kind === 'paused-hidden');
@@ -35,7 +56,9 @@ export function useHarimaruLive(requested: string | null, state: LiveState | nul
     if (source && interrupted) rebaseLive(source);
   }, [source, interrupted]);
   useEffect(() => {
-    // 別の大会の状態 (tdid が違う) は、味方を判定できないので中立で流す。
-    if (source && state) publishLive(source, state, state.tdid && season && state.tdid !== season.tournamentId ? null : allyId);
-  }, [source, state, allyId, season]);
+    if (!source || !state) return;
+    // シーズンの分かる画面: 別の大会の状態 (tdid が違う) は中立。分からない画面 (試合の詳細): 大会 ID とチーム ID の一致だけ。
+    const ally = season ? (state.tdid && state.tdid !== season.tournamentId ? null : allyId) : allyTeamIdByTournament(state.tdid, binding);
+    publishLive(source, state, ally);
+  }, [source, state, allyId, season, binding]);
 }

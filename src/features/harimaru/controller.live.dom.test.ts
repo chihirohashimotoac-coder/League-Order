@@ -272,6 +272,20 @@ describe('優先順位・割り込み・クールダウン', () => {
     expect(seen.has('action:climb')).toBe(true);
   });
 
+  it('待っている間に足場が消えて (スクロールなど) 出直したら、待っていた出来事は別の場所で再生しない', () => {
+    standing();
+    controller.trigger('slip');
+    advance(700);
+    controller.reactLive('surprise180');
+    expect(controller.snapshot().pendingLive).toBe('surprise180');
+    window.dispatchEvent(new Event('scroll'));
+    expect(controller.snapshot().pendingLive).toBeNull();
+    for (let i = 0; i < 300; i += 1) {
+      advance(16);
+      expect(controller.snapshot().live).toBeNull();
+    }
+  });
+
   it('待っている間に休止したら捨てる。待てる時間を過ぎても捨てる', async () => {
     standing();
     controller.trigger('slip');

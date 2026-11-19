@@ -1024,9 +1024,10 @@ export class HarimaruController {
     this.setVisible(true);
   }
 
-  /** 姿を消して (フェード)、delay 後に安全な場所から出直す。 */
+  /** 姿を消して (フェード)、delay 後に安全な場所から出直す。待っている観戦の出来事も捨てる (別の場所で再生しない)。 */
   private vanish(delay: number): void {
     this.interrupt();
+    this.dropPendingLive();
     this.setVisible(false);
     this.placed = false;
     this.airborne = false;

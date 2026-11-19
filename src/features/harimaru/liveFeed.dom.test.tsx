@@ -4,7 +4,7 @@ import type { LiveState } from '../matches/parse';
 import { HarimaruLayer } from './HarimaruLayer';
 import { activeLiveSource, claimLive, publishLive, subscribeLive, type LiveFeedMessage } from './liveFeed';
 import { resetHarimaruPreferenceForTests, saveHarimaruEnabled } from './preference';
-import { allyTeamIdIn } from './useHarimaruLive';
+import { allyTeamIdByTournament, allyTeamIdIn } from './useHarimaruLive';
 
 const state = (over: Partial<LiveState> = {}): LiveState =>
   ({
@@ -72,6 +72,14 @@ describe('liveFeed (観戦画面 → ハリマル)', () => {
     expect(allyTeamIdIn(season, { ...binding, lastTeamId: 'Z' })).toBeNull();
     expect(allyTeamIdIn(season, null)).toBeNull();
     expect(allyTeamIdIn(null, binding)).toBeNull();
+  });
+
+  it('シーズンの情報がない画面 (試合の詳細) では、大会 ID が紐付けと一致するときだけ紐付けのチーム ID', () => {
+    const binding = { lastTournamentId: 'T', lastTeamId: 'A' };
+    expect(allyTeamIdByTournament('T', binding)).toBe('A');
+    expect(allyTeamIdByTournament('T2', binding)).toBeNull();
+    expect(allyTeamIdByTournament(null, binding)).toBeNull();
+    expect(allyTeamIdByTournament('T', null)).toBeNull();
   });
 });
 

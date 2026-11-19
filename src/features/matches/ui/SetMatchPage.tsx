@@ -14,6 +14,7 @@ import { liveStatusText } from './MatchSheet';
 import { LiveReturn, MatchBar, MatchHead, UnitChips, UnitHead, shortUnit } from './MatchParts';
 import type { MatchUnit } from './MatchParts';
 import { useScreenWake } from './useScreenWake';
+import { useHarimaruLive } from '../../harimaru/useHarimaruLive';
 
 /**
  * One n01 match opened from 「いま n01 で進行中」 (個別の試合・注目選手), on a page of its own — the
@@ -237,6 +238,9 @@ function Inner({ initialMid, requestedMid, factory, onBack, onShown, knownMids, 
   const pick = (mid: string): void => setChosen(mid === liveSet?.mid ? null : mid);
   const scid = row?.scid ?? null;
   const following = live !== null && live.mid === shownMid;
+  // ハリマル (観戦リアクション): 表示している状態を渡すだけ (取得は増やさない)。ライブに追従している間だけ
+  // (閲覧者が前のセットを選んでいる間は渡さない)。シーズンの情報がないので、味方は大会 ID とチーム ID の一致だけで決める。
+  useHarimaruLive(chosen === null || chosen === undefined ? 'watch-match' : null, live, null, status);
   const betweenSets = scid !== null && live !== null && live.gameEnded && !live.cardEnded && status.kind !== 'finished';
   const ended = status.kind === 'finished' || (live?.cardEnded ?? false) || (!scid && (row?.finished ?? false));
   const updated = live ? new Date(live.updateTime).toLocaleTimeString('ja-JP') : null;
