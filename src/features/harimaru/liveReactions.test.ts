@@ -338,6 +338,48 @@ describe('LiveReactionTracker: 勝敗・逆転', () => {
     expect(t2.update(live({ throws: [v(0, 1, 45), v(0, 2, 140), v(1, 1, 60), v(0, 3, 26)] }))?.reaction).toBe('panic');
   });
 
+  it('1 ゲームの対戦: 付いている Leg が表示中より古い終了の応答 (古い勝数) では勝敗を決めず、整合する応答で 1 回だけ', () => {
+    const single = { isSchedule: false, tmid: 'card2' };
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ ...single, legIndex: 2, legs: [1, 1] }));
+    // 古い Leg 1 の勝数 (1-0 のころ) のまま end_match が付いた応答: 勝利にしない。
+    expect(tracker.update(live({ ...single, legIndex: 1, legs: [1, 0], gameEnded: true }))).toBeNull();
+    expect(tracker.update(live({ ...single, legIndex: 2, legs: [1, 2], gameEnded: true, legEnded: true, legWinner: 1 }))?.reaction).toBe('frustrated');
+    expect(tracker.update(live({ ...single, legIndex: 2, legs: [1, 2], gameEnded: true, legEnded: true, legWinner: 1, updateTime: 9 }))).toBeNull();
+    // 監査の再現手順: Leg 2・2-0 を見たあとに、Leg 1・0-1・end_match の応答 → 敗北にしない。
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live({ ...single, legIndex: 2, legs: [2, 0] }));
+    expect(t2.update(live({ ...single, legIndex: 1, legs: [0, 1], gameEnded: true }))).toBeNull();
+    expect(t2.update(live({ ...single, legIndex: 2, legs: [3, 0], gameEnded: true, legEnded: true, legWinner: 0 }))?.reaction).toBe('victory');
+  });
+
+  it('Leg を 2 つ以上飛び越した応答の勝数の増加は Leg の勝ちにしない (飛ばした Leg の後着の結果も)。次の Leg の勝ちには反応する', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ legIndex: 0, legs: [0, 0] }));
+    expect(tracker.update(live({ legIndex: 2, legs: [1, 0] }))).toBeNull();
+    expect(tracker.update(live({ legIndex: 2, legs: [1, 0], updateTime: 3 }))).toBeNull();
+    expect(tracker.update(live({ legIndex: 2, legs: [2, 0], legEnded: true, legWinner: 0, updateTime: 4 }))?.reaction).toBe('legWin');
+    // 監査の再現手順: Leg 0・0-0 → Leg 2・1-0 → Leg 3・1-0 (勝数は変わらない) → 反応しない。
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live({ legIndex: 0, legs: [0, 0] }));
+    expect(t2.update(live({ legIndex: 2, legs: [1, 0] }))).toBeNull();
+    expect(t2.update(live({ legIndex: 3, legs: [1, 0] }))).toBeNull();
+  });
+
+  it('前に見た投てきの残り点・フィニッシュだけが変わった訂正でも、新しい投てきに反応しない。残り 0 (フィニッシュの欠け) の点にも反応しない', () => {
+    const tracker = new LiveReactionTracker('A');
+    tracker.update(live({ throws: [v(0, 1, 60)] }));
+    expect(tracker.update(live({ throws: [v(0, 1, 60, { left: 400 }), v(0, 2, 180, { left: 220 })] }))).toBeNull();
+    const t2 = new LiveReactionTracker('A');
+    t2.update(live({ throws: [v(0, 1, 60)] }));
+    expect(t2.update(live({ throws: [v(0, 1, 60, { finish: true }), v(1, 1, 140)] }))).toBeNull();
+    const t3 = new LiveReactionTracker('A');
+    t3.update(live({ throws: [v(0, 1, 60, { left: 40 })] }));
+    expect(t3.update(live({ throws: [v(0, 1, 60, { left: 40 }), v(0, 2, 40, { left: 0 })] }))).toBeNull();
+    expect(scoreReaction({ score: 40, finish: false, left: 0 }, true)).toBeNull();
+    expect(scoreReaction({ score: 40, finish: false, left: 1 }, true)).toBe('panic');
+  });
+
   it('基準で見た結果は、訂正から復元されても演出しない', () => {
     const tracker = new LiveReactionTracker('A');
     tracker.update(live({ legs: [1, 0], legIndex: 1 }));

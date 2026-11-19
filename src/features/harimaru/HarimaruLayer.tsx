@@ -166,16 +166,23 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
 
     // 観戦リアクション: 観戦画面が流すライブの状態を聞く。判定は観戦画面 (source) と味方ごとに作り直す。
     let tracker: { source: string; allyId: string | null; judge: LiveReactionTracker } | null = null;
-    /** 最後に受け取った状態の対戦の単位 (中立の状態も含む)。切り替わったら演出を取り消す。 */
+    /** 最後に受け取った状態の対戦の単位とゲーム (mid) (中立の状態も含む)。切り替わったら演出を取り消す。 */
     let lastUnit: string | null = null;
+    let lastMid: string | null = null;
     const unsubscribe = subscribeLive((message) => {
       if (message.kind === 'release') {
         // 観戦画面を離れた: その対戦の演出中・待っている出来事も取り消す。
         if (tracker?.source === message.source) {
           tracker = null;
           lastUnit = null;
+          lastMid = null;
           controller?.cancelLive();
         }
+        return;
+      }
+      if (message.kind === 'hold') {
+        // 観戦画面が過去の Leg を表示し始めた: 演出中・待っている出来事を取り消す (解除のあとは基準からやり直す)。
+        controller?.cancelLive();
         return;
       }
       if (message.kind === 'rebase') {
@@ -195,8 +202,11 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
       // 前の対戦・味方の演出と待っている出来事を取り消す (判定より先に確かめる)。
       const state = message.state;
       const unit = state.tmid ?? state.scid ?? state.mid;
-      if ((lastUnit !== null && unit !== lastUnit) || allySide(state, message.allyId) === null) controller?.cancelLive();
+      // 同じ対戦の次のゲーム・セット (mid) に進んだときも、前のゲームの演出・待っている出来事を取り消す
+      // (その応答で確定した前のゲームの結果は、取り消したあとの判定で演出する)。
+      if ((lastUnit !== null && unit !== lastUnit) || (lastMid !== null && state.mid !== lastMid) || allySide(state, message.allyId) === null) controller?.cancelLive();
       lastUnit = unit;
+      lastMid = state.mid;
       const event = tracker.judge.update(state);
       if (event && controller) controller.reactLive(event.reaction);
     });

@@ -11,6 +11,7 @@ import { CricketGrid, ZeroOneGrid } from './ScoreGrid';
 import { FinishChances, RaceChart } from './LegCharts';
 import { useFollowLatest } from './useFollowLatest';
 import { legDarts, shortName } from './legLabel';
+import { useHarimaruHold } from '../../harimaru/useHarimaruLive';
 
 /**
  * The live game the way a darts scoreboard shows it — the layout spectators know from n01's
@@ -93,6 +94,8 @@ export function LiveSheet({
   // An ended leg the viewer chose to look at; `null` = the leg in progress.
   const [pickedLeg, setPickedLeg] = useState<number | null>(null);
   const past = pickedLeg !== null && pickedLeg !== legIndex ? (all.find((entry) => entry.index === pickedLeg && entry.ended) ?? null) : null;
+  // ハリマル (観戦リアクション): 過去の Leg を表示している間は、進行中の Leg の出来事に反応しない。
+  useHarimaruHold(past !== null);
   // The score sheet's own box follows the newest visit while the viewer is at it (01 only).
   const follow = useFollowLatest<HTMLDivElement>({ enabled: !cricket && leg !== null, game: live.mid, update: leg });
   const toLive = (): void => {

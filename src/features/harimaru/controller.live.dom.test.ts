@@ -391,6 +391,62 @@ describe('安全: エフェクトの範囲・素材の読み込み・後片付�
     expect(order(frames.map((f) => f.body)).some((f) => f.startsWith('happy:'))).toBe(true);
   });
 
+  it('演出中にスクロール・リサイズ・見える範囲の変化があったら、エフェクトをすぐにやめる (止まっても出し直さない)', () => {
+    for (const fire of [
+      () => window.dispatchEvent(new Event('scroll')),
+      () => window.dispatchEvent(new Event('resize')),
+    ]) {
+      standing();
+      expect(controller.reactLive('victory')).toBe(true);
+      advance(200);
+      expect(effect.dataset.active).toBe('true');
+      fire();
+      expect(controller.snapshot().events).toContain('live:stopped:view');
+      expect(controller.snapshot().live).toBeNull();
+      expect(effect.dataset.active).toBe('false');
+      advance(1_500);
+      expect(controller.snapshot().events.filter((e) => e === 'live:victory')).toHaveLength(1);
+      controller.destroy();
+    }
+  });
+
+  it('スクロールの途中に届いた出来事: 得点は捨て、重要な出来事はスクロールが止まってから演出する', () => {
+    standing();
+    window.dispatchEvent(new Event('scroll'));
+    advance(16);
+    expect(controller.reactLive('cheer')).toBe(false);
+    expect(controller.snapshot().events.at(-1)).toBe('live:cheer:dropped:busy');
+    expect(controller.reactLive('victory')).toBe(false);
+    expect(controller.snapshot().pendingLive).toBe('victory');
+    expect(controller.snapshot().live).toBeNull();
+    const seen = new Set<string>();
+    for (let i = 0; i < 100 && !seen.has('live:victory'); i += 1) {
+      advance(16);
+      for (const e of controller.snapshot().events) seen.add(e);
+    }
+    expect(seen.has('live:victory')).toBe(true);
+  });
+
+  it('観戦の演出中は、速いスクロールのあとでも「転ぶ」を始めない', () => {
+    standing();
+    expect(controller.reactLive('legWin')).toBe(true);
+    let y = 0;
+    const scrollY = vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => y);
+    for (let i = 0; i < 5; i += 1) {
+      y += 120;
+      window.dispatchEvent(new Event('scroll'));
+      advance(16);
+    }
+    const seen = new Set<string>();
+    for (let i = 0; i < 40; i += 1) {
+      advance(16);
+      for (const e of controller.snapshot().events) seen.add(e);
+    }
+    scrollY.mockRestore();
+    expect(seen.has('tumble:skipped:live')).toBe(true);
+    expect([...seen].some((e) => e.startsWith('react:tumble') || e === 'action:tumble')).toBe(false);
+  });
+
   it('演出中のタップには反応しない (一度に 1 つ)', () => {
     standing();
     controller.reactLive('victory');

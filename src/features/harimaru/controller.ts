@@ -472,6 +472,7 @@ export class HarimaruController {
     add(win, 'scroll', () => this.onScroll(), { passive: true });
     add(win, 'resize', () => {
       this.abortAirborne();
+      this.stopLiveOnViewChange();
       this.scheduleRemeasure();
     });
 
@@ -748,6 +749,7 @@ export class HarimaruController {
 
   private onScroll(): void {
     this.abortAirborne();
+    this.stopLiveOnViewChange();
     this.noteActivity();
     // スクロールの速さ (CSS px / 秒) の最大を、止まるまで覚えておく。
     const t = this.now();
@@ -782,8 +784,9 @@ export class HarimaruController {
       this.x + SPRITE.width - SPRITE.sideInset <= terrain.view.right;
     if (inView) {
       this.resume('offscreen');
-      // 速いスクロールのあとは転ぶ (素材待ち。素材がなければ見送る)。
-      if (fast && this.placed && this.pauses.size === 0) this.react('tumble');
+      // 速いスクロールのあとは転ぶ (素材待ち。素材がなければ見送る)。観戦の演出中は転ばない (演出を途中で切らない)。
+      if (fast && this.liveNow) this.log('tumble:skipped:live');
+      else if (fast && this.placed && this.pauses.size === 0) this.react('tumble');
       return;
     }
     // 見えない場所にいる: 見える足場があれば、そこへこっそり移る。なければ休む。
@@ -1734,8 +1737,9 @@ export class HarimaruController {
       this.log(`live:${kind}:dropped:cooldown`);
       return false;
     }
-    // 体が足場の外・カード裏・宙・ずれた姿勢の途中 (再生中のリアクションの姿勢を除く) では、すぐには始めない。
-    const unsettled = this.airborne || this.sink > 0 || this.lift > 0 || (!this.liveNow && (this.poseX !== 0 || this.poseY !== 0));
+    // 体が足場の外・カード裏・宙・ずれた姿勢の途中 (再生中のリアクションの姿勢を除く)、スクロールの途中では、すぐには始めない。
+    const unsettled =
+      this.airborne || this.sink > 0 || this.lift > 0 || this.scrollTimer !== null || (!this.liveNow && (this.poseX !== 0 || this.poseY !== 0));
     if (unsettled) {
       if (priority <= IMPORTANT_PRIORITY) this.waitLive(kind);
       else this.log(`live:${kind}:dropped:busy`);
@@ -1772,7 +1776,8 @@ export class HarimaruController {
         this.pendingLive = null;
         return;
       }
-      const ready = this.placed && this.pauses.size === 0 && !this.airborne && this.sink === 0 && this.lift === 0 && this.poseX === 0 && this.poseY === 0;
+      const ready =
+        this.placed && this.pauses.size === 0 && !this.airborne && this.sink === 0 && this.lift === 0 && this.scrollTimer === null && this.poseX === 0 && this.poseY === 0;
       if (ready) {
         this.pendingLive = null;
         this.reactLive(pending.kind);
@@ -1876,6 +1881,16 @@ export class HarimaruController {
     this.drawReaction(id, 0);
     next();
     return true;
+  }
+
+  /**
+   * スクロール・リサイズ・見えている範囲 (visualViewport) が変わったら、出しているエフェクトをすぐにやめる。
+   * 動いている間は、文字・操作部品に重ならないことを確かめられないため (止まったあとに出し直しはしない)。
+   */
+  private stopLiveOnViewChange(): void {
+    if (!this.liveNow?.id) return;
+    this.log('live:stopped:view');
+    this.endLive();
   }
 
   /** リアクションを終えて (途中で終えても) 待機に戻る。エフェクトの残像を残さない。 */

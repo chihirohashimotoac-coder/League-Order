@@ -14,7 +14,7 @@ import type { LiveState, SeasonDocument } from '../matches/parse';
 import type { LiveStatus } from '../matches/livePoller';
 import { useAppStore } from '../../state/appStore';
 import { WatchShownContext } from '../matches/ui/useScreenWake';
-import { claimLive, publishLive, rebaseLive } from './liveFeed';
+import { claimLive, holdLive, publishLive, rebaseLive } from './liveFeed';
 
 export function allyTeamIdIn(season: Pick<SeasonDocument, 'tournamentId' | 'leagueId' | 'teams'> | null, binding: { leagueId: string; lastTournamentId: string; lastTeamId: string } | null | undefined): string | null {
   if (!season || !binding) return null;
@@ -61,4 +61,9 @@ export function useHarimaruLive(requested: string | null, state: LiveState | nul
     const ally = season ? (state.tdid && state.tdid !== season.tournamentId ? null : allyId) : allyTeamIdByTournament(state.tdid, binding);
     publishLive(source, state, ally);
   }, [source, state, allyId, season, binding]);
+}
+
+/** 観戦画面が過去の Leg を表示している間 (active)、ハリマルへ状態を流さない (LiveSheet から 1 行で呼ぶ)。 */
+export function useHarimaruHold(active: boolean): void {
+  useEffect(() => (active ? holdLive() : undefined), [active]);
 }

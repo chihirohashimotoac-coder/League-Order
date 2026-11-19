@@ -2,7 +2,8 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LiveState } from '../matches/parse';
 import { HarimaruLayer } from './HarimaruLayer';
-import { activeLiveSource, claimLive, publishLive, subscribeLive, type LiveFeedMessage } from './liveFeed';
+import { HarimaruController } from './controller';
+import { activeLiveSource, claimLive, holdLive, publishLive, subscribeLive, type LiveFeedMessage } from './liveFeed';
 import { resetHarimaruPreferenceForTests, saveHarimaruEnabled } from './preference';
 import { allyTeamIdByTournament, allyTeamIdIn } from './useHarimaruLive';
 
@@ -60,6 +61,28 @@ describe('liveFeed (観戦画面 → ハリマル)', () => {
     publishLive('live-tab', state(), 'A');
     expect(heard.filter((m) => m.kind === 'state')).toHaveLength(2);
     expect(activeLiveSource()).toBeNull();
+  });
+
+  it('過去の Leg を表示している間 (hold) は状態を流さず、すべて解除したら流す権利を持つ画面の次の状態を基準にし直す', () => {
+    const heard: LiveFeedMessage[] = [];
+    const stop = subscribeLive((m) => heard.push(m));
+    const release = claimLive('watch-live');
+    const unholdA = holdLive();
+    const unholdB = holdLive();
+    expect(heard.map((m) => m.kind)).toEqual(['hold', 'hold']);
+    publishLive('watch-live', state(), 'A');
+    expect(heard.filter((m) => m.kind === 'state')).toHaveLength(0);
+    unholdA();
+    unholdA();
+    expect(heard.filter((m) => m.kind === 'rebase')).toHaveLength(0);
+    publishLive('watch-live', state(), 'A');
+    expect(heard.filter((m) => m.kind === 'state')).toHaveLength(0);
+    unholdB();
+    expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
+    publishLive('watch-live', state(), 'A');
+    expect(heard.at(-1)?.kind).toBe('state');
+    release();
+    stop();
   });
 
   it('味方の ID は、リーグ・大会 (シーズン)・チーム ID がすべて一致したときだけ (チーム名では推測しない)', () => {
@@ -132,6 +155,26 @@ describe('HarimaruLayer の購読', () => {
     view.unmount();
     act(() => publishLive('watch-live', state({ updateTime: 3 }), 'A'));
     release();
+  });
+
+  it('同じ対戦の次のゲーム (mid) へ進んだとき・過去の Leg の表示を始めたとき、演出中・待っている出来事を取り消す', () => {
+    const cancel = vi.spyOn(HarimaruController.prototype, 'cancelLive');
+    render(<HarimaruLayer page="watch" />);
+    act(() => FakeImage.instances[0].onload?.());
+    const release = claimLive('watch-live');
+    act(() => publishLive('watch-live', state(), 'A'));
+    act(() => publishLive('watch-live', state({ updateTime: 2 }), 'A'));
+    expect(cancel).not.toHaveBeenCalled();
+    act(() => publishLive('watch-live', state({ mid: 'm2', updateTime: 3 }), 'A'));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    let unhold = (): void => undefined;
+    act(() => {
+      unhold = holdLive();
+    });
+    expect(cancel).toHaveBeenCalledTimes(2);
+    act(() => unhold());
+    release();
+    cancel.mockRestore();
   });
 
   it('表示 OFF ではレイヤーがなく、購読も画像の読み込みもしない', () => {

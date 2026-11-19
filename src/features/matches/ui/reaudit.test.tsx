@@ -17,6 +17,7 @@ import { AppStoreProvider } from '../../../state/appStore';
 import { LiveSheet } from './LiveSheet';
 import { GameView } from './GameView';
 import { SYNC_RETRY_MS } from './useGameLegs';
+import { claimLive, subscribeLive, type LiveFeedMessage } from '../../harimaru/liveFeed';
 
 /**
  * Re-audit of 2026-11-09, R02: the legs of a live game held against what the game has ended.
@@ -518,5 +519,27 @@ describe('review follow-ups', () => {
     await flush();
     expect(calls).toHaveLength(3);
     visibility.mockRestore();
+  });
+});
+
+describe('ハリマル (観戦リアクション): 過去の Leg の表示', () => {
+  it('終わった Leg のタブを選んでいる間はハリマルへ状態を流さず (hold)、進行中へ戻したら基準からやり直す (rebase)', async () => {
+    const { api } = apiOf(() => throwsReply('gameA', 20, 1, [endedLeg(0, 20)]));
+    const heard: LiveFeedMessage[] = [];
+    const stop = subscribeLive((m) => heard.push(m));
+    const release = claimLive('watch-live');
+    render(<LiveSheet api={api} live={liveAt('gameA', 1, [1, 0])} />);
+    await flush();
+    expect(heard).toHaveLength(0);
+    const tabs = screen.getByTestId('leg-tabs');
+    const [first, current] = [...tabs.querySelectorAll('button')];
+    fireEvent.click(first);
+    expect(first.getAttribute('aria-pressed')).toBe('true');
+    expect(heard.map((m) => m.kind)).toEqual(['hold']);
+    fireEvent.click(current);
+    expect(current.getAttribute('aria-pressed')).toBe('true');
+    expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
+    release();
+    stop();
   });
 });

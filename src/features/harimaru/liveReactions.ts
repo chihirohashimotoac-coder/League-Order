@@ -59,10 +59,11 @@ export interface LiveEvent {
 }
 
 /** 01 の得点の分類 (確定仕様の閾値)。null = 反応しない。 */
-export function scoreReaction(visit: Pick<LiveThrow01, 'score' | 'finish'>, ally: boolean): 'surprise180' | 'cheer' | 'panic' | 'anxious' | null {
+export function scoreReaction(visit: Pick<LiveThrow01, 'score' | 'finish'> & { left?: number }, ally: boolean): 'surprise180' | 'cheer' | 'panic' | 'anxious' | null {
   const { score } = visit;
-  // フィニッシュは Leg の結果として扱う。0 (バスト)・小数・範囲外・欠損は反応しない。
-  if (visit.finish || !Number.isInteger(score) || score < 1 || score > 180) return null;
+  // フィニッシュ (finish、または残り点 0: finish が欠けた上がり) は Leg の結果として扱う。0 (バスト)・小数・範囲外・
+  // 欠損は反応しない。
+  if (visit.finish || visit.left === 0 || !Number.isInteger(score) || score < 1 || score > 180) return null;
   if (ally) {
     if (score === 180) return 'surprise180';
     if (score >= 100) return 'cheer';
@@ -94,7 +95,7 @@ const MID_HISTORY = 16;
 
 interface LegMemory {
   /** 見た投てき (`side:round` → 点) と、側ごとの最大ラウンド。 */
-  seen: Map<string, number>;
+  seen: Map<string, string>;
   maxRound: [number, number];
   /** 終わった (`end`) のを見た Leg: そのあとに届いた投てきは後着 (反応しない)。 */
   ended: boolean;
@@ -128,9 +129,11 @@ function step(before: Pair, after: Pair): 0 | 1 | 'same' | null {
 
 const maxPair = (a: Pair, b: Pair): Pair => [Math.max(a[0], b[0]), Math.max(a[1], b[1])];
 
-/** 投てきの点 (訂正を見分けるため)。Cricket はマーク数と点。 */
-function visitScore(entry: LiveThrow): number {
-  return entry.kind === '01' ? entry.score : entry.marks * 1000 + entry.points;
+/** 投てきの中身 (訂正を見分けるため)。01 は点・残り点・フィニッシュ、Cricket はマーク数・点・当たり。 */
+function visitScore(entry: LiveThrow): string {
+  return entry.kind === '01'
+    ? `${entry.score}|${entry.left}|${entry.finish ? 1 : 0}`
+    : `${entry.marks}|${entry.points}|${entry.hits.map((hit) => `${hit.number}x${hit.mark}`).join(',')}`;
 }
 
 export class LiveReactionTracker {
@@ -196,8 +199,9 @@ export class LiveReactionTracker {
     const sets = usesSets(state);
     const matchEnded = state.cardEnded || (!sets && state.gameEnded);
 
-    // 試合全体の勝敗 (n01 が終了を確定させたときだけ、1 回)。
-    if (matchEnded) {
+    // 試合全体の勝敗 (n01 が終了を確定させたときだけ、1 回)。1 ゲームの対戦 (Leg の勝数で決める) で、付いている
+    // Leg が表示中より古い応答 (古い勝数のおそれ) からは決めない (終了の確定も保留し、整合する応答を待つ)。
+    if (matchEnded && !(staleLeg && !sets)) {
       this.unitDone = true;
       const score = norm(sets ? state.sets : state.legs);
       if (score[0] > score[1]) push('victory', `${unit}:result`);
@@ -258,7 +262,10 @@ export class LiveReactionTracker {
     // すでに結果を確定させた (終わっているのを見た) Leg の勝数の変化は、訂正として扱う。
     const legOver = settledLeg !== null && !game.resolvedLegs.has(settledLeg);
     if (settledLeg !== null) game.resolvedLegs.add(settledLeg);
-    if (legChange === null || (legChange !== 'same' && !legOver && settledLeg !== null)) {
+    // Leg を 2 つ以上飛び越した (取りこぼし): 勝数をいまの値に合わせ、飛ばした Leg を確定済みにし、逆転の流れも切る。
+    const skippedLegs = leg !== null && leg.index > game.maxLeg + 1;
+    if (skippedLegs) for (let index = 0; index < leg.index; index += 1) game.resolvedLegs.add(index);
+    if (legChange === null || skippedLegs || (legChange !== 'same' && !legOver && settledLeg !== null)) {
       game.trailed = false;
       game.legs = legsNow;
     } else if (legChange !== 'same' && legOver && (winner === null || winner === legChange || leg?.index !== game.maxLeg)) {
@@ -408,7 +415,7 @@ export class LiveReactionTracker {
     const settled = memory.ended;
     const before: [number, number] = [memory.maxRound[0], memory.maxRound[1]];
     // 前に見た投てきが消えた・点が変わった (削除・訂正・ラウンドの付け替え) 応答では、新しい投てきにも反応しない。
-    const current = new Map<string, number>(leg.throws.map((entry) => [`${entry.side}:${entry.round}`, visitScore(entry)]));
+    const current = new Map<string, string>(leg.throws.map((entry) => [`${entry.side}:${entry.round}`, visitScore(entry)]));
     const rewritten = [...memory.seen].some(([key, score]) => current.get(key) !== score);
     const fresh = leg.throws.filter((entry) => !memory.seen.has(`${entry.side}:${entry.round}`));
     for (const [key, score] of current) memory.seen.set(key, score);
