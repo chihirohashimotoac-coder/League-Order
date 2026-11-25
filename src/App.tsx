@@ -45,6 +45,7 @@ import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { MorePage } from './pages/MorePage';
 import { WelcomePage } from './pages/WelcomePage';
+import { HarimaruLayer } from './features/harimaru/HarimaruLayer';
 import { ViewerHome, ViewerOrder } from './pages/ViewerPages';
 import { readWatchLink, replaceWatchLink, useWatchLink } from './features/matches/watchLink';
 
@@ -698,6 +699,8 @@ export function App(): React.JSX.Element {
         </main>
         <TabBar active={TAB_FOR_PAGE[viewerPage] ?? viewerPage} onSelect={setPage} />
         {showChangelog ? <ChangelogSheet onClose={() => setShowChangelog(false)} /> : null}
+        {/* ハリマル (装飾。足場のある画面だけ・操作や読み上げには関与しない) */}
+        <HarimaruLayer page={viewerPage} />
       </div>
     );
   }
@@ -899,6 +902,9 @@ export function App(): React.JSX.Element {
         // still leads to the setup.
         onSelect={(next) => setPage(next === 'setup' && session?.present.current ? 'result' : next)}
       />
+
+      {/* ハリマル (装飾。足場のある画面だけ・操作や読み上げには関与しない) */}
+      <HarimaruLayer page={page} />
 
       {menuOpen ? (
         <MenuDrawer
