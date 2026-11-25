@@ -17,7 +17,7 @@ import { useMediaQuery } from '../../components/useMediaQuery';
 import { HarimaruController } from './controller';
 import { useHarimaruEnabled } from './preference';
 import { atlasFor, BACKGROUND_SIZE, CLIP_IDS, clipUrlFor, REACTION_IDS, reactionUrlFor, type ClipId, type ReactionId } from './sprite';
-import { forgetLiveStates, subscribeLive } from './liveFeed';
+import { subscribeLive } from './liveFeed';
 import type { LiveState } from '../matches/parse';
 import { allySide, LiveReactionTracker } from './liveReactions';
 import './harimaru.css';
@@ -227,9 +227,8 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
       take(message.source, message.state, message.allyId, true);
     });
     // タブが非表示から戻ったとき: その間に起きたこと (戻った直後の取得で届く) には反応しない。
-    // 表示の切り替えより前に受け取った状態は、停止の解除の基準に使わない (戻ったあとに受け取った状態は使う)。
+    // (表示の切り替えより前に受け取った状態を停止の解除の基準に使わないことは、liveFeed が見張る。)
     const onVisibility = (): void => {
-      forgetLiveStates();
       if (document.visibilityState === 'visible') tracker?.judge.rebaseline();
     };
     document.addEventListener('visibilitychange', onVisibility);

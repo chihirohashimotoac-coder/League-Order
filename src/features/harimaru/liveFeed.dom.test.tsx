@@ -393,6 +393,44 @@ describe('HarimaruLayer の購読', () => {
     react.mockRestore();
   });
 
+  it('表示 OFF のままタブが非表示 → 応答 → 再表示と進んでも、非表示の前後をまたぐ古い記録を基準にしない', () => {
+    const react = vi.spyOn(HarimaruController.prototype, 'reactLive');
+    const view = render(<HarimaruLayer page="watch" />);
+    act(() => FakeImage.instances[0].onload?.());
+    const release = claimLive('watch-live');
+    act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100]]), 'A'));
+    let unhold = (): void => undefined;
+    act(() => {
+      unhold = holdLive('watch-live');
+    });
+    // 過去の Leg を開いたまま表示 OFF (レイヤーも購読もない)。
+    view.unmount();
+    act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100], [0, 2, 60]]), 'A'));
+    // タブが非表示 → 非表示の間に取得済みの応答が届く → 再表示 (どれも、表示 OFF のまま)。
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100], [0, 2, 60], [1, 2, 60]]), 'A'));
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    // 表示 ON・Leg 2 に戻る: 非表示の前後の記録は使わず、次の状態を基準にする (非表示の間の 180 に反応しない)。
+    render(<HarimaruLayer page="watch" />);
+    act(() => FakeImage.instances.filter((image) => /atlas/.test(image.src)).at(-1)?.onload?.());
+    const heard: LiveFeedMessage[] = [];
+    const stop = subscribeLive((m) => heard.push(m));
+    act(() => unhold());
+    expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
+    act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100], [0, 2, 60], [1, 2, 60], [0, 3, 180]]), 'A'));
+    expect(react).not.toHaveBeenCalled();
+    // その次の新しい出来事には反応する。
+    act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100], [0, 2, 60], [1, 2, 60], [0, 3, 180], [1, 3, 140]]), 'A'));
+    expect(react.mock.calls.map(([reaction]) => reaction)).toEqual(['anxious']);
+    stop();
+    release();
+    react.mockRestore();
+  });
+
   it('別の観戦対象 (右カードの過去の Leg・別の試合の詳細) の停止の解除では、反応している観戦対象の判定を変えない', () => {
     const react = vi.spyOn(HarimaruController.prototype, 'reactLive');
     render(<HarimaruLayer page="watch" />);

@@ -43,6 +43,7 @@ export function subscribeLive(listener: Listener): () => void {
 export function claimLive(source: string): () => void {
   // 権利が移る: それまでの記録 (前の画面のもの、または取り直す画面の古いもの) は基準に使わない。
   latest.clear();
+  watchVisibility();
   claims.push(source);
   return () => {
     const index = claims.lastIndexOf(source);
@@ -102,6 +103,17 @@ export function publishLive(source: string, state: LiveState, allyId: string | n
  */
 export function forgetLiveStates(): void {
   latest.clear();
+}
+
+/**
+ * タブの表示の切り替えで、記録を捨てる。ハリマルの描画レイヤーの有無 (表示 OFF) と関係なく、観戦画面が権利を
+ * 取ったときから見張る (1 回だけ登録する。記録は小さな Map だけなので、外す必要はない)。
+ */
+let watchingVisibility = false;
+function watchVisibility(): void {
+  if (watchingVisibility || typeof document === 'undefined') return;
+  watchingVisibility = true;
+  document.addEventListener('visibilitychange', forgetLiveStates);
 }
 
 export function rebaseLive(source: string): void {
