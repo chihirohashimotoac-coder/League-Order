@@ -32,10 +32,10 @@ describe('mergePlatforms', () => {
     ]);
   });
 
-  it('重なり合う足場 (カードの中の同じ高さの枠など) はつなぎ、外側の角だけ避ける (段の高さは最も高い上辺)', () => {
+  it('角丸の内側どうしが重なる足場 (カードの中の同じ高さの枠など) はつなぎ、外側の角だけ避ける (段の高さは最も高い上辺)', () => {
     const merged = mergePlatforms([
       { left: 0, right: 200, top: 50 },
-      { left: 20, right: 120, top: 50.5 },
+      { left: 0, right: 120, top: 50.5 },
       { left: 150, right: 260, top: 48 },
       { left: 300, right: 400, top: 50 },
     ]);
@@ -43,6 +43,25 @@ describe('mergePlatforms', () => {
       { left: inset, right: 260 - inset, top: 48 },
       { left: 300 + inset, right: 400 - inset, top: 50 },
     ]);
+  });
+
+  it('角丸のカードが浅く重なるだけ (角丸の内側は重ならない) ならつながない', () => {
+    const merged = mergePlatforms([
+      { left: 0, right: 100, top: 50 },
+      { left: 99, right: 200, top: 50 },
+      // 角丸の内側どうしがちょうど 1px 重なる: つなぐ。
+      { left: 100 - 2 * inset - 1, right: 300, top: 120 },
+      { left: 0, right: 100, top: 120 },
+    ]);
+    expect(merged).toEqual([
+      { left: inset, right: 100 - inset, top: 50 },
+      { left: 99 + inset, right: 200 - inset, top: 50 },
+      { left: inset, right: 300 - inset, top: 120 },
+    ]);
+  });
+
+  it('角丸を除いて幅の残らない足場は使わない', () => {
+    expect(mergePlatforms([{ left: 0, right: 2 * inset, top: 50 }])).toEqual([]);
   });
 });
 

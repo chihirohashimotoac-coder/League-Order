@@ -42,12 +42,16 @@ export interface TerrainInput {
 }
 
 /**
- * ほぼ同じ高さ (rowTolerance 以内) で、横に minJoinOverlap 以上重なる足場をつなぐ。隙間のある足場・端が接するだけの
- * 足場 (角丸どうしの継ぎ目) は別の足場のまま。角丸の内側余白は、つないだあとの両端に適用する。
+ * ほぼ同じ高さ (rowTolerance 以内) の足場のうち、角丸の内側 (両端から cornerInset を除いた範囲) が minJoinOverlap 以上
+ * 重なるものだけをつなぐ。隙間のある足場・端が接するだけ・角丸どうしが浅く重なるだけの足場は別の足場のまま
+ * (つなぐと、継ぎ目の隙間と角丸の上を足元の高さが変わらないまま歩いて、空中を踏んで見える)。カードの中の同じ
+ * 高さの枠のように、角丸の内側どうしが重なる足場はつなぐ。角丸を除いて幅の残らない足場は使わない。
  */
 export function mergePlatforms(platforms: readonly Platform[], params: TerrainParams = DEFAULT_TERRAIN): Platform[] {
   const byTop = [...platforms]
     .filter((p) => Number.isFinite(p.left) && Number.isFinite(p.right) && Number.isFinite(p.top) && p.right > p.left)
+    .map((p) => ({ ...p, left: p.left + params.cornerInset, right: p.right - params.cornerInset }))
+    .filter((p) => p.right > p.left)
     .sort((a, b) => a.top - b.top);
   // 高さの差が rowTolerance 以内の足場を 1 つの段にまとめ、段の中で左から順につなぐ (段の高さは最も高い上辺)。
   const rows: Platform[][] = [];
@@ -70,7 +74,7 @@ export function mergePlatforms(platforms: readonly Platform[], params: TerrainPa
     }
     merged.push(...runs);
   }
-  return merged.map((p) => ({ ...p, left: p.left + params.cornerInset, right: p.right - params.cornerInset }));
+  return merged;
 }
 
 /** 区間 [left, right] から、ふさがれた区間を取り除いた残り。 */
