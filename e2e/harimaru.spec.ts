@@ -512,3 +512,31 @@ test('追加素材 v0.9 は登場のあとで画素密度に合う 1 組 (14 動
   await page.waitForTimeout(3_000);
   expect(await clipRequests(page)).toEqual([]);
 });
+
+test('画面を狭めても、隠れたままのハリマルが右端からはみ出して横スクロールを出さない', async ({ page }) => {
+  // 2026-11-25 の本番デプロイで見つかった不具合: 画面幅を 393 → 320 px に狭めた直後、隠れた (不透明度 0) ハリマルが
+  // 前の位置 (右端の外) に残り、スマホではレイアウト幅が広がって横スクロールが出た。時計を止めてその状態を固定する。
+  await page.clock.install();
+  await openSampleHome(page);
+  await page.clock.runFor(4_000);
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  await page.clock.pauseAt(Date.now() + 60_000);
+  const width = page.viewportSize()!.width;
+  // 隠れた状態 (不透明度 0) を作り、右端の手前に置く。
+  await sprite(page).evaluate((el, x) => {
+    const node = el as HTMLElement;
+    node.dataset.visible = 'false';
+    node.style.transform = `translate3d(${x}px, 200px, 0)`;
+  }, width - 12);
+  await page.setViewportSize({ width: Math.min(320, width - 40), height: 640 });
+  // 縮めたあとの同じ瞬間に: 隠れたまま、右端の外に残っていて (resize で置き直されていない)、それでも横スクロールがない。
+  const state = await sprite(page).evaluate((el) => {
+    const doc = document.documentElement;
+    return {
+      opacity: getComputedStyle(el).opacity,
+      outside: el.getBoundingClientRect().right > doc.clientWidth,
+      sideways: doc.scrollWidth - doc.clientWidth,
+    };
+  });
+  expect(state).toEqual({ opacity: '0', outside: true, sideways: 0 });
+});

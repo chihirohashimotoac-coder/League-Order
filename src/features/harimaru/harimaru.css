@@ -7,9 +7,15 @@
   position: absolute;
   top: 0;
   left: 0;
-  width: 0;
+  /*
+   * 横幅は画面 (初期包含ブロック) と同じにして、右端より外は切り取る。画面を狭めた直後などに
+   * キャラクター (隠れていても) が前の位置に残っても、ページの横幅を広げず横スクロールを出さない。
+   * 縦は切り取らない (高さ 0 のまま、ページの下までスクロールに追従して描く)。
+   */
+  right: 0;
   height: 0;
-  overflow: visible;
+  overflow-x: clip;
+  overflow-y: visible;
   z-index: 10;
   pointer-events: none;
   user-select: none;
