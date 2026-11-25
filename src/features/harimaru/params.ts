@@ -139,8 +139,12 @@ export interface TerrainParams {
   clearanceSide: number;
   /** 足場の角 (角丸) を避ける最小の内側余白 (CSS px)。 */
   cornerInset: number;
-  /** 隣り合う足場を 1 本につなぐ最大の隙間 (CSS px)。同じ高さのタイル列を歩けるようにする。 */
-  joinGap: number;
+  /**
+   * 同じ段の足場を 1 本につなぐのに必要な、横方向の重なり (CSS px)。重なっている足場 (カードの中の同じ高さの枠など)
+   * だけをつなぐ。隙間のある・角丸どうしが接するだけの継ぎ目はつながない (つなぐと、隙間と角丸の上を足元の高さが
+   * 変わらないまま歩いて、空中を踏んで見える)。継ぎ目は、安全なジャンプで渡るか、その手前で止まる。
+   */
+  minJoinOverlap: number;
   /** 同じ高さの段とみなす上辺の差 (CSS px)。ホバーで 2px 浮いたタイルも同じ列のまま歩ける。 */
   rowTolerance: number;
   /** 足場として使う最小の幅 (可視部分 + 余白)。 */
@@ -155,7 +159,7 @@ export const DEFAULT_TERRAIN: TerrainParams = {
   clearanceTop: 3,
   clearanceSide: 4,
   cornerInset: 12,
-  joinGap: 12,
+  minJoinOverlap: 1,
   rowTolerance: 3,
   minSegmentWidth: SPRITE.width + 8,
   jumpMaxGap: 110,

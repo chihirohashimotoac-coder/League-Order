@@ -379,6 +379,54 @@ test('PC: 近くで止まったカーソルに、気まぐれに近づくか顔�
   expect(await overlaps(page)).toEqual([]);
 });
 
+test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカードの上 (横並びのカードの隙間・角丸の上を歩かない)', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'desktop', 'PC の横並びのカード (サンプルのホーム) で確かめる');
+  test.setTimeout(240_000);
+  let movingFrames = 0;
+  const floating: string[] = [];
+  // 乱数の種: どれも、修正前 (隙間のあるタイル列を 1 本の足場につないでいた) にはタイルの隙間の上を歩いた種。
+  // 種ごとに新しいページで、時計を止めて進める (同じ種なら、ほぼ同じ歩き方になる)。
+  for (const seed of [1, 9, 14]) {
+    const context = await browser.newContext({ ...info.project.use, viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, serviceWorkers: 'block' });
+    const page = await context.newPage();
+    await seedRandom(page, seed);
+    await page.clock.install();
+    await openSampleHome(page);
+    await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1_000);
+    await runUntilCalm(page);
+    for (let step = 0; step < 900; step += 1) {
+      await page.clock.runFor(100);
+      if (step % 50 === 0) await page.evaluate(() => window.scrollTo(0, 0));
+      const sample = await sprite(page).evaluate((el) => {
+        const action = el.dataset.action ?? '';
+        const moving = (action === 'walk' || action === 'run') && el.dataset.visible === 'true' && !el.style.clipPath;
+        if (!moving) return { moving: false, gap: 0, where: '' };
+        const r = el.getBoundingClientRect();
+        // 足元の見える範囲 (表示枠の左右の透明な余白 2px を除く)。
+        const left = r.left + 2;
+        const right = r.right - 2;
+        let gap = Infinity;
+        for (const card of Array.from(document.querySelectorAll('.app-main .card, .app-main .next-match-card, .app-main .quick-tile'))) {
+          const q = card.getBoundingClientRect();
+          if (Math.abs(q.top - r.bottom) > 3.5 || left < q.left - 0.5 || right > q.right + 0.5) continue;
+          // 角丸の上なら、上辺から下がった分だけ浮く。
+          const radius = parseFloat(getComputedStyle(card).borderTopLeftRadius) || 0;
+          const drop = (d: number): number => (d < radius ? radius - Math.sqrt(Math.max(0, radius * radius - (radius - d) ** 2)) : 0);
+          gap = Math.min(gap, Math.max(drop(left - q.left), drop(q.right - right), Math.abs(q.top - r.bottom)));
+        }
+        return { moving: true, gap, where: `${action} x=${Math.round(r.left)} foot=${Math.round(r.bottom)}` };
+      });
+      if (!sample.moving) continue;
+      movingFrames += 1;
+      if (sample.gap > 1) floating.push(`種 ${seed}: ${sample.where} gap=${sample.gap}`);
+    }
+    expect(await overlaps(page), `種 ${seed}`).toEqual([]);
+    await context.close();
+  }
+  expect(movingFrames, '歩く・駆ける場面がある').toBeGreaterThan(20);
+  expect(floating).toEqual([]);
+});
+
 test('速くスクロールしても位置が崩れず、止まったあとも重ならない', async ({ page }) => {
   await openSampleHome(page);
   await waitStanding(page);

@@ -6,28 +6,67 @@ const bounds = { left: 0, right: 2_000 };
 const inset = DEFAULT_TERRAIN.cornerInset;
 
 describe('mergePlatforms', () => {
-  it('ホバーで 2px 浮いたタイルも同じ列としてつなぐ (段の高さは最も高い上辺)', () => {
+  it('隙間のある横並びのタイルはつながない (継ぎ目の隙間と角丸の上を歩かない)。どのタイルも両端の角を避ける', () => {
     const merged = mergePlatforms([
       { left: 0, right: 100, top: 50 },
       { left: 110, right: 200, top: 48 },
       { left: 210, right: 300, top: 54 },
     ]);
     expect(merged).toEqual([
-      { left: inset, right: 200 - inset, top: 48 },
+      { left: inset, right: 100 - inset, top: 50 },
+      { left: 110 + inset, right: 200 - inset, top: 48 },
       { left: 210 + inset, right: 300 - inset, top: 54 },
     ]);
   });
 
-  it('同じ高さで隙間の小さいタイルをつなぎ、外側の角だけ避ける', () => {
+  it('端が接するだけのカード (角丸どうしの継ぎ目) もつながない', () => {
     const merged = mergePlatforms([
       { left: 0, right: 100, top: 50 },
-      { left: 110, right: 200, top: 50.5 },
+      { left: 100, right: 200, top: 50 },
+      { left: 199.5, right: 300, top: 50 },
+    ]);
+    expect(merged).toEqual([
+      { left: inset, right: 100 - inset, top: 50 },
+      { left: 100 + inset, right: 200 - inset, top: 50 },
+      { left: 199.5 + inset, right: 300 - inset, top: 50 },
+    ]);
+  });
+
+  it('重なり合う足場 (カードの中の同じ高さの枠など) はつなぎ、外側の角だけ避ける (段の高さは最も高い上辺)', () => {
+    const merged = mergePlatforms([
+      { left: 0, right: 200, top: 50 },
+      { left: 20, right: 120, top: 50.5 },
+      { left: 150, right: 260, top: 48 },
       { left: 300, right: 400, top: 50 },
     ]);
     expect(merged).toEqual([
-      { left: inset, right: 200 - inset, top: 50 },
+      { left: inset, right: 260 - inset, top: 48 },
       { left: 300 + inset, right: 400 - inset, top: 50 },
     ]);
+  });
+});
+
+describe('横並びのカードの継ぎ目', () => {
+  it('隙間 10px・角丸のタイル列は別々の足場になり、継ぎ目は左右どちらからもジャンプの候補で渡る (歩いては渡らない)', () => {
+    // サンプルのホーム (PC 1280 px) の 3 枚のタイルと同じ並び。
+    const tiles = [
+      { left: 70, right: 275, top: 398 },
+      { left: 285, right: 490, top: 398 },
+      { left: 500, right: 705, top: 398 },
+    ];
+    const segments = computeSegments({ platforms: tiles, obstacles: [], bounds });
+    expect(segments.map((s) => [s.left, s.right])).toEqual(tiles.map((t) => [t.left + inset, t.right - inset]));
+    const middle = segments[1];
+    const plans = jumpCandidates(middle, segments, 10);
+    expect(plans.filter((plan) => plan.to.x > plan.from.x).map((plan) => plan.target)).toEqual([segments[2]]);
+    expect(plans.filter((plan) => plan.to.x < plan.from.x).map((plan) => plan.target)).toEqual([segments[0]]);
+    // 踏切・着地は、どちらも足場の上 (表示枠の左端 x の範囲の中)。
+    for (const plan of plans) {
+      expect(plan.from.x).toBeGreaterThanOrEqual(middle.minX);
+      expect(plan.from.x).toBeLessThanOrEqual(middle.maxX);
+      expect(plan.to.x).toBeGreaterThanOrEqual(plan.target.minX);
+      expect(plan.to.x).toBeLessThanOrEqual(plan.target.maxX);
+    }
   });
 });
 
