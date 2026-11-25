@@ -223,18 +223,24 @@ describe('HarimaruController', () => {
     const low = document.createElement('div');
     const high = document.createElement('div');
     root.append(low, high);
-    low.getBoundingClientRect = () => ({ left: 100, right: 295, top: 300, bottom: 380, width: 195, height: 80, x: 100, y: 300, toJSON: () => ({}) }) as DOMRect;
-    high.getBoundingClientRect = () => ({ left: 305, right: 500, top: 298, bottom: 380, width: 195, height: 80, x: 305, y: 298, toJSON: () => ({}) }) as DOMRect;
-    current = { ...terrain([{ left: 100, right: 295, top: 300 }, { left: 305, right: 500, top: 298 }]), elements: [low, high] };
+    // 同じ段で重なり合う 2 つの足場 (角丸の内側どうしが重なるので 1 本につながる。隙間のあるタイルは別の足場)。
+    low.getBoundingClientRect = () => ({ left: 100, right: 330, top: 300, bottom: 380, width: 230, height: 80, x: 100, y: 300, toJSON: () => ({}) }) as DOMRect;
+    high.getBoundingClientRect = () => ({ left: 290, right: 500, top: 298, bottom: 380, width: 210, height: 80, x: 290, y: 298, toJSON: () => ({}) }) as DOMRect;
+    current = { ...terrain([{ left: 100, right: 330, top: 300 }, { left: 290, right: 500, top: 298 }]), elements: [low, high] };
     make(3).start();
+    let sawHigh = false;
     for (let i = 0; i < 600; i += 1) {
       advance(100);
       const { placed, x, top } = controller.snapshot();
       if (!placed) continue;
-      const overHigh = x + 30 - 2 > 305;
+      const overHigh = x + 30 - 2 > 290;
       // 浮いたタイルの上に体がかかっていれば、その上辺 (298) に立つ。
-      if (overHigh) expect(top).toBe(298);
+      if (overHigh) {
+        sawHigh = true;
+        expect(top).toBe(298);
+      }
     }
+    expect(sawHigh).toBe(true);
   });
 
   it('歩いて向かう先 (同じ足場の遠い端) のタイルが動き始めても隠れる', () => {
