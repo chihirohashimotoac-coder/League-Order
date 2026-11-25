@@ -470,6 +470,37 @@ describe('HarimaruController (PR2)', () => {
     expect(landed.airborne).toBe(false);
   });
 
+  it('横並びのタイル (隙間 10px・角丸) の列: 歩く・駆ける間は 1 枚のタイルの角丸の内側だけを踏み、継ぎ目は左右どちらの向きにもジャンプで渡る', () => {
+    // サンプルのホーム (PC 1280 px) の 3 枚のタイルと同じ並び。
+    const tiles = [
+      { left: 70, right: 275, top: 398 },
+      { left: 285, right: 490, top: 398 },
+      { left: 500, right: 705, top: 398 },
+    ];
+    current = terrain(tiles);
+    make2({ seed: 5, behavior: only({ walk: 1, run: 0.5, jump: 1, idle: 0.3 }) }).start();
+    const tileOf = (x: number): number => tiles.findIndex((t) => x + 2 >= t.left + 12 - 0.01 && x + 30 - 2 <= t.right - 12 + 0.01);
+    const crossed = { right: 0, left: 0 };
+    let lastTile = -1;
+    let groundFrames = 0;
+    for (let i = 0; i < 6_000; i += 1) {
+      advance(16);
+      const state = controller.snapshot();
+      if (!state.placed || state.airborne || state.lift !== 0 || state.sink !== 0) continue;
+      groundFrames += 1;
+      // 地上では、足元の見える範囲が必ず 1 枚のタイルの角丸の内側に収まる (隙間・角丸の上にいない)。
+      const tile = tileOf(state.x);
+      expect(tile, `x=${state.x}`).toBeGreaterThanOrEqual(0);
+      expect(state.top).toBe(398);
+      if (lastTile >= 0 && tile !== lastTile) crossed[tile > lastTile ? 'right' : 'left'] += 1;
+      lastTile = tile;
+    }
+    expect(groundFrames).toBeGreaterThan(1_000);
+    // 継ぎ目は、右向き・左向きのどちらにもジャンプで渡った (歩いては渡らない: 地上の標本はすべて 1 枚の上)。
+    expect(crossed.right).toBeGreaterThan(0);
+    expect(crossed.left).toBeGreaterThan(0);
+  });
+
   it('ジャンプの途中でスクロール・DOM の変化があったら、古い経路のまま飛ばずに即座に隠れて出直す', async () => {
     for (const disturb of ['scroll', 'dom'] as const) {
       current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
