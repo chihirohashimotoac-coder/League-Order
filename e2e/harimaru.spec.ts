@@ -395,8 +395,9 @@ test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカード
   const floating: string[] = [];
   const touching: string[] = [];
   /**
-   * 継ぎ目 (隣のタイルとの隙間が 20px 以下の端) から 16px 以内にいた回数 (右端・左端)。data-action は歩き終えて
-   * 次の行動を選ぶまで walk / run のままなので、端で立ち止まっている間も数える。
+   * 同じカードの上を継ぎ目 (隣のタイルとの隙間が 20px 以下の端) の側へ進んで、その端から 16px 以内に着いた回数
+   * (右端・左端)。data-action は歩き終えて次の行動を選ぶまで walk / run のままなので、止まったあとの標本は数えない
+   * (前の標本から動いたときだけ数える)。
    */
   const seams = { right: 0, left: 0 };
   // 乱数の種: 9・14 は継ぎ目の手前まで歩く種 (時計を読み込みの前から止めたときの歩き方)。
@@ -409,13 +410,15 @@ test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカード
     await page.clock.pauseAt(CURSOR_CLOCK + 1_000);
     await openSampleHome(page);
     await runUntilCalm(page);
+    /** 前の標本 (歩く・駆ける間だけ。ほかの行動を挟んだら捨てる)。 */
+    let previous: { x: number; card: number } | null = null;
     for (let step = 0; step < 900; step += 1) {
       await page.clock.runFor(100);
       if (step % 50 === 0) await page.evaluate(() => window.scrollTo(0, 0));
       const sample = await sprite(page).evaluate((el) => {
         const action = el.dataset.action ?? '';
         const moving = (action === 'walk' || action === 'run') && el.dataset.visible === 'true' && !el.style.clipPath;
-        if (!moving) return { moving: false, gap: 0, where: '', seam: null as 'right' | 'left' | null };
+        if (!moving) return { moving: false, gap: 0, where: '', seam: null as 'right' | 'left' | null, x: 0, card: -1 };
         const r = el.getBoundingClientRect();
         // 足元の見える範囲 (表示枠の左右の透明な余白 2px を除く)。右向きは scaleX(-1)。
         const left = r.left + 2;
@@ -423,25 +426,34 @@ test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカード
         const cards = Array.from(document.querySelectorAll('.app-main .card, .app-main .next-match-card, .app-main .quick-tile')).map((card) => ({ q: card.getBoundingClientRect(), radius: parseFloat(getComputedStyle(card).borderTopLeftRadius) || 0 }));
         let gap = Infinity;
         let seam: 'right' | 'left' | null = null;
-        for (const { q, radius } of cards) {
+        let card = -1;
+        for (const [index, { q, radius }] of cards.entries()) {
           if (Math.abs(q.top - r.bottom) > 3.5 || left < q.left - 0.5 || right > q.right + 0.5) continue;
           // 足元の両端で、カードの輪郭 (角丸で下がる分) と足元の高さの差を合わせた浮き。
           const drop = (d: number): number => (d < radius ? radius - Math.sqrt(Math.max(0, radius * radius - (radius - d) ** 2)) : 0);
           const vertical = r.bottom - q.top;
-          gap = Math.min(gap, Math.max(Math.abs(drop(left - q.left) - vertical), Math.abs(drop(q.right - right) - vertical)));
+          const here = Math.max(Math.abs(drop(left - q.left) - vertical), Math.abs(drop(q.right - right) - vertical));
+          if (here < gap) card = index;
+          gap = Math.min(gap, here);
           const neighbor = (side: 'right' | 'left'): boolean =>
             cards.some(({ q: o }) => Math.abs(o.top - q.top) <= 3 && (side === 'right' ? o.left - q.right : q.left - o.right) >= 0 && (side === 'right' ? o.left - q.right : q.left - o.right) <= 20);
           if (q.right - right <= 16 && neighbor('right')) seam = 'right';
           if (left - q.left <= 16 && neighbor('left')) seam = 'left';
         }
-        return { moving: true, gap, where: `${action} x=${Math.round(r.left)} foot=${Math.round(r.bottom)}`, seam };
+        return { moving: true, gap, where: `${action} x=${Math.round(r.left)} foot=${Math.round(r.bottom)}`, seam, x: r.left, card };
       });
-      if (!sample.moving) continue;
+      if (!sample.moving) {
+        previous = null;
+        continue;
+      }
       movingFrames += 1;
       if (sample.gap > 1) floating.push(`種 ${seed}: ${sample.where} gap=${sample.gap}`);
-      if (sample.seam) seams[sample.seam] += 1;
-      if (movingFrames % 3 === 0) for (const hit of await overlaps(page)) touching.push(`種 ${seed}: ${sample.where} ${hit}`);
+      // 同じカードの上で、前の標本から継ぎ目の側へ進んで、継ぎ目の手前に着いたときだけ数える。
+      if (sample.seam && previous && previous.card === sample.card && (sample.seam === 'right' ? sample.x > previous.x + 0.5 : sample.x < previous.x - 0.5)) seams[sample.seam] += 1;
+      previous = { x: sample.x, card: sample.card };
+      for (const hit of await overlaps(page)) touching.push(`種 ${seed}: ${sample.where} ${hit}`);
     }
+    for (const hit of await overlaps(page)) touching.push(`種 ${seed}: 最後 ${hit}`);
     await context.close();
   }
   expect(movingFrames, '歩く・駆ける場面がある').toBeGreaterThan(20);

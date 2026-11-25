@@ -482,18 +482,36 @@ describe('HarimaruController (PR2)', () => {
     const tileOf = (x: number): number => tiles.findIndex((t) => x + 2 >= t.left + 12 - 0.01 && x + 30 - 2 <= t.right - 12 + 0.01);
     const crossed = { right: 0, left: 0 };
     let lastTile = -1;
+    /** 前の地上の標本のあと、ジャンプの空中 (airborne・正の lift) を通ったか。 */
+    let flew = false;
     let groundFrames = 0;
     for (let i = 0; i < 6_000; i += 1) {
       advance(16);
       const state = controller.snapshot();
-      if (!state.placed || state.airborne || state.lift !== 0 || state.sink !== 0) continue;
+      if (!state.placed) {
+        // 見えない間に別の場所へ移ったら (隠れて出直すなど)、横断として数えない。
+        lastTile = -1;
+        flew = false;
+        continue;
+      }
+      if (state.airborne || state.lift > 0) {
+        if (state.action === 'jump' && state.airborne && state.lift > 0) flew = true;
+        continue;
+      }
+      if (state.sink !== 0) continue;
       groundFrames += 1;
       // 地上では、足元の見える範囲が必ず 1 枚のタイルの角丸の内側に収まる (隙間・角丸の上にいない)。
       const tile = tileOf(state.x);
       expect(tile, `x=${state.x}`).toBeGreaterThanOrEqual(0);
       expect(state.top).toBe(398);
-      if (lastTile >= 0 && tile !== lastTile) crossed[tile > lastTile ? 'right' : 'left'] += 1;
+      if (lastTile >= 0 && tile !== lastTile) {
+        // タイルが変わるのは、ジャンプで隣のタイルへ渡ったときだけ (歩いて・瞬間的に移らない)。
+        expect(flew, `${lastTile} → ${tile}`).toBe(true);
+        expect(Math.abs(tile - lastTile)).toBe(1);
+        crossed[tile > lastTile ? 'right' : 'left'] += 1;
+      }
       lastTile = tile;
+      flew = false;
     }
     expect(groundFrames).toBeGreaterThan(1_000);
     // 継ぎ目は、右向き・左向きのどちらにもジャンプで渡った (歩いては渡らない: 地上の標本はすべて 1 枚の上)。
