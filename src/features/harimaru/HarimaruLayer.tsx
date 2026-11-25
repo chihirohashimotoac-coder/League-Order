@@ -17,7 +17,7 @@ import { useMediaQuery } from '../../components/useMediaQuery';
 import { HarimaruController } from './controller';
 import { useHarimaruEnabled } from './preference';
 import { atlasFor, BACKGROUND_SIZE, CLIP_IDS, clipUrlFor, REACTION_IDS, reactionUrlFor, type ClipId, type ReactionId } from './sprite';
-import { subscribeLive } from './liveFeed';
+import { forgetLiveStates, subscribeLive } from './liveFeed';
 import type { LiveState } from '../matches/parse';
 import { allySide, LiveReactionTracker } from './liveReactions';
 import './harimaru.css';
@@ -170,14 +170,8 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
     /** 最後に受け取った状態の対戦の単位とゲーム (mid) (中立の状態も含む)。切り替わったら演出を取り消す。 */
     let lastUnit: string | null = null;
     let lastMid: string | null = null;
-    /**
-     * タブが非表示から戻ってから、まだ状態を受け取っていない (その間の状態は信頼できない): 停止の解除で渡された
-     * 状態を基準に使わず、次の状態を基準にし直す。
-     */
-    let hiddenSinceState = false;
     /** 状態を判定する。react が false なら演出しない (基準にするだけ)。 */
     const take = (source: string, state: LiveState, allyId: string | null, react: boolean): void => {
-      hiddenSinceState = false;
       if (!tracker || tracker.source !== source || tracker.allyId !== allyId) {
         // 観戦画面・味方が変わった: 判定を作り直し、前の対戦の演出・待っている出来事を取り消す。
         if (tracker) controller?.cancelLive();
@@ -221,7 +215,7 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         return;
       }
       if (message.kind === 'rebase') {
-        if (message.base && !hiddenSinceState) {
+        if (message.base) {
           // 過去の Leg の表示をすべて解除した: 表示中に受け取った同じ観戦対象の最新の状態を、演出せずに基準にする
           // (解除のあとに `changed: 0` が続いても、次の新しい出来事を基準として捨てない)。
           take(message.source, message.base.state, message.base.allyId, false);
@@ -233,9 +227,9 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
       take(message.source, message.state, message.allyId, true);
     });
     // タブが非表示から戻ったとき: その間に起きたこと (戻った直後の取得で届く) には反応しない。
-    // 非表示になったあとは、停止の解除で渡される状態 (それより前に受け取ったかもしれない) も基準に使わない。
+    // 表示の切り替えより前に受け取った状態は、停止の解除の基準に使わない (戻ったあとに受け取った状態は使う)。
     const onVisibility = (): void => {
-      hiddenSinceState = true;
+      forgetLiveStates();
       if (document.visibilityState === 'visible') tracker?.judge.rebaseline();
     };
     document.addEventListener('visibilitychange', onVisibility);

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LiveState, LiveThrow } from '../matches/parse';
 import { HarimaruLayer } from './HarimaruLayer';
 import { HarimaruController } from './controller';
-import { activeLiveSource, claimLive, holdLive, publishLive, rebaseLive, subscribeLive, type LiveFeedMessage } from './liveFeed';
+import { activeLiveSource, claimLive, forgetLiveStates, holdLive, publishLive, rebaseLive, subscribeLive, type LiveFeedMessage } from './liveFeed';
 import { resetHarimaruPreferenceForTests, saveHarimaruEnabled } from './preference';
 import { allyTeamIdByTournament, allyTeamIdIn } from './useHarimaruLive';
 
@@ -156,6 +156,13 @@ describe('liveFeed (観戦画面 → ハリマル)', () => {
     unhold = holdLive('watch-live');
     unhold();
     expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
+    // 権利が移って戻ってきた (その間に状態が届かなくても): 移る前の記録は渡さない。
+    publishLive('watch-live', state({ updateTime: 5.5 }), 'A');
+    unhold = holdLive('watch-live');
+    const releaseOther = claimLive('watch-match');
+    releaseOther();
+    unhold();
+    expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
     // 権利を手放したら記録を捨てる (取り直した画面に前の状態を渡さない)。
     publishLive('watch-live', state({ updateTime: 6 }), 'A');
     releaseLive();
@@ -163,8 +170,27 @@ describe('liveFeed (観戦画面 → ハリマル)', () => {
     unhold = holdLive('watch-live');
     unhold();
     expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
-    again();
+    // タブの表示の切り替えより前の記録は渡さない。切り替えのあとに受け取った状態は渡す。
+    publishLive('watch-live', state({ updateTime: 7 }), 'A');
+    unhold = holdLive('watch-live');
+    forgetLiveStates();
+    unhold();
+    expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
+    unhold = holdLive('watch-live');
+    forgetLiveStates();
+    publishLive('watch-live', state({ updateTime: 8 }), 'A');
+    unhold();
+    expect(heard.at(-1)).toMatchObject({ kind: 'rebase', base: { state: { updateTime: 8 } } });
+    // 聞き手がいない間 (表示 OFF) に届いた状態も記録する (OFF の前の古い状態を基準にしない)。
     stop();
+    unhold = holdLive('watch-live');
+    publishLive('watch-live', state({ updateTime: 9 }), 'A');
+    const heard2: LiveFeedMessage[] = [];
+    const stop2 = subscribeLive((m) => heard2.push(m));
+    unhold();
+    expect(heard2.at(-1)).toMatchObject({ kind: 'rebase', base: { state: { updateTime: 9 } } });
+    again();
+    stop2();
   });
 
   it('味方の ID は、リーグ・大会 (シーズン)・チーム ID がすべて一致したときだけ (チーム名では推測しない)', () => {
@@ -334,6 +360,35 @@ describe('HarimaruLayer の購読', () => {
     expect(react).toHaveBeenCalledTimes(1);
     act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100], [0, 2, 180], [1, 2, 60], [0, 3, 180], [1, 3, 140], [0, 4, 180], [1, 4, 26], [0, 5, 140]]), 'A'));
     expect(react.mock.calls.map(([reaction]) => reaction)).toEqual(['anxious', 'cheer']);
+    release();
+    react.mockRestore();
+  });
+
+  it('表示 OFF の間・タブの表示の切り替えのあとに受け取った状態を基準にする: その間の 180 には反応せず、戻ったあとの新しい 180 に 1 回', () => {
+    const react = vi.spyOn(HarimaruController.prototype, 'reactLive');
+    const view = render(<HarimaruLayer page="watch" />);
+    act(() => FakeImage.instances[0].onload?.());
+    const release = claimLive('watch-live');
+    act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100]]), 'A'));
+    // 過去の Leg を開いたまま表示 OFF (レイヤーがなくなる)。その間に味方 180。
+    let unhold = (): void => undefined;
+    act(() => {
+      unhold = holdLive('watch-live');
+    });
+    view.unmount();
+    act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100], [0, 2, 180]]), 'A'));
+    // 表示 ON に戻し、タブの非表示・再表示のあと (閲覧中のまま) 相手 60 が届き、Leg 2 に戻る。
+    render(<HarimaruLayer page="watch" />);
+    act(() => FakeImage.instances.filter((image) => /atlas/.test(image.src)).at(-1)?.onload?.());
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100], [0, 2, 180], [1, 2, 60]]), 'A'));
+    act(() => unhold());
+    expect(react).not.toHaveBeenCalled();
+    // `changed: 0` (流れない) のあとの新しい味方 180 には反応する。表示 OFF の間の 180 には反応しない。
+    act(() => publishLive('watch-live', legState([[0, 1, 100], [1, 1, 100], [0, 2, 180], [1, 2, 60], [0, 3, 180]]), 'A'));
+    expect(react.mock.calls.map(([reaction]) => reaction)).toEqual(['surprise180']);
     release();
     react.mockRestore();
   });

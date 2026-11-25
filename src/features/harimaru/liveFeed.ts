@@ -25,10 +25,10 @@ const listeners = new Set<Listener>();
 /** 流す権利を持つ観戦画面 (後から来たものが優先)。 */
 const claims: string[] = [];
 /**
- * 観戦対象 (source) ごとの、流す権利を持っている間に受け取った最新の状態 (停止中に受け取ったものを含む)。
- * 権利のない間に届いた状態は記録せず、それまでの記録も捨てる (取りこぼしがある)。
- * 停止をすべて解除したときの基準に使う。基準のやり直し (通信の失敗など)・権利を手放したときに捨てる
- * (信頼できない・別の画面の状態を基準にしない)。
+ * 観戦対象 (source) ごとの、流す権利を持っている間に受け取った最新の状態 (停止中・聞き手がいない間に受け取ったものを
+ * 含む: 表示 OFF の間に進んだ状態も基準に含める)。停止をすべて解除したときの基準に使う。
+ * 信頼できない記録は捨てる: 権利のない間に状態が届いた (取りこぼしがある)・権利が移った・権利を手放した・
+ * 基準のやり直し (通信の失敗など)・タブの表示の切り替え (forgetLiveStates)。
  */
 const latest = new Map<string, { state: LiveState; allyId: string | null }>();
 
@@ -41,6 +41,8 @@ export function subscribeLive(listener: Listener): () => void {
 
 /** 観戦画面が、状態を流す権利を取る。返り値で手放す。 */
 export function claimLive(source: string): () => void {
+  // 権利が移る: それまでの記録 (前の画面のもの、または取り直す画面の古いもの) は基準に使わない。
+  latest.clear();
   claims.push(source);
   return () => {
     const index = claims.lastIndexOf(source);
@@ -85,14 +87,21 @@ export function holdLive(source: string): () => void {
 }
 
 export function publishLive(source: string, state: LiveState, allyId: string | null): void {
-  if (listeners.size === 0) return;
   if (activeLiveSource() !== source) {
     latest.delete(source);
     return;
   }
   latest.set(source, { state, allyId });
-  if (holds.has(source)) return;
+  if (listeners.size === 0 || holds.has(source)) return;
   for (const listener of [...listeners]) listener({ kind: 'state', source, state, allyId });
+}
+
+/**
+ * 記録した状態をすべて捨てる (タブが非表示になった・表示に戻ったとき。その前に受け取った状態は、停止の解除の
+ * 基準に使わない。戻ったあとに受け取った状態からまた記録する)。
+ */
+export function forgetLiveStates(): void {
+  latest.clear();
 }
 
 export function rebaseLive(source: string): void {
