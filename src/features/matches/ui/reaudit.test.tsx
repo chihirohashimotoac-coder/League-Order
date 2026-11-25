@@ -582,7 +582,7 @@ describe('ハリマル: 過去の Leg の表示による停止は、その画面
     stop();
   });
 
-  it('主たる対象で過去の Leg を選んだら止め、進行中へ戻したら基準からやり直してから流す', async () => {
+  it('主たる対象で過去の Leg を選んだら止め、進行中へ戻したら表示中に受け取った状態を基準にしてから流す', async () => {
     const { api } = twoLegs();
     const heard: LiveFeedMessage[] = [];
     const stop = subscribeLive((m) => heard.push(m));
@@ -593,7 +593,8 @@ describe('ハリマル: 過去の Leg の表示による停止は、その画面
     view.rerender(<Watching api={api} source="watch-live" live={liveAt('gameA', 1, [1, 0], { updateTime: 2_000 })} />);
     expect(states(heard, 'watch-live')).toBe(1);
     fireEvent.click(tabsOf(0)[1]);
-    expect(heard.at(-1)).toEqual({ kind: 'rebase', source: 'watch-live' });
+    // 表示中に受け取った最新の状態 (updateTime 2000) を、演出しない基準として渡す。
+    expect(heard.at(-1)).toMatchObject({ kind: 'rebase', source: 'watch-live', base: { state: { updateTime: 2_000 } } });
     view.rerender(<Watching api={api} source="watch-live" live={liveAt('gameA', 1, [1, 0], { updateTime: 3_000 })} />);
     expect(states(heard, 'watch-live')).toBe(2);
     view.unmount();

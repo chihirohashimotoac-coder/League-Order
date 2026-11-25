@@ -9,8 +9,12 @@ import type { LiveState } from '../matches/parse';
 
 export type LiveFeedMessage =
   | { kind: 'state'; source: string; state: LiveState; allyId: string | null }
-  /** 次の状態を基準にし直す (通信の失敗・取得上限・非表示のあと: その間の出来事には反応しない)。 */
-  | { kind: 'rebase'; source: string }
+  /**
+   * 次の状態を基準にし直す (通信の失敗・取得上限・非表示のあと: その間の出来事には反応しない)。
+   * `base` 付き (過去の Leg の表示をすべて解除したとき): 表示中に受け取った、同じ観戦対象の最新の状態。聞き手はこれを
+   * 演出せずに基準にする (解除のあとに `changed: 0` が続いても、次の新しい出来事を基準として捨てない)。
+   */
+  | { kind: 'rebase'; source: string; base?: { state: LiveState; allyId: string | null } }
   /** 観戦対象 source の画面が過去の Leg を表示し始めた: その source の演出中・待っている出来事を取り消す (表示中は流さない)。 */
   | { kind: 'hold'; source: string }
   | { kind: 'release'; source: string };
@@ -20,6 +24,13 @@ type Listener = (message: LiveFeedMessage) => void;
 const listeners = new Set<Listener>();
 /** 流す権利を持つ観戦画面 (後から来たものが優先)。 */
 const claims: string[] = [];
+/**
+ * 観戦対象 (source) ごとの、流す権利を持っている間に受け取った最新の状態 (停止中に受け取ったものを含む)。
+ * 権利のない間に届いた状態は記録せず、それまでの記録も捨てる (取りこぼしがある)。
+ * 停止をすべて解除したときの基準に使う。基準のやり直し (通信の失敗など)・権利を手放したときに捨てる
+ * (信頼できない・別の画面の状態を基準にしない)。
+ */
+const latest = new Map<string, { state: LiveState; allyId: string | null }>();
 
 export function subscribeLive(listener: Listener): () => void {
   listeners.add(listener);
@@ -34,6 +45,7 @@ export function claimLive(source: string): () => void {
   return () => {
     const index = claims.lastIndexOf(source);
     if (index >= 0) claims.splice(index, 1);
+    if (!claims.includes(source)) latest.delete(source);
     for (const listener of [...listeners]) listener({ kind: 'release', source });
   };
 }
@@ -49,8 +61,9 @@ const holds = new Map<string, number>();
 /**
  * 観戦対象 `source` の画面が過去の Leg を表示している間、その source の状態を流さない (見ていない進行中の Leg に
  * 反応しない)。ほかの source (2 カード表示の左・開いた試合のページなど) は止めない。返り値で解除する (2 回目以降の
- * 解除は何もしない)。その source の停止がすべて解けたら、次の状態を基準にし直す (表示中に起きた出来事にまとめて
- * 反応しない)。
+ * 解除は何もしない)。その source の停止がすべて解けたら、表示中に受け取った最新の状態を演出せずに基準にする
+ * (表示中に起きた出来事に反応せず、解除のあとの新しい出来事には反応する)。受け取った状態がなければ、次の状態を
+ * 基準にし直す (従来どおり)。
  */
 export function holdLive(source: string): () => void {
   holds.set(source, (holds.get(source) ?? 0) + 1);
@@ -65,16 +78,26 @@ export function holdLive(source: string): () => void {
       return;
     }
     holds.delete(source);
-    rebaseLive(source);
+    const base = latest.get(source);
+    if (listeners.size === 0 || activeLiveSource() !== source) return;
+    for (const listener of [...listeners]) listener(base ? { kind: 'rebase', source, base } : { kind: 'rebase', source });
   };
 }
 
 export function publishLive(source: string, state: LiveState, allyId: string | null): void {
-  if (listeners.size === 0 || holds.has(source) || activeLiveSource() !== source) return;
+  if (listeners.size === 0) return;
+  if (activeLiveSource() !== source) {
+    latest.delete(source);
+    return;
+  }
+  latest.set(source, { state, allyId });
+  if (holds.has(source)) return;
   for (const listener of [...listeners]) listener({ kind: 'state', source, state, allyId });
 }
 
 export function rebaseLive(source: string): void {
+  // それまでに受け取った状態は、停止の解除の基準に使わない (その後に受け取る状態から記録し直す)。
+  latest.delete(source);
   if (listeners.size === 0 || activeLiveSource() !== source) return;
   for (const listener of [...listeners]) listener({ kind: 'rebase', source });
 }
