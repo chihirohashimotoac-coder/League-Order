@@ -18,6 +18,7 @@ import { HarimaruController } from './controller';
 import { useHarimaruEnabled } from './preference';
 import { atlasFor, BACKGROUND_SIZE, CLIP_IDS, clipUrlFor, REACTION_IDS, reactionUrlFor, type ClipId, type ReactionId } from './sprite';
 import { subscribeLive } from './liveFeed';
+import type { LiveState } from '../matches/parse';
 import { allySide, LiveReactionTracker } from './liveReactions';
 import './harimaru.css';
 
@@ -169,6 +170,33 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
     /** 最後に受け取った状態の対戦の単位とゲーム (mid) (中立の状態も含む)。切り替わったら演出を取り消す。 */
     let lastUnit: string | null = null;
     let lastMid: string | null = null;
+    /** 状態を判定する。react が false なら演出しない (基準にするだけ)。 */
+    const take = (source: string, state: LiveState, allyId: string | null, react: boolean): void => {
+      if (!tracker || tracker.source !== source || tracker.allyId !== allyId) {
+        // 観戦画面・味方が変わった: 判定を作り直し、前の対戦の演出・待っている出来事を取り消す。
+        if (tracker) controller?.cancelLive();
+        tracker = { source, allyId, judge: new LiveReactionTracker(allyId) };
+      }
+      if (allyId && !reactionsWanted) {
+        reactionsWanted = true;
+        loadReactions();
+      }
+      // 同じ観戦画面の中で対戦が切り替わった (カードの選び直しなど)、または味方を決められない状態になった:
+      // 前の対戦・味方の演出と待っている出来事を取り消す (判定より先に確かめる)。
+      const unit = state.tmid ?? state.scid ?? state.mid;
+      // 同じ対戦の次のゲーム・セット (mid) に進んだときも、前のゲームの演出・待っている出来事を取り消す
+      // (その応答で確定した前のゲームの結果は、取り消したあとの判定で演出する)。
+      if ((lastUnit !== null && unit !== lastUnit) || (lastMid !== null && state.mid !== lastMid) || allySide(state, allyId) === null) controller?.cancelLive();
+      lastUnit = unit;
+      lastMid = state.mid;
+      if (!react) {
+        tracker.judge.rebaseline();
+        tracker.judge.update(state);
+        return;
+      }
+      const event = tracker.judge.update(state);
+      if (event && controller) controller.reactLive(event.reaction);
+    };
     const unsubscribe = subscribeLive((message) => {
       if (message.kind === 'release') {
         // 観戦画面を離れた: その対戦の演出中・待っている出来事も取り消す。
@@ -187,31 +215,19 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         return;
       }
       if (message.kind === 'rebase') {
-        if (tracker?.source === message.source) tracker.judge.rebaseline();
+        if (message.base) {
+          // 過去の Leg の表示をすべて解除した: 表示中に受け取った同じ観戦対象の最新の状態を、演出せずに基準にする
+          // (解除のあとに `changed: 0` が続いても、次の新しい出来事を基準として捨てない)。
+          take(message.source, message.base.state, message.base.allyId, false);
+        } else if (tracker?.source === message.source) {
+          tracker.judge.rebaseline();
+        }
         return;
       }
-      if (!tracker || tracker.source !== message.source || tracker.allyId !== message.allyId) {
-        // 観戦画面・味方が変わった: 判定を作り直し、前の対戦の演出・待っている出来事を取り消す。
-        if (tracker) controller?.cancelLive();
-        tracker = { source: message.source, allyId: message.allyId, judge: new LiveReactionTracker(message.allyId) };
-      }
-      if (message.allyId && !reactionsWanted) {
-        reactionsWanted = true;
-        loadReactions();
-      }
-      // 同じ観戦画面の中で対戦が切り替わった (カードの選び直しなど)、または味方を決められない状態になった:
-      // 前の対戦・味方の演出と待っている出来事を取り消す (判定より先に確かめる)。
-      const state = message.state;
-      const unit = state.tmid ?? state.scid ?? state.mid;
-      // 同じ対戦の次のゲーム・セット (mid) に進んだときも、前のゲームの演出・待っている出来事を取り消す
-      // (その応答で確定した前のゲームの結果は、取り消したあとの判定で演出する)。
-      if ((lastUnit !== null && unit !== lastUnit) || (lastMid !== null && state.mid !== lastMid) || allySide(state, message.allyId) === null) controller?.cancelLive();
-      lastUnit = unit;
-      lastMid = state.mid;
-      const event = tracker.judge.update(state);
-      if (event && controller) controller.reactLive(event.reaction);
+      take(message.source, message.state, message.allyId, true);
     });
     // タブが非表示から戻ったとき: その間に起きたこと (戻った直後の取得で届く) には反応しない。
+    // (表示の切り替えより前に受け取った状態を停止の解除の基準に使わないことは、liveFeed が見張る。)
     const onVisibility = (): void => {
       if (document.visibilityState === 'visible') tracker?.judge.rebaseline();
     };

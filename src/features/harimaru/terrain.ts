@@ -1,7 +1,8 @@
 /**
  * 足場の判定 (純関数)。実 DOM から集めた矩形 (ページ座標, CSS px) だけを入力にする。
  *
- * - 足場 = カード・タイルの上辺。角丸を避けて内側だけを使い、同じ高さで隙間の小さい足場は 1 本につなぐ。
+ * - 足場 = カード・タイルの上辺。角丸を避けて内側だけを使い、同じ高さで重なり合う足場だけを 1 本につなぐ
+ *   (隙間・角丸の継ぎ目はつながない。渡るのはジャンプの経路の判定を通ったときだけ)。
  * - キャラクターが立つ帯 (上辺から全高 + 余白ぶん上) に、文字・操作部品・色の付いた要素などの
  *   障害物が 1 つでも重なる x 範囲は使わない。障害物の判定は保守的に行い、迷う場所には立たない。
  * - 結果は「キャラクターの左端 x が取りうる範囲」で返す。範囲が狭い足場は捨てる (安全な場所がなければ非表示)。
@@ -40,10 +41,17 @@ export interface TerrainInput {
   bounds: { left: number; right: number };
 }
 
-/** ほぼ同じ高さ (rowTolerance 以内) で隙間が joinGap 以下の足場をつなぐ。角丸の内側余白はつなぐ前に外側の端にだけ適用する。 */
+/**
+ * ほぼ同じ高さ (rowTolerance 以内) の足場のうち、角丸の内側 (両端から cornerInset を除いた範囲) が minJoinOverlap 以上
+ * 重なるものだけをつなぐ。隙間のある足場・端が接するだけ・角丸どうしが浅く重なるだけの足場は別の足場のまま
+ * (つなぐと、継ぎ目の隙間と角丸の上を足元の高さが変わらないまま歩いて、空中を踏んで見える)。カードの中の同じ
+ * 高さの枠のように、角丸の内側どうしが重なる足場はつなぐ。角丸を除いて幅の残らない足場は使わない。
+ */
 export function mergePlatforms(platforms: readonly Platform[], params: TerrainParams = DEFAULT_TERRAIN): Platform[] {
   const byTop = [...platforms]
     .filter((p) => Number.isFinite(p.left) && Number.isFinite(p.right) && Number.isFinite(p.top) && p.right > p.left)
+    .map((p) => ({ ...p, left: p.left + params.cornerInset, right: p.right - params.cornerInset }))
+    .filter((p) => p.right > p.left)
     .sort((a, b) => a.top - b.top);
   // 高さの差が rowTolerance 以内の足場を 1 つの段にまとめ、段の中で左から順につなぐ (段の高さは最も高い上辺)。
   const rows: Platform[][] = [];
@@ -57,7 +65,7 @@ export function mergePlatforms(platforms: readonly Platform[], params: TerrainPa
     const runs: Platform[] = [];
     for (const platform of [...row].sort((a, b) => a.left - b.left)) {
       const last = runs[runs.length - 1];
-      if (last && platform.left - last.right <= params.joinGap) {
+      if (last && last.right - platform.left >= params.minJoinOverlap) {
         last.right = Math.max(last.right, platform.right);
         last.top = Math.min(last.top, platform.top);
       } else {
@@ -66,7 +74,7 @@ export function mergePlatforms(platforms: readonly Platform[], params: TerrainPa
     }
     merged.push(...runs);
   }
-  return merged.map((p) => ({ ...p, left: p.left + params.cornerInset, right: p.right - params.cornerInset }));
+  return merged;
 }
 
 /** 区間 [left, right] から、ふさがれた区間を取り除いた残り。 */

@@ -223,18 +223,24 @@ describe('HarimaruController', () => {
     const low = document.createElement('div');
     const high = document.createElement('div');
     root.append(low, high);
-    low.getBoundingClientRect = () => ({ left: 100, right: 295, top: 300, bottom: 380, width: 195, height: 80, x: 100, y: 300, toJSON: () => ({}) }) as DOMRect;
-    high.getBoundingClientRect = () => ({ left: 305, right: 500, top: 298, bottom: 380, width: 195, height: 80, x: 305, y: 298, toJSON: () => ({}) }) as DOMRect;
-    current = { ...terrain([{ left: 100, right: 295, top: 300 }, { left: 305, right: 500, top: 298 }]), elements: [low, high] };
+    // 同じ段で重なり合う 2 つの足場 (角丸の内側どうしが重なるので 1 本につながる。隙間のあるタイルは別の足場)。
+    low.getBoundingClientRect = () => ({ left: 100, right: 330, top: 300, bottom: 380, width: 230, height: 80, x: 100, y: 300, toJSON: () => ({}) }) as DOMRect;
+    high.getBoundingClientRect = () => ({ left: 290, right: 500, top: 298, bottom: 380, width: 210, height: 80, x: 290, y: 298, toJSON: () => ({}) }) as DOMRect;
+    current = { ...terrain([{ left: 100, right: 330, top: 300 }, { left: 290, right: 500, top: 298 }]), elements: [low, high] };
     make(3).start();
+    let sawHigh = false;
     for (let i = 0; i < 600; i += 1) {
       advance(100);
       const { placed, x, top } = controller.snapshot();
       if (!placed) continue;
-      const overHigh = x + 30 - 2 > 305;
+      const overHigh = x + 30 - 2 > 290;
       // 浮いたタイルの上に体がかかっていれば、その上辺 (298) に立つ。
-      if (overHigh) expect(top).toBe(298);
+      if (overHigh) {
+        sawHigh = true;
+        expect(top).toBe(298);
+      }
     }
+    expect(sawHigh).toBe(true);
   });
 
   it('歩いて向かう先 (同じ足場の遠い端) のタイルが動き始めても隠れる', () => {
@@ -468,6 +474,55 @@ describe('HarimaruController (PR2)', () => {
     expect(startTop).not.toBe(landed.top);
     expect(landed.lift).toBe(0);
     expect(landed.airborne).toBe(false);
+  });
+
+  it('横並びのタイル (隙間 10px・角丸) の列: 歩く・駆ける間は 1 枚のタイルの角丸の内側だけを踏み、継ぎ目は左右どちらの向きにもジャンプで渡る', () => {
+    // サンプルのホーム (PC 1280 px) の 3 枚のタイルと同じ並び。
+    const tiles = [
+      { left: 70, right: 275, top: 398 },
+      { left: 285, right: 490, top: 398 },
+      { left: 500, right: 705, top: 398 },
+    ];
+    current = terrain(tiles);
+    make2({ seed: 5, behavior: only({ walk: 1, run: 0.5, jump: 1, idle: 0.3 }) }).start();
+    const tileOf = (x: number): number => tiles.findIndex((t) => x + 2 >= t.left + 12 - 0.01 && x + 30 - 2 <= t.right - 12 + 0.01);
+    const crossed = { right: 0, left: 0 };
+    let lastTile = -1;
+    /** 前の地上の標本のあと、ジャンプの空中 (airborne・正の lift) を通ったか。 */
+    let flew = false;
+    let groundFrames = 0;
+    for (let i = 0; i < 6_000; i += 1) {
+      advance(16);
+      const state = controller.snapshot();
+      if (!state.placed) {
+        // 見えない間に別の場所へ移ったら (隠れて出直すなど)、横断として数えない。
+        lastTile = -1;
+        flew = false;
+        continue;
+      }
+      if (state.airborne || state.lift > 0) {
+        if (state.action === 'jump' && state.airborne && state.lift > 0) flew = true;
+        continue;
+      }
+      if (state.sink !== 0) continue;
+      groundFrames += 1;
+      // 地上では、足元の見える範囲が必ず 1 枚のタイルの角丸の内側に収まる (隙間・角丸の上にいない)。
+      const tile = tileOf(state.x);
+      expect(tile, `x=${state.x}`).toBeGreaterThanOrEqual(0);
+      expect(state.top).toBe(398);
+      if (lastTile >= 0 && tile !== lastTile) {
+        // タイルが変わるのは、ジャンプで隣のタイルへ渡ったときだけ (歩いて・瞬間的に移らない)。
+        expect(flew, `${lastTile} → ${tile}`).toBe(true);
+        expect(Math.abs(tile - lastTile)).toBe(1);
+        crossed[tile > lastTile ? 'right' : 'left'] += 1;
+      }
+      lastTile = tile;
+      flew = false;
+    }
+    expect(groundFrames).toBeGreaterThan(1_000);
+    // 継ぎ目は、右向き・左向きのどちらにもジャンプで渡った (歩いては渡らない: 地上の標本はすべて 1 枚の上)。
+    expect(crossed.right).toBeGreaterThan(0);
+    expect(crossed.left).toBeGreaterThan(0);
   });
 
   it('ジャンプの途中でスクロール・DOM の変化があったら、古い経路のまま飛ばずに即座に隠れて出直す', async () => {

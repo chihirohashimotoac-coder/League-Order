@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { tab } from './nav';
+import { seedRandom } from './seededRandom';
 
 /**
  * ハリマル (PR1: ホームだけ・待機 / 歩行 / 睡眠)。
@@ -333,24 +334,134 @@ test('入力欄にフォーカスがある間は休み、離れると戻る', as
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
 });
 
+/**
+ * page.clock を少しずつ進めて、ハリマルが見える位置で静かな行動 (待機・休む・周囲を見る。眠り・隠れ・跳ねの途中ではない)
+ * をしているところまで待つ。眠り (最長 40 秒) の途中でも、時計を進めるので実時間の上限に当たらない。
+ */
+async function runUntilCalm(page: Page, maxMs = 90_000): Promise<void> {
+  for (let spent = 0; spent <= maxMs; spent += 250) {
+    const calm = await sprite(page).evaluate((el) => el.dataset.visible === 'true' && !el.style.clipPath && ['idle', 'look', 'rest'].includes(el.dataset.action ?? ''));
+    if (calm) return;
+    await page.clock.runFor(250);
+  }
+  throw new Error('ハリマルが静かな行動に戻らない');
+}
+
+/** カーソルの E2E の時計の起点 (固定)。 */
+const CURSOR_CLOCK = Date.parse('2026-11-25T03:00:00Z');
+
 test('PC: 近くで止まったカーソルに、気まぐれに近づくか顔を出す (カーソルは捕まえない)', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'ホバーできる PC だけ');
   test.setTimeout(120_000);
+  // 再現できる条件: 乱数の種・時計を固定し (登場の位置と気まぐれな抽選が毎回同じ)、眠っていない静かな行動から始める。
+  // 時計は読み込みの前から決まった時刻で止めて、runFor でだけ進める (実時間で進むと、カーソルの動く速さや抽選の
+  // 時刻・回数が実行ごとに変わる)。
+  await seedRandom(page, 20261125);
+  await page.clock.install({ time: CURSOR_CLOCK });
+  await page.clock.pauseAt(CURSOR_CLOCK + 1_000);
   await openSampleHome(page);
-  await waitStanding(page);
+  await runUntilCalm(page);
   const actions = await watchActions(page);
+  // カーソルへの反応だけを数える: 近づく (approach) と、カーソルの近くで顔を出す (peek)。気まぐれに隠れてから顔を出す
+  // ときは、直前の動作が隠れる (hide) なので数えない。
+  const cursorReactions = async (): Promise<string[]> => {
+    const seen = await actions();
+    return seen.filter((action, i) => action === 'approach' || (action === 'peek' && seen[i - 1] !== 'hide' && seen[i - 1] !== 'peek'));
+  };
+  // カーソルを動かす前: 時計を進めても、カーソルへの反応 (近づく・顔を出す) は起きない。
+  await page.clock.runFor(6_000);
+  expect(await cursorReactions()).toEqual([]);
   let reacted = false;
-  for (let i = 0; i < 8 && !reacted; i += 1) {
-    await waitStanding(page);
+  for (let attempt = 0; attempt < 6 && !reacted; attempt += 1) {
+    await runUntilCalm(page);
+    expect(await cursorReactions()).toEqual([]);
     const point = await body(page);
     // 体の横 90px あたりで止める (ボタンの上かどうかは問わない: カーソルの見た目・操作は変えない)。
     await page.mouse.move(point.x + (point.x > 300 ? -90 : 90), point.y - 10, { steps: 4 });
-    await page.waitForTimeout(4_000);
-    const seen = await actions();
-    reacted = seen.includes('approach') || seen.includes('peek');
+    // 止まってから反応を考えるまで (cursorStillMs 1.5 秒) と、その後の確かめ (cursorCheckMs 0.7 秒ごと) を時計で進める。
+    for (let step = 0; step < 12 && !reacted; step += 1) {
+      await page.clock.runFor(700);
+      reacted = (await cursorReactions()).length > 0;
+    }
   }
   expect(reacted).toBe(true);
   expect(await overlaps(page)).toEqual([]);
+});
+
+test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカードの上 (横並びのカードの隙間・角丸の上を歩かない)', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'desktop', 'PC の横並びのカード (サンプルのホーム) で確かめる');
+  test.setTimeout(300_000);
+  let movingFrames = 0;
+  const floating: string[] = [];
+  const touching: string[] = [];
+  /**
+   * 同じカードの上を継ぎ目 (隣のタイルとの隙間が 20px 以下の端) の側へ進んで、その端から 16px 以内に着いた回数
+   * (右端・左端)。data-action は歩き終えて次の行動を選ぶまで walk / run のままなので、止まったあとの標本は数えない
+   * (前の標本から動いたときだけ数える)。
+   */
+  const seams = { right: 0, left: 0 };
+  // 乱数の種: 9・14 は継ぎ目の手前まで歩く種 (時計を読み込みの前から止めたときの歩き方)。
+  // 種ごとに新しいページで、時計を読み込みの前から止めて進める (同じ種なら同じ歩き方になる)。
+  for (const seed of [1, 9, 14]) {
+    const context = await browser.newContext({ ...info.project.use, viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, serviceWorkers: 'block' });
+    const page = await context.newPage();
+    await seedRandom(page, seed);
+    await page.clock.install({ time: CURSOR_CLOCK });
+    await page.clock.pauseAt(CURSOR_CLOCK + 1_000);
+    await openSampleHome(page);
+    await runUntilCalm(page);
+    /** 前の標本 (歩く・駆ける間だけ。ほかの行動を挟んだら捨てる)。 */
+    let previous: { x: number; card: number } | null = null;
+    for (let step = 0; step < 900; step += 1) {
+      await page.clock.runFor(100);
+      if (step % 50 === 0) await page.evaluate(() => window.scrollTo(0, 0));
+      const sample = await sprite(page).evaluate((el) => {
+        const action = el.dataset.action ?? '';
+        const moving = (action === 'walk' || action === 'run') && el.dataset.visible === 'true' && !el.style.clipPath;
+        if (!moving) return { moving: false, gap: 0, where: '', seam: null as 'right' | 'left' | null, x: 0, card: -1 };
+        const r = el.getBoundingClientRect();
+        // 足元の見える範囲 (表示枠の左右の透明な余白 2px を除く)。右向きは scaleX(-1)。
+        const left = r.left + 2;
+        const right = r.right - 2;
+        const cards = Array.from(document.querySelectorAll('.app-main .card, .app-main .next-match-card, .app-main .quick-tile')).map((card) => ({ q: card.getBoundingClientRect(), radius: parseFloat(getComputedStyle(card).borderTopLeftRadius) || 0 }));
+        let gap = Infinity;
+        let seam: 'right' | 'left' | null = null;
+        let card = -1;
+        for (const [index, { q, radius }] of cards.entries()) {
+          if (Math.abs(q.top - r.bottom) > 3.5 || left < q.left - 0.5 || right > q.right + 0.5) continue;
+          // 足元の両端で、カードの輪郭 (角丸で下がる分) と足元の高さの差を合わせた浮き。
+          const drop = (d: number): number => (d < radius ? radius - Math.sqrt(Math.max(0, radius * radius - (radius - d) ** 2)) : 0);
+          const vertical = r.bottom - q.top;
+          const here = Math.max(Math.abs(drop(left - q.left) - vertical), Math.abs(drop(q.right - right) - vertical));
+          if (here < gap) card = index;
+          gap = Math.min(gap, here);
+          const neighbor = (side: 'right' | 'left'): boolean =>
+            cards.some(({ q: o }) => Math.abs(o.top - q.top) <= 3 && (side === 'right' ? o.left - q.right : q.left - o.right) >= 0 && (side === 'right' ? o.left - q.right : q.left - o.right) <= 20);
+          if (q.right - right <= 16 && neighbor('right')) seam = 'right';
+          if (left - q.left <= 16 && neighbor('left')) seam = 'left';
+        }
+        return { moving: true, gap, where: `${action} x=${Math.round(r.left)} foot=${Math.round(r.bottom)}`, seam, x: r.left, card };
+      });
+      if (!sample.moving) {
+        previous = null;
+        continue;
+      }
+      movingFrames += 1;
+      if (sample.gap > 1) floating.push(`種 ${seed}: ${sample.where} gap=${sample.gap}`);
+      // 同じカードの上で、前の標本から継ぎ目の側へ進んで、継ぎ目の手前に着いたときだけ数える。
+      if (sample.seam && previous && previous.card === sample.card && (sample.seam === 'right' ? sample.x > previous.x + 0.5 : sample.x < previous.x - 0.5)) seams[sample.seam] += 1;
+      previous = { x: sample.x, card: sample.card };
+      for (const hit of await overlaps(page)) touching.push(`種 ${seed}: ${sample.where} ${hit}`);
+    }
+    for (const hit of await overlaps(page)) touching.push(`種 ${seed}: 最後 ${hit}`);
+    await context.close();
+  }
+  expect(movingFrames, '歩く・駆ける場面がある').toBeGreaterThan(20);
+  expect(floating).toEqual([]);
+  expect(touching).toEqual([]);
+  // 継ぎ目の手前まで進んだ場面がある (そこで止まるか、ジャンプで渡る)。気まぐれな歩き方では向きが偏るので、
+  // 左右どちらの向きでも渡ることは、controller.dom.test.ts (横並びのタイルの列) で決まった乱数で確かめる。
+  expect(seams.right + seams.left, '継ぎ目の手前まで').toBeGreaterThan(0);
 });
 
 test('速くスクロールしても位置が崩れず、止まったあとも重ならない', async ({ page }) => {

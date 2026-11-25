@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { N01_API_BASE_URL } from '../src/integrations/n01/endpoints';
 import { serveN01 } from './n01Server';
+import { seedRandom } from './seededRandom';
 import { tab } from './nav';
 
 /**
@@ -40,14 +41,28 @@ interface LiveGame {
   gameEnded: boolean;
   cardEnded: boolean;
   rev: number;
+  /** 進行中の Leg (0 始まり。既定 0)。それより前の Leg は `past` の投てきで、味方の勝ちで終わったものとする。 */
+  leg?: number;
+  past?: Visit[][];
+  /** true なら、`since` が今の updateTime と同じ取得に `changed: 0` を返す (実際の n01 と同じ)。 */
+  honorSince?: boolean;
 }
 
-function liveOf(game: LiveGame): unknown {
+function legOf(visits: Visit[], index: number, ended: boolean): Record<string, unknown> {
   const left: [number, number] = [501, 501];
-  const throws = game.visits.map((visit) => {
+  const throws = visits.map((visit) => {
     left[visit.p] -= visit.score;
     return { p: visit.p, r: visit.r, score: visit.score, left: left[visit.p], darts: 3, ...(visit.finish ? { finish: 1 } : {}) };
   });
+  return { leg: index, first: 0, end: ended ? 1 : 0, winner: ended ? 0 : null, start: [501, 501], left, thrower: visits.length % 2, round: Math.floor(visits.length / 2) + 1, throws };
+}
+
+function updateTimeOf(game: LiveGame): number {
+  return NIGHT + 60_000 + game.rev * 1000;
+}
+
+function liveOf(game: LiveGame): unknown {
+  const index = game.leg ?? 0;
   return {
     result: 0,
     changed: 1,
@@ -59,21 +74,21 @@ function liveOf(game: LiveGame): unknown {
     ttype: 'lg',
     title: 'ATDO 2026 3rd A Division',
     match_type: '01',
-    updateTime: NIGHT + 60_000 + game.rev * 1000,
+    updateTime: updateTimeOf(game),
     end_match: game.gameEnded ? 1 : 0,
     end_schedule: game.cardEnded ? 1 : 0,
     format: { limit_leg: 2, draw_mode: 0, schedule: 1, start_score: 501 },
     show_sets: 0,
     sets: game.sets,
     legs: game.legs,
-    current_leg: 0,
-    leg_count: 1,
+    current_leg: index,
+    leg_count: index + 1,
     players: [
       { name: 'kalavinka', tpid: 'GpiQ', order: [{ oid: 'k1', name: '橋本 千尋' }] },
       { name: 'スピンコブラ', tpid: '68wv', order: [{ oid: 's1', name: '山本 剛' }] },
     ],
     stats: [{ avg: 60 }, { avg: 55 }],
-    leg: { leg: 0, first: 0, end: 0, winner: null, start: [501, 501], left, thrower: game.visits.length % 2, round: Math.floor(game.visits.length / 2) + 1, throws },
+    leg: legOf(game.visits, index, false),
   };
 }
 
@@ -112,12 +127,17 @@ async function serveNight(page: Page, game: LiveGame): Promise<string[]> {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(todayRows(game)), headers });
     }
     if (request.operation === 'match/live') {
+      if (game.honorSince && request.params.since === String(updateTimeOf(game))) {
+        server.log.push('match/live?unchanged');
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: 0, changed: 0, mid: game.mid, updateTime: updateTimeOf(game) }), headers });
+      }
       server.log.push('match/live');
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(liveOf(game)), headers });
     }
     if (request.operation === 'match/throws') {
       const live = liveOf(game) as { leg: unknown; updateTime: number };
-      const body = { result: 0, changed: 1, mid: game.mid, match_type: '01', end_match: game.gameEnded ? 1 : 0, current_leg: 0, updateTime: live.updateTime, leg_data: [live.leg] };
+      const past = (game.past ?? []).map((visits, index) => legOf(visits, index, true));
+      const body = { result: 0, changed: 1, mid: game.mid, match_type: '01', end_match: game.gameEnded ? 1 : 0, current_leg: game.leg ?? 0, updateTime: live.updateTime, leg_data: [...past, live.leg] };
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body), headers });
     }
     if (request.operation === 'team/order/list') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: 0, list: [] }), headers });
@@ -136,10 +156,12 @@ async function createKalavinka(page: Page): Promise<void> {
 }
 
 /** ハリマルの観戦リアクションの結果 (data-live) と、エフェクトのコマを、変わるたびに記録する。 */
-async function watchLive(page: Page): Promise<() => Promise<{ live: string[]; effects: string[]; mirrored: string[]; overlaps: string[] }>> {
+async function watchLive(page: Page): Promise<() => Promise<{ live: string[]; effects: string[]; mirrored: string[]; overlaps: string[]; starts: string[] }>> {
   await page.evaluate(() => {
-    const w = window as unknown as { __hl: { live: string[]; effects: string[]; mirrored: string[]; overlaps: string[] }; __hlObserver?: MutationObserver };
-    w.__hl = { live: [], effects: [], mirrored: [], overlaps: [] };
+    const w = window as unknown as { __hl: { live: string[]; effects: string[]; mirrored: string[]; overlaps: string[]; starts: string[] }; __hlObserver?: MutationObserver };
+    w.__hl = { live: [], effects: [], mirrored: [], overlaps: [], starts: [] };
+    /** エフェクトが表示されていたか (表示し始めた回数 = 演出の回数を数える)。 */
+    let wasActive = false;
     w.__hlObserver?.disconnect();
     const sprite = document.querySelector<HTMLElement>('[data-testid="harimaru"]')!;
     const effect = document.querySelector<HTMLElement>('[data-testid="harimaru-effect"]')!;
@@ -154,8 +176,13 @@ async function watchLive(page: Page): Promise<() => Promise<{ live: string[]; ef
     };
     const check = (): void => {
       if (sprite.dataset.live && w.__hl.live[w.__hl.live.length - 1] !== sprite.dataset.live) w.__hl.live.push(sprite.dataset.live);
-      if (effect.dataset.active !== 'true') return;
+      if (effect.dataset.active !== 'true') {
+        wasActive = false;
+        return;
+      }
       const frame = effect.dataset.frame ?? '';
+      if (!wasActive) w.__hl.starts.push(frame.split(':')[0]);
+      wasActive = true;
       if (w.__hl.effects[w.__hl.effects.length - 1] !== frame) w.__hl.effects.push(frame);
       const flipped = /scaleX\(-1\)/.test(effect.style.transform);
       if (flipped) w.__hl.mirrored.push(frame);
@@ -183,7 +210,7 @@ async function watchLive(page: Page): Promise<() => Promise<{ live: string[]; ef
     w.__hlObserver.observe(sprite, { attributes: true, attributeFilter: ['data-live', 'style'] });
     w.__hlObserver.observe(effect, { attributes: true, attributeFilter: ['data-frame', 'data-active', 'style'] });
   });
-  return () => page.evaluate(() => (window as unknown as { __hl: { live: string[]; effects: string[]; mirrored: string[]; overlaps: string[] } }).__hl);
+  return () => page.evaluate(() => (window as unknown as { __hl: { live: string[]; effects: string[]; mirrored: string[]; overlaps: string[]; starts: string[] } }).__hl);
 }
 
 /** ハリマルが立って見えるまで時計を進める (観戦の画面の上の方を見る)。 */
@@ -274,6 +301,62 @@ test('味方・相手の新しい得点と試合の勝利に、1 回ずつ反応
   expect(seen.overlaps).toEqual([]);
   // 終わったらエフェクトを残さない。
   await expect(page.getByTestId('harimaru-effect')).toHaveAttribute('data-active', 'false');
+});
+
+test('過去の Leg から戻った直後: 閲覧中の得点には反応せず、`changed: 0` が続いたあとの新しい 180 をボードに 1 回だけ描く', async ({ page }) => {
+  test.setTimeout(180_000);
+  // 進行中の Leg 2 (Leg 1 は味方の勝ちで終了)。最初の状態は基準。
+  const leg1: Visit[] = [
+    { p: 0, r: 1, score: 140 },
+    { p: 1, r: 1, score: 100 },
+    { p: 0, r: 2, score: 180 },
+    { p: 1, r: 2, score: 100 },
+    { p: 0, r: 3, score: 181, finish: 1 },
+  ];
+  const game: LiveGame = { mid: `${LSID}_c2`, schid: 'c2', visits: [{ p: 0, r: 1, score: 100 }, { p: 1, r: 1, score: 100 }], legs: [1, 0], sets: [2, 1], gameEnded: false, cardEnded: false, rev: 0, leg: 1, past: [leg1], honorSince: true };
+  // 気まぐれな動作の抽選を毎回同じにする (長い動作の途中で 180 が届き、待ちきれずに捨てる回を作らない)。
+  await seedRandom(page, 1);
+  const log = await openNight(page, game);
+  await waitHarimaru(page);
+  const result = await watchLive(page);
+  const tabs = page.getByTestId('leg-tabs').first();
+  // 終了済みの Leg 1 を開く。閲覧中に味方が 60。
+  // Leg のタブは、スクロールせずに押す (Playwright の自動スクロールでハリマルが見えない位置の休止に入らないように)。
+  await tabs.getByRole('button', { name: /^Leg 1/ }).dispatchEvent('click');
+  await expect(tabs.getByRole('button', { name: /^Leg 1/ })).toHaveAttribute('aria-pressed', 'true');
+  game.visits.push({ p: 0, r: 2, score: 60 });
+  await poll(page, game);
+  await page.clock.runFor(2_000);
+  // Leg 2 に戻る。`since` 付きの取得に `changed: 0` が 3 回。
+  await tabs.getByRole('button', { name: /^Leg 2/ }).dispatchEvent('click');
+  await expect(tabs.getByRole('button', { name: /^Leg 2/ })).toHaveAttribute('aria-pressed', 'true');
+  const unchangedBefore = log.filter((entry) => entry === 'match/live?unchanged').length;
+  for (let i = 0; i < 3; i += 1) {
+    await page.clock.runFor(1_700);
+    await page.waitForTimeout(150);
+    await page.clock.runFor(100);
+  }
+  expect(log.filter((entry) => entry === 'match/live?unchanged').length - unchangedBefore).toBeGreaterThanOrEqual(3);
+  expect((await result()).live).toEqual([]);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await waitHarimaru(page);
+  // 相手 60・味方 180 の新しいラウンド → 180 を 1 回 (得点表にも載る)。
+  game.visits.push({ p: 1, r: 2, score: 60 }, { p: 0, r: 3, score: 180 });
+  await poll(page, game);
+  // ジャンプの途中など: 重要な出来事は最大 3 秒待ってから演出する (controller.ts の waitLive)。
+  await page.clock.runFor(4_500);
+  // 同じ応答の再取得 (`changed: 0` と、同じ内容の `changed: 1`) では増えない。
+  await page.clock.runFor(1_700);
+  await page.waitForTimeout(150);
+  await poll(page, game);
+  await page.clock.runFor(3_000);
+  const seen = await result();
+  // 演出した (余白がなく見送った・待ちきれず捨てたのではない) のが 1 回 (足場の外にいれば、待ってから演出する)。
+  // エフェクトが実際に表示されたのも 1 回。
+  expect(seen.live.filter((entry) => entry !== 'surprise180:waiting')).toEqual(['surprise180']);
+  expect(seen.starts).toEqual(['surprise180']);
+  expect(seen.mirrored.filter((frame) => frame.startsWith('surprise180'))).toEqual([]);
+  expect(seen.overlaps).toEqual([]);
 });
 
 test('ハリマルの有無で、n01 への取得 (match/live) の間隔は変わらない (追加の取得をしない)', async ({ page, browser }, info) => {
