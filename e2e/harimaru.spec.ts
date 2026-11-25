@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { tab } from './nav';
+import { seedRandom } from './seededRandom';
 
 /**
  * ハリマル (PR1: ホームだけ・待機 / 歩行 / 睡眠)。
@@ -333,21 +334,46 @@ test('入力欄にフォーカスがある間は休み、離れると戻る', as
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
 });
 
+/**
+ * page.clock を少しずつ進めて、ハリマルが見える位置で静かな行動 (待機・休む・周囲を見る。眠り・隠れ・跳ねの途中ではない)
+ * をしているところまで待つ。眠り (最長 40 秒) の途中でも、時計を進めるので実時間の上限に当たらない。
+ */
+async function runUntilCalm(page: Page, maxMs = 90_000): Promise<void> {
+  for (let spent = 0; spent <= maxMs; spent += 250) {
+    const calm = await sprite(page).evaluate((el) => el.dataset.visible === 'true' && !el.style.clipPath && ['idle', 'look', 'rest'].includes(el.dataset.action ?? ''));
+    if (calm) return;
+    await page.clock.runFor(250);
+  }
+  throw new Error('ハリマルが静かな行動に戻らない');
+}
+
 test('PC: 近くで止まったカーソルに、気まぐれに近づくか顔を出す (カーソルは捕まえない)', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'ホバーできる PC だけ');
   test.setTimeout(120_000);
+  // 再現できる条件: 乱数の種・時計を固定し (登場の位置と気まぐれな抽選が毎回同じ)、眠っていない静かな行動から始める。
+  // 時計は止めて、runFor でだけ進める (実時間で進むと、カーソルの動く速さや抽選の時刻が実行ごとに変わる)。
+  await seedRandom(page, 20261125);
+  await page.clock.install();
   await openSampleHome(page);
-  await waitStanding(page);
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1_000);
+  await runUntilCalm(page);
   const actions = await watchActions(page);
+  const cursorReactions = async (): Promise<string[]> => (await actions()).filter((action) => action === 'approach' || action === 'peek');
+  // カーソルを動かす前: 時計を進めても、カーソルへの反応 (近づく・顔を出す) は起きない。
+  await page.clock.runFor(6_000);
+  expect(await cursorReactions()).toEqual([]);
   let reacted = false;
-  for (let i = 0; i < 8 && !reacted; i += 1) {
-    await waitStanding(page);
+  for (let attempt = 0; attempt < 6 && !reacted; attempt += 1) {
+    await runUntilCalm(page);
+    expect(await cursorReactions()).toEqual([]);
     const point = await body(page);
     // 体の横 90px あたりで止める (ボタンの上かどうかは問わない: カーソルの見た目・操作は変えない)。
     await page.mouse.move(point.x + (point.x > 300 ? -90 : 90), point.y - 10, { steps: 4 });
-    await page.waitForTimeout(4_000);
-    const seen = await actions();
-    reacted = seen.includes('approach') || seen.includes('peek');
+    // 止まってから反応を考えるまで (cursorStillMs 1.5 秒) と、その後の確かめ (cursorCheckMs 0.7 秒ごと) を時計で進める。
+    for (let step = 0; step < 12 && !reacted; step += 1) {
+      await page.clock.runFor(700);
+      reacted = (await cursorReactions()).length > 0;
+    }
   }
   expect(reacted).toBe(true);
   expect(await overlaps(page)).toEqual([]);
