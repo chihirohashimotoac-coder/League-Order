@@ -255,3 +255,76 @@ test('検証用の足場: 下端から入るときは、画面の下へ続くカ
   const stand = (await sprite(page).boundingBox())!;
   expect(stand.y + 20).toBeCloseTo(card.top, 0);
 });
+
+/** 時計を進めながら、条件を満たす記録が得られるまで待つ (無操作で眠りやすくなるので、ときどきキーを押す)。 */
+async function watchUntil<T>(page: Page, trail: () => Promise<Sample[]>, found: (all: Sample[]) => T | null, rounds = 150): Promise<T | null> {
+  for (let round = 0; round < rounds; round += 1) {
+    await page.keyboard.press('Shift');
+    await page.clock.runFor(4_000);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const result = found(await trail());
+    if (result) return result;
+  }
+  return null;
+}
+
+/** 記録の中の横の小ジャンプ (構え → 空中 → 着地)。着地 0 → 1 の間に横へ動いた回数も数える。 */
+function hopsIn(all: Sample[]): { arc: number; distance: number; slid: boolean }[] {
+  const hops: { arc: number; distance: number; slid: boolean }[] = [];
+  for (let i = 0; i < all.length; i += 1) {
+    if (!all[i].frame.startsWith('jumpPrep')) continue;
+    let j = i + 1;
+    const air: Sample[] = [];
+    for (; j < all.length && all[j].frame.startsWith('jumpAir'); j += 1) air.push(all[j]);
+    if (air.length < 3 || !all[j]?.frame.startsWith('jumpLand')) continue;
+    const land: Sample[] = [];
+    for (let k = j; k < all.length && all[k].frame.startsWith('jumpLand'); k += 1) land.push(all[k]);
+    hops.push({ arc: all[i].top - Math.min(...air.map((s) => s.top)), distance: Math.abs(all[j].left - all[i].left), slid: new Set(land.map((s) => Math.round(s.left))).size > 1 });
+  }
+  return hops;
+}
+
+test('検証用の足場: 狭い隙間と広い隙間の小ジャンプは弧の高さが違い、前足 → 後ろ足で着地して横に滑らない', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'PC 1280×720 の配置');
+  test.setTimeout(300_000);
+  await fixed(page, 11);
+  await openSample(page);
+  // 左端まで続くカード (歩いて入る) → 隙間 10px → 隙間 60px。
+  await lab(page, [[-80, 300, 380, 120], [310, 300, 200, 120], [570, 300, 200, 120]], 600);
+  const trail = await record(page);
+  await untilStanding(page);
+  const hops = await watchUntil(page, trail, (all) => {
+    const list = hopsIn(all);
+    return list.some((h) => h.distance < 100) && list.some((h) => h.distance > 105) ? list : null;
+  });
+  expect(hops, '狭い隙間・広い隙間の両方の小ジャンプ').not.toBeNull();
+  const narrow = hops!.filter((h) => h.distance < 100);
+  const wide = hops!.filter((h) => h.distance > 105);
+  expect(Math.max(...wide.map((h) => h.arc))).toBeGreaterThan(Math.max(...narrow.map((h) => h.arc)) + 4);
+  expect(hops!.filter((h) => h.slid)).toEqual([]);
+});
+
+test('検証用の足場: 低いカードへは下をのぞいて飛び降り (四足で着地)、高いカードへは側面をよじ登る', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'PC 1280×720 の配置');
+  test.setTimeout(300_000);
+  await fixed(page, 11);
+  await openSample(page);
+  // 左端まで続く高いカードと、その右の側面の下から続く低いカード (110px 下)。低いカードの上辺は高いカードの側面で切れる。
+  await lab(page, [[-80, 410, 900, 120], [-80, 300, 420, 160]], 600);
+  const trail = await record(page);
+  await untilStanding(page);
+  const seen = await watchUntil(page, trail, (all) => {
+    const order = all.map((s) => s.frame.split(':')[0]).filter((f, i, list) => f !== list[i - 1]);
+    const drop = order.findIndex((f, i) => f === 'lookDown' && order[i + 1] === 'dropAir' && order[i + 2] === 'dropLand');
+    const climb = order.findIndex((f, i) => f === 'sideMount' && order[i + 1] === 'sideClimb' && order[i + 2] === 'sideLedge' && order[i + 3] === 'climb');
+    return drop >= 0 && climb >= 0 ? { all, order } : null;
+  }, 200);
+  expect(seen, '飛び降りと、側面のよじ登りの両方').not.toBeNull();
+  // 飛び降りの着地は四足のコマ (横の小ジャンプの着地とは別)。
+  const landing = seen!.all.filter((s) => s.frame.startsWith('dropLand'));
+  expect(landing.length).toBeGreaterThan(0);
+  expect(seen!.order.filter((f, i, o) => f === 'dropAir' && o[i + 1] === 'jumpLand')).toEqual([]);
+  // よじ登る間、前足 (基準点) は高いカードの右の側面の線の上。
+  const face = await page.evaluate(() => document.querySelectorAll('#harimaru-lab > .card')[1].getBoundingClientRect().right);
+  for (const s of seen!.all.filter((x) => x.frame.startsWith('sideClimb'))) expect(Math.abs(s.left + 7.67 - face), `sideClimb at ${s.left}`).toBeLessThanOrEqual(0.6);
+});

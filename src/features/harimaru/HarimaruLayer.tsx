@@ -28,7 +28,14 @@ import './harimaru.css';
  * `.n01-sheet` (ライブのスコア表の枠) は PR3 で追加: 観戦のライブ画面は、本日の対戦の帯 (横スクロール) が
  * フォーカスカードの上辺をふさぎ、ほかに立てる場所がなかったため (観戦リアクションを見せる場所)。
  */
-const PLATFORMS = '.card, .next-match-card, .quick-tile, .focus-card, .board-tile, .n01-list, .browse-lobby, .n01-sheet';
+const CARDS = '.card, .next-match-card, .quick-tile, .focus-card, .board-tile, .n01-list, .browse-lobby, .n01-sheet';
+/**
+ * 通常のコンテンツの中のボタンも足場の候補にする (上辺の安全な区間だけを使う。中央のラベルの左右など、区間ごとに判定)。
+ * 入力欄は含めない。固定ナビ・モーダルの中は従来どおり使わない (root の外・固定・休止)。見えない要素とフォーカスの
+ * 輪が出ている要素は計測で除く (terrainDom)。
+ */
+const BUTTONS = 'button, [role="button"], a.btn';
+const PLATFORMS = `${CARDS}, ${BUTTONS}`;
 
 /** 足場を探す画面。登録のない画面には出ない。 */
 export const HARIMARU_PLATFORMS: Partial<Record<string, string>> = Object.fromEntries(

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seededRng } from './behavior';
 import { HarimaruController } from './controller';
-import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, DEFAULT_TIMING } from './params';
+import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, DEFAULT_MOTION, DEFAULT_TIMING } from './params';
 import type { MeasuredTerrain } from './terrainDom';
 
 const VIEW = { top: 0, bottom: 800, left: 0, right: 1_000 };
@@ -427,7 +427,7 @@ const only = (weights: Partial<typeof DEFAULT_BEHAVIOR.weights>): typeof DEFAULT
   afterMovingPenalty: 1,
 });
 
-function make2(options: { seed?: number; behavior?: typeof DEFAULT_BEHAVIOR; finePointer?: boolean; interaction?: Partial<typeof DEFAULT_INTERACTION> } = {}): HarimaruController {
+function make2(options: { seed?: number; behavior?: typeof DEFAULT_BEHAVIOR; finePointer?: boolean; interaction?: Partial<typeof DEFAULT_INTERACTION>; motion?: Partial<typeof DEFAULT_MOTION> } = {}): HarimaruController {
   controller = new HarimaruController({
     sprite,
     root,
@@ -440,6 +440,7 @@ function make2(options: { seed?: number; behavior?: typeof DEFAULT_BEHAVIOR; fin
     behavior: options.behavior,
     finePointer: options.finePointer ?? false,
     interaction: { ...DEFAULT_INTERACTION, ...options.interaction },
+    motion: { ...DEFAULT_MOTION, ...options.motion },
   });
   return controller;
 }
@@ -463,35 +464,32 @@ function tapAt(x: number, y: number, holdMs = 80, extra: Record<string, unknown>
 }
 
 describe('HarimaruController (PR2)', () => {
-  it('隣の足場へ安全な経路があればジャンプし、空中では足元から浮き、着地すると隣の足場に立つ', () => {
-    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
-    make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+  it('隣の足場 (同じ高さ) へ安全な経路があれば小ジャンプし、空中では足元から浮き、着地すると隣の足場に立つ', () => {
+    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 296 }]);
+    make2({ behavior: only({ jump: 1, idle: 0.0001 }), motion: { reconsiderChance: 0 } }).start();
     entered();
+    const startX = controller.snapshot().x;
     let sawAirborne = false;
-    let startTop = 0;
-    let lastGroundTop = 0;
-    let maxLift = 0;
+    let maxRise = 0;
     for (let i = 0; i < 2_000 && !(sawAirborne && !controller.snapshot().airborne); i += 1) {
       advance(16);
       const state = controller.snapshot();
-      if (!state.airborne && !sawAirborne) lastGroundTop = state.top;
-      if (state.airborne) {
-        // 踏み切る直前 (空中に入る前のフレーム) の足元の高さ。
-        if (!sawAirborne) startTop = lastGroundTop;
+      if (state.airborne && state.action === 'hopJump' && state.abs) {
         sawAirborne = true;
-        maxLift = Math.max(maxLift, state.lift);
+        // 足元 (セルの下端) が、低い方の上辺からどれだけ上にあるか。
+        maxRise = Math.max(maxRise, 300 - (state.abs.y + 20));
       }
     }
     expect(sawAirborne).toBe(true);
-    expect(maxLift).toBeGreaterThan(10);
-    // どちらの足場から跳んでも、もう一方の足場に着地して立つ。
+    // 隙間 40px の弧の高さ (16px) まで浮く。
+    expect(maxRise).toBeGreaterThan(10);
     const landed = controller.snapshot();
-    expect([300, 290]).toContain(landed.top);
-    if (landed.top === 290) expect(landed.x).toBeGreaterThan(340);
+    expect([300, 296]).toContain(landed.top);
+    if (landed.top === 296) expect(landed.x).toBeGreaterThan(340);
     else expect(landed.x).toBeLessThan(300);
     // 跳んだ足場とは別の足場に着地している。
-    expect(startTop).not.toBe(landed.top);
-    expect(landed.lift).toBe(0);
+    expect(startX < 300 ? landed.top : 300).toBe(startX < 300 ? 296 : 300);
+    expect(landed.abs).toBeNull();
     expect(landed.airborne).toBe(false);
   });
 
@@ -520,7 +518,7 @@ describe('HarimaruController (PR2)', () => {
         continue;
       }
       if (state.airborne || state.lift > 0) {
-        if (state.action === 'jump' && state.airborne && state.lift > 0) flew = true;
+        if (state.action === 'hopJump' && state.airborne && state.abs) flew = true;
         continue;
       }
       if (state.sink !== 0) continue;
@@ -546,9 +544,11 @@ describe('HarimaruController (PR2)', () => {
 
   it('ジャンプの途中でスクロール・DOM の変化があったら、古い経路のまま飛ばずに即座に隠れて出直す', async () => {
     for (const disturb of ['scroll', 'dom'] as const) {
-      current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
-      make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
-      for (let i = 0; i < 2_000 && !controller.snapshot().airborne; i += 1) advance(16);
+      current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 296 }]);
+      make2({ behavior: only({ jump: 1, idle: 0.0001 }), motion: { reconsiderChance: 0 } }).start();
+      entered();
+      for (let i = 0; i < 2_000 && controller.snapshot().action !== 'hopJump'; i += 1) advance(16);
+      advance(400);
       expect(controller.snapshot().airborne).toBe(true);
       if (disturb === 'scroll') window.dispatchEvent(new Event('scroll'));
       else {
@@ -560,8 +560,7 @@ describe('HarimaruController (PR2)', () => {
       expect(state.airborne).toBe(false);
       expect(state.placed).toBe(false);
       expect(sprite.dataset.visible).toBe('false');
-      advance(5_000);
-      expect(controller.snapshot().placed).toBe(true);
+      entered();
       controller.destroy();
     }
   });
@@ -570,10 +569,10 @@ describe('HarimaruController (PR2)', () => {
     const tile = document.createElement('div');
     root.append(tile);
     tile.getBoundingClientRect = () => ({ left: 340, right: 600, top: 290, bottom: 380, width: 260, height: 90, x: 340, y: 290, toJSON: () => ({}) }) as DOMRect;
-    current = { ...terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]), elements: [] };
-    make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    current = { ...terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 296 }]), elements: [] };
+    make2({ behavior: only({ jump: 1, idle: 0.0001 }), motion: { reconsiderChance: 0 } }).start();
     entered();
-    for (let i = 0; i < 2_000 && !controller.snapshot().airborne; i += 1) advance(16);
+    for (let i = 0; i < 2_000 && controller.snapshot().action !== 'hopJump'; i += 1) advance(16);
     expect(controller.snapshot().airborne).toBe(true);
     const event = new Event('transitionrun', { bubbles: true });
     Object.defineProperty(event, 'propertyName', { value: 'transform' });
@@ -587,10 +586,11 @@ describe('HarimaruController (PR2)', () => {
     const target = document.createElement('div');
     const start = document.createElement('div');
     root.append(target, start);
-    target.getBoundingClientRect = () => ({ left: 340, right: 600, top: 290, bottom: 380, width: 260, height: 90, x: 340, y: 290, toJSON: () => ({}) }) as DOMRect;
+    target.getBoundingClientRect = () => ({ left: 340, right: 600, top: 296, bottom: 380, width: 260, height: 84, x: 340, y: 296, toJSON: () => ({}) }) as DOMRect;
     start.getBoundingClientRect = () => ({ left: 100, right: 300, top: 300, bottom: 380, width: 200, height: 80, x: 100, y: 300, toJSON: () => ({}) }) as DOMRect;
-    current = { ...terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]), elements: [start, target] };
+    current = { ...terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 296 }]), elements: [start, target] };
     make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    entered();
     // 「ジャンプ」を選んで踏切へ歩き始めたところで、着地先の足場がホバーで浮き始める (終わらない)。
     for (let i = 0; i < 4_000 && !controller.snapshot().events.includes('action:jump'); i += 1) advance(16);
     expect(controller.snapshot().events).toContain('action:jump');
@@ -879,7 +879,7 @@ describe('HarimaruController (PR2)', () => {
     expect(controller.trigger('slip')).toBe(false);
     controller.destroy();
 
-    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
+    current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 296 }]);
     make2({ seed: 4, behavior: only({ jump: 1, idle: 0.3 }) }).start();
     seen.clear();
     for (let i = 0; i < 12_000 && !seen.has('react:tumble:pending-asset'); i += 1) {

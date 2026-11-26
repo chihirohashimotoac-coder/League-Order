@@ -238,32 +238,3 @@ export function arcIsClear(
   }
   return true;
 }
-
-/**
- * いまの足場から、横に並ぶ別の足場へのジャンプの候補 (経路の安全はまだ確かめない)。
- * 横の隙間が jumpMaxGap 以下、上りは jumpMaxRise 以下、下りは jumpMaxDrop 以下のものだけ。
- */
-export function jumpCandidates(
-  current: Segment,
-  segments: readonly Segment[],
-  height: number,
-  params: TerrainParams = DEFAULT_TERRAIN,
-): JumpPlan[] {
-  const plans: JumpPlan[] = [];
-  for (const target of segments) {
-    if (target.top === current.top && target.minX === current.minX && target.maxX === current.maxX) continue;
-    const rise = current.top - target.top;
-    if (rise > params.jumpMaxRise || -rise > params.jumpMaxDrop) continue;
-    const inset = Math.min(16, (target.maxX - target.minX) / 2);
-    if (target.minX > current.maxX) {
-      const gap = target.minX - current.maxX;
-      if (gap > params.jumpMaxGap || gap < 4) continue;
-      plans.push({ from: { x: current.maxX, top: current.top }, to: { x: target.minX + inset, top: target.top }, height, target });
-    } else if (target.maxX < current.minX) {
-      const gap = current.minX - target.maxX;
-      if (gap > params.jumpMaxGap || gap < 4) continue;
-      plans.push({ from: { x: current.minX, top: current.top }, to: { x: target.maxX - inset, top: target.top }, height, target });
-    }
-  }
-  return plans;
-}

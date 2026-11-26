@@ -31,7 +31,7 @@ import {
   type MotionParams,
   type TimingParams,
 } from './params';
-import { entryPlans, pickPlan, retreatOf, stepAt, stepsAreClear, stepsMargin, type Edge, type EntryMode, type MovePlan, type Pose, type Step } from './paths';
+import { climbPlans, dropPlans, entryPlans, hopPlans, pickPlan, retreatOf, stepAt, stepsAreClear, stepsMargin, type Edge, type EntryMode, type MovePlan, type Pose, type Step } from './paths';
 import {
   BACKGROUND_SIZE,
   CLIPS,
@@ -56,16 +56,11 @@ import {
 } from './sprite';
 import { LIVE_PRIORITY, type LiveReaction } from './liveReactions';
 import {
-  arcAt,
-  arcBounds,
-  arcIsClear,
   boxIsClear,
   computeSegments,
   findSegment,
-  jumpCandidates,
   spriteBox,
   visibleSegments,
-  type JumpPlan,
   type Rect,
   type Segment,
 } from './terrain';
@@ -90,6 +85,7 @@ type SheetKey = 'base' | ClipId | `rx:${ReactionId}`;
 /** 外から (デバッグ・テスト) 始められる動作。いつもと同じ安全の確かめを通り、できなければ false。 */
 export type TriggerName =
   | 'slip' | 'tumble' | 'sleepyFall' | 'groom' | 'stretch' | 'lookUp' | 'tilt' | 'play' | 'surprise' | 'happy' | 'run' | 'cursorHang' | 'turn'
+  | 'hopJump' | 'drop' | 'wallClimb'
   | `live:${LiveReaction}`;
 
 export interface ControllerOptions {
@@ -223,8 +219,9 @@ export class HarimaruController {
   private exitSeen: 'top' | 'bottom' | null = null;
   /** 経路を再生している間の、セルの左上 (ページ座標)。null なら立ち位置から描く。 */
   private abs: { x: number; y: number } | null = null;
-  /** 最後の計測での足場の要素の箱 (platformEls と同じ順)。 */
+  /** 最後の計測での足場の要素の箱 (platformEls と同じ順) と、文書の下端。 */
   private boxes: readonly Rect[] = [];
+  private docBottom: number | undefined;
   /** 直前に渡った 2 つの要素 (往復を選びにくくする)。 */
   private lastPair: { a: Element | null; b: Element | null; at: number } | null = null;
   /** 読み込めた画像 (base = v0.2 のアトラス、ほかは v0.9 の動作ごとのアトラス) と、いま表示している画像。 */
@@ -409,6 +406,17 @@ export class HarimaruController {
       }
       case 'cursorHang':
         return this.cursor !== null && this.tryCursorHang(this.cursor);
+      case 'hopJump':
+      case 'drop':
+      case 'wallClimb': {
+        // 開発・テスト用: その種類の安全な移動があれば、準備のあとで見送らずに移動する。
+        const segment = this.currentSegment();
+        const kind = name === 'hopJump' ? 'hop' : name === 'drop' ? 'drop' : 'climb';
+        const chosen = segment ? pickPlan(this.rng, this.safeMoves(segment).filter((o) => o.plan.kind === kind)) : null;
+        if (!chosen) return false;
+        this.move(chosen.plan, false);
+        return true;
+      }
       case 'live:victory':
       case 'live:frustrated':
       case 'live:surprise180':
@@ -1072,6 +1080,7 @@ export class HarimaruController {
     this.segments = computeSegments(terrain);
     // 計測を差し替えたテストなど、箱のないときは上辺から下へ 60 px の箱とみなす。
     this.boxes = terrain.boxes ?? terrain.platforms.map((p) => ({ left: p.left, right: p.right, top: p.top, bottom: p.top + 60 }));
+    this.docBottom = terrain.docBottom;
     return terrain;
   }
 
@@ -1359,15 +1368,24 @@ export class HarimaruController {
     return boxIsClear(region, this.obstaclesIn(this.root, [region], this.win, undefined, this.containers), this.view);
   }
 
-  /** 安全なジャンプの候補 (経路の全体で障害物に重ならず、見える範囲に収まるもの)。 */
-  private safeJumps(segment: Segment): JumpPlan[] {
-    if (!this.view) return [];
+  /**
+   * いまの足場から安全に移れる先 (横の小ジャンプ・飛び降り・側面のよじ登り)。経路の全体が見えている範囲に収まり、
+   * 文字・操作部品などに重ならないものだけ。移動先は、いまの足場の端の近く (局所的)。素材のない動きは選ばない。
+   */
+  private safeMoves(segment: Segment): { plan: MovePlan; margin: number; penalty: number }[] {
     const view = this.view;
-    const targets = visibleSegments(this.segments, view);
-    const plans = jumpCandidates(segment, targets, this.animation.jumpApex, DEFAULT_TERRAIN);
-    if (plans.length === 0) return [];
-    const obstacles = this.obstaclesIn(this.root, plans.map(arcBounds), this.win, undefined, this.containers);
-    return plans.filter((plan) => arcIsClear(plan, obstacles, view));
+    if (!view) return [];
+    const visible = visibleSegments(this.segments, view);
+    const current = visible.find((s) => s.top === segment.top && s.left === segment.left && s.right === segment.right);
+    if (!current) return [];
+    const plans: MovePlan[] = [];
+    // 小ジャンプ・飛び降りは、画像を読み込めていなければ v0.2 の近いコマで描く (drawPose)。側面の動きは画像が要る。
+    plans.push(...hopPlans(current, visible, this.boxes, DEFAULT_TERRAIN, this.motion));
+    plans.push(...dropPlans(current, visible, this.boxes, DEFAULT_TERRAIN, this.motion));
+    if (this.hasClips(['sideMount', 'sideClimb', 'sideLedge', 'climb'])) {
+      plans.push(...climbPlans(current, visible, this.boxes, DEFAULT_TERRAIN, this.motion, { speed: this.behavior.walkSpeed, frameMs: this.animation.walkFrameMs }));
+    }
+    return this.safePlans(plans, { docBottom: this.docBottom });
   }
 
   private nextAction(): void {
@@ -1396,15 +1414,19 @@ export class HarimaruController {
       canRelocate: this.available('hide'),
       available: this.available,
     };
-    // ジャンプの経路の計測 (障害物の収集) は重いので、ジャンプが選ばれうるときだけ行う。
+    // 移動の経路の計測 (障害物の収集) は重いので、移動が選ばれうるときだけ行う。
     const jumpPossible = actionWeights({ ...input, canJump: true }, this.behavior).jump > 0;
-    const jumps = jumpPossible ? this.safeJumps(segment) : [];
-    const decision = decideNext({ ...input, canJump: jumps.length > 0 }, this.rng, this.behavior);
+    const moves = jumpPossible ? this.safeMoves(segment) : [];
+    // 安全な候補が少ない (直前に渡った組しかない) ときは、待機や別の行動を選びやすくする。
+    const score = moves.reduce((sum, o) => sum + o.penalty, 0);
+    const behavior = score > 0 && score < 2 ? { ...this.behavior, weights: { ...this.behavior.weights, jump: this.behavior.weights.jump * (score / 2) } } : this.behavior;
+    const decision = decideNext({ ...input, canJump: moves.length > 0 }, this.rng, behavior);
     if (decision.action === 'jump') {
-      const plan = jumps[Math.floor(this.rng() * jumps.length)];
-      this.recordAction('jump');
-      this.jump(plan);
-      return;
+      const chosen = pickPlan(this.rng, moves);
+      if (chosen) {
+        this.move(chosen.plan);
+        return;
+      }
     }
     this.run(decision);
   }
@@ -1575,50 +1597,85 @@ export class HarimaruController {
     once();
   }
 
-  /** 踏切の位置まで歩いてから、放物線で別の足場へ跳ぶ (経路の安全は確かめ済み)。 */
-  private jump(plan: JumpPlan): void {
-    this.walk(plan.from.x, false, () => {
-      // 足場が動いている途中 (ホバーで浮く途中など) は、動いたあとの高さが分からないので跳ばない。
+  /**
+   * 足場の間を移る (横の小ジャンプ・飛び降り・側面のよじ登り)。踏み切る位置まで歩き、出発位置・経路全体・着地点を
+   * もう一度確かめてから再生する。再生中は着地・つかまる要素を毎フレーム確かめ、消えた・動いたら隠れて出直す。
+   * ときどき準備の動き (縁を見る・踏み切りの構え) のあとで見送り、一歩戻るか伏せる。
+   */
+  private move(plan: MovePlan, mayReconsider = true): void {
+    this.recordAction('jump');
+    this.walk(plan.startX ?? this.x, false, () => {
+      // 足場が動いている途中 (ホバーで浮く途中など) は、動いたあとの高さが分からないので移らない。
       if (this.platformsMoving()) {
         this.log('jump:skipped:moving');
         this.idle(between(this.rng, this.behavior.idleMs));
         return;
       }
-      // 歩いている間に画面が変わったかもしれない: 経路をもう一度確かめる。
+      // 歩いている間に画面が変わったかもしれない: 経路をもう一度確かめる (同じ先へ。着地点の調整は変わってよい)。
       const current = this.currentSegment();
-      const again = current ? this.safeJumps(current).find((p) => p.target.top === plan.target.top && p.target.minX === plan.target.minX) : undefined;
+      const same = (p: MovePlan): boolean => p.kind === plan.kind && p.end?.segment.top === plan.end?.segment.top && p.end?.segment.left === plan.end?.segment.left;
+      const options = current ? this.safeMoves(current).filter((o) => same(o.plan)) : [];
+      const again = options.find((o) => Math.abs((o.plan.end?.x ?? 0) - (plan.end?.x ?? 0)) < 1) ?? options[0];
       if (!again) {
+        this.log(`move:${plan.kind}:skipped:path`);
         this.idle(between(this.rng, this.behavior.idleMs));
         return;
       }
-      this.dir = again.to.x > again.from.x ? 1 : -1;
-      const durationMs = Math.max(this.animation.jumpMinMs, Math.abs(again.to.x - again.from.x) * this.animation.jumpMsPerPx);
-      const startedAt = this.now();
+      const p = again.plan;
+      if (mayReconsider && p.kind !== 'climb' && this.rng() < this.motion.reconsiderChance) {
+        this.reconsider(p);
+        return;
+      }
+      this.action = p.kind === 'hop' ? 'hopJump' : p.kind === 'drop' ? 'drop' : 'wallClimb';
+      this.log(`move:${p.kind}`);
       this.airborne = true;
-      this.render(ROW.walk, WALK_AIR);
-      const tick = (): void => {
-        const t = Math.min(1, (this.now() - startedAt) / durationMs);
-        const point = arcAt(again, t);
-        this.x = point.x;
-        this.top = again.to.top;
-        this.lift = again.to.top - point.foot;
-        this.place();
-        if (t >= 1) {
-          this.frame = null;
-          this.airborne = false;
-          this.lift = 0;
-          this.top = again.to.top;
-          this.segment = again.target;
-          this.action = 'idle';
-          this.render(ROW.idle, IDLE_OPEN);
-          this.idle(between(this.rng, this.behavior.idleMs));
-          // ときどき着地に失敗して転ぶ (素材待ち: 素材がなければ記録だけ)。
-          if (this.rng() < MISHAP_CHANCE) this.react('tumble');
-          return;
-        }
-        this.frame = this.requestFrame(tick);
-      };
-      this.frame = this.requestFrame(tick);
+      const held = [p.fromBox, p.toBox, p.wallBox]
+        .filter((i): i is number => i !== null && this.platformEls[i] !== undefined)
+        .map((i) => [this.platformEls[i], this.pageRect(this.platformEls[i])] as const);
+      this.playSteps(p.steps, () => this.finishMove(p), () => held.every(([el, rect]) => this.sameRect(el, rect)));
+    });
+  }
+
+  private finishMove(plan: MovePlan): void {
+    const end = plan.end!;
+    this.airborne = false;
+    this.abs = null;
+    this.x = end.x;
+    this.top = end.top;
+    this.segment = end.segment;
+    this.top = this.footTop() ?? end.top;
+    this.lastPair = {
+      a: plan.fromBox !== null ? this.platformEls[plan.fromBox] ?? null : null,
+      b: plan.toBox !== null ? this.platformEls[plan.toBox] ?? null : null,
+      at: this.now(),
+    };
+    this.action = 'idle';
+    this.render(ROW.idle, IDLE_OPEN);
+    this.idle(between(this.rng, this.behavior.idleMs));
+    // ときどき着地に失敗して転ぶ (横の小ジャンプだけ。素材がなければ記録だけ)。
+    if (plan.kind === 'hop' && this.rng() < MISHAP_CHANCE) this.react('tumble');
+  }
+
+  /** 準備の動き (縁を見る・踏み切りの構え) のあとで移動を見送り、同じ足場の上で一歩戻るか、その場に伏せる。 */
+  private reconsider(plan: MovePlan): void {
+    const prep = plan.steps.slice(0, 2).map((s) => ({ ...s }));
+    const last = prep[prep.length - 1];
+    prep.push({ ...last, pose: { sheet: 'base', row: 0, column: 0 }, ms: 0, tween: 'hold' });
+    this.action = plan.kind === 'drop' ? 'drop' : 'hopJump';
+    this.playSteps(prep, () => {
+      this.abs = null;
+      const segment = this.segment;
+      if (segment && this.rng() < 0.5) {
+        this.log('move:reconsidered:back');
+        // 来た方へ一歩戻る (同じ足場の立てる範囲の中で向きを変える)。
+        const back = clamp(this.x - last.dir * between(this.rng, [6, 14]), segment.minX, segment.maxX);
+        this.action = 'walk';
+        this.walk(back, false, () => this.idle(between(this.rng, this.behavior.idleMs)));
+        return;
+      }
+      this.log('move:reconsidered:rest');
+      this.action = 'rest';
+      this.rest(between(this.rng, this.behavior.restMs));
     });
   }
 
