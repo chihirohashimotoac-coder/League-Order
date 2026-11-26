@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isSolid } from './terrainDom';
+import type { Rect } from './terrain';
+import { collectObstacles, isSolid } from './terrainDom';
 
 const style = (values: Record<string, string>): CSSStyleDeclaration =>
   ({
@@ -126,5 +127,29 @@ describe('collectObstacles の seeThrough (カードの内側を調べる)', () 
     document.body.append(card);
     expect(topCornerRadius(card, window)).toBe(18);
     card.remove();
+  });
+});
+
+describe('collectObstacles の seeThrough は背景色・枠だけを数えない', () => {
+  it('背景の画像・疑似要素の内容・操作部品は、seeThrough でも箱全体を数える', () => {
+    const root = document.createElement('main');
+    document.body.append(root);
+    const make = (tag: string, style: Partial<CSSStyleDeclaration>): HTMLElement => {
+      const el = document.createElement(tag);
+      Object.assign(el.style, style);
+      el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 100, bottom: 50, width: 100, height: 50, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      root.append(el);
+      return el;
+    };
+    const plain = make('div', { backgroundColor: 'rgb(255, 255, 255)' });
+    const image = make('div', { backgroundImage: 'url("a.png")' });
+    const button = make('button', {});
+    const region = [{ left: 0, top: 0, right: 100, bottom: 50 }];
+    expect(collectObstacles(root, region, window, plain)).toHaveLength(2);
+    expect(collectObstacles(root, region, window, new Set<Element>([plain, image, button]))).toHaveLength(2);
+    // 箱の要素がどれかを (列挙しない) source で持つ。
+    const found = collectObstacles(root, region, window, plain) as (Rect & { source?: Element })[];
+    expect(found.map((o) => o.source)).toEqual([image, button]);
+    root.remove();
   });
 });

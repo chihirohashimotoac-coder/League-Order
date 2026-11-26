@@ -1,3 +1,5 @@
+import { readdirSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { tab } from './nav';
 import { seedRandom } from './seededRandom';
@@ -511,6 +513,9 @@ test('速くスクロールしても位置が崩れず、止まったあとも�
   expect(await overlaps(page)).toEqual([]);
 });
 
+/** 動作素材 v1.0 の画像 (リポジトリの中)。 */
+const V10_DIR = fileURLToPath(new URL('../src/features/harimaru/assets/v10', import.meta.url));
+
 /** 読み込んだ追加素材 v0.9 (14 動作) と動作素材 v1.0 (10 動作) のアトラスのファイル名。 */
 const clipRequests = (page: Page): Promise<string[]> =>
   page.evaluate(() =>
@@ -523,11 +528,15 @@ const clipRequests = (page: Page): Promise<string[]> =>
 test('追加素材 v0.9・動作素材 v1.0 は描画レイヤーの準備のあとで画素密度に合う 1 組 (14 + 10 動作) だけを読み込み、表示 OFF・動きを減らす設定では読み込まない', async ({ page, browser }, info) => {
   await openSampleHome(page);
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
-  // v0.9 は 14 枚を要求する。v1.0 は 4KB 未満の画像をビルドが埋め込む (データ URI。1x の 9 枚) ので、要求は 10 枚以下。
-  const V09 = /^(hang|slip|climb|cursorHang|tumble|sleepyFall|groom|stretch|lookUp|surprise|tilt|play|run|happy)@/;
-  await expect.poll(async () => (await clipRequests(page)).filter((n) => V09.test(n)).length, { timeout: 10_000 }).toBe(14);
-  expect((await clipRequests(page)).filter((n) => !V09.test(n)).length).toBeLessThanOrEqual(10);
   const density = info.project.name === 'mobile' ? 3 : 1;
+  // v0.9 は 14 枚を要求する。v1.0 の 10 枚は、ビルドが 4KB 未満の画像を埋め込む (データ URI) ので、4KB 以上の画像だけを要求する。
+  const V09 = /^(hang|slip|climb|cursorHang|tumble|sleepyFall|groom|stretch|lookUp|surprise|tilt|play|run|happy)@/;
+  const v10 = readdirSync(V10_DIR)
+    .filter((name) => name.endsWith(`@${density}x.png`) && statSync(`${V10_DIR}/${name}`).size >= 4_096)
+    .map((name) => name.split('@')[0])
+    .sort();
+  await expect.poll(async () => (await clipRequests(page)).filter((n) => V09.test(n)).length, { timeout: 10_000 }).toBe(14);
+  await expect.poll(async () => (await clipRequests(page)).filter((n) => !V09.test(n)).map((n) => n.split('@')[0]).sort(), { timeout: 10_000 }).toEqual(v10);
   for (const name of await clipRequests(page)) expect(name).toMatch(new RegExp(`@${density}x`));
 
   // 動きを減らす設定: 描画しないので、追加素材も要求しない。

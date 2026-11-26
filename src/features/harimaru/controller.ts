@@ -515,7 +515,12 @@ export class HarimaruController {
     }, { passive: true, capture: true });
     add(win, 'blur', () => this.releaseCursor(), { passive: true });
     // 入力欄にフォーカスがある間は休む。
-    const onFocus = (): void => (this.typing() ? this.pause('input') : this.resume('input'));
+    const onFocus = (): void => {
+      // 経路の途中にフォーカスの輪が出るかもしれない: 空中・登場の途中なら中断して出直す。
+      this.abortAirborne();
+      if (this.typing()) this.pause('input');
+      else this.resume('input');
+    };
     doc.addEventListener('focusin', onFocus, { passive: true });
     doc.addEventListener('focusout', onFocus, { passive: true });
     this.cleanups.push(() => {
@@ -557,7 +562,8 @@ export class HarimaruController {
       if (event.type === 'transitionrun' && !GEOMETRY_PROPERTY.test((event as TransitionEvent).propertyName ?? '')) return;
       // タブ非表示・モーダルの休止中は計測しない (休止が解けたときに計測し直す)。
       if (this.destroyed || this.pauses.has('hidden') || this.pauses.has('modal')) return;
-      if (!event.target || !this.placed) return;
+      // 登場の途中 (まだ足場に立っていない) でも、位置の変わる動きがあれば中断する。
+      if (!event.target || (!this.placed && !this.entering)) return;
       // 空中では、着地先の足場が浮く・沈むと着地の高さが合わなくなる: 位置の変わる動きがあれば中断して出直す。
       if (this.abortAirborne()) return;
       if (this.isPlatform(event.target)) {
@@ -621,7 +627,8 @@ export class HarimaruController {
         this.checkSoon();
         this.scheduleRemeasure();
       });
-      observer.observe(this.watch, { childList: true, subtree: true });
+      // 中身の入れ替わりに加えて、表示を変える属性 (クラス・hidden・open) の変化も契機にする (経路の途中に部品が出る)。
+      observer.observe(this.watch, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden', 'open'] });
       this.cleanups.push(() => observer.disconnect());
     }
     const fonts = (doc as Document & { fonts?: FontFaceSet }).fonts;
@@ -815,8 +822,8 @@ export class HarimaruController {
     this.clearTimer('scroll');
     if (this.destroyed || this.blocked()) return;
     this.noteExit();
-    // 画面の外で端から出直すのを待っている間にまたスクロールした: 止まってから確かめ直す。
-    if (this.placed && this.pauses.has('offscreen')) this.clearActionTimers();
+    // 画面の外で端から出直すのを待っている間・まだ入れていない間にスクロールした: 予約を消し、止まってから確かめ直す。
+    if ((this.placed && this.pauses.has('offscreen')) || (!this.placed && !this.entering)) this.clearActionTimers();
     this.scrollTimer = this.win.setTimeout(() => {
       this.scrollTimer = null;
       this.onScrollEnd();
@@ -829,8 +836,10 @@ export class HarimaruController {
    */
   private noteExit(view = viewport(this.win)): void {
     if (!this.placed || this.airborne) return;
-    const head = this.top - SPRITE.height;
-    if (this.top <= view.top) this.exitSeen = 'top';
+    // 描いている姿の見える範囲 (カード裏に沈んで切り取られた部分・跳ねた高さ・姿勢のずれを含める)。
+    const head = this.top - SPRITE.height - this.lift + this.sink + this.poseY;
+    const foot = head + SPRITE.height - Math.min(SPRITE.height, Math.max(0, this.sink));
+    if (foot <= view.top) this.exitSeen = 'top';
     else if (head >= view.bottom) this.exitSeen = 'bottom';
     else this.exitSeen = null;
   }
@@ -876,6 +885,7 @@ export class HarimaruController {
    */
   private returnFromEdge(): void {
     if (this.destroyed || !this.placed || this.blocked() || !this.pauses.has('offscreen') || !this.intent?.strict) return;
+    if (this.scrollTimer !== null) return;
     if (this.animating()) {
       this.after(300, () => this.returnFromEdge());
       return;
@@ -887,7 +897,7 @@ export class HarimaruController {
     }
     const terrain = this.survey();
     const view = terrain.view;
-    if (this.top - SPRITE.height >= view.top && this.top <= view.bottom) {
+    if (this.top - SPRITE.height >= view.top && this.top <= view.bottom && this.x + SPRITE.sideInset >= view.left && this.x + SPRITE.width - SPRITE.sideInset <= view.right) {
       this.exitSeen = null;
       this.intent = null;
       this.resume('offscreen');
@@ -1091,6 +1101,8 @@ export class HarimaruController {
    */
   private tryEnter(): void {
     if (this.destroyed || this.placed || this.entering || this.blocked()) return;
+    // スクロールの途中は始めない (止まったときに onScrollEnd が確かめ直す)。
+    if (this.scrollTimer !== null) return;
     if (this.modalOpen()) {
       this.pause('modal');
       return;
@@ -1117,9 +1129,10 @@ export class HarimaruController {
   private entryEdges(): Edge[] {
     const intent = this.intent;
     if (intent?.strict) return [intent.edge];
-    const first: Edge = intent && (intent.edge === 'left' || intent.edge === 'right') ? intent.edge : this.rng() < 0.5 ? 'left' : 'right';
-    const sides: Edge[] = [first, first === 'left' ? 'right' : 'left'];
-    return this.motion.sideEntryFallback ? [...sides, 'top', 'bottom'] : sides;
+    const side: Edge = intent && (intent.edge === 'left' || intent.edge === 'right') ? intent.edge : this.rng() < 0.5 ? 'left' : 'right';
+    const order: Edge[] = [side, side === 'left' ? 'right' : 'left', ...(this.motion.sideEntryFallback ? (['top', 'bottom'] as Edge[]) : [])];
+    // 引っ込んだ端など、意図の端 (上下を含む) があれば最初に試す。
+    return intent ? [intent.edge, ...order.filter((e) => e !== intent.edge)] : order;
   }
 
   /** 登場の経路を選ぶ (安全な経路のある最初の端から)。なければ null (記録だけ残す)。 */
@@ -1167,23 +1180,29 @@ export class HarimaruController {
         const el = index !== null ? this.platformEls[index] : undefined;
         for (let node = el?.parentElement; node && node !== this.root; node = node.parentElement) if (this.containers?.has(node)) through.add(node);
       }
-      if (plan.wallBox !== null && this.platformEls[plan.wallBox]) through.add(this.platformEls[plan.wallBox]);
+      // つかまる側面の要素は、その面 (背景色・枠) を数えない。操作部品 (ボタンなど) の面は数える (かぶりは decorAllowance まで)。
+      const wallEl = plan.wallBox !== null ? this.platformEls[plan.wallBox] : undefined;
+      if (wallEl && !wallEl.closest(CONTROL_SELECTOR)) through.add(wallEl);
       const regions = plans.filter((p) => keyOf(p) === key).map((p) => p.bounds);
       groups.set(key, this.obstaclesIn(this.root, regions, this.win, through.size > 0 ? through : undefined, this.containers));
     }
     for (const plan of plans) {
-      const obstacles = groups.get(keyOf(plan))!;
-      let selfBoxes: Rect[] = [];
-      if (plan.wallBox === null) {
-        selfBoxes = [plan.fromBox, plan.toBox].filter((i): i is number => i !== null).map((i) => this.boxes[i]).filter(Boolean);
-      }
+      // 候補の要素自身 (出発・着地・つかまる側面) の箱だけを decorAllowance だけ縮める (座標ではなく要素で見分ける)。
+      const selfEls = new Set([plan.fromBox, plan.toBox, plan.wallBox].filter((i): i is number => i !== null).map((i) => this.platformEls[i]).filter(Boolean));
+      const decor = this.motion.decorAllowance;
+      const obstacles = groups.get(keyOf(plan))!.map((o) => {
+        const source = (o as Rect & { source?: Element }).source;
+        return source && selfEls.has(source) ? { left: o.left + decor, top: o.top, right: o.right - decor, bottom: o.bottom - decor } : o;
+      });
+      // 計測を差し替えたテストなど、要素の分からない障害物は、候補の箱と同じ座標のものを縮める (従来どおり)。
+      const selfBoxes = selfEls.size === 0 ? [plan.fromBox, plan.toBox].filter((i): i is number => i !== null).map((i) => this.boxes[i]).filter(Boolean) : [];
       const clear = {
         view,
         beyond: options.beyond,
         docBottom: options.docBottom,
         overhang: plan.wallBox !== null ? this.motion.edgeOverhang : 0,
         selfBoxes,
-        decor: this.motion.decorAllowance,
+        decor,
       };
       if (!stepsAreClear(plan.steps, obstacles, clear)) continue;
       out.push({ plan, margin: stepsMargin(plan.steps, obstacles, clear), penalty: this.pairPenalty(plan) });
@@ -1233,7 +1252,8 @@ export class HarimaruController {
     this.abs = null;
     this.lastEntryMode = plan.mode ?? null;
     if (!plan.end) {
-      // のぞいて引っ込んだ: 同じ端の意図のまま、しばらく空けて出直す。
+      // のぞいて引っ込んだ: 同じ端の意図のまま (実際にのぞいた端を最初に)、しばらく空けて出直す。
+      if (plan.edge) this.intent = { edge: plan.edge, strict: this.intent?.strict ?? false };
       this.setVisible(false);
       this.nextEntryAt = this.now() + between(this.rng, this.motion.retreatCooldownMs);
       this.scheduleEnter(this.nextEntryAt - this.now());

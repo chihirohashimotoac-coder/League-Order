@@ -150,8 +150,13 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
     // 実際にスクロールする入れ物 (中身が動く) は、包んでいても箱全体を数える。
     const scrolling = /(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`) && overflows(el, style);
     const solid = isSolid(el, style) && (!behind || scrolling);
-    if (!through(el) && (solid || hasPseudoContent(el, win))) {
-      obstacles.push(box);
+    // 内側を調べる要素 (seeThrough) は、背景色・枠の箱だけを数えない。背景の画像・疑似要素の内容 (アイコンなど)・
+    // 操作部品は、ふつうどおり箱全体を数える。
+    const decorOnly = through(el) && !interactive(el) && !(style.backgroundImage && style.backgroundImage !== 'none');
+    const pseudo = hasPseudoContent(el, win);
+    if ((solid && !decorOnly) || pseudo) {
+      // どの要素の箱か (候補の要素自身の箱を見分ける)。列挙しないので、座標の比較には影響しない。
+      obstacles.push(Object.defineProperty(box, 'source', { value: el, enumerable: false }));
       continue;
     }
     for (const node of Array.from(el.childNodes)) {

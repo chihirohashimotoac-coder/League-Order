@@ -488,7 +488,7 @@ const PEEK_TOP = [-21, -16, -11, -6] as const;
 const PEEK_BOTTOM = [1, -5, -12, -20] as const;
 
 /** 左右の端から入る経路。立てる範囲が端に届いていれば歩いて、隙間があれば端から小さく跳んで入る。 */
-function sideEntry(edge: 'left' | 'right', target: Segment, view: View, landX: number, options: EntryOptions, motion: MotionParams): Step[] {
+function sideEntry(edge: 'left' | 'right', target: Segment, view: View, landX: number, options: EntryOptions, motion: MotionParams, box?: Rect): Step[] {
   const dir: -1 | 1 = edge === 'left' ? 1 : -1;
   const y = target.top - SPRITE.height;
   const at = (visible: number): number => (edge === 'left' ? view.left - SPRITE.width + visible : view.right - visible);
@@ -497,9 +497,11 @@ function sideEntry(edge: 'left' | 'right', target: Segment, view: View, landX: n
     { pose: IDLE, x: at(PEEK_SIDE[1]), y, dir, ms: 75, tween: 'linear' },
   ];
   const gap = edge === 'left' ? target.left - view.left : view.right - target.right;
+  // 要素そのものが画面の端まで (またはその外まで) 続いているときだけ歩いて入る (立てる範囲の端の数 px は計測で除いた余白)。
+  const reaches = box !== undefined && (edge === 'left' ? box.left <= view.left + 1 : box.right >= view.right - 1);
   const fromX = at(PEEK_SIDE[2]);
   if (options.mode === 'peek') steps.push({ pose: IDLE, x: fromX, y, dir, ms: options.holdMs, tween: 'hold' });
-  if (gap <= EDGE_WALK_GAP) {
+  if (gap <= EDGE_WALK_GAP && reaches) {
     // 足場が端まで続いている: 歩いて入る。
     const walk = options.walk ?? { speed: 20, frameMs: 170 };
     const distance = Math.abs(landX - fromX);
@@ -582,8 +584,9 @@ export function entryPlans(
       const toBox = endBox(target, boxes, edge, terrain);
       // 隙間を跳ぶときは、足場の端が要素の角であること (角の手前の文字などをまたがない)。
       if (gap > EDGE_WALK_GAP && toBox === null) continue;
+      const under = boxOfSegment(target, boxes, terrain);
       for (const x of landings(target, dir, motion.landingInsets)) {
-        const steps = sideEntry(edge, target, view, x, options, motion);
+        const steps = sideEntry(edge, target, view, x, options, motion, under !== null ? boxes[under] : undefined);
         plans.push(make(steps, target, toBox ?? boxOfSegment(target, boxes, terrain), null, Math.max(0, gap) + Math.abs(x - (dir > 0 ? target.minX : target.maxX))));
       }
     }

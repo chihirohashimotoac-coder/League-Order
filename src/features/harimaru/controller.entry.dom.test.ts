@@ -258,6 +258,70 @@ describe('経路がない・中断', () => {
   });
 });
 
+describe('監査の指摘の回帰', () => {
+  it('まだ入れていない間に続けてスクロールしても、止まるまでは登場を始めない (予約の時刻をまたいでも)', () => {
+    make().start();
+    // 登場の予約 (最長 2.6 秒) をまたいで、200ms ごとにスクロールし続ける。
+    for (let t = 0; t < 4_000; t += 200) {
+      scrollTo(0);
+      advance(200);
+      expect(controller.snapshot().entering, `t=${t}`).toBeNull();
+      expect(sprite.dataset.visible).toBe('false');
+    }
+    recordUntilPlaced();
+    expect(controller.snapshot().placed).toBe(true);
+  });
+
+  it('のぞいて引っ込んだ端から入り直す (左右とも安全で、乱数が反対の側を引いても)', () => {
+    boxes = [{ left: 60, right: 400, top: 300, bottom: 420 }, { left: 640, right: 980, top: 300, bottom: 420 }];
+    for (let seed = 1; seed < 8; seed += 1) {
+      make({ seed, motion: { entryPeekChance: 1, entryRetreatChance: 1 } }).start();
+      recordUntilPlaced(40_000);
+      const list = entries().filter((e) => !e.startsWith('enter:none'));
+      expect(list[0]).toMatch(/:retreat$/);
+      expect(list[1].split(':')[1], `seed ${seed}`).toBe(list[0].split(':')[1]);
+      controller.destroy();
+    }
+  });
+
+  it('登場の途中に、近くで位置の変わるトランジションが始まる・フォーカスが移ると中断する', () => {
+    for (const disturb of ['transition', 'focus'] as const) {
+      make().start();
+      for (let t = 0; t < 10_000 && !controller.snapshot().entering; t += 16) advance(16);
+      advance(100);
+      expect(controller.snapshot().entering).not.toBeNull();
+      if (disturb === 'transition') {
+        const el = document.createElement('div');
+        root.append(el);
+        const event = new Event('transitionrun', { bubbles: true });
+        Object.defineProperty(event, 'propertyName', { value: 'transform' });
+        el.dispatchEvent(event);
+      } else {
+        const button = document.createElement('button');
+        root.append(button);
+        button.focus();
+      }
+      expect(controller.snapshot().entering, disturb).toBeNull();
+      expect(sprite.dataset.visible).toBe('false');
+      expect(controller.snapshot().events).toContain('jump:aborted');
+      controller.destroy();
+    }
+  });
+
+  it('カード裏に沈んで一部が切り取られた姿は、見えている部分 (頭) が下端を抜けたときに抜けたとみなす', () => {
+    scrollY = 600;
+    boxes = [{ left: 60, right: 400, top: 1_000, bottom: 1_100 }];
+    make().start();
+    recordUntilPlaced();
+    // 足元 1000 の姿を 14px 沈める (見えている頭 = 994。沈んでいなければ 980)。
+    (controller as unknown as { sink: number }).sink = 14;
+    // 見えている下端 = 990: 沈んでいない姿なら頭が見えているが、沈んだ姿は見えている部分がすべて下へ抜けている。
+    scrollTo(222);
+    advance(400);
+    expect(controller.snapshot().intent).toBe('bottom');
+  });
+});
+
 describe('スクロールで画面の外へ出たとき', () => {
   it('体が上へ完全に抜けたら上の端の意図を記録し、経路がなければ元の位置で待つ。逆にスクロールすると、元の位置がそのまま見えてくる', () => {
     make().start();

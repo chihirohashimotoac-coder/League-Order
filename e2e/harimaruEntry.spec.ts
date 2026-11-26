@@ -156,6 +156,27 @@ test('実際のホーム: 画面の端から、見える画素が端から増え
   expect(await overlaps(page)).toEqual([]);
 });
 
+test('PC: サンプルのホームの初期位置 (端からの安全な経路がない) では画面の外で待ち、スクロールで経路ができると端から入る', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'PC のホーム (左右の端からカードまで遠い)');
+  await fixed(page, 20261126);
+  await openSample(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(1_500);
+  // 先頭: 左右の端からは遠く、上端からはカードにふさがれる。置き直さずに待つ。
+  for (let i = 0; i < 20; i += 1) {
+    await page.clock.runFor(1_000);
+    expect(await sprite(page).getAttribute('data-visible'), `${i} 秒`).toBe('false');
+  }
+  const trail = await record(page);
+  await page.evaluate(() => {
+    const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
+    window.scrollTo(0, Math.round(card.bottom + window.scrollY - document.querySelector('.app-header')!.getBoundingClientRect().bottom + 6));
+  });
+  await untilStanding(page);
+  const { edge } = checkEntry(await trail(), await viewport(page));
+  expect(edge).toBe('top');
+});
+
 test('PC: 体が上へ完全に抜けるまでスクロールすると、元の位置で待つ。逆にスクロールすれば、元の位置がそのまま見えてくる', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'PC のホーム (上端から入れる位置がある)');
   await fixed(page, 20261126);
