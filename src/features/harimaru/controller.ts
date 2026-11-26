@@ -516,8 +516,11 @@ export class HarimaruController {
     add(win, 'blur', () => this.releaseCursor(), { passive: true });
     // 入力欄にフォーカスがある間は休む。
     const onFocus = (): void => {
-      // 経路の途中にフォーカスの輪が出るかもしれない: 空中・登場の途中なら中断して出直す。
+      // 経路の途中にフォーカスの輪が出るかもしれない: 空中・登場の途中なら中断して出直す。立っていれば、その場を確かめ直す
+      // (フォーカスの輪が出た要素の上には立たない・輪には重ならない)。
       this.abortAirborne();
+      this.checkSoon();
+      this.scheduleRemeasure();
       if (this.typing()) this.pause('input');
       else this.resume('input');
     };
@@ -618,7 +621,14 @@ export class HarimaruController {
     }
     const MO = (win as Window & { MutationObserver?: typeof MutationObserver }).MutationObserver;
     if (MO) {
-      const observer = new MO(() => {
+      const observer = new MO((records) => {
+        // インラインの style・文字だけの変化: 経路の途中なら中断し、それ以外はまとめ待ちの計測だけ (毎フレーム変わる
+        // style で、そのたびに計測しない)。
+        if (records.every((r) => r.type === 'characterData' || (r.type === 'attributes' && r.attributeName === 'style'))) {
+          this.abortAirborne();
+          this.scheduleRemeasure();
+          return;
+        }
         // モーダル・シートは開いた瞬間に隠す (計測を待たない)。
         if (this.modalOpen()) this.pause('modal');
         else this.resume('modal');
@@ -628,7 +638,7 @@ export class HarimaruController {
         this.scheduleRemeasure();
       });
       // 中身の入れ替わりに加えて、表示を変える属性 (クラス・hidden・open) の変化も契機にする (経路の途中に部品が出る)。
-      observer.observe(this.watch, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden', 'open'] });
+      observer.observe(this.watch, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class', 'hidden', 'open', 'style'] });
       this.cleanups.push(() => observer.disconnect());
     }
     const fonts = (doc as Document & { fonts?: FontFaceSet }).fonts;
@@ -872,7 +882,11 @@ export class HarimaruController {
       return;
     }
     this.noteExit(view);
+    // 休止で姿勢 (沈んだ深さなど) が立ち姿に戻ると、抜けていた体が画面に出ることがある: そのときは隠しておく
+    // (逆にスクロールして元の位置が見えたら、resume で同じ場所に戻る)。
+    const posed = this.sink !== 0 || this.lift !== 0 || this.poseX !== 0 || this.poseY !== 0;
     this.pause('offscreen');
+    if (posed) this.setVisible(false);
     if (!this.exitSeen) return;
     // 体が上・下へ完全に抜けた: その端から出直す (少し待ってから。待つ間に元の位置が見えてくれば、そのまま続ける)。
     this.intent = { edge: this.exitSeen, strict: true };
@@ -1192,7 +1206,7 @@ export class HarimaruController {
       const decor = this.motion.decorAllowance;
       const obstacles = groups.get(keyOf(plan))!.map((o) => {
         const source = (o as Rect & { source?: Element }).source;
-        return source && selfEls.has(source) ? { left: o.left + decor, top: o.top, right: o.right - decor, bottom: o.bottom - decor } : o;
+        return source && selfEls.has(source) && this.decorative(source) ? { left: o.left + decor, top: o.top, right: o.right - decor, bottom: o.bottom - decor } : o;
       });
       // 計測を差し替えたテストなど、要素の分からない障害物は、候補の箱と同じ座標のものを縮める (従来どおり)。
       const selfBoxes = selfEls.size === 0 ? [plan.fromBox, plan.toBox].filter((i): i is number => i !== null).map((i) => this.boxes[i]).filter(Boolean) : [];
@@ -1208,6 +1222,25 @@ export class HarimaruController {
       out.push({ plan, margin: stepsMargin(plan.steps, obstacles, clear), penalty: this.pairPenalty(plan) });
     }
     return out;
+  }
+
+  /**
+   * 要素の箱が背景色・枠だけの飾りか (かぶりを許してよいか)。操作部品 (中のラベル・アイコンを箱で数えている)・
+   * 背景の画像・疑似要素の内容・フォーカスの輪がある要素は、箱を縮めずに数える。
+   */
+  private decorative(el: Element): boolean {
+    if (el.closest(CONTROL_SELECTOR)) return false;
+    const style = this.win.getComputedStyle(el);
+    if (style.backgroundImage && style.backgroundImage !== 'none') return false;
+    for (const pseudo of ['::before', '::after']) {
+      try {
+        const content = this.win.getComputedStyle(el, pseudo).content;
+        if (content && content !== 'none' && content !== 'normal') return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
   }
 
   /** 直前に渡った 2 つの要素の間の経路 (行き・帰り) なら、しばらく選びにくくする。 */
@@ -1229,6 +1262,8 @@ export class HarimaruController {
     this.interrupt();
     this.pauses.delete('offscreen');
     this.entering = plan;
+    // 実際に使う端を意図として残す (中断されても、同じ端から入り直す)。
+    if (plan.edge) this.intent = { edge: plan.edge, strict: this.intent?.strict ?? false };
     this.airborne = true;
     this.placed = false;
     this.segment = null;
@@ -1279,7 +1314,13 @@ export class HarimaruController {
   private sameRect(el: Element, rect: Rect): boolean {
     if (!el.isConnected) return false;
     const now = this.pageRect(el);
-    return now.right > now.left && Math.abs(now.top - rect.top) <= 1 && Math.abs(now.left - rect.left) <= 1 && Math.abs(now.right - rect.right) <= 1;
+    return (
+      now.right > now.left &&
+      Math.abs(now.top - rect.top) <= 1 &&
+      Math.abs(now.left - rect.left) <= 1 &&
+      Math.abs(now.right - rect.right) <= 1 &&
+      Math.abs(now.bottom - rect.bottom) <= 1
+    );
   }
 
   /**

@@ -322,6 +322,74 @@ describe('監査の指摘の回帰', () => {
   });
 });
 
+describe('監査 (2 回目) の指摘の回帰', () => {
+  it('候補の要素自身の箱を縮めるのは飾りの要素だけ (ボタンの箱は縮めない)', () => {
+    make();
+    const card = document.createElement('div');
+    const button = document.createElement('button');
+    root.append(card, button);
+    const c = controller as unknown as { platformEls: Element[]; boxes: Rect[]; view: unknown; containers: unknown; safePlans: (plans: unknown[], o: object) => unknown[] };
+    const box = { left: 100, top: 300, right: 200, bottom: 400 };
+    c.boxes = [box];
+    c.view = { top: 0, bottom: 768, left: 0, right: 1_024 };
+    // 経路は要素の右の縁に 2px かぶる (縮めれば通る)。
+    const plan = {
+      kind: 'drop', startX: 0, end: null, fromBox: 0, toBox: null, wallBox: null, distance: 10, bounds: { left: 190, top: 330, right: 230, bottom: 350 },
+      steps: [{ pose: { sheet: 'base', row: 0, column: 0 }, x: 196, y: 330, dir: 1, ms: 0, tween: 'hold' }],
+    };
+    const tagged = (el: Element) => [Object.defineProperty({ ...box }, 'source', { value: el, enumerable: false })];
+    for (const [el, safe] of [[card, 1], [button, 0]] as const) {
+      c.platformEls = [el];
+      (controller as unknown as { obstaclesIn: () => Rect[] }).obstaclesIn = () => tagged(el);
+      expect(c.safePlans([plan], {}).length, el.tagName).toBe(safe);
+    }
+  });
+
+  it('登場の途中に、経路の上の要素のインラインの style・文字だけが変わっても中断する', async () => {
+    for (const change of ['style', 'text'] as const) {
+      const el = document.createElement('p');
+      el.textContent = 'a';
+      root.append(el);
+      make().start();
+      for (let t = 0; t < 10_000 && !controller.snapshot().entering; t += 16) advance(16);
+      advance(100);
+      if (change === 'style') el.style.transform = 'translateY(4px)';
+      else el.firstChild!.textContent = 'abc';
+      await Promise.resolve();
+      expect(controller.snapshot().entering, change).toBeNull();
+      expect(sprite.dataset.visible).toBe('false');
+      controller.destroy();
+      el.remove();
+    }
+  });
+
+  it('登場の途中で中断されたら、実際に使っていた端から入り直す (両側に経路があっても)', () => {
+    boxes = [{ left: 60, right: 400, top: 300, bottom: 420 }, { left: 640, right: 980, top: 300, bottom: 420 }];
+    for (let seed = 1; seed < 6; seed += 1) {
+      make({ seed }).start();
+      for (let t = 0; t < 10_000 && !controller.snapshot().entering; t += 16) advance(16);
+      const first = controller.snapshot().entering!.split(':')[0];
+      scrollTo(0);
+      recordUntilPlaced();
+      const list = entries().filter((e) => !e.startsWith('enter:none'));
+      expect(list[1].split(':')[1], `seed ${seed}`).toBe(first);
+      controller.destroy();
+    }
+  });
+
+  it('沈んだ姿で画面の外へ抜けたまま休止しても、立ち姿に戻った体を画面に出さない', () => {
+    scrollY = 600;
+    boxes = [{ left: 60, right: 400, top: 1_000, bottom: 1_100 }];
+    make().start();
+    recordUntilPlaced();
+    (controller as unknown as { sink: number }).sink = 14;
+    scrollTo(222);
+    advance(400);
+    expect(controller.snapshot().sink).toBe(0);
+    expect(sprite.dataset.visible).toBe('false');
+  });
+});
+
 describe('スクロールで画面の外へ出たとき', () => {
   it('体が上へ完全に抜けたら上の端の意図を記録し、経路がなければ元の位置で待つ。逆にスクロールすると、元の位置がそのまま見えてくる', () => {
     make().start();

@@ -142,7 +142,13 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
     // SVG の子要素は親の svg で数える。
     if (el.parentElement?.closest('svg')) continue;
     const box = toPage(el.getBoundingClientRect(), sx, sy);
-    if (box.right <= box.left || box.bottom <= box.top || !inRegion(box)) continue;
+    if (box.right <= box.left || box.bottom <= box.top) continue;
+    // キーボードのフォーカスの輪 (要素の外側に描かれる) は、要素の箱より広く数える。
+    if (focusRing(el)) {
+      const ring = { left: box.left - FOCUS_RING, top: box.top - FOCUS_RING, right: box.right + FOCUS_RING, bottom: box.bottom + FOCUS_RING };
+      if (inRegion(ring)) obstacles.push(Object.defineProperty(ring, 'source', { value: el, enumerable: false }));
+    }
+    if (!inRegion(box)) continue;
     const style = win.getComputedStyle(el);
     if (style.display === 'contents') continue;
     // 入れ物を数えないのは、重なっている範囲をすべて包んでいるときだけ (帯の一部にかかるだけの別の色付きの枠は数える)。
@@ -169,6 +175,18 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
   }
   range.detach();
   return obstacles;
+}
+
+/** フォーカスの輪として、要素の外側に数える幅 (CSS px)。 */
+const FOCUS_RING = 4;
+
+function focusRing(el: Element): boolean {
+  if (el !== el.ownerDocument.activeElement) return false;
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return false;
+  }
 }
 
 /** 要素の上辺の角丸の半径 (左右の大きい方、CSS px)。 */
