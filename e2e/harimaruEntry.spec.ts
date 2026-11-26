@@ -77,19 +77,36 @@ const viewport = (page: Page) =>
     width: document.documentElement.clientWidth,
   }));
 
-/** 登場の記録: 最初に見えたコマは端に接し、そこから足場に立つまで 1 回に 12px を超えて跳ばない。 */
+/**
+ * 登場の記録: 見えない間 (のぞいて引っ込んだあとなど) で区切った登場ごとに、最初に見えたコマは端に接し、そこから
+ * 1 回に 12px (上下の端からは落ちる・登る速さのぶん 24px) を超えて跳ばない。最後の登場の端と、最初・最後のコマを返す。
+ */
 function checkEntry(trail: Sample[], view: { top: number; bottom: number; width: number }): { edge: string; first: Sample; last: Sample } {
-  const entry = trail.filter((s) => s.visible && s.action === 'enter');
-  expect(entry.length, '登場の途中のコマ').toBeGreaterThan(5);
-  const first = entry[0];
-  const edge = first.right <= 13 ? 'left' : first.left >= view.width - 13 ? 'right' : first.bottom <= view.top + 1 ? 'top' : first.top >= view.bottom - 1 ? 'bottom' : 'none';
-  expect(edge, `最初に描いたコマは端の外 (${JSON.stringify(first)})`).not.toBe('none');
-  for (let i = 1; i < entry.length; i += 1) {
-    const jump = Math.hypot(entry[i].left - entry[i - 1].left, entry[i].top - entry[i - 1].top);
-    expect(jump, `コマ ${i} (${entry[i - 1].frame} → ${entry[i].frame})`).toBeLessThan(edge === 'top' || edge === 'bottom' ? 24 : 12);
+  const runs: Sample[][] = [];
+  let run: Sample[] = [];
+  for (const s of trail) {
+    if (s.visible && s.action === 'enter') run.push(s);
+    else if (run.length > 0 && (!s.visible || s.action !== 'enter')) {
+      runs.push(run);
+      run = [];
+    }
+  }
+  if (run.length > 0) runs.push(run);
+  expect(runs.length, '登場').toBeGreaterThan(0);
+  let edge = 'none';
+  for (const entry of runs) {
+    expect(entry.length, '登場の途中のコマ').toBeGreaterThan(5);
+    const first = entry[0];
+    edge = first.right <= 13 ? 'left' : first.left >= view.width - 13 ? 'right' : first.bottom <= view.top + 1 ? 'top' : first.top >= view.bottom - 1 ? 'bottom' : 'none';
+    expect(edge, `最初に描いたコマは端の外 (${JSON.stringify(first)})`).not.toBe('none');
+    for (let i = 1; i < entry.length; i += 1) {
+      const jump = Math.hypot(entry[i].left - entry[i - 1].left, entry[i].top - entry[i - 1].top);
+      expect(jump, `コマ ${i} (${entry[i - 1].frame} → ${entry[i].frame})`).toBeLessThan(edge === 'top' || edge === 'bottom' ? 24 : 12);
+    }
   }
   for (const s of trail) expect(s.sideways, '横スクロール').toBeLessThanOrEqual(0);
-  return { edge, first, last: entry[entry.length - 1] };
+  const last = runs[runs.length - 1];
+  return { edge, first: last[0], last: last[last.length - 1] };
 }
 
 /** 表示枠に重なる操作部品・文字・固定バー (0.5px 未満の接触は除く)。 */

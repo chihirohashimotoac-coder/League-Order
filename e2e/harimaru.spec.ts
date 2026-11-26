@@ -298,8 +298,11 @@ test('顔をタップ・クリックすると喜び、下の画面の操作に�
   const url = page.url();
   const actions = await watchActions(page);
   const point = await body(page);
-  if (page.viewportSize()!.width < 600) await page.touchscreen.tap(point.faceX, point.y);
-  else await page.mouse.click(point.faceX, point.y);
+  // 顔の上の方 (頭の高さ) を触る。足元の足場がボタン (タイル) のとき、足元に近い点を触ると、ブラウザーのタッチの
+  // 位置の補正で下のボタンが押されることがある (ハリマルはクリックを受け取らない)。
+  const faceY = point.y - 5;
+  if (page.viewportSize()!.width < 600) await page.touchscreen.tap(point.faceX, faceY);
+  else await page.mouse.click(point.faceX, faceY);
   await expect.poll(actions, { timeout: 3_000 }).toContain('happy');
   // 画面は変わらず、ダイアログも開かない。
   expect(page.url()).toBe(url);
@@ -435,9 +438,10 @@ test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカード
    * (前の標本から動いたときだけ数える)。
    */
   const seams = { right: 0, left: 0 };
-  // 乱数の種: 9・14 は継ぎ目の手前まで歩く種 (時計を読み込みの前から止めたときの歩き方)。
+  // 乱数の種: 10・12 は継ぎ目の手前まで歩く種 (時計を読み込みの前から止めたときの歩き方。画面の端から入るように
+  // なって歩き方が変わったため、1〜16 を試して選び直した。9・14 は継ぎ目まで歩かなくなった)。
   // 種ごとに新しいページで、時計を読み込みの前から止めて進める (同じ種なら同じ歩き方になる)。
-  for (const seed of [1, 9, 14]) {
+  for (const seed of [1, 10, 12]) {
     const context = await browser.newContext({ ...info.project.use, viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, serviceWorkers: 'block' });
     const page = await context.newPage();
     await seedRandom(page, seed);
@@ -472,8 +476,9 @@ test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカード
           gap = Math.min(gap, here);
           const neighbor = (side: 'right' | 'left'): boolean =>
             cards.some(({ q: o }) => Math.abs(o.top - q.top) <= 3 && (side === 'right' ? o.left - q.right : q.left - o.right) >= 0 && (side === 'right' ? o.left - q.right : q.left - o.right) <= 20);
-          if (q.right - right <= 16 && neighbor('right')) seam = 'right';
-          if (left - q.left <= 16 && neighbor('left')) seam = 'left';
+          // 足場の両端は角丸の半径 (サンプルのタイルは 16px) だけ除くので、継ぎ目の手前で止まる位置は端から 16px。
+          if (q.right - right <= 18 && neighbor('right')) seam = 'right';
+          if (left - q.left <= 18 && neighbor('left')) seam = 'left';
         }
         return { moving: true, gap, where: `${action} x=${Math.round(r.left)} foot=${Math.round(r.bottom)}`, seam, x: r.left, card };
       });
