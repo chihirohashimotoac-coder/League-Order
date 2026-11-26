@@ -16,6 +16,10 @@ export interface MeasuredTerrain extends TerrainInput {
   containers?: ReadonlySet<Element>;
   /** いま見えている範囲 (ページ座標)。固定ヘッダー・下部ナビ・固定操作バーと、ピンチズームで見えない部分を除く。 */
   view: { top: number; bottom: number; left: number; right: number };
+  /** 足場の要素の箱 (ページ座標、elements と同じ順)。側面・角の判定に使う。 */
+  boxes?: readonly Rect[];
+  /** 文書の下端 (ページ座標)。キャラクターをこれより下に置かない (スクロールできる範囲を広げない)。 */
+  docBottom?: number;
 }
 
 const SOLID_TAGS = new Set([
@@ -125,7 +129,8 @@ export function containersOf(elements: readonly Element[], root: Element): Set<E
  * @param containers 足場を包む入れ物 (containersOf)。色・枠・スクロール領域でも箱全体は数えない (疑似要素の内容が
  *   ある入れ物は数える)。直下の文字はふつうに数える。
  */
-export function collectObstacles(root: Element, regions: readonly Rect[], win: Window = window, seeThrough?: Element, containers?: ReadonlySet<Element>): Rect[] {
+export function collectObstacles(root: Element, regions: readonly Rect[], win: Window = window, seeThrough?: Element | ReadonlySet<Element>, containers?: ReadonlySet<Element>): Rect[] {
+  const through = (el: Element): boolean => (seeThrough instanceof Set ? seeThrough.has(el) : seeThrough === el);
   const doc = root.ownerDocument;
   const sx = win.scrollX;
   const sy = win.scrollY;
@@ -145,7 +150,7 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
     // 実際にスクロールする入れ物 (中身が動く) は、包んでいても箱全体を数える。
     const scrolling = /(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`) && overflows(el, style);
     const solid = isSolid(el, style) && (!behind || scrolling);
-    if (el !== seeThrough && (solid || hasPseudoContent(el, win))) {
+    if (!through(el) && (solid || hasPseudoContent(el, win))) {
       obstacles.push(box);
       continue;
     }
@@ -173,14 +178,16 @@ export function topCornerRadius(el: Element, win: Window = window): number {
   return Math.max(radius(style.borderTopLeftRadius), radius(style.borderTopRightRadius));
 }
 
-/** 計測する。root (例: `.app-main`) の中だけを見る。 */
-export function measureTerrain(root: Element, platformSelector: string, win: Window = window): MeasuredTerrain {
-  const doc = root.ownerDocument;
+/**
+ * いま見えている範囲 (ページ座標)。固定ヘッダー・下部ナビ・固定操作バーの内側で、ピンチズーム中は実際に見えている
+ * 範囲 (visual viewport)。固定バーと画面の大きさだけを読む軽い計測 (スクロールのたびに呼べる)。
+ */
+export function viewport(win: Window = window): MeasuredTerrain['view'] {
+  const doc = win.document;
   const sx = win.scrollX;
   const sy = win.scrollY;
   const viewportWidth = doc.documentElement.clientWidth || win.innerWidth;
   const viewportHeight = win.innerHeight;
-
   let viewTop = 0;
   let viewBottom = viewportHeight;
   for (const bar of Array.from(doc.querySelectorAll(FIXED_BARS))) {
@@ -189,15 +196,58 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
     if (rect.top < viewportHeight / 2) viewTop = Math.max(viewTop, rect.bottom);
     else viewBottom = Math.min(viewBottom, rect.top);
   }
+  let viewLeft = 0;
+  let viewRight = viewportWidth;
+  const visual = win.visualViewport;
+  if (visual) {
+    viewTop = Math.max(viewTop, visual.offsetTop);
+    viewBottom = Math.min(viewBottom, visual.offsetTop + visual.height);
+    viewLeft = Math.max(viewLeft, visual.offsetLeft);
+    viewRight = Math.min(viewRight, visual.offsetLeft + visual.width);
+  }
+  return { top: sy + viewTop, bottom: sy + viewBottom, left: sx + viewLeft, right: sx + viewRight };
+}
+
+/** 見えない要素 (visibility・透明・自身の大きさ 0) か。祖先の透明・非表示も数える。 */
+function invisible(el: Element, root: Element, win: Window): boolean {
+  for (let node: Element | null = el; node && node !== root.parentElement; node = node.parentElement) {
+    const style = win.getComputedStyle(node);
+    if (style.visibility === 'hidden' || style.visibility === 'collapse' || style.display === 'none') return true;
+    if (parseFloat(style.opacity || '1') < 0.05) return true;
+  }
+  return false;
+}
+
+/** フォーカスの表示 (キーボード操作の輪) が、要素かその中に出ているか。その上には立たない。 */
+function focusShown(el: Element): boolean {
+  const active = el.ownerDocument.activeElement;
+  if (!active || active === el.ownerDocument.body || !el.contains(active)) return false;
+  try {
+    return active.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+}
+
+/** 計測する。root (例: `.app-main`) の中だけを見る。 */
+export function measureTerrain(root: Element, platformSelector: string, win: Window = window): MeasuredTerrain {
+  const doc = root.ownerDocument;
+  const sx = win.scrollX;
+  const sy = win.scrollY;
+  const viewportWidth = doc.documentElement.clientWidth || win.innerWidth;
 
   const platforms: Platform[] = [];
   const elements: Element[] = [];
+  const boxes: Rect[] = [];
   for (const el of Array.from(root.querySelectorAll(platformSelector))) {
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) continue;
     if (movesOnItsOwn(el, root, win)) continue;
+    // 見えない要素・フォーカスの輪が出ている要素には立たない。
+    if (invisible(el, root, win) || focusShown(el)) continue;
     platforms.push({ left: rect.left + sx, right: rect.right + sx, top: rect.top + sy });
     elements.push(el);
+    boxes.push(toPage(rect, sx, sy));
   }
 
   const bands: Rect[] = platforms.map((p) => ({
@@ -209,23 +259,14 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
   const containers = containersOf(elements, root);
   const obstacles = collectObstacles(root, bands, win, undefined, containers);
 
-  // ピンチズーム中は、実際に見えている範囲 (visual viewport) に狭める。
-  let viewLeft = 0;
-  let viewRight = viewportWidth;
-  const visual = win.visualViewport;
-  if (visual) {
-    viewTop = Math.max(viewTop, visual.offsetTop);
-    viewBottom = Math.min(viewBottom, visual.offsetTop + visual.height);
-    viewLeft = Math.max(viewLeft, visual.offsetLeft);
-    viewRight = Math.min(viewRight, visual.offsetLeft + visual.width);
-  }
-
   return {
     platforms,
     elements,
+    boxes,
     containers,
     obstacles,
     bounds: { left: sx + 4, right: sx + viewportWidth - 4 },
-    view: { top: sy + viewTop, bottom: sy + viewBottom, left: sx + viewLeft, right: sx + viewRight },
+    view: viewport(win),
+    docBottom: Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0),
   };
 }

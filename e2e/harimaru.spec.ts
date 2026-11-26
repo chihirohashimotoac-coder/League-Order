@@ -31,11 +31,38 @@ async function openSampleHome(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルで試す' }).click();
   await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
-  // サンプルの読み込み後、アプリはホームを少し下までスクロールする (既存の動作)。PC の低い画面では
-  // その位置に安全な足場がなく、ハリマルは出ないのが正しい。足場の見える先頭へ戻してから確かめる。
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await scrollToEntry(page);
   // 画面の入場アニメーション (CSS、実時間で進む) が終わるのを待つ。page.clock はタイマーだけを進めるため。
   await page.waitForTimeout(1_500);
+}
+
+/**
+ * ハリマルが画面の端から入れる位置へスクロールする (登場は端からだけ。端から最初の足場までの安全な経路が要る)。
+ * - スマホ: 先頭 (右端の外から「観戦・分析」のタイルへ小さく跳んで入れる)。
+ * - PC (横幅 1024 以上): サンプルのホームは左右の端からカードまでが遠く、左右からは入れない (記録がないときの
+ *   上下の端の経路を使う)。次の試合のカードの下端が見えている上端のすぐ上に来る位置 = 上端からタイルへ落ちられる。
+ * サンプルの読み込み後にアプリがホームを少し下へスクロールする既存の動作は、ここで置き換える。
+ */
+async function scrollToEntry(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    if (window.innerWidth < 1024) {
+      window.scrollTo(0, 0);
+      return;
+    }
+    const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
+    const header = document.querySelector('.app-header')!.getBoundingClientRect();
+    window.scrollTo(0, Math.round(Math.max(0, card.bottom + window.scrollY - header.bottom + 6)));
+  });
+}
+
+/** 時計を少しずつ進めて、端からの登場が終わり、足場に立つまで待つ (のぞいて引っ込む回・引っ込んだあとの間も含む)。 */
+async function appear(page: Page, maxMs = 30_000): Promise<void> {
+  for (let spent = 0; spent <= maxMs; spent += 250) {
+    const standing = await sprite(page).evaluate((el) => el.dataset.visible === 'true' && el.dataset.action !== 'enter');
+    if (standing) return;
+    await page.clock.runFor(250);
+  }
+  throw new Error('ハリマルが端から現れない');
 }
 
 /** 表示枠の見える部分に重なるボタン・リンク・入力・文字・固定バーの一覧 (0.5px 未満の接触は除く)。 */
@@ -48,6 +75,9 @@ async function overlaps(page: Page): Promise<string[]> {
     const clip = /inset\(0(?:px)? 0(?:px)? ([\d.]+)px/.exec((el as HTMLElement).style.clipPath || '');
     const clipped = clip ? parseFloat(clip[1]) : 0;
     const box = { left: r.left + 2.5, right: r.right - 2.5, top: r.top + 0.5, bottom: r.bottom - 0.5 - clipped };
+    // 固定ヘッダー・下部ナビの裏 (画面の端から入る途中) の部分は描かれていないので数えない。
+    box.top = Math.max(box.top, document.querySelector('.app-header')?.getBoundingClientRect().bottom ?? -Infinity);
+    box.bottom = Math.min(box.bottom, document.querySelector('.tab-bar')?.getBoundingClientRect().top ?? Infinity);
     if (box.bottom <= box.top) return [];
     const hit = (q: { left: number; right: number; top: number; bottom: number }): boolean =>
       q.right > box.left && q.left < box.right && q.bottom > box.top && q.top < box.bottom;
@@ -78,8 +108,7 @@ test('ホームに 1 体だけ現れ、UI に重ならずに歩き、クリッ�
   await page.clock.install({ time: start });
   await page.clock.pauseAt(start + 1_000);
   await openSampleHome(page);
-  await page.clock.runFor(4_000);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  await appear(page);
   await expect(page.getByTestId('harimaru-layer')).toHaveCount(1);
   await expect(sprite(page)).toHaveCount(1);
   await expect(page.getByTestId('harimaru-layer')).toHaveAttribute('aria-hidden', 'true');
@@ -112,28 +141,26 @@ test('ホームに 1 体だけ現れ、UI に重ならずに歩き、クリッ�
 test('既存のボタンはハリマルの有無で同じように動く (日程・結果への移動と、ホームへの戻り)', async ({ page }) => {
   await page.clock.install();
   await openSampleHome(page);
-  await page.clock.runFor(4_000);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  await appear(page);
   await page.getByTestId('home-results').click();
   // ボタンの操作はそのまま届き、画面が移る (ハリマルは移った先で足場を探し直す)。
   await expect(page.locator('.app-header h1')).not.toHaveText('サンプルチーム');
   await tab(page, 'ホーム').click();
-  await page.clock.runFor(4_000);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  await scrollToEntry(page);
+  await appear(page);
 });
 
 test('モーダル・シートを開くと隠れ、閉じると戻る', async ({ page }) => {
   await page.clock.install();
   await openSampleHome(page);
-  await page.clock.runFor(4_000);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  await appear(page);
   await page.getByRole('button', { name: /チーム切替/ }).first().click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(sprite(page)).toHaveAttribute('data-visible', 'false');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.clock.runFor(3_000);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  await page.clock.runFor(1_000);
+  await appear(page);
 });
 
 test('設定で OFF にすると表示されず、再読み込み後も OFF のまま。ON で戻る', async ({ page }) => {
@@ -155,7 +182,8 @@ test('設定で OFF にすると表示されず、再読み込み後も OFF の�
   await page.getByText('ハリマル', { exact: true }).click();
   await page.getByTestId('harimaru-toggle').check();
   await tab(page, 'ホーム').click();
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  await scrollToEntry(page);
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
 });
 
 test('「動きを減らす」設定では描画しない', async ({ page }) => {
@@ -165,7 +193,7 @@ test('「動きを減らす」設定では描画しない', async ({ page }) => 
   await expect(page.getByTestId('harimaru-layer')).toHaveCount(0);
   // 設定が変わったら追従する。
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.getByTestId('harimaru-layer')).toHaveCount(0);
 });
@@ -190,8 +218,7 @@ test('安全な足場がなくなると即座に消え、足場が戻ると安�
   expect(await sprite(page).evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
 
   await page.evaluate(() => document.getElementById('harimaru-blocker')?.remove());
-  await page.clock.runFor(4_000);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  await appear(page);
   expect(await overlaps(page)).toEqual([]);
 
   // 表示中に足場がふさがれたら、検出した時点 (DOM 変化のまとめ待ち 200ms) でフェードせずに消える。
@@ -205,12 +232,12 @@ test('安全な足場がなくなると即座に消え、足場が戻ると安�
 test('PC: 足場のタイルにホバーして浮いても消えず、浮いたタイルに重ならない', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'ホバーで浮くのはマウスのある画面だけ');
   await openSampleHome(page);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
   // 足元のタイル・同じ列のほかのタイル・列の外を順に指す。トランジションの途中も含めて、
   // 消えずに (足場を失った場合を除く)、ボタンや文字に重ならないことを確かめる。
   let onTile = 0;
   for (let i = 0; i < 6; i += 1) {
-    await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+    await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
     const targets = await sprite(page).evaluate((el) => {
       const r = el.getBoundingClientRect();
       const feet = { x: r.left + r.width / 2, y: r.bottom + 12 };
@@ -258,7 +285,7 @@ async function body(page: Page): Promise<{ x: number; y: number; faceX: number; 
 }
 
 async function waitStanding(page: Page): Promise<void> {
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
   // 隠れている・跳ねている間は待つ。
   await expect.poll(async () => sprite(page).evaluate((el) => !el.style.clipPath && ['idle', 'look', 'rest'].includes(el.dataset.action ?? '')), { timeout: 20_000 }).toBe(true);
 }
@@ -331,13 +358,13 @@ test('入力欄にフォーカスがある間は休み、離れると戻る', as
   await openSampleHome(page);
   await tab(page, 'メンバー').click();
   await page.evaluate(() => window.scrollTo(0, 0));
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
   const field = page.locator('.page-view input:not([type="checkbox"]):not([type="radio"]):visible').first();
   await field.focus();
   await expect(sprite(page)).toHaveAttribute('data-visible', 'false');
   await field.blur();
   await page.evaluate(() => window.scrollTo(0, 0));
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
 });
 
 /**
@@ -480,23 +507,26 @@ test('速くスクロールしても位置が崩れず、止まったあとも�
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(1_500);
   if ((await sprite(page).getAttribute('data-visible')) === 'true') expect(await overlaps(page)).toEqual([]);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
   expect(await overlaps(page)).toEqual([]);
 });
 
-/** 読み込んだ追加素材 v0.9 (動作ごとのアトラス) のファイル名。 */
+/** 読み込んだ追加素材 v0.9 (14 動作) と動作素材 v1.0 (10 動作) のアトラスのファイル名。 */
 const clipRequests = (page: Page): Promise<string[]> =>
   page.evaluate(() =>
     performance
       .getEntriesByType('resource')
       .map((e) => e.name.split('/').pop() ?? '')
-      .filter((n) => /^(hang|slip|climb|cursorHang|tumble|sleepyFall|groom|stretch|lookUp|surprise|tilt|play|run|happy)@\dx/.test(n)),
+      .filter((n) => /^(hang|slip|climb|cursorHang|tumble|sleepyFall|groom|stretch|lookUp|surprise|tilt|play|run|happy|lookDown|jumpPrep|jumpAir|jumpLand|dropAir|dropLand|peekTop|sideMount|sideClimb|sideLedge)@\dx/.test(n)),
   );
 
-test('追加素材 v0.9 は登場のあとで画素密度に合う 1 組 (14 動作) だけを読み込み、表示 OFF・動きを減らす設定では読み込まない', async ({ page, browser }, info) => {
+test('追加素材 v0.9・動作素材 v1.0 は描画レイヤーの準備のあとで画素密度に合う 1 組 (14 + 10 動作) だけを読み込み、表示 OFF・動きを減らす設定では読み込まない', async ({ page, browser }, info) => {
   await openSampleHome(page);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 10_000 });
-  await expect.poll(async () => (await clipRequests(page)).length, { timeout: 10_000 }).toBe(14);
+  await expect(sprite(page)).toHaveAttribute('data-visible', 'true', { timeout: 20_000 });
+  // v0.9 は 14 枚を要求する。v1.0 は 4KB 未満の画像をビルドが埋め込む (データ URI。1x の 9 枚) ので、要求は 10 枚以下。
+  const V09 = /^(hang|slip|climb|cursorHang|tumble|sleepyFall|groom|stretch|lookUp|surprise|tilt|play|run|happy)@/;
+  await expect.poll(async () => (await clipRequests(page)).filter((n) => V09.test(n)).length, { timeout: 10_000 }).toBe(14);
+  expect((await clipRequests(page)).filter((n) => !V09.test(n)).length).toBeLessThanOrEqual(10);
   const density = info.project.name === 'mobile' ? 3 : 1;
   for (const name of await clipRequests(page)) expect(name).toMatch(new RegExp(`@${density}x`));
 
@@ -524,8 +554,7 @@ test('画面を狭めても、隠れたままのハリマルが右端からは�
   // 前の位置 (右端の外) に残り、スマホではレイアウト幅が広がって横スクロールが出た。時計を止めてその状態を固定する。
   await page.clock.install();
   await openSampleHome(page);
-  await page.clock.runFor(4_000);
-  await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
+  await appear(page);
   await page.clock.pauseAt(Date.now() + 60_000);
   const width = page.viewportSize()!.width;
   // 隠れた状態 (不透明度 0) を作り、右端の手前に置く。

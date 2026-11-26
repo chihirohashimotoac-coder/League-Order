@@ -21,14 +21,17 @@ import {
   DEFAULT_ANIMATION,
   DEFAULT_BEHAVIOR,
   DEFAULT_INTERACTION,
+  DEFAULT_MOTION,
   DEFAULT_TERRAIN,
   DEFAULT_TIMING,
   SPRITE,
   type AnimationParams,
   type BehaviorParams,
   type InteractionParams,
+  type MotionParams,
   type TimingParams,
 } from './params';
+import { entryPlans, pickPlan, retreatOf, stepAt, stepsAreClear, stepsMargin, type Edge, type EntryMode, type MovePlan, type Pose, type Step } from './paths';
 import {
   BACKGROUND_SIZE,
   CLIPS,
@@ -66,7 +69,7 @@ import {
   type Rect,
   type Segment,
 } from './terrain';
-import { collectObstacles, measureTerrain, topCornerRadius, type MeasuredTerrain } from './terrainDom';
+import { collectObstacles, measureTerrain, topCornerRadius, viewport, type MeasuredTerrain } from './terrainDom';
 
 /**
  * 休止の理由。hidden = タブ非表示、modal = モーダル・シート表示中、offscreen = キャラクターが画面外、
@@ -77,7 +80,7 @@ export type PauseReason = 'hidden' | 'modal' | 'offscreen' | 'shift' | 'input';
 /** 行動中の状態 (自分から選ぶ行動と、触れ合いの反応)。 */
 export type ActionState =
   | HarimaruAction
-  | 'happy' | 'turn' | 'flee' | 'approach' | 'peek' | 'enter'
+  | 'happy' | 'turn' | 'flee' | 'approach' | 'peek' | 'enter' | 'hopJump' | 'drop' | 'wallClimb'
   | 'slip' | 'hang' | 'climb' | 'cursorHang' | 'tumble' | 'sleepyFall' | 'lookUp' | 'tilt' | 'play' | 'surprise'
   | `live:${LiveReaction}`;
 
@@ -86,7 +89,7 @@ type SheetKey = 'base' | ClipId | `rx:${ReactionId}`;
 
 /** 外から (デバッグ・テスト) 始められる動作。いつもと同じ安全の確かめを通り、できなければ false。 */
 export type TriggerName =
-  | 'slip' | 'tumble' | 'sleepyFall' | 'groom' | 'stretch' | 'lookUp' | 'tilt' | 'play' | 'surprise' | 'happy' | 'run' | 'cursorHang'
+  | 'slip' | 'tumble' | 'sleepyFall' | 'groom' | 'stretch' | 'lookUp' | 'tilt' | 'play' | 'surprise' | 'happy' | 'run' | 'cursorHang' | 'turn'
   | `live:${LiveReaction}`;
 
 export interface ControllerOptions {
@@ -116,7 +119,23 @@ export interface ControllerOptions {
   /** 観戦リアクションの調整値。 */
   live?: LiveParams;
   /** テスト用: 経路の障害物の集め方の差し替え (seeThrough = 内側を調べるカード自身は数えない)。 */
-  obstaclesIn?: (root: Element, regions: readonly Rect[], win: Window, seeThrough?: Element, containers?: ReadonlySet<Element>) => Rect[];
+  obstaclesIn?: (root: Element, regions: readonly Rect[], win: Window, seeThrough?: Element | ReadonlySet<Element>, containers?: ReadonlySet<Element>) => Rect[];
+  /** 画面端からの登場・足場の移動の調整値。 */
+  motion?: MotionParams;
+  /**
+   * 最初の登場の端 (画面遷移の前の画面から引き継ぐ、左右どちらの端から入りたいか)。null・省略なら記録なし
+   * (安全な経路のある左右どちらか)。座標・足場・タイマーは引き継がない。
+   */
+  entryFrom?: 'left' | 'right' | null;
+}
+
+/**
+ * 次に入る端の意図。strict = スクロールで体が抜けた端 (その端だけから入る。経路がなければ画面の外で待つ)。
+ * strict でなければ左右の好み (なければ乱数) で、左右どちらか、必要なら上下 (sideEntryFallback)。
+ */
+interface EntryIntent {
+  edge: Edge;
+  strict: boolean;
 }
 
 type ObstaclesIn = NonNullable<ControllerOptions['obstaclesIn']>;
@@ -171,6 +190,8 @@ const GEOMETRY_PROPERTY = /^(all|transform|translate|scale|rotate|top|right|bott
 const SHIFT_FALLBACK_MS = 2_000;
 /** 保険の確認を繰り返す回数。超えても動いていれば、姿を消して安全な場所から出直す。 */
 const SHIFT_MAX_CHECKS = 5;
+/** 描く位置を画素に合わせるとき、足元が足場の上辺より下へ食い込んでよい量 (装置の画素の割合)。 */
+const FOOT_SNAP = 0.3;
 /** 足場の高さがこの範囲でずれたら、足元を合わせ直して続ける (ホバーで 2px 浮くタイルなど)。 */
 const SNAP_TOLERANCE = 3;
 
@@ -190,6 +211,22 @@ export class HarimaruController {
   private readonly available: (id: MotionId) => boolean;
   private readonly finePointer: boolean;
   private readonly obstaclesIn: ObstaclesIn;
+  private motion: MotionParams;
+  /** 次に入る端の意図 (登場に成功するまで保つ。引っ込む仕草では消さない)。 */
+  private intent: EntryIntent | null = null;
+  /** 登場の途中の経路 (端の向こうから最初の足場まで)。 */
+  private entering: MovePlan | null = null;
+  /** 直前の登場のしかたと、引っ込んだあとに次の登場を待つ時刻。 */
+  private lastEntryMode: EntryMode | null = null;
+  private nextEntryAt = -Infinity;
+  /** スクロールの途中で体が完全に抜けた端 (描いている位置で判定。また見えたら消す)。 */
+  private exitSeen: 'top' | 'bottom' | null = null;
+  /** 経路を再生している間の、セルの左上 (ページ座標)。null なら立ち位置から描く。 */
+  private abs: { x: number; y: number } | null = null;
+  /** 最後の計測での足場の要素の箱 (platformEls と同じ順)。 */
+  private boxes: readonly Rect[] = [];
+  /** 直前に渡った 2 つの要素 (往復を選びにくくする)。 */
+  private lastPair: { a: Element | null; b: Element | null; at: number } | null = null;
   /** 読み込めた画像 (base = v0.2 のアトラス、ほかは v0.9 の動作ごとのアトラス) と、いま表示している画像。 */
   private readonly sheets = new Map<SheetKey, string>();
   private sheetKey: SheetKey = 'base';
@@ -294,6 +331,8 @@ export class HarimaruController {
     this.obstaclesIn = options.obstaclesIn ?? collectObstacles;
     this.effect = options.effect ?? null;
     this.liveParams = options.live ?? DEFAULT_LIVE;
+    this.motion = options.motion ?? DEFAULT_MOTION;
+    if (options.entryFrom) this.intent = { edge: options.entryFrom, strict: false };
     this.lastActivityAt = this.now();
   }
 
@@ -404,6 +443,9 @@ export class HarimaruController {
     effect: string | null;
     pendingLive: LiveReaction | null;
     paused: PauseReason[];
+    entering: string | null;
+    intent: string | null;
+    abs: { x: number; y: number } | null;
     timers: number;
     auxTimers: number;
     frame: boolean;
@@ -425,6 +467,9 @@ export class HarimaruController {
       effect: this.effectOn ? `${this.effectOn.id}:${this.effectOn.frame}` : null,
       pendingLive: this.pendingLive?.kind ?? null,
       paused: [...this.pauses],
+      entering: this.entering ? `${this.entering.edge}:${this.entering.mode}` : null,
+      intent: this.intent ? `${this.intent.edge}${this.intent.strict ? '' : '?'}` : null,
+      abs: this.abs ? { ...this.abs } : null,
       timers: this.actionTimers.size,
       auxTimers: [this.remeasureTimer, this.scrollTimer, this.shiftTimer, this.rideTimer, this.cursorTimer, this.checkFrame, this.pendingTimer].filter((id) => id !== null).length,
       frame: this.frame !== null,
@@ -761,10 +806,25 @@ export class HarimaruController {
     this.lastScroll = { y, t };
     this.clearTimer('scroll');
     if (this.destroyed || this.blocked()) return;
+    this.noteExit();
+    // 画面の外で端から出直すのを待っている間にまたスクロールした: 止まってから確かめ直す。
+    if (this.placed && this.pauses.has('offscreen')) this.clearActionTimers();
     this.scrollTimer = this.win.setTimeout(() => {
       this.scrollTimer = null;
       this.onScrollEnd();
     }, this.timing.scrollIdleMs);
+  }
+
+  /**
+   * スクロールの途中で、立っている体 (描いている位置) が見えている範囲の上・下へ完全に抜けたかを記録する
+   * (スクロールの向きではなく、どちらの端を抜けたか)。また見えてきたら記録を消す。
+   */
+  private noteExit(view = viewport(this.win)): void {
+    if (!this.placed || this.airborne) return;
+    const head = this.top - SPRITE.height;
+    if (this.top <= view.top) this.exitSeen = 'top';
+    else if (head >= view.bottom) this.exitSeen = 'bottom';
+    else this.exitSeen = null;
   }
 
   private onScrollEnd(): void {
@@ -773,30 +833,62 @@ export class HarimaruController {
     this.lastScroll = null;
     if (this.destroyed || this.blocked()) return;
     if (!this.placed) {
-      if (!this.placed) this.scheduleEnter(0);
+      // 登場の途中で止められた・まだ入れていない: 同じ意図のまま、止まった画面でもう一度確かめる。
+      this.scheduleEnter(0);
       return;
     }
-    const terrain = this.measureFn(this.root, this.selector, this.win);
+    const view = this.measureFn(this.root, this.selector, this.win).view;
+    this.view = view;
     const inView =
-      this.top - SPRITE.height >= terrain.view.top &&
-      this.top <= terrain.view.bottom &&
-      this.x + SPRITE.sideInset >= terrain.view.left &&
-      this.x + SPRITE.width - SPRITE.sideInset <= terrain.view.right;
+      this.top - SPRITE.height >= view.top &&
+      this.top <= view.bottom &&
+      this.x + SPRITE.sideInset >= view.left &&
+      this.x + SPRITE.width - SPRITE.sideInset <= view.right;
     if (inView) {
+      // 逆にスクロールして元の位置が見えてきた: その場の続きから (置き直さない)。
+      this.exitSeen = null;
+      if (this.intent?.strict) this.intent = null;
       this.resume('offscreen');
       // 速いスクロールのあとは転ぶ (素材待ち。素材がなければ見送る)。観戦の演出中は転ばない (演出を途中で切らない)。
       if (fast && this.liveNow) this.log('tumble:skipped:live');
       else if (fast && this.placed && this.pauses.size === 0) this.react('tumble');
       return;
     }
-    // 見えない場所にいる: 見える足場があれば、そこへこっそり移る。なければ休む。
-    const segments = visibleSegments(computeSegments(terrain), terrain.view);
-    if (segments.length > 0) {
-      this.pauses.delete('offscreen');
-      this.vanish(0);
-    } else {
-      this.pause('offscreen');
+    this.noteExit(view);
+    this.pause('offscreen');
+    if (!this.exitSeen) return;
+    // 体が上・下へ完全に抜けた: その端から出直す (少し待ってから。待つ間に元の位置が見えてくれば、そのまま続ける)。
+    this.intent = { edge: this.exitSeen, strict: true };
+    this.after(between(this.rng, this.motion.edgeReturnDelayMs), () => this.returnFromEdge());
+  }
+
+  /**
+   * 画面の外に抜けたまま待っている: 抜けた端から最初の足場への経路があれば、元の位置を離れて端から入る。
+   * なければ元の位置に残ったまま待つ (逆にスクロールすれば、元の位置がそのまま見えてくる)。
+   */
+  private returnFromEdge(): void {
+    if (this.destroyed || !this.placed || this.blocked() || !this.pauses.has('offscreen') || !this.intent?.strict) return;
+    if (this.animating()) {
+      this.after(300, () => this.returnFromEdge());
+      return;
     }
+    const wait = this.nextEntryAt - this.now();
+    if (wait > 0) {
+      this.after(wait, () => this.returnFromEdge());
+      return;
+    }
+    const terrain = this.survey();
+    const view = terrain.view;
+    if (this.top - SPRITE.height >= view.top && this.top <= view.bottom) {
+      this.exitSeen = null;
+      this.intent = null;
+      this.resume('offscreen');
+      return;
+    }
+    const plan = this.planEntry(terrain);
+    if (!plan) return;
+    this.setVisible(false);
+    this.startEntry(plan);
   }
 
   // ------------------------------------------------------------------ 休止・再開
@@ -879,6 +971,11 @@ export class HarimaruController {
       return;
     }
     this.segment = segment;
+    // 画面の外で、抜けた端から出直すのを待っている: 変化のあとで経路ができたかを確かめる。
+    if (this.pauses.has('offscreen') && this.intent?.strict) {
+      this.returnFromEdge();
+      return;
+    }
     if (this.action === 'walk') {
       // 歩いている途中で足場が縮んだら、新しい範囲の中で止まる。
       const clamped = clamp(this.x, segment.minX, segment.maxX);
@@ -933,11 +1030,7 @@ export class HarimaruController {
   }
 
   private currentSegment(): Segment | null {
-    const terrain = this.measureFn(this.root, this.selector, this.win);
-    this.view = terrain.view;
-    this.platformEls = terrain.elements ?? [];
-    this.containers = terrain.containers;
-    this.segments = computeSegments(terrain);
+    this.survey();
     this.segment = findSegment(this.segments, this.top, this.x, SNAP_TOLERANCE);
     // 小さなずれ (フォントの読み込み・端数・ホバーで浮くタイル) は、足元を新しい上辺に合わせ直す。
     if (this.segment) {
@@ -964,13 +1057,31 @@ export class HarimaruController {
   // ------------------------------------------------------------------ 登場・退場
 
   private scheduleEnter(delay: number): void {
-    if (this.destroyed || this.placed) return;
+    // 登場の途中は予約し直さない (古いタイマーで二重に登場しない)。
+    if (this.destroyed || this.placed || this.entering) return;
     this.clearActionTimers();
     this.after(delay, () => this.tryEnter());
   }
 
+  /** 計測して、足場の一覧・要素・箱・見えている範囲を覚える。 */
+  private survey(): MeasuredTerrain {
+    const terrain = this.measureFn(this.root, this.selector, this.win);
+    this.view = terrain.view;
+    this.platformEls = terrain.elements ?? [];
+    this.containers = terrain.containers;
+    this.segments = computeSegments(terrain);
+    // 計測を差し替えたテストなど、箱のないときは上辺から下へ 60 px の箱とみなす。
+    this.boxes = terrain.boxes ?? terrain.platforms.map((p) => ({ left: p.left, right: p.right, top: p.top, bottom: p.top + 60 }));
+    return terrain;
+  }
+
+  /**
+   * 画面の端から登場する。端は意図 (スクロールで抜けた端 / 前の画面から引き継いだ左右 / なし) で決め、その端から
+   * 最初の足場までの安全な経路があるときだけ入る。なければ画面の外で待ち、スクロールの停止・リサイズ・DOM の変化で
+   * もう一度確かめる (別の端や画面の中へ置き直さない)。
+   */
   private tryEnter(): void {
-    if (this.destroyed || this.placed || this.blocked()) return;
+    if (this.destroyed || this.placed || this.entering || this.blocked()) return;
     if (this.modalOpen()) {
       this.pause('modal');
       return;
@@ -981,56 +1092,240 @@ export class HarimaruController {
       return;
     }
     this.animationWaits = 0;
-    const terrain = this.measureFn(this.root, this.selector, this.win);
-    this.view = terrain.view;
-    this.platformEls = terrain.elements ?? [];
-    this.containers = terrain.containers;
-    this.segments = computeSegments(terrain);
-    const candidates = visibleSegments(this.segments, terrain.view);
-    // 安全な足場がない: 表示しない (DOM の変化・リサイズ・スクロールで、もう一度探す)。
-    if (candidates.length === 0) return;
-    // 広い足場ほど選ばれやすい。
-    const total = candidates.reduce((sum, s) => sum + (s.maxX - s.minX + 1), 0);
-    let roll = this.rng() * total;
-    let chosen = candidates[candidates.length - 1];
-    for (const candidate of candidates) {
-      roll -= candidate.maxX - candidate.minX + 1;
-      if (roll < 0) {
-        chosen = candidate;
-        break;
-      }
-    }
-    this.pauses.delete('offscreen');
-    this.placed = true;
-    this.top = chosen.top;
-    this.segment = chosen;
-    this.x = chosen.minX + (chosen.maxX - chosen.minX) * this.rng();
-    // 段の高さではなく、真下の足場の上辺に立つ。
-    this.top = this.footTop() ?? chosen.top;
-    this.dir = this.rng() < 0.5 ? -1 : 1;
-    this.history = [];
-    this.lift = 0;
-    this.airborne = false;
-    // 画面に着いたとき: ふわっと現れるか、カード裏からひょっこり顔を出す (気まぐれ)。
-    if (this.available('peek') && this.rng() < 0.5) {
-      this.sink = SPRITE.height + 2;
-      this.setVisible(true);
-      this.action = 'enter';
-      this.log('enter:peek');
-      this.place();
-      this.emerge();
+    // 引っ込んだ直後は、続けて出直さない。
+    const wait = this.nextEntryAt - this.now();
+    if (wait > 0) {
+      this.after(wait, () => this.tryEnter());
       return;
     }
+    const terrain = this.survey();
+    const plan = this.planEntry(terrain);
+    if (!plan) return;
+    this.startEntry(plan);
+  }
+
+  /** 登場を試す端の順。 */
+  private entryEdges(): Edge[] {
+    const intent = this.intent;
+    if (intent?.strict) return [intent.edge];
+    const first: Edge = intent && (intent.edge === 'left' || intent.edge === 'right') ? intent.edge : this.rng() < 0.5 ? 'left' : 'right';
+    const sides: Edge[] = [first, first === 'left' ? 'right' : 'left'];
+    return this.motion.sideEntryFallback ? [...sides, 'top', 'bottom'] : sides;
+  }
+
+  /** 登場の経路を選ぶ (安全な経路のある最初の端から)。なければ null (記録だけ残す)。 */
+  private planEntry(terrain: MeasuredTerrain): MovePlan | null {
+    const view = terrain.view;
+    const visible = visibleSegments(this.segments, view);
+    const edges = this.entryEdges();
+    // のぞく・立ち止まらず入る・のぞいて引っ込む (直前に引っ込んだときは引っ込まない)。
+    const peek = this.rng() < this.motion.entryPeekChance;
+    const retreat = peek && this.lastEntryMode !== 'retreat' && this.rng() < this.motion.entryRetreatChance;
+    const holdMs = between(this.rng, this.motion.peekHoldMs);
+    const walk = { speed: this.behavior.walkSpeed, frameMs: this.animation.walkFrameMs };
+    for (const edge of edges) {
+      // 下端からは側面をよじ登る (その素材がなければ入らない)。上端・左右の素材がなくても、v0.2 のコマで描ける。
+      if (edge === 'bottom' && !this.hasClips(['sideMount', 'sideClimb', 'sideLedge', 'climb'])) continue;
+      const dir: -1 | 1 = this.rng() < 0.5 ? -1 : 1;
+      const plans = entryPlans(edge, visible, this.boxes, view, { mode: peek ? 'peek' : 'direct', holdMs, dir, docBottom: terrain.docBottom, walk }, DEFAULT_TERRAIN, this.motion);
+      const safe = this.safePlans(plans, { beyond: edge, docBottom: terrain.docBottom });
+      const chosen = pickPlan(this.rng, safe);
+      if (!chosen) continue;
+      return retreat ? retreatOf(chosen.plan) : chosen.plan;
+    }
+    this.log(`enter:none:${edges.join('/')}`);
+    return null;
+  }
+
+  /**
+   * 候補の経路のうち、全体が安全なもの (見えている範囲に収まり、文字・操作部品などに重ならない)。
+   * 側面をつかむ経路は、その要素自身の面を数えない (中の文字・部品は数える)。ほかは、出発・着地の要素自身の
+   * 背景・枠に decorAllowance だけ重なってよい。
+   */
+  private safePlans(plans: readonly MovePlan[], options: { beyond?: Edge; docBottom?: number }): { plan: MovePlan; margin: number; penalty: number }[] {
+    const view = this.view;
+    if (!view || plans.length === 0) return [];
+    const out: { plan: MovePlan; margin: number; penalty: number }[] = [];
+    // 障害物は、経路の組 (つかまる側面の要素・出発と着地の要素) ごとに 1 回だけ集める。出発・着地の要素を包む入れ物
+    // (カードの中の枠など) の背景・枠は、その上に立っているときと同じく数えない (中の文字・部品は数える)。
+    const groups = new Map<string, Rect[]>();
+    const keyOf = (plan: MovePlan): string => (plan.wallBox !== null ? `w${plan.wallBox}` : `p${plan.fromBox ?? ''}:${plan.toBox ?? ''}`);
+    for (const plan of plans) {
+      const key = keyOf(plan);
+      if (groups.has(key)) continue;
+      const through = new Set<Element>();
+      for (const index of [plan.fromBox, plan.toBox]) {
+        const el = index !== null ? this.platformEls[index] : undefined;
+        for (let node = el?.parentElement; node && node !== this.root; node = node.parentElement) if (this.containers?.has(node)) through.add(node);
+      }
+      if (plan.wallBox !== null && this.platformEls[plan.wallBox]) through.add(this.platformEls[plan.wallBox]);
+      const regions = plans.filter((p) => keyOf(p) === key).map((p) => p.bounds);
+      groups.set(key, this.obstaclesIn(this.root, regions, this.win, through.size > 0 ? through : undefined, this.containers));
+    }
+    for (const plan of plans) {
+      const obstacles = groups.get(keyOf(plan))!;
+      let selfBoxes: Rect[] = [];
+      if (plan.wallBox === null) {
+        selfBoxes = [plan.fromBox, plan.toBox].filter((i): i is number => i !== null).map((i) => this.boxes[i]).filter(Boolean);
+      }
+      const clear = {
+        view,
+        beyond: options.beyond,
+        docBottom: options.docBottom,
+        overhang: plan.wallBox !== null ? this.motion.edgeOverhang : 0,
+        selfBoxes,
+        decor: this.motion.decorAllowance,
+      };
+      if (!stepsAreClear(plan.steps, obstacles, clear)) continue;
+      out.push({ plan, margin: stepsMargin(plan.steps, obstacles, clear), penalty: this.pairPenalty(plan) });
+    }
+    return out;
+  }
+
+  /** 直前に渡った 2 つの要素の間の経路 (行き・帰り) なら、しばらく選びにくくする。 */
+  private pairPenalty(plan: MovePlan): number {
+    const pair = this.lastPair;
+    if (!pair || this.now() - pair.at > this.motion.pairCooldownMs) return 1;
+    const a = plan.fromBox !== null ? this.platformEls[plan.fromBox] ?? null : null;
+    const b = plan.toBox !== null ? this.platformEls[plan.toBox] ?? null : null;
+    const same = (a === pair.a && b === pair.b) || (a === pair.b && b === pair.a);
+    return same && a !== null && b !== null ? this.motion.pairPenalty : 1;
+  }
+
+  private hasClips(ids: readonly ClipId[]): boolean {
+    return ids.every((id) => this.sheets.has(id));
+  }
+
+  /** 登場を始める (端の向こうから。最初の数コマは描かれない位置なので、瞬間的に現れない)。 */
+  private startEntry(plan: MovePlan): void {
+    this.interrupt();
+    this.pauses.delete('offscreen');
+    this.entering = plan;
+    this.airborne = true;
+    this.placed = false;
+    this.segment = null;
+    this.history = [];
+    this.lift = 0;
     this.sink = 0;
-    this.log('enter:fade');
-    this.run({ action: 'idle', durationMs: between(this.rng, this.behavior.idleMs) });
+    this.exitSeen = null;
+    this.action = 'enter';
+    this.log(`enter:${plan.edge}:${plan.mode}`);
+    const target = plan.toBox !== null ? this.platformEls[plan.toBox] : undefined;
+    const held = target ? this.pageRect(target) : null;
+    // 端から現れるときはフェードしない (見え始めた画素から連続して描く)。
+    this.sprite.dataset.instant = 'true';
+    this.playSteps(plan.steps, () => this.finishEntry(plan), () => !target || !held || this.sameRect(target, held));
     this.setVisible(true);
+  }
+
+  private finishEntry(plan: MovePlan): void {
+    this.entering = null;
+    this.airborne = false;
+    this.abs = null;
+    this.lastEntryMode = plan.mode ?? null;
+    if (!plan.end) {
+      // のぞいて引っ込んだ: 同じ端の意図のまま、しばらく空けて出直す。
+      this.setVisible(false);
+      this.nextEntryAt = this.now() + between(this.rng, this.motion.retreatCooldownMs);
+      this.scheduleEnter(this.nextEntryAt - this.now());
+      return;
+    }
+    this.intent = null;
+    this.placed = true;
+    this.x = plan.end.x;
+    this.top = plan.end.top;
+    this.segment = plan.end.segment;
+    this.top = this.footTop() ?? plan.end.top;
+    this.action = 'idle';
+    this.render(ROW.idle, IDLE_OPEN);
+    this.idle(between(this.rng, this.behavior.idleMs));
+  }
+
+  private pageRect(el: Element): Rect {
+    const r = el.getBoundingClientRect();
+    return { left: r.left + this.win.scrollX, top: r.top + this.win.scrollY, right: r.right + this.win.scrollX, bottom: r.bottom + this.win.scrollY };
+  }
+
+  /** 要素がまだ同じ場所にあるか (経路の再生中、毎フレームに 1 要素だけ確かめる)。 */
+  private sameRect(el: Element, rect: Rect): boolean {
+    if (!el.isConnected) return false;
+    const now = this.pageRect(el);
+    return now.right > now.left && Math.abs(now.top - rect.top) <= 1 && Math.abs(now.left - rect.left) <= 1 && Math.abs(now.right - rect.right) <= 1;
+  }
+
+  /**
+   * 経路 (段の並び) を再生する。時刻から段と途中の位置を求めて描く (コマは段が変わったときだけ切り替える)。
+   * check が false を返したら (掴んでいる・着地する要素が消えた・動いた)、そこでやめて姿を消し、出直す。
+   */
+  private playSteps(steps: readonly Step[], done: () => void, check?: () => boolean): void {
+    const starts: number[] = [];
+    let total = 0;
+    for (const step of steps) {
+      starts.push(total);
+      total += step.ms;
+    }
+    const startedAt = this.now();
+    let shown = -1;
+    const tick = (): void => {
+      this.frame = null;
+      if (check && !check()) {
+        this.holdLost();
+        return;
+      }
+      const elapsed = this.now() - startedAt;
+      let i = steps.length - 1;
+      while (i > 0 && starts[i] > elapsed) i -= 1;
+      const step = steps[i];
+      const t = step.ms > 0 ? (elapsed - starts[i]) / step.ms : 1;
+      this.dir = step.dir;
+      this.abs = stepAt(steps, i, t);
+      if (i !== shown) {
+        shown = i;
+        this.drawPose(step.pose);
+      } else {
+        this.place();
+      }
+      if (elapsed >= total) {
+        done();
+        return;
+      }
+      this.frame = this.requestFrame(tick);
+    };
+    tick();
+  }
+
+  /** 経路のコマを描く。動作の画像を読み込めていなければ、v0.2 の近いコマで描く (足場・側面の動作は計画の時点で除く)。 */
+  private drawPose(pose: Pose): void {
+    if (pose.sheet === 'base') {
+      this.render(pose.row as SpriteRow, pose.column);
+      return;
+    }
+    if (this.sheets.has(pose.sheet)) {
+      this.drawClip(pose.sheet, pose.frame);
+      return;
+    }
+    const air = pose.sheet === 'jumpAir' || pose.sheet === 'dropAir';
+    this.render(air ? ROW.walk : ROW.idle, air ? WALK_AIR : pose.sheet === 'lookDown' ? IDLE_LOOK : IDLE_OPEN);
+  }
+
+  /** 画面遷移のとき、次の画面で入りたい左右の端 (いまいる位置に近い側。いなければ意図の左右)。 */
+  exitSide(): 'left' | 'right' | null {
+    if (this.placed && this.view) return this.x + SPRITE.width / 2 < (this.view.left + this.view.right) / 2 ? 'left' : 'right';
+    const edge = this.intent?.edge;
+    return edge === 'left' || edge === 'right' ? edge : null;
+  }
+
+  /** 開発用: 登場・移動の調整値をその場で差し替える (プレビューで確率・間隔を調整する)。 */
+  tune(partial: Partial<MotionParams>): MotionParams {
+    this.motion = { ...this.motion, ...partial };
+    return this.motion;
   }
 
   /** 姿を消して (フェード)、delay 後に安全な場所から出直す。待っている観戦の出来事も捨てる (別の場所で再生しない)。 */
   private vanish(delay: number): void {
     this.interrupt();
     this.dropPendingLive();
+    // 登場の意図 (抜けた端・左右の好み) は保ったまま、端の向こうから出直す。
     this.setVisible(false);
     this.placed = false;
     this.airborne = false;
@@ -1075,14 +1370,6 @@ export class HarimaruController {
     return plans.filter((plan) => arcIsClear(plan, obstacles, view));
   }
 
-  /** 隠れて移れる場所 (見えている別の足場、または同じ足場の 40px 以上離れた位置)。 */
-  private relocationTargets(segment: Segment): Segment[] {
-    if (!this.view) return [];
-    return visibleSegments(this.segments, this.view).filter(
-      (s) => s.top !== segment.top || s.minX !== segment.minX || Math.abs(s.maxX - s.minX) >= 40,
-    );
-  }
-
   private nextAction(): void {
     if (this.destroyed || this.pauses.size > 0 || !this.placed) return;
     // 画面のアニメーション中は位置がずれて見えるので、最後に確かめた足場を使う。
@@ -1105,7 +1392,8 @@ export class HarimaruController {
       minX: bounds.minX,
       maxX: bounds.maxX,
       canHop: this.available('hop') && this.hopRoom(),
-      canRelocate: this.available('hide') && this.relocationTargets(segment).length > 0,
+      // カード裏に隠れて、同じ場所からのぞき直す (別のカードへは移らない)。
+      canRelocate: this.available('hide'),
       available: this.available,
     };
     // ジャンプの経路の計測 (障害物の収集) は重いので、ジャンプが選ばれうるときだけ行う。
@@ -1375,32 +1663,20 @@ export class HarimaruController {
     go();
   }
 
-  /** 隠れたまま、見えている安全な足場の別の位置へ移って顔を出す。移れる先がなければ同じ場所から出る。 */
+  /**
+   * 隠れた同じ場所から、また耳と目を出してのぞき直す (隠れている間に離れたカードへは移らない)。near があれば、同じ
+   * 足場の近くの位置 (カーソル・タップの近く) へ。いまの足場がなくなっていれば、端の向こうから出直す。
+   */
   private reappear(near?: number): void {
     if (this.destroyed || this.pauses.size > 0) return;
     const current = this.currentSegment();
-    const targets = current ? this.relocationTargets(current) : visibleSegments(this.segments, this.view ?? { top: -Infinity, bottom: Infinity });
-    if (targets.length === 0 && !current) {
+    if (!current) {
       this.vanish(between(this.rng, this.timing.enterDelayMs));
       return;
     }
-    if (targets.length > 0) {
-      let target: Segment;
-      let x: number;
-      if (near !== undefined && current) {
-        target = current;
-        x = clamp(near - SPRITE.width / 2, current.minX, current.maxX);
-      } else {
-        target = targets[Math.floor(this.rng() * targets.length)];
-        // 同じ足場なら、いまの位置から離れたところへ。
-        const far = target === current;
-        x = target.minX + (target.maxX - target.minX) * this.rng();
-        if (far && Math.abs(x - this.x) < 40) x = this.x - target.minX > target.maxX - this.x ? target.minX : target.maxX;
-      }
-      this.top = target.top;
-      this.segment = target;
-      this.x = x;
-      this.top = this.footTop() ?? target.top;
+    if (near !== undefined) {
+      this.x = clamp(near - SPRITE.width / 2, current.minX, current.maxX);
+      this.top = this.footTop() ?? current.top;
       this.dir = this.rng() < 0.5 ? -1 : 1;
       this.place();
     }
@@ -2396,10 +2672,12 @@ export class HarimaruController {
 
   private place(): void {
     const dpr = this.win.devicePixelRatio || 1;
-    const x = Math.round((this.x + this.poseX) * dpr) / dpr;
-    // 足元が足場に食い込まないよう、上側の画素へ切り捨てる。跳ねている間は lift だけ上、沈んでいる間は sink だけ下。
+    // 経路の再生中 (登場・小ジャンプ・飛び降り・よじ登り) は、段の位置 (セルの左上) に描く。
+    const x = Math.round((this.abs ? this.abs.x : this.x + this.poseX) * dpr) / dpr;
+    // 足元が足場に食い込まないよう、上側の画素へ寄せる (食い込みは 0.3px まで: 切り捨てだけだと最大 1px 浮く)。
+    // 跳ねている間は lift だけ上、沈んでいる間は sink だけ下。
     // 縁にしがみつく・ぶら下がるなどの間は、コマの基準点に合わせたずれ (poseX / poseY) だけ動かす。
-    const y = Math.floor((this.top - SPRITE.height - this.lift + this.sink + this.poseY) * dpr + 1e-6) / dpr;
+    const y = Math.floor((this.abs ? this.abs.y : this.top - SPRITE.height - this.lift + this.sink + this.poseY) * dpr + FOOT_SNAP) / dpr;
     // 元の絵は左向き。右へ向くときだけ左右反転する。
     this.sprite.style.transform = `translate3d(${x}px, ${y}px, 0) scaleX(${this.dir > 0 ? -1 : 1})`;
     // カードの裏に沈んでいる部分 (足場の上辺より下) は描かない。
@@ -2428,7 +2706,10 @@ export class HarimaruController {
 
   private setVisible(visible: boolean): void {
     this.sprite.dataset.visible = visible ? 'true' : 'false';
-    if (!visible) this.hideEffect();
+    if (!visible) {
+      this.hideEffect();
+      delete this.sprite.dataset.instant;
+    }
   }
 
   private hideEffect(): void {
@@ -2503,6 +2784,9 @@ export class HarimaruController {
     this.grip = null;
     this.hideEffect();
     this.liveNow = null;
+    // 途中の経路 (登場など) をやめる。登場の意図は残す (呼ぶ側が姿を消して、同じ端から出直す)。
+    this.entering = null;
+    this.abs = null;
     if (this.lift !== 0 || this.sink !== 0 || this.poseX !== 0 || this.poseY !== 0 || this.airborne) {
       this.lift = 0;
       this.sink = 0;

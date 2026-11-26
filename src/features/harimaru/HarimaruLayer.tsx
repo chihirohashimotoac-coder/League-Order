@@ -37,6 +37,12 @@ export const HARIMARU_PLATFORMS: Partial<Record<string, string>> = Object.fromEn
 
 export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 
+/**
+ * 画面遷移のとき、次の画面のハリマルが入る左右の端 (前の画面でいた位置に近い側)。座標・足場・タイマーは
+ * 引き継がない (画面ごとに作り直す)。初回は記録なし (安全な経路のある左右どちらか)。
+ */
+let carriedSide: 'left' | 'right' | null = null;
+
 export function HarimaruLayer({ page }: { page: string }): React.JSX.Element | null {
   const enabled = useHarimaruEnabled();
   const reduced = useMediaQuery(REDUCED_MOTION_QUERY);
@@ -145,7 +151,14 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         sprite.style.backgroundImage = `url("${url}")`;
         sprite.dataset.ready = 'true';
         if (!controller) {
-          controller = new HarimaruController({ sprite, effect: effect ?? undefined, root, watch: root.closest('.app') ?? root.parentElement ?? root, platformSelector: selector });
+          controller = new HarimaruController({
+            sprite,
+            effect: effect ?? undefined,
+            root,
+            watch: root.closest('.app') ?? root.parentElement ?? root,
+            platformSelector: selector,
+            entryFrom: carriedSide,
+          });
           controller.start();
           // 開発サーバーだけ: 動作の確認用に操作口を出す (本番のビルドには含まれない)。
           if (import.meta.env.DEV) (window as Window & { __harimaru?: HarimaruController }).__harimaru = controller;
@@ -240,6 +253,7 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
       tracker = null;
       keepReactions.length = 0;
       window.removeEventListener('resize', load);
+      if (controller) carriedSide = controller.exitSide() ?? carriedSide;
       controller?.destroy();
       controller = null;
       keep.clear();

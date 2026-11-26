@@ -54,7 +54,8 @@ export const BACKGROUND_SIZE = `${ATLAS.columns * SPRITE.width}px ${ATLAS.rows *
  */
 export type ClipId =
   | 'hang' | 'slip' | 'climb' | 'cursorHang' | 'tumble' | 'sleepyFall' | 'groom'
-  | 'stretch' | 'lookUp' | 'surprise' | 'tilt' | 'play' | 'run' | 'happy';
+  | 'stretch' | 'lookUp' | 'surprise' | 'tilt' | 'play' | 'run' | 'happy'
+  | MotionClipId;
 
 export interface ClipSpec {
   frameCount: number;
@@ -63,6 +64,62 @@ export interface ClipSpec {
   anchors: readonly (readonly [number, number] | null)[];
   moveX?: readonly number[];
 }
+
+// ------------------------------------------------------------------ 動作素材 v1.0 (画面端の登場・足場の移動、10 動作・14 コマ)
+
+/**
+ * 動作素材 v1.0 (`Harimaru-Motion-Pack-v1.0` の manifest.json の写し。画像は `clips/` の 30 枚を加工せずに収録)。
+ * 1 コマ 30×20 CSS px、元の絵は左向き (右向きは左右反転し、基準点の x は 30 − x)。地面はセルの下端 (y = 20)。
+ *
+ * - `anchors`: 描画の基準点 (セルの左上から、CSS px)。床に立つコマは足元の中央 (15, 20)。側面のコマは前足が
+ *   側面に触れる点 (壁の線の上の掴む点に合わせる)。
+ * - `ground` / `wall`: 床・側面に触れている点 (接地の確認用)。`alpha`: 1x・2x・3x の不透明な画素を包む範囲の和
+ *   (left, top, right, bottom)。経路・余白の安全判定に使う。
+ * - 表示時間は基準。飛ぶ・落ちる時間は経路の長さに合わせて伸び縮みさせる (コマの順と接地のコマは変えない)。
+ */
+export type MotionClipId =
+  | 'lookDown' | 'jumpPrep' | 'jumpAir' | 'jumpLand' | 'dropAir' | 'dropLand' | 'peekTop' | 'sideMount' | 'sideClimb' | 'sideLedge';
+
+export interface MotionClipSpec extends ClipSpec {
+  anchors: readonly (readonly [number, number])[];
+  ground: readonly (readonly (readonly [number, number])[])[];
+  wall: readonly (readonly (readonly [number, number])[])[];
+  alpha: readonly (readonly [number, number, number, number])[];
+}
+
+export const MOTION_CLIPS: Record<MotionClipId, MotionClipSpec> = {
+  lookDown: { frameCount: 1, durationsMs: [210], loop: false, anchors: [[15, 20]], ground: [[[9.67, 20], [12.67, 20], [19, 20]]], wall: [[]], alpha: [[2, 0, 26, 20]] },
+  jumpPrep: { frameCount: 1, durationsMs: [110], loop: false, anchors: [[15, 20]], ground: [[[8, 20], [11.5, 20], [18.5, 20]]], wall: [[]], alpha: [[2, 2, 27, 20]] },
+  jumpAir: { frameCount: 1, durationsMs: [140], loop: false, anchors: [[15, 20]], ground: [[]], wall: [[]], alpha: [[3, 0, 24, 20]] },
+  jumpLand: {
+    frameCount: 2,
+    durationsMs: [75, 85],
+    loop: false,
+    anchors: [[15, 20], [15, 20]],
+    // 着地 0 は前足だけ (後ろ足は床から 2 CSS px 以上離れる)、着地 1 で後ろ足を下ろす。
+    ground: [[[7.17, 20], [10.33, 20]], [[7.5, 20], [11.33, 20], [17.33, 20]]],
+    wall: [[], []],
+    alpha: [[2, 0, 25, 20], [2, 2, 25, 20]],
+  },
+  dropAir: { frameCount: 1, durationsMs: [150], loop: false, anchors: [[15, 20]], ground: [[]], wall: [[]], alpha: [[3, 0, 23, 20]] },
+  // 四足で受け止めて沈む (横ジャンプの着地とは共用しない)。
+  dropLand: { frameCount: 1, durationsMs: [115], loop: false, anchors: [[15, 20]], ground: [[[7, 20], [11.67, 20], [15.67, 20], [19.83, 20]]], wall: [[]], alpha: [[2, 1, 26, 20]] },
+  // 上端から頭を先に見せる (耳と目が先に出る)。
+  peekTop: { frameCount: 1, durationsMs: [170], loop: false, anchors: [[15, 20]], ground: [[]], wall: [[]], alpha: [[4, 0, 23, 20]] },
+  sideMount: { frameCount: 1, durationsMs: [105], loop: false, anchors: [[7.67, 9.67]], ground: [[]], wall: [[[7.67, 9.67]]], alpha: [[6, 0.5, 23, 20]] },
+  // 前足でつかむ (a) → 後ろ足で押し上げる (a) → 次の高さをつかむ (b) → 押し上げる (b)。組ごとに前足の基準点は同じ。
+  sideClimb: {
+    frameCount: 4,
+    durationsMs: [95, 115, 95, 115],
+    loop: true,
+    anchors: [[7.67, 10], [7.67, 10], [7.67, 8.33], [7.67, 8.33]],
+    ground: [[], [], [], []],
+    wall: [[[7.67, 10]], [[7.67, 10], [7.67, 13.5]], [[7.67, 8.33]], [[7.67, 8.33], [7.67, 12.67]]],
+    alpha: [[6, 0, 25, 20], [6, 0, 25, 20], [6, 0, 25, 20], [6, 0, 26, 20]],
+  },
+  // 側面の最後のコマから上辺の角へ前足を持ち替える (このあと既存の climb の初コマへ)。
+  sideLedge: { frameCount: 1, durationsMs: [95], loop: false, anchors: [[9, 9]], ground: [[]], wall: [[[9, 9]]], alpha: [[7, 0, 25, 20]] },
+};
 
 const none = (n: number): null[] => Array.from({ length: n }, () => null);
 
@@ -98,17 +155,19 @@ export const CLIPS: Record<ClipId, ClipSpec> = {
   play: { frameCount: 5, durationsMs: [130, 100, 95, 120, 155], loop: false, anchors: none(5) },
   run: { frameCount: 4, durationsMs: [78, 72, 78, 72], loop: true, anchors: none(4) },
   happy: { frameCount: 4, durationsMs: [120, 125, 275, 175], loop: false, anchors: none(4) },
+  ...MOTION_CLIPS,
 };
 
 export const CLIP_IDS = Object.keys(CLIPS) as ClipId[];
 
 /** 素材の URL (ビルド時にハッシュ付きの名前になる)。キーは `${id}@${density}x`。 */
-const CLIP_URLS = import.meta.glob<string>('./assets/v09/*.png', { eager: true, import: 'default', query: '?url' });
+const CLIP_URLS = import.meta.glob<string>(['./assets/v09/*.png', './assets/v10/*.png'], { eager: true, import: 'default', query: '?url' });
 
 /** 画素密度に合う、動作のアトラスの URL。 */
 export function clipUrlFor(id: ClipId, devicePixelRatio: number): string | null {
   const density = !(devicePixelRatio > 1) ? 1 : devicePixelRatio <= 2 ? 2 : 3;
-  return CLIP_URLS[`./assets/v09/${id}@${density}x.png`] ?? null;
+  const folder = id in MOTION_CLIPS ? 'v10' : 'v09';
+  return CLIP_URLS[`./assets/${folder}/${id}@${density}x.png`] ?? null;
 }
 
 export function clipBackgroundSize(id: ClipId): string {
@@ -130,6 +189,19 @@ export function clipOffset(id: ClipId, frame: number, dir: -1 | 1): { dx: number
   const ax = dir < 0 ? anchor[0] : SPRITE.width - anchor[0];
   const mx = (spec.moveX?.[frame] ?? 0) * (dir < 0 ? 1 : -1);
   return { dx: mx - ax, dy: -anchor[1] };
+}
+
+/** コマの不透明な範囲 (セルの左上から、向きを反映)。v1.0 以外の動作は枠から左右の透明余白を除いた範囲。 */
+export function clipAlpha(id: ClipId | 'base', frame: number, dir: -1 | 1): { left: number; top: number; right: number; bottom: number } {
+  const box = id !== 'base' && id in MOTION_CLIPS ? MOTION_CLIPS[id as MotionClipId].alpha[frame] : [SPRITE.sideInset, 0, SPRITE.width - SPRITE.sideInset, SPRITE.height];
+  const [l, t, r, b] = box;
+  return dir < 0 ? { left: l, top: t, right: r, bottom: b } : { left: SPRITE.width - r, top: t, right: SPRITE.width - l, bottom: b };
+}
+
+/** 基準点 (向きを反映) のセル左上からの位置。 */
+export function clipAnchor(id: ClipId, frame: number, dir: -1 | 1): { x: number; y: number } {
+  const anchor = CLIPS[id].anchors[frame] ?? [SPRITE.width / 2, SPRITE.height];
+  return { x: dir < 0 ? anchor[0] : SPRITE.width - anchor[0], y: anchor[1] };
 }
 
 // ------------------------------------------------------------------ PR3 観戦リアクション素材 v0.5 (6 種・49 コマ)

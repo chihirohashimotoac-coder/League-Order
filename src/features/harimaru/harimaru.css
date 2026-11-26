@@ -36,10 +36,15 @@
   will-change: transform;
 }
 
-/* フェードは登場するときだけ。隠すとき (モーダル・足場の消失など) は残像を残さず即座に消す。 */
+/* フェードは同じ場所に戻るときだけ。隠すとき (モーダル・足場の消失など) は残像を残さず即座に消す。 */
 .harimaru-sprite[data-visible='true'][data-ready='true'] {
   opacity: 1;
   transition: opacity 240ms ease;
+}
+
+/* 画面の端から現れるときはフェードしない (端で見え始めた画素から、不透明なまま連続して描く)。 */
+.harimaru-sprite[data-visible='true'][data-ready='true'][data-instant='true'] {
+  transition: none;
 }
 
 /*

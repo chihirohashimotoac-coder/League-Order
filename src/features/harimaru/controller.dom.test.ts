@@ -59,14 +59,25 @@ afterEach(() => {
 });
 
 describe('HarimaruController', () => {
-  it('少し待ってから、足場の上に 1 回だけ現れる (足元 = 上辺、全高 20px の枠)', () => {
+  it('少し待ってから、画面の端の向こうから入り、足場の上に 1 回だけ立つ (足元 = 上辺、全高 20px の枠)', () => {
     make().start();
     expect(sprite.dataset.visible).toBe('false');
-    advance(DEFAULT_TIMING.enterDelayMs[1] + 50);
+    let entered = false;
+    let firstX: number | null = null;
+    for (let i = 0; i < 400 && !controller.snapshot().placed; i += 1) {
+      advance(16);
+      const state = controller.snapshot();
+      if (state.entering && state.abs && firstX === null) firstX = state.abs.x;
+      if (state.entering) entered = true;
+    }
     const state = controller.snapshot();
+    expect(entered).toBe(true);
+    // 最初のコマは端の向こう (左端の外、または右端の外) に描かれる。
+    expect(firstX! + 30 <= VIEW.left + 0.01 || firstX! >= VIEW.right - 0.01).toBe(true);
     expect(sprite.dataset.visible).toBe('true');
     expect(state.placed).toBe(true);
     expect(state.top).toBe(300);
+    expect(state.events.filter((e) => e.startsWith('enter:') && !e.includes('retreat'))).toHaveLength(1);
     expect(sprite.style.transform).toMatch(/translate3d\([\d.]+px, 280px, 0(px)?\)/);
   });
 
@@ -229,7 +240,8 @@ describe('HarimaruController', () => {
     current = { ...terrain([{ left: 100, right: 330, top: 300 }, { left: 290, right: 500, top: 298 }]), elements: [low, high] };
     make(3).start();
     let sawHigh = false;
-    for (let i = 0; i < 600; i += 1) {
+    // 端から入ったあと、気まぐれに歩いて浮いたタイルの上へ来るまで (乱数は固定)。
+    for (let i = 0; i < 2_400 && !sawHigh; i += 1) {
       advance(100);
       const { placed, x, top } = controller.snapshot();
       if (!placed) continue;
@@ -432,6 +444,12 @@ function make2(options: { seed?: number; behavior?: typeof DEFAULT_BEHAVIOR; fin
   return controller;
 }
 
+/** 画面の端から入り終えて、足場に立つまで進める。 */
+function entered(): void {
+  for (let i = 0; i < 2_000 && !controller.snapshot().placed; i += 1) advance(16);
+  expect(controller.snapshot().placed).toBe(true);
+}
+
 function pointer(type: string, x: number, y: number, extra: Record<string, unknown> = {}, target: EventTarget = window): void {
   const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
   for (const [key, value] of Object.entries({ pointerId: 1, pointerType: 'touch', ...extra })) Object.defineProperty(event, key, { value });
@@ -448,6 +466,7 @@ describe('HarimaruController (PR2)', () => {
   it('隣の足場へ安全な経路があればジャンプし、空中では足元から浮き、着地すると隣の足場に立つ', () => {
     current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
     make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    entered();
     let sawAirborne = false;
     let startTop = 0;
     let lastGroundTop = 0;
@@ -553,6 +572,7 @@ describe('HarimaruController (PR2)', () => {
     tile.getBoundingClientRect = () => ({ left: 340, right: 600, top: 290, bottom: 380, width: 260, height: 90, x: 340, y: 290, toJSON: () => ({}) }) as DOMRect;
     current = { ...terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]), elements: [] };
     make2({ behavior: only({ jump: 1, idle: 0.0001 }) }).start();
+    entered();
     for (let i = 0; i < 2_000 && !controller.snapshot().airborne; i += 1) advance(16);
     expect(controller.snapshot().airborne).toBe(true);
     const event = new Event('transitionrun', { bubbles: true });
@@ -612,6 +632,7 @@ describe('HarimaruController (PR2)', () => {
       behavior: only({ jump: 1, idle: 0.0001 }), finePointer: false,
     });
     controller.start();
+    entered();
     for (let i = 0; i < 200; i += 1) {
       advance(50);
       expect(controller.snapshot().airborne).toBe(false);

@@ -71,8 +71,8 @@ function advance(ms: number): void {
 
 function standing(options: Parameters<typeof make>[0] = {}): HarimaruController {
   make(options).start();
-  advance(DEFAULT_TIMING.enterDelayMs[1] + DEFAULT_ANIMATION.sinkMs * 2 + 3_000);
-  for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
+  // 画面の端から入って (のぞいて引っ込む回もある)、足場の上で待機するまで。
+  for (let i = 0; i < 2_000 && !(controller.snapshot().placed && controller.snapshot().action === 'idle'); i += 1) advance(16);
   expect(controller.snapshot().placed).toBe(true);
   return controller;
 }
@@ -306,7 +306,7 @@ describe('安全: エフェクトの範囲・素材の読み込み・後片付�
     standing();
     const { x, top } = controller.snapshot();
     // カードの面 (足元のすぐ下) に、左右どちらの向きの砂ぼこりにもかかる幅の文字。
-    const inside = (_root: Element, _regions: readonly Rect[], _win: Window, seeThrough?: Element) => (seeThrough ? [{ left: x - 20, right: x + 50, top: top + 1, bottom: top + 3 }] : []);
+    const inside = (_root: Element, _regions: readonly Rect[], _win: Window, seeThrough?: Element | ReadonlySet<Element>) => (seeThrough ? [{ left: x - 20, right: x + 50, top: top + 1, bottom: top + 3 }] : []);
     // 演出するかは obstaclesIn の差し替えで決まる: ここでは controller を作り直す。
     controller.destroy();
     controller = new HarimaruController({
