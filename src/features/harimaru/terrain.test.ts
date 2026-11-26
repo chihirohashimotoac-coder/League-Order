@@ -221,3 +221,12 @@ describe('ジャンプの経路', () => {
     expect(boxIsClear(spriteBox(100, 200), [{ left: 120, right: 140, top: 180, bottom: 200 }], { top: 0, bottom: 999 })).toBe(false);
   });
 });
+
+describe('角丸の半径で立てる範囲を狭める', () => {
+  it('半径が cornerInset より大きい足場は、その半径だけ両端を除く (ボタンの大きな角丸の曲線を歩かない)', () => {
+    const [plain] = mergePlatforms([{ left: 0, right: 200, top: 100 }]);
+    const [round] = mergePlatforms([{ left: 0, right: 200, top: 100, inset: 18 }]);
+    expect([plain.left, plain.right]).toEqual([12, 188]);
+    expect([round.left, round.right]).toEqual([18, 182]);
+  });
+});

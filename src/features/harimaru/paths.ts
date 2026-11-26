@@ -185,7 +185,9 @@ export function endBox(segment: Segment, boxes: readonly Rect[], side: 'left' | 
   for (let i = 0; i < boxes.length; i += 1) {
     const box = boxes[i];
     if (Math.abs(box.top - segment.top) > params.rowTolerance + 0.5) continue;
-    const edge = side === 'right' ? box.right - params.cornerInset : box.left + params.cornerInset;
+    // 角丸の半径が cornerInset より大きい要素は、その半径だけ除いた端 (terrain.ts の mergePlatforms と同じ)。
+    const inset = Math.max(params.cornerInset, (box as Rect & { inset?: number }).inset ?? 0);
+    const edge = side === 'right' ? box.right - inset : box.left + inset;
     if (Math.abs((side === 'right' ? segment.right : segment.left) - edge) <= 1) return i;
   }
   return null;

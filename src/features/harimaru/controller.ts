@@ -626,6 +626,12 @@ export class HarimaruController {
         // style で、そのたびに計測しない)。
         if (records.every((r) => r.type === 'characterData' || (r.type === 'attributes' && r.attributeName === 'style'))) {
           this.abortAirborne();
+          // 変わった要素が、いま描いている姿の近くにかかるなら、次の描画の前に立ち位置を確かめる。
+          const near = records.some((r) => {
+            const el = r.target instanceof Element ? r.target : r.target.parentElement;
+            return el !== null && this.nearSprite(el);
+          });
+          if (near) this.checkSoon();
           this.scheduleRemeasure();
           return;
         }
@@ -846,6 +852,8 @@ export class HarimaruController {
    */
   private noteExit(view = viewport(this.win)): void {
     if (!this.placed || this.airborne) return;
+    // 抜けた端から出直すのを待っている間は、抜けたときの記録を保つ (元の位置が見えたら onScrollEnd で再開する)。
+    if (this.pauses.has('offscreen') && this.intent?.strict) return;
     // 描いている姿の見える範囲 (カード裏に沈んで切り取られた部分・跳ねた高さ・姿勢のずれを含める)。
     const head = this.top - SPRITE.height - this.lift + this.sink + this.poseY;
     const foot = head + SPRITE.height - Math.min(SPRITE.height, Math.max(0, this.sink));
@@ -887,9 +895,10 @@ export class HarimaruController {
     const posed = this.sink !== 0 || this.lift !== 0 || this.poseX !== 0 || this.poseY !== 0;
     this.pause('offscreen');
     if (posed) this.setVisible(false);
-    if (!this.exitSeen) return;
+    const edge = this.exitSeen ?? (this.intent?.strict ? this.intent.edge : null);
+    if (!edge) return;
     // 体が上・下へ完全に抜けた: その端から出直す (少し待ってから。待つ間に元の位置が見えてくれば、そのまま続ける)。
-    this.intent = { edge: this.exitSeen, strict: true };
+    this.intent = { edge, strict: true };
     this.after(between(this.rng, this.motion.edgeReturnDelayMs), () => this.returnFromEdge());
   }
 
@@ -1230,6 +1239,8 @@ export class HarimaruController {
    */
   private decorative(el: Element): boolean {
     if (el.closest(CONTROL_SELECTOR)) return false;
+    // 直下に文字がある要素は、箱で文字を数えているので縮めない。
+    if (Array.from(el.childNodes).some((node) => node.nodeType === 3 && node.textContent?.trim())) return false;
     const style = this.win.getComputedStyle(el);
     if (style.backgroundImage && style.backgroundImage !== 'none') return false;
     for (const pseudo of ['::before', '::after']) {
@@ -1262,8 +1273,8 @@ export class HarimaruController {
     this.interrupt();
     this.pauses.delete('offscreen');
     this.entering = plan;
-    // 実際に使う端を意図として残す (中断されても、同じ端から入り直す)。
-    if (plan.edge) this.intent = { edge: plan.edge, strict: this.intent?.strict ?? false };
+    // 実際に使う端を意図として残す (中断・引っ込みのあとも、その端だけから入り直す)。
+    if (plan.edge) this.intent = { edge: plan.edge, strict: true };
     this.airborne = true;
     this.placed = false;
     this.segment = null;
@@ -1288,7 +1299,7 @@ export class HarimaruController {
     this.lastEntryMode = plan.mode ?? null;
     if (!plan.end) {
       // のぞいて引っ込んだ: 同じ端の意図のまま (実際にのぞいた端を最初に)、しばらく空けて出直す。
-      if (plan.edge) this.intent = { edge: plan.edge, strict: this.intent?.strict ?? false };
+      if (plan.edge) this.intent = { edge: plan.edge, strict: true };
       this.setVisible(false);
       this.nextEntryAt = this.now() + between(this.rng, this.motion.retreatCooldownMs);
       this.scheduleEnter(this.nextEntryAt - this.now());

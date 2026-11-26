@@ -390,6 +390,75 @@ describe('監査 (2 回目) の指摘の回帰', () => {
   });
 });
 
+describe('監査 (3 回目) の指摘の回帰', () => {
+  it('直下に文字のある要素の箱は縮めない (縁に寄せたラベルに重ならない)', () => {
+    make();
+    const card = document.createElement('div');
+    card.textContent = 'ラベル';
+    root.append(card);
+    const c = controller as unknown as { platformEls: Element[]; boxes: Rect[]; view: unknown; safePlans: (plans: unknown[], o: object) => unknown[]; obstaclesIn: () => Rect[] };
+    const box = { left: 100, top: 300, right: 200, bottom: 400 };
+    c.boxes = [box];
+    c.view = { top: 0, bottom: 768, left: 0, right: 1_024 };
+    c.platformEls = [card];
+    c.obstaclesIn = () => [Object.defineProperty({ ...box }, 'source', { value: card, enumerable: false })];
+    const plan = {
+      kind: 'drop', startX: 0, end: null, fromBox: 0, toBox: null, wallBox: null, distance: 10, bounds: { left: 190, top: 330, right: 230, bottom: 350 },
+      steps: [{ pose: { sheet: 'base', row: 0, column: 0 }, x: 196, y: 330, dir: 1, ms: 0, tween: 'hold' }],
+    };
+    expect(c.safePlans([plan], {})).toHaveLength(0);
+  });
+
+  it('立っている間に、近くの要素のインラインの style が変わって足場がなくなったら、次の描画の前に隠れる', async () => {
+    const el = document.createElement('div');
+    el.getBoundingClientRect = () => ({ left: 100, right: 200, top: 270, bottom: 300, width: 100, height: 30, x: 100, y: 270, toJSON: () => ({}) }) as DOMRect;
+    root.append(el);
+    make().start();
+    recordUntilPlaced();
+    boxes = [];
+    el.style.transform = 'translateY(2px)';
+    await Promise.resolve();
+    advance(16);
+    expect(sprite.dataset.visible).toBe('false');
+  });
+
+  it('登場を始めた端は、中断のあとその端だけから入り直す (その端がふさがれたら画面の外で待つ)', () => {
+    boxes = [{ left: 60, right: 400, top: 300, bottom: 420 }, { left: 640, right: 980, top: 300, bottom: 420 }];
+    make({ seed: 2 }).start();
+    for (let t = 0; t < 10_000 && !controller.snapshot().entering; t += 16) advance(16);
+    const first = controller.snapshot().entering!.split(':')[0];
+    // その端の側の足場がなくなる (反対側には経路がある)。
+    boxes = boxes.filter((b) => (first === 'left' ? b.left > 500 : b.left < 500));
+    scrollTo(0);
+    advance(8_000);
+    expect(controller.snapshot().placed).toBe(false);
+    expect(controller.snapshot().intent).toBe(first);
+    expect(controller.snapshot().events).toContain(`enter:none:${first}`);
+  });
+
+  it('抜けた端から出直すのを待つ間に少しだけ逆にスクロールしても、抜けた記録を保ち、その端から出直す', () => {
+    boxes = [{ left: 60, right: 400, top: 300, bottom: 420 }, { left: 500, right: 800, top: 560, bottom: 700 }];
+    make().start();
+    recordUntilPlaced();
+    expect(controller.snapshot().top).toBe(300);
+    // 体が上へ抜ける (足元 300 ≤ 見えている上端 420)。上端からの経路を一時的になくす。
+    const keep = boxes;
+    boxes = [keep[0]];
+    scrollTo(420);
+    advance(2_500);
+    expect(controller.snapshot().intent).toBe('top');
+    // 数 px だけ戻す (元の位置はまだ見えない)。
+    scrollTo(410);
+    advance(600);
+    expect(controller.snapshot().intent).toBe('top');
+    // 経路ができたら、上端から入る。
+    boxes = keep;
+    scrollTo(412);
+    for (let t = 0; t < 10_000 && !controller.snapshot().entering; t += 16) advance(16);
+    expect(controller.snapshot().entering).toMatch(/^top:/);
+  });
+});
+
 describe('スクロールで画面の外へ出たとき', () => {
   it('体が上へ完全に抜けたら上の端の意図を記録し、経路がなければ元の位置で待つ。逆にスクロールすると、元の位置がそのまま見えてくる', () => {
     make().start();

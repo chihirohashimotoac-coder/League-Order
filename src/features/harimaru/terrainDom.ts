@@ -268,9 +268,11 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
     if (movesOnItsOwn(el, root, win)) continue;
     // 見えない要素・フォーカスの輪が出ている要素には立たない。
     if (invisible(el, root, win) || focusShown(el)) continue;
-    platforms.push({ left: rect.left + sx, right: rect.right + sx, top: rect.top + sy });
+    // 上辺の角丸 (半径が大きい要素ほど、平らな部分は短い)。立てる範囲から除く幅に使う。
+    const inset = Math.min(topCornerRadius(el, win), rect.width / 2);
+    platforms.push({ left: rect.left + sx, right: rect.right + sx, top: rect.top + sy, inset });
     elements.push(el);
-    boxes.push(toPage(rect, sx, sy));
+    boxes.push({ ...toPage(rect, sx, sy), inset } as Rect);
   }
 
   const bands: Rect[] = platforms.map((p) => ({
