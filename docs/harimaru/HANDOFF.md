@@ -401,6 +401,6 @@ git log --oneline -3 origin/main origin/feat/harimaru-integration
 
 - 判断待ち（全回で指摘）：`sideEntryFallback`・`edgeOverhang`（上の「要相談」）。
 - 最終の全 E2E で見つかったテスト側の 3 件（`30f8640`）：スマホの顔のタップはタイル（ボタン）に近い点だとブラウザーのタッチ位置の補正で下のボタンが押されるため頭の高さを触る（ハリマルはクリックを受け取らない。足場がボタンのときの既存の性質）、継ぎ目の E2E の判定幅と乱数の種（角丸 16px のため）、登場の E2E を見えない間で区切る。
-- 検証（`30f8640`）：`npm ci` 成功。`npm run verify`（lint・単体 145 ファイル 1896 件・build）・`npm run typecheck` 成功。`npm run test:e2e`：合格 516・失敗 0・スキップ 30。CI 2 件成功。
+- 検証（`30f8640`）：`npm ci` 成功。`npm run verify`（lint・単体 145 ファイル 1896 件・build）・`npm run typecheck` 成功。`npm run test:e2e`：合格 516・失敗 0・スキップ 30。`npm run test:e2e -- e2e/harimaru.spec.ts e2e/harimaruLive.spec.ts`：合格 34・スキップ 4。`npm run test:e2e:preview`：合格 38・スキップ 2。CI 2 件成功。プレビュー（非公開の claude.ai Artifact、架空の n01）：https://claude.ai/artifact/DoJcnJzJ2avoeYtKEJ1yT4（バージョン 2 = `30f8640` のビルド）。
 - 実画面（開発サーバー・Chromium・時計を固定）：スマホ（390・320px、DPR 2・3、ライト・ダーク）は右端から小ジャンプで登場、PC 1280px（DPR 1・2）は上端から登場（スクロール約 300px）。登場中も含めて横スクロール 0、文字・操作部品との重なり 0。PC 1920px は登場しない（要相談 1）。小ジャンプ（狭い／広い隙間）・飛び降り・左右の側面のよじ登りは検証用の足場で撮影。
 - 未確認：実機（iPhone Safari / Android）、本物の n01 の試合での観戦リアクション。
