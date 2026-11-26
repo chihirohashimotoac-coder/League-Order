@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Rect } from './terrain';
-import { collectObstacles, isSolid } from './terrainDom';
+import { collectObstacles, isSolid, topCornerRadius } from './terrainDom';
 
 const style = (values: Record<string, string>): CSSStyleDeclaration =>
   ({
@@ -151,5 +151,20 @@ describe('collectObstacles の seeThrough は背景色・枠だけを数えな�
     const found = collectObstacles(root, region, window, plain) as (Rect & { source?: Element })[];
     expect(found.map((o) => o.source)).toEqual([image, button]);
     root.remove();
+  });
+});
+
+describe('topCornerRadius', () => {
+  it('CSS が縮めて描く大きな半径 (999px の丸いボタン) は、幅・高さの半分までに収める', () => {
+    const el = document.createElement('button');
+    el.style.borderTopLeftRadius = '999px';
+    el.style.borderTopRightRadius = '999px';
+    el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 200, bottom: 40, width: 200, height: 40, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    document.body.append(el);
+    expect(topCornerRadius(el)).toBe(20);
+    el.style.borderTopLeftRadius = '16px';
+    el.style.borderTopRightRadius = '16px';
+    expect(topCornerRadius(el)).toBe(16);
+    el.remove();
   });
 });

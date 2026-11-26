@@ -459,6 +459,45 @@ describe('監査 (3 回目) の指摘の回帰', () => {
   });
 });
 
+describe('監査 (4 回目) の指摘の回帰', () => {
+  it('上へ抜けたあと、元の体が一部だけ見える位置まで戻して止めると、その場に描いたまま端から入り直さない', () => {
+    boxes = [{ left: 60, right: 400, top: 300, bottom: 420 }, { left: 500, right: 800, top: 560, bottom: 700 }];
+    make().start();
+    recordUntilPlaced();
+    const before = controller.snapshot();
+    scrollTo(320);
+    advance(300);
+    // 体 (280〜300) が一部だけ見える (見えている上端 290)。
+    scrollTo(290);
+    advance(4_000);
+    const s = controller.snapshot();
+    expect(s.placed).toBe(true);
+    expect(s.x).toBe(before.x);
+    expect(s.top).toBe(before.top);
+    expect(sprite.dataset.visible).toBe('true');
+    expect(entries().filter((e) => e.startsWith('enter:top'))).toEqual([]);
+  });
+
+  it('足元の足場が style だけで消えたら (姿から離れた要素の変化でも)、次の描画の前に隠れる', async () => {
+    const platform = document.createElement('div');
+    let rect = { left: 60, right: 400, top: 300, bottom: 420 };
+    platform.getBoundingClientRect = () => ({ ...rect, width: rect.right - rect.left, height: rect.bottom - rect.top, x: rect.left, y: rect.top, toJSON: () => ({}) }) as DOMRect;
+    const far = document.createElement('div');
+    far.getBoundingClientRect = () => ({ left: 900, right: 1_000, top: 700, bottom: 760, width: 100, height: 60, x: 900, y: 700, toJSON: () => ({}) }) as DOMRect;
+    root.append(platform, far);
+    controller = make();
+    (controller as unknown as { measureFn: () => MeasuredTerrain }).measureFn = () => ({ ...terrain(), elements: [platform] });
+    controller.start();
+    recordUntilPlaced();
+    rect = { left: 0, right: 0, top: 0, bottom: 0 };
+    boxes = [];
+    far.style.height = '80px';
+    await Promise.resolve();
+    advance(16);
+    expect(sprite.dataset.visible).toBe('false');
+  });
+});
+
 describe('スクロールで画面の外へ出たとき', () => {
   it('体が上へ完全に抜けたら上の端の意図を記録し、経路がなければ元の位置で待つ。逆にスクロールすると、元の位置がそのまま見えてくる', () => {
     make().start();

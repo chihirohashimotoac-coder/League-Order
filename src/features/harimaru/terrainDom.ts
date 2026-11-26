@@ -198,7 +198,10 @@ export function topCornerRadius(el: Element, win: Window = window): number {
     const n = parseFloat(first) || 0;
     return first.endsWith('%') ? (el.getBoundingClientRect().width * n) / 100 : n;
   };
-  return Math.max(radius(style.borderTopLeftRadius), radius(style.borderTopRightRadius));
+  // CSS は半径の和が辺の長さを超えると縮めて描く (999px の丸いボタンなど): 幅・高さの半分までに収める。
+  const rect = el.getBoundingClientRect();
+  const r = Math.max(radius(style.borderTopLeftRadius), radius(style.borderTopRightRadius));
+  return rect.width > 0 && rect.height > 0 ? Math.min(r, rect.width / 2, rect.height / 2) : r;
 }
 
 /**

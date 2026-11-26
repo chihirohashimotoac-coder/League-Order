@@ -222,6 +222,8 @@ export class HarimaruController {
   /** 最後の計測での足場の要素の箱 (platformEls と同じ順) と、文書の下端。 */
   private boxes: readonly Rect[] = [];
   private docBottom: number | undefined;
+  /** 近くの要素の style・文字の変化で、最後に立ち位置を確かめた時刻。 */
+  private lastNearCheckAt = -Infinity;
   /** 直前に渡った 2 つの要素 (往復を選びにくくする)。 */
   private lastPair: { a: Element | null; b: Element | null; at: number } | null = null;
   /** 読み込めた画像 (base = v0.2 のアトラス、ほかは v0.9 の動作ごとのアトラス) と、いま表示している画像。 */
@@ -626,12 +628,21 @@ export class HarimaruController {
         // style で、そのたびに計測しない)。
         if (records.every((r) => r.type === 'characterData' || (r.type === 'attributes' && r.attributeName === 'style'))) {
           this.abortAirborne();
-          // 変わった要素が、いま描いている姿の近くにかかるなら、次の描画の前に立ち位置を確かめる。
-          const near = records.some((r) => {
-            const el = r.target instanceof Element ? r.target : r.target.parentElement;
-            return el !== null && this.nearSprite(el);
-          });
-          if (near) this.checkSoon();
+          // 足元の足場が動いた・消えた (足場自身や上の兄弟の変化で並びが変わった) なら、次の描画の前に確かめる
+          // (足場の要素の位置だけを読む軽い確認)。変わった要素が姿の近くにかかるときも確かめるが、毎フレーム変わる
+          // style で毎フレーム全体を計測しないよう、その確認は 100ms に 1 回まで。
+          if (this.placed && this.pauses.size === 0 && !this.airborne) {
+            const foot = this.footTop();
+            const moved = this.platformEls.length > 0 && (foot === null || Math.abs(foot - this.top) > 0.5);
+            const near = records.some((r) => {
+              const el = r.target instanceof Element ? r.target : r.target.parentElement;
+              return el !== null && this.nearSprite(el);
+            });
+            if (moved || (near && this.now() - this.lastNearCheckAt >= 100)) {
+              if (near) this.lastNearCheckAt = this.now();
+              this.checkSoon();
+            }
+          }
           this.scheduleRemeasure();
           return;
         }
@@ -850,13 +861,17 @@ export class HarimaruController {
    * スクロールの途中で、立っている体 (描いている位置) が見えている範囲の上・下へ完全に抜けたかを記録する
    * (スクロールの向きではなく、どちらの端を抜けたか)。また見えてきたら記録を消す。
    */
+  /** 描いている姿の見える範囲の上下 (カード裏に沈んで切り取られた部分・跳ねた高さ・姿勢のずれを含める)。 */
+  private drawnRange(): { head: number; foot: number } {
+    const head = this.top - SPRITE.height - this.lift + this.sink + this.poseY;
+    return { head, foot: head + SPRITE.height - Math.min(SPRITE.height, Math.max(0, this.sink)) };
+  }
+
   private noteExit(view = viewport(this.win)): void {
     if (!this.placed || this.airborne) return;
     // 抜けた端から出直すのを待っている間は、抜けたときの記録を保つ (元の位置が見えたら onScrollEnd で再開する)。
     if (this.pauses.has('offscreen') && this.intent?.strict) return;
-    // 描いている姿の見える範囲 (カード裏に沈んで切り取られた部分・跳ねた高さ・姿勢のずれを含める)。
-    const head = this.top - SPRITE.height - this.lift + this.sink + this.poseY;
-    const foot = head + SPRITE.height - Math.min(SPRITE.height, Math.max(0, this.sink));
+    const { head, foot } = this.drawnRange();
     if (foot <= view.top) this.exitSeen = 'top';
     else if (head >= view.bottom) this.exitSeen = 'bottom';
     else this.exitSeen = null;
@@ -879,6 +894,15 @@ export class HarimaruController {
       this.top <= view.bottom &&
       this.x + SPRITE.sideInset >= view.left &&
       this.x + SPRITE.width - SPRITE.sideInset <= view.right;
+    // 元の位置の体 (描いている姿の見える部分) が一部でも見えている: その場の続きとして描いたまま待つ (端から入り直さない)。
+    const drawn = this.drawnRange();
+    if (!inView && drawn.foot > view.top && drawn.head < view.bottom) {
+      this.exitSeen = null;
+      if (this.intent?.strict) this.intent = null;
+      this.pause('offscreen');
+      this.setVisible(true);
+      return;
+    }
     if (inView) {
       // 逆にスクロールして元の位置が見えてきた: その場の続きから (置き直さない)。
       this.exitSeen = null;
@@ -924,6 +948,12 @@ export class HarimaruController {
       this.exitSeen = null;
       this.intent = null;
       this.resume('offscreen');
+      return;
+    }
+    // 元の位置の描いている体が一部でも見えているなら、端から入り直さない (その場の続きとして描いたまま待つ)。
+    if (this.sprite.dataset.visible === 'true' && this.top > view.top && this.top - SPRITE.height < view.bottom) {
+      this.exitSeen = null;
+      this.intent = null;
       return;
     }
     const plan = this.planEntry(terrain);
@@ -1694,6 +1724,12 @@ export class HarimaruController {
         return;
       }
       const p = again.plan;
+      // 出発の位置が変わった (出発のカードが広がった・縮んだ): 新しい角へ瞬間的に移らず、見送る。
+      if (p.startX !== null && Math.abs(p.startX - this.x) > 1) {
+        this.log(`move:${p.kind}:skipped:start`);
+        this.idle(between(this.rng, this.behavior.idleMs));
+        return;
+      }
       if (mayReconsider && p.kind !== 'climb' && this.rng() < this.motion.reconsiderChance) {
         this.reconsider(p);
         return;
