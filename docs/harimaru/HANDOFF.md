@@ -1,6 +1,6 @@
 # ハリマル実装 引き継ぎ文書
 
-最終更新：2026-11-26（画面を狭めたときの横スクロールの不具合を修正して本番に公開。#64）。秘密情報は記載しない。
+最終更新：2026-11-26（画面を狭めたときの横スクロールの不具合を修正して本番に公開（#64）。不安定だった E2E 1 件の乱数・時計を固定（#66））。秘密情報は記載しない。
 
 > **本番反映済み（2026-11-25）。** ユーザーの指示（「本番反映まで進めてください」）により、監査の修正 [#61](https://github.com/chihirohashimotoac-coder/League-Order/pull/61) を統合ブランチに取り込み、統合ブランチから main への最終 PR [#62](https://github.com/chihirohashimotoac-coder/League-Order/pull/62) をマージした。main `ffd21f9`、deploy.yml の run #57 が成功し、gh-pages `b43d90e` で公開中。公開サイトでの動作確認の結果は §7。
 >
@@ -14,12 +14,12 @@
 
 | 項目 | 値 |
 |---|---|
-| main | `034fd56`（#64 のマージ。横スクロールの修正）。その前に `1219ca5`（#63、本書の更新）、`ffd21f9`（#62、ハリマル反映）。本書の今回の更新はその後のコミット（`git log` 参照） |
-| gh-pages | `fb24e3c`（`034fd56` の公開分、run #59）。`1219ca5` の run #58 は E2E の失敗で公開されなかった（§7）。公開 URL：https://chihirohashimotoac-coder.github.io/League-Order/ |
+| main | ハリマルのコードは `034fd56`（#64、横スクロールの修正）が最新。その後に本書の更新 `477733d`（#65）と、E2E の乱数・時計の固定（#66）。それ以降は `git log` 参照。その前は `1219ca5`（#63、本書の更新）、`ffd21f9`（#62、ハリマル反映） |
+| gh-pages | main の最新の公開分（`git log origin/gh-pages -1` の件名に公開した main のコミットが出る）。`034fd56` の公開分は `fb24e3c`（run #59）。`1219ca5`（run #58）と `477733d`（run #60）は E2E の失敗で公開されなかった（§7）。公開 URL：https://chihirohashimotoac-coder.github.io/League-Order/ |
 | 統合ブランチ | `feat/harimaru-integration` = `f2c975b`（#61 のマージ。main に取り込み済み。今後の作業は main から分岐する） |
-| PR | #58（PR1）・#59（PR2）：自動でマージ済み。#60（PR3）：閉じた（内容は反映済み）。#61（監査の修正）・#62（最終 PR）・#63（本書の更新）・#64（横スクロールの修正）：マージ済み |
+| PR | #58（PR1）・#59（PR2）：自動でマージ済み。#60（PR3）：閉じた（内容は反映済み）。#61（監査の修正）・#62（最終 PR）・#63（本書の更新）・#64（横スクロールの修正）・#65（本書の更新）・#66（E2E の固定）：マージ済み |
 | プレビュー | 監査の修正（#61）：https://claude.ai/artifact/EXD2UyeGL2JMoLXdNrpqLv（バージョン 1 = `baf3c8d` のビルド）。以前のもの：PR3 https://claude.ai/artifact/TtVuLMEMsNztchm91FYMwL／PR2 https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX／PR1 https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（いずれも非公開の claude.ai Artifact、n01 は架空データ） |
-| Codex 監査の回数 | PR1：3 / 3、PR2：3 / 3、PR3：4 回（以上は §7）。監査の修正（#61）：2 回（ユーザー承認済み、2 回目の指摘も反映済み）。#62 は GitHub の Codex レビューで指摘 0 件。#64：1 回（§7）。今後の監査は、作業ごとに新たなユーザー承認が必要 |
+| Codex 監査の回数 | PR1：3 / 3、PR2：3 / 3、PR3：4 回（以上は §7）。監査の修正（#61）：2 回（ユーザー承認済み、2 回目の指摘も反映済み）。#62 は GitHub の Codex レビューで指摘 0 件。#64：1 回、#66：1 回（§7）。今後の監査は、作業ごとに新たなユーザー承認が必要 |
 
 ### ユーザーの判断待ち（勝手に進めない）
 
@@ -331,6 +331,15 @@ git log --oneline -3 origin/main origin/feat/harimaru-integration
   - PC 1280×900・Pixel 5：1 体だけ、20 CSS px、`aria-hidden`。約 25 秒で重なり 0・横スクロールなし・コンソールのエラーなし。足元の浮きは Pixel 5 で歩行 10 標本中 0（PC はこの間に歩かず未判定）。追加素材は画素密度に合う 14 枚だけ
   - 表示 OFF：消え、再読み込み後も描画しない。動きを減らす設定：描画しない。プリキャッシュ：アトラス、追加 42 枚、観戦リアクション 28 ファイル（ほか 8 枚はビルドでデータ URI として埋め込み。前回と同じ）
   - 未確認：実機（特に iPhone の画面回転）
+
+### E2E「ホームに 1 体だけ現れ…」の乱数・時計の固定（#66）、2026-11-26
+
+- 発見：#65（本書の更新、main `477733d`）の本番デプロイ run #60 が、E2E `e2e/harimaru.spec.ts`［mobile］「ホームに 1 体だけ現れ、UI に重ならずに歩き、クリックを妨げない」の `xs.size > 2`（Received 1）で失敗し、公開されなかった。手元では 60 回に 1 回再現（Received 2）。#64 より前の `7b3c353` でも 1 回失敗しており（上の記録）、#64 の CSS とは関係ない。
+- 原因：このテストは乱数を固定せず、時計も実時間で進んでいた（`clock.install()` だけ）。眠り・待機が続くと、120 秒の間に 2 か所以下しか立たない回がある。
+- 修正（テストだけ。本番のコードは変えない）：カーソルのテストと同じく、`seedRandom(page, 20261126)` と、読み込み前に決まった時刻で `clock.install`・`pauseAt` を行い、`runFor` でだけ進める。判定の閾値・回数・重なりの検査は変えていない。
+- 確認：修正後、mobile・desktop で各 60 回、計 120 回合格（`xs.size` は 8〜10）。`harimaru.spec.ts` 一式：合格 28・スキップ 4。`npm run verify`・`npm run typecheck` 成功。
+- Codex 監査（CLI、読み取り専用、1 回）：指摘 中 1 件（時計が実時間で進む）→ 反映（`pauseAt` を追加）。テストを弱めることには当たらない、との判断。
+- 本番反映：#66 のマージで deploy.yml が走る（結果は `git log origin/gh-pages -1` と Actions を参照）。
 
 ## 8. 次に進める工程
 
