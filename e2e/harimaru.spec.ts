@@ -70,7 +70,13 @@ async function overlaps(page: Page): Promise<string[]> {
 }
 
 test('ホームに 1 体だけ現れ、UI に重ならずに歩き、クリックを妨げない', async ({ page }) => {
-  await page.clock.install();
+  // 気まぐれな動作の抽選と時計を固定する。固定しないと、眠り・待機が続いて 120 秒の間に 2 か所以下しか
+  // 立たない回があった (CI の run #60 と手元で 60 回に 1 回)。本番の抽選は変えない (seededRandom.ts)。
+  // 時計は読み込みの前から決まった時刻で止め、runFor でだけ進める (実時間で進むと、抽選の時刻・回数が実行ごとに変わる)。
+  const start = Date.parse('2026-11-26T03:00:00Z');
+  await seedRandom(page, 20261126);
+  await page.clock.install({ time: start });
+  await page.clock.pauseAt(start + 1_000);
   await openSampleHome(page);
   await page.clock.runFor(4_000);
   await expect(sprite(page)).toHaveAttribute('data-visible', 'true');
