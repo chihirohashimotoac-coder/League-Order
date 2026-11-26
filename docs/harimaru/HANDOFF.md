@@ -1,23 +1,25 @@
 # ハリマル実装 引き継ぎ文書
 
-最終更新：2026-11-25（監査の 3 件を修正し、PR1〜PR3 とあわせて本番に公開）。秘密情報は記載しない。
+最終更新：2026-11-26（画面を狭めたときの横スクロールの不具合を修正して本番に公開。#64）。秘密情報は記載しない。
 
 > **本番反映済み（2026-11-25）。** ユーザーの指示（「本番反映まで進めてください」）により、監査の修正 [#61](https://github.com/chihirohashimotoac-coder/League-Order/pull/61) を統合ブランチに取り込み、統合ブランチから main への最終 PR [#62](https://github.com/chihirohashimotoac-coder/League-Order/pull/62) をマージした。main `ffd21f9`、deploy.yml の run #57 が成功し、gh-pages `b43d90e` で公開中。公開サイトでの動作確認の結果は §7。
 >
 > PR #58・#59 は、コミットが main に入ったため GitHub が自動でマージ済みにした。#60 は base が PR2 のブランチのため開いたままだったので、ユーザーの指示で閉じた（内容は本番に反映済み）。
+>
+> **追加の修正（2026-11-26）。** 本書の更新（#63、main `1219ca5`）の本番デプロイ（run #58）が E2E 1 件で失敗し、ハリマルの不具合（画面を狭めた直後、隠れたハリマルが右端の外に残って横スクロールが出る）が見つかった。修正 [#64](https://github.com/chihirohashimotoac-coder/League-Order/pull/64) をユーザーの指示でマージし、main `034fd56`、run #59 が成功、gh-pages `fb24e3c` で公開中。記録は §7。
 
 ## 0. 新しいセッションの開始手順（最初に読む）
 
-### 現在の状態（2026-11-25）
+### 現在の状態（2026-11-26）
 
 | 項目 | 値 |
 |---|---|
-| main | `ffd21f9`（#62 のマージ。ハリマル反映済み）。本書の更新はその後のコミット（`git log` 参照） |
-| gh-pages | `b43d90e`（`ffd21f9` の公開分）。公開 URL：https://chihirohashimotoac-coder.github.io/League-Order/ |
+| main | `034fd56`（#64 のマージ。横スクロールの修正）。その前に `1219ca5`（#63、本書の更新）、`ffd21f9`（#62、ハリマル反映）。本書の今回の更新はその後のコミット（`git log` 参照） |
+| gh-pages | `fb24e3c`（`034fd56` の公開分、run #59）。`1219ca5` の run #58 は E2E の失敗で公開されなかった（§7）。公開 URL：https://chihirohashimotoac-coder.github.io/League-Order/ |
 | 統合ブランチ | `feat/harimaru-integration` = `f2c975b`（#61 のマージ。main に取り込み済み。今後の作業は main から分岐する） |
-| PR | #58（PR1）・#59（PR2）：自動でマージ済み。#60（PR3）：閉じた（内容は反映済み）。#61（監査の修正）・#62（最終 PR）：マージ済み |
+| PR | #58（PR1）・#59（PR2）：自動でマージ済み。#60（PR3）：閉じた（内容は反映済み）。#61（監査の修正）・#62（最終 PR）・#63（本書の更新）・#64（横スクロールの修正）：マージ済み |
 | プレビュー | 監査の修正（#61）：https://claude.ai/artifact/EXD2UyeGL2JMoLXdNrpqLv（バージョン 1 = `baf3c8d` のビルド）。以前のもの：PR3 https://claude.ai/artifact/TtVuLMEMsNztchm91FYMwL／PR2 https://claude.ai/artifact/6hwBYyRTvLNYcH6bGK23GX／PR1 https://claude.ai/artifact/VBPWXXm1Vi9BCDSAQPfYfB（いずれも非公開の claude.ai Artifact、n01 は架空データ） |
-| Codex 監査の回数 | PR1：3 / 3、PR2：3 / 3、PR3：4 回（以上は §7）。監査の修正（#61）：2 回（ユーザー承認済み、2 回目の指摘も反映済み）。#62 は GitHub の Codex レビューで指摘 0 件。今後の監査は、作業ごとに新たなユーザー承認が必要 |
+| Codex 監査の回数 | PR1：3 / 3、PR2：3 / 3、PR3：4 回（以上は §7）。監査の修正（#61）：2 回（ユーザー承認済み、2 回目の指摘も反映済み）。#62 は GitHub の Codex レビューで指摘 0 件。#64：1 回（§7）。今後の監査は、作業ごとに新たなユーザー承認が必要 |
 
 ### ユーザーの判断待ち（勝手に進めない）
 
@@ -26,6 +28,7 @@
 3. 更新履歴（`src/data/changelog.ts`）・バージョン番号への記載
 4. 範囲外で見つけた既存の動作：歩き終えて待機している間も `data-action` が `walk` / `run` のまま残る（`controller.ts` の `run()` が歩行の完了後に `idle()` を呼ぶとき、動作名を更新しない）。見た目には影響しない。E2E の判定で注意（§7）
 5. 実機（iPhone Safari / Android Chrome）と、本物の n01 の試合での観戦リアクションの確認
+6. Safari 16 未満（`overflow: clip` 非対応）では、#64 の横スクロール対策が効かない（従来の挙動のまま。§7）。対応するかどうか
 
 ### 作業前の確認
 
@@ -310,6 +313,24 @@ git log --oneline -3 origin/main origin/feat/harimaru-integration
   - 表示 OFF（設定）：消え、再読み込み後も描画しない（`league-order:harimaru` = `off`）。動きを減らす設定：描画しない
   - Service Worker が動いており、プリキャッシュにハリマルの素材がすべて入っている（基本のアトラス、追加 42 枚、観戦リアクション 36 枚）
   - 未確認：実機、本物の n01 の試合での観戦リアクション
+
+### 画面を狭めたときの横スクロールの修正（#64）と本番反映、2026-11-26
+
+- 発見：#63（本書の更新、main `1219ca5`）の本番デプロイ run #58 が、E2E `e2e/setMatch.spec.ts:153`［mobile］「the page fills the screen」の横スクロールの検査で失敗し、公開されなかった（画面幅 393 → 320 px の直後、`scrollWidth` 347 > `clientWidth` 320）。手元では約 20 回に 1 回再現。
+- 原因：画面を狭めた直後、隠れた（不透明度 0）スプライトが前の位置（右端の外、x≈316〜346）に残る。幅 0・`overflow: visible` のレイヤーの外へはみ出し、スマホではレイアウト幅が広がって横スクロールが出ていた。本番 `ffd21f9` にもあった。
+- 修正（`5ff2c07`）：`harimaru.css` の `.harimaru-layer` の横幅を初期包含ブロック（画面幅）に合わせ（`right: 0`）、`overflow-x: clip` で右端より外を切り取る。縦は `overflow-y: visible` のまま（高さ 0 のレイヤーの下へ描く従来どおり）。JS は変更なし。
+  - 前提：`body` は位置指定しない（レイヤーの包含ブロックが初期包含ブロックになるため）。`body` に `position` を付けるときは、この前提を見直すこと。
+  - 制約：Safari 16 未満は `overflow: clip` に非対応で、宣言が無視されて従来の挙動に戻る（退行はない）。`overflow-x: hidden` は `overflow-y` が `auto` に計算されて縦も切れるため、代わりに使えない。
+- 回帰テスト：`e2e/harimaru.spec.ts`「画面を狭めても、隠れたままのハリマルが右端からはみ出して横スクロールを出さない」。時計を止め、隠れたハリマルを右端の手前に置いて画面を縮め、「不透明度 0」「右端の外」「横スクロールなし」を同時に確かめる。修正前は mobile・desktop とも失敗（はみ出し 91 px）。
+- Codex 監査（CLI、読み取り専用、1 回）：指摘 中 2 件。回帰テストの強化は反映した（resize のリスナーは時計を止めても動くので、置き直されていないことも確かめる）。Safari 16 未満の対応は反映していない（上の制約）。
+- 検証：`npm run verify`（1842 件）・`npm run typecheck` 成功。失敗した setMatch のテスト（mobile）の 40 回連続で合格。`npm run test:e2e`：合格 508・失敗 0・スキップ 24。`npm run test:e2e:preview`：合格 38・失敗 0・スキップ 2。CI 2 件（#64）成功。全件の E2E は回帰テストの強化前の版で実行し、強化後は単独で 10 回合格（修正を戻すと失敗）。
+- 本番反映：#64 をマージ（`034fd56`）→ deploy.yml の run #59 成功（約 35 分）、gh-pages `fb24e3c`
+- 本番の動作確認（公開 URL、Chromium、サンプルデータ、n01 への書き込みなし）
+  - 公開中の CSS に修正が入っている（`.harimaru-layer{…right:0;height:0;overflow-x:clip;overflow-y:visible…}`）。`npm run smoke:pages`：2 件合格
+  - 画面の縮小（Pixel 5・PC 1280×900）：レイヤーの幅は `clientWidth` と同じ。隠れたハリマルを右端の手前に置いて 320 px に縮め、右端の外に残った状態でも横スクロール 0。その後 6 秒も 0 で、ハリマルは再び現れた
+  - PC 1280×900・Pixel 5：1 体だけ、20 CSS px、`aria-hidden`。約 25 秒で重なり 0・横スクロールなし・コンソールのエラーなし。足元の浮きは Pixel 5 で歩行 10 標本中 0（PC はこの間に歩かず未判定）。追加素材は画素密度に合う 14 枚だけ
+  - 表示 OFF：消え、再読み込み後も描画しない。動きを減らす設定：描画しない。プリキャッシュ：アトラス、追加 42 枚、観戦リアクション 28 ファイル（ほか 8 枚はビルドでデータ URI として埋め込み。前回と同じ）
+  - 未確認：実機（特に iPhone の画面回転）
 
 ## 8. 次に進める工程
 
