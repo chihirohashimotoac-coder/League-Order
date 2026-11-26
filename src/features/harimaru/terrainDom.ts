@@ -192,16 +192,28 @@ function focusRing(el: Element): boolean {
 /** 要素の上辺の角丸の半径 (左右の大きい方、CSS px)。 */
 export function topCornerRadius(el: Element, win: Window = window): number {
   const style = win.getComputedStyle(el);
-  const radius = (value: string): number => {
-    // 「12px 8px」(横 縦) は横の半径を使う。% は要素の幅に対する割合。
-    const first = (value || '0').trim().split(/\s+/)[0];
-    const n = parseFloat(first) || 0;
-    return first.endsWith('%') ? (el.getBoundingClientRect().width * n) / 100 : n;
-  };
-  // CSS は半径の和が辺の長さを超えると縮めて描く (999px の丸いボタンなど): 幅・高さの半分までに収める。
   const rect = el.getBoundingClientRect();
-  const r = Math.max(radius(style.borderTopLeftRadius), radius(style.borderTopRightRadius));
-  return rect.width > 0 && rect.height > 0 ? Math.min(r, rect.width / 2, rect.height / 2) : r;
+  /** 角の横・縦の半径 (「12px 8px」は横 縦。% は横は幅、縦は高さに対する割合)。 */
+  const corner = (value: string): [number, number] => {
+    const parts = (value || '0').trim().split(/\s+/);
+    const size = (part: string, length: number): number => {
+      const n = parseFloat(part) || 0;
+      return part.endsWith('%') ? (length * n) / 100 : n;
+    };
+    return [size(parts[0], rect.width), size(parts[1] ?? parts[0], rect.height)];
+  };
+  const tl = corner(style.borderTopLeftRadius);
+  const tr = corner(style.borderTopRightRadius);
+  const bl = corner(style.borderBottomLeftRadius);
+  const br = corner(style.borderBottomRightRadius);
+  // CSS は辺ごとの半径の和が辺の長さを超えると、すべての半径を同じ割合で縮めて描く (999px の丸いボタン・楕円)。
+  let f = 1;
+  if (rect.width > 0 && rect.height > 0) {
+    for (const [sum, length] of [[tl[0] + tr[0], rect.width], [bl[0] + br[0], rect.width], [tl[1] + bl[1], rect.height], [tr[1] + br[1], rect.height]]) {
+      if (sum > length) f = Math.min(f, length / sum);
+    }
+  }
+  return Math.max(tl[0], tr[0]) * f;
 }
 
 /**

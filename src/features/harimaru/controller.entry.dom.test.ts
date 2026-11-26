@@ -498,6 +498,38 @@ describe('監査 (4 回目) の指摘の回帰', () => {
   });
 });
 
+describe('監査 (5 回目) の指摘の回帰', () => {
+  it('立っている間に近くの要素が style だけで体に重なる位置へ動いたら、続けて起きた変化でもすぐに隠れる', async () => {
+    const button = document.createElement('button');
+    let rect = { left: 600, right: 640, top: 200, bottom: 240 };
+    button.getBoundingClientRect = () => ({ ...rect, width: 40, height: 40, x: rect.left, y: rect.top, toJSON: () => ({}) }) as DOMRect;
+    root.append(button);
+    make().start();
+    recordUntilPlaced();
+    const { x } = controller.snapshot();
+    // 1 回目: 離れた位置で変わる (重ならない)。2 回目 (100ms 以内): 体の上へ動く。
+    button.style.transform = 'translateX(1px)';
+    await Promise.resolve();
+    rect = { left: x + 5, right: x + 25, top: 285, bottom: 305 };
+    button.style.transform = 'translateX(2px)';
+    await Promise.resolve();
+    expect(sprite.dataset.visible).toBe('false');
+  });
+
+  it('逆スクロールで一部が見える位置に戻っても、元の位置に立てなくなっていれば描かずに出直す', () => {
+    boxes = [{ left: 60, right: 400, top: 300, bottom: 420 }];
+    make().start();
+    recordUntilPlaced();
+    scrollTo(320);
+    advance(300);
+    boxes = [];
+    scrollTo(290);
+    advance(400);
+    expect(controller.snapshot().placed).toBe(false);
+    expect(sprite.dataset.visible).toBe('false');
+  });
+});
+
 describe('スクロールで画面の外へ出たとき', () => {
   it('体が上へ完全に抜けたら上の端の意図を記録し、経路がなければ元の位置で待つ。逆にスクロールすると、元の位置がそのまま見えてくる', () => {
     make().start();

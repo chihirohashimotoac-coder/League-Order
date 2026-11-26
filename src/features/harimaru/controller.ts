@@ -222,8 +222,11 @@ export class HarimaruController {
   /** 最後の計測での足場の要素の箱 (platformEls と同じ順) と、文書の下端。 */
   private boxes: readonly Rect[] = [];
   private docBottom: number | undefined;
-  /** 近くの要素の style・文字の変化で、最後に立ち位置を確かめた時刻。 */
+  /** 近くの要素の style・文字の変化で、最後に立ち位置を確かめた時刻と、まとめて確かめる予約。 */
   private lastNearCheckAt = -Infinity;
+  private nearTimer: number | null = null;
+  /** 足元の足場の要素 (footTop で見つけたもの)。 */
+  private footEl: Element | null = null;
   /** 直前に渡った 2 つの要素 (往復を選びにくくする)。 */
   private lastPair: { a: Element | null; b: Element | null; at: number } | null = null;
   /** 読み込めた画像 (base = v0.2 のアトラス、ほかは v0.9 の動作ごとのアトラス) と、いま表示している画像。 */
@@ -358,6 +361,8 @@ export class HarimaruController {
     this.cancelCheck();
     this.stopCursorWatch();
     this.stopRide();
+    if (this.nearTimer !== null) this.win.clearTimeout(this.nearTimer);
+    this.nearTimer = null;
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.setVisible(false);
   }
@@ -632,15 +637,37 @@ export class HarimaruController {
           // (足場の要素の位置だけを読む軽い確認)。変わった要素が姿の近くにかかるときも確かめるが、毎フレーム変わる
           // style で毎フレーム全体を計測しないよう、その確認は 100ms に 1 回まで。
           if (this.placed && this.pauses.size === 0 && !this.airborne) {
-            const foot = this.footTop();
-            const moved = this.platformEls.length > 0 && (foot === null || Math.abs(foot - this.top) > 0.5);
-            const near = records.some((r) => {
-              const el = r.target instanceof Element ? r.target : r.target.parentElement;
-              return el !== null && this.nearSprite(el);
+            const changed = records.map((r) => (r.target instanceof Element ? r.target : r.target.parentElement)).filter((el): el is Element => el !== null);
+            // 変わった要素が、描いている体にいま重なっている: 確かめるまで待たずに隠れて出直す (要素の位置だけを読む)。
+            const body = spriteBox(this.x, this.top);
+            const hit = changed.some((el) => {
+              if (el.contains(this.sprite) || this.isPlatform(el)) return false;
+              const r = el.getBoundingClientRect();
+              const page = { left: r.left + this.win.scrollX, top: r.top + this.win.scrollY, right: r.right + this.win.scrollX, bottom: r.bottom + this.win.scrollY };
+              return r.width > 0 && r.height > 0 && intersects(body, page) && !(page.left <= body.left && page.right >= body.right && page.top <= body.top && page.bottom >= body.bottom);
             });
-            if (moved || (near && this.now() - this.lastNearCheckAt >= 100)) {
-              if (near) this.lastNearCheckAt = this.now();
-              this.checkSoon();
+            if (hit) {
+              this.vanish(between(this.rng, this.timing.enterDelayMs));
+              this.scheduleRemeasure();
+              return;
+            }
+            // 足元の足場が消えた: 次の描画の前に確かめる。動いただけなら足元を合わせる (足元の要素だけを読む)。
+            const foot = this.footElTop();
+            if (foot === null) this.checkSoon();
+            else if (Math.abs(foot - this.top) > 0.5) this.followFeet();
+            // 姿の近くの変化: 全体の確認は 100ms に 1 回まで。間に起きた変化は、窓の終わりにまとめて確かめる。
+            if (changed.some((el) => this.nearSprite(el))) {
+              const wait = this.lastNearCheckAt + 100 - this.now();
+              if (wait <= 0) {
+                this.lastNearCheckAt = this.now();
+                this.checkSoon();
+              } else if (this.nearTimer === null) {
+                this.nearTimer = this.win.setTimeout(() => {
+                  this.nearTimer = null;
+                  this.lastNearCheckAt = this.now();
+                  this.checkSoon();
+                }, wait);
+              }
             }
           }
           this.scheduleRemeasure();
@@ -679,15 +706,31 @@ export class HarimaruController {
     const left = this.x + SPRITE.sideInset;
     const right = this.x + SPRITE.width - SPRITE.sideInset;
     let top: number | null = null;
+    let foot: Element | null = null;
     for (const platform of this.platformEls) {
       const rect = platform.getBoundingClientRect();
       if (rect.width <= 0 || rect.right + sx <= left || rect.left + sx >= right) continue;
       const edge = rect.top + sy;
       // 足元から離れた段 (別のカード) は数えない。
       if (Math.abs(edge - this.top) > SNAP_TOLERANCE + 1) continue;
-      top = top === null ? edge : Math.min(top, edge);
+      if (top === null || edge < top) {
+        top = edge;
+        foot = platform;
+      }
     }
+    this.footEl = foot;
     return top;
+  }
+
+  /** 足元の要素 (最後に footTop で見つけたもの) の上辺だけを読む軽い確認。分からなければ null。 */
+  private footElTop(): number | null {
+    const el = this.footEl;
+    if (!el || !el.isConnected) return null;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const sx = this.win.scrollX;
+    if (rect.right + sx <= this.x + SPRITE.sideInset || rect.left + sx >= this.x + SPRITE.width - SPRITE.sideInset) return null;
+    return rect.top + this.win.scrollY;
   }
 
   /** 足元を、真下の足場の上辺に合わせる (足場が浮いても食い込まない)。 */
@@ -896,7 +939,13 @@ export class HarimaruController {
       this.x + SPRITE.width - SPRITE.sideInset <= view.right;
     // 元の位置の体 (描いている姿の見える部分) が一部でも見えている: その場の続きとして描いたまま待つ (端から入り直さない)。
     const drawn = this.drawnRange();
-    if (!inView && drawn.foot > view.top && drawn.head < view.bottom) {
+    const posedNow = this.sink !== 0 || this.lift !== 0 || this.poseX !== 0 || this.poseY !== 0;
+    if (!inView && !posedNow && drawn.foot > view.top && drawn.head < view.bottom) {
+      // 元の位置にまだ立てるか (足場・文字・部品) を確かめてから描く。立てなければ隠れて出直す。
+      if (!this.currentSegment()) {
+        this.vanish(between(this.rng, this.timing.enterDelayMs));
+        return;
+      }
       this.exitSeen = null;
       if (this.intent?.strict) this.intent = null;
       this.pause('offscreen');
@@ -919,7 +968,9 @@ export class HarimaruController {
     const posed = this.sink !== 0 || this.lift !== 0 || this.poseX !== 0 || this.poseY !== 0;
     this.pause('offscreen');
     if (posed) this.setVisible(false);
-    const edge = this.exitSeen ?? (this.intent?.strict ? this.intent.edge : null);
+    // 姿勢のある (沈んだなど) 体が一部だけ見えていた: 休止で立ち姿に戻ると跳ねて見えるので隠し、近い端から出直す。
+    const partlyPosed = posedNow && drawn.foot > view.top && drawn.head < view.bottom ? (drawn.head < view.top ? 'top' : 'bottom') : null;
+    const edge = this.exitSeen ?? partlyPosed ?? (this.intent?.strict ? this.intent.edge : null);
     if (!edge) return;
     // 体が上・下へ完全に抜けた: その端から出直す (少し待ってから。待つ間に元の位置が見えてくれば、そのまま続ける)。
     this.intent = { edge, strict: true };
@@ -950,8 +1001,8 @@ export class HarimaruController {
       this.resume('offscreen');
       return;
     }
-    // 元の位置の描いている体が一部でも見えているなら、端から入り直さない (その場の続きとして描いたまま待つ)。
-    if (this.sprite.dataset.visible === 'true' && this.top > view.top && this.top - SPRITE.height < view.bottom) {
+    // 元の位置の描いている体が一部でも見えていて、まだ立てるなら、端から入り直さない (その場の続きとして描いたまま待つ)。
+    if (this.sprite.dataset.visible === 'true' && this.top > view.top && this.top - SPRITE.height < view.bottom && this.currentSegment()) {
       this.exitSeen = null;
       this.intent = null;
       return;

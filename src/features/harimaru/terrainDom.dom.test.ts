@@ -155,16 +155,20 @@ describe('collectObstacles の seeThrough は背景色・枠だけを数えな�
 });
 
 describe('topCornerRadius', () => {
-  it('CSS が縮めて描く大きな半径 (999px の丸いボタン) は、幅・高さの半分までに収める', () => {
+  const button = (width: number, height: number, radius: string): HTMLElement => {
     const el = document.createElement('button');
-    el.style.borderTopLeftRadius = '999px';
-    el.style.borderTopRightRadius = '999px';
-    el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 200, bottom: 40, width: 200, height: 40, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    for (const corner of ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius'] as const) el.style[corner] = radius;
+    el.getBoundingClientRect = () => ({ left: 0, top: 0, right: width, bottom: height, width, height, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     document.body.append(el);
-    expect(topCornerRadius(el)).toBe(20);
-    el.style.borderTopLeftRadius = '16px';
-    el.style.borderTopRightRadius = '16px';
-    expect(topCornerRadius(el)).toBe(16);
-    el.remove();
+    return el;
+  };
+
+  it('CSS が縮めて描く大きな半径 (999px の丸いボタン) は、縮めたあとの横の半径', () => {
+    expect(topCornerRadius(button(200, 40, '999px'))).toBeCloseTo(20, 6);
+    expect(topCornerRadius(button(200, 40, '16px'))).toBe(16);
+  });
+
+  it('楕円の角丸 (50%) は横の半径が幅の半分 (平らな上辺がない)', () => {
+    expect(topCornerRadius(button(120, 32, '50%'))).toBeCloseTo(60, 6);
   });
 });
