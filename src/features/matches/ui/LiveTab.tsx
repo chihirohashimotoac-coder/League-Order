@@ -508,10 +508,21 @@ function FocusCard({
   }
   const bySchid = new Map(card.games.map((game) => [game.schid, game]));
   for (const [schid, state] of seen) {
-    if (bySchid.has(schid)) continue;
-    // Over once n01 says so or once the card has moved on to another game.
-    const over = state.gameEnded || (live !== null && live.mid !== state.mid);
-    bySchid.set(schid, { ...gameRowOfLive(state), finished: over });
+    const row = bySchid.get(schid);
+    if (row) {
+      // The list's row of the same game, still in progress, while n01 has said it ended: its end
+      // and final legs (as the results view does). Another game (a replay) keeps the list's row.
+      if (row.mid === state.mid && state.gameEnded && !row.finished) {
+        bySchid.set(schid, { ...row, finished: true, sides: row.sides.map((sideRow) => ({ ...sideRow, legsWon: state.sides[0].teamId === sideRow.teamId ? state.legs[0] : state.legs[1] })) as GameRow['sides'] });
+      }
+      continue;
+    }
+    // Over once n01 says so, or once the card has moved on to another game — then its result is not
+    // known (the last legs seen may not be the last ones): no legs, no winner until the list has it.
+    const ended = state.gameEnded;
+    const movedOn = !ended && live !== null && live.mid !== state.mid;
+    const recorded = gameRowOfLive(state);
+    bySchid.set(schid, movedOn ? { ...recorded, finished: true, sides: recorded.sides.map((sideRow) => ({ ...sideRow, legsWon: null })) as GameRow['sides'] } : { ...recorded, finished: ended });
   }
   const currentSchid = live && !live.gameEnded ? live.schid : card.current?.schid ?? null;
   // The game picked before it started has started: it is followed again (its live view, then the
@@ -522,6 +533,9 @@ function FocusCard({
   // ライブに追従している間だけ (別のゲームを選んで開いている間は渡さない。ゲームの終了・対戦の終了も追従のまま渡す)。
   const harimaruSource = useHarimaruLive(pane === 'right' || (picked !== null && picked !== live?.schid) ? null : 'watch-live', live, data.season, status);
   const selectedGame = selected ? bySchid.get(selected) ?? null : null;
+  // Legs won per card side; `null` for a game whose result is not known (left before its end was seen).
+  const legsOf = (game: GameRow | undefined): [number, number] | null =>
+    !game ? null : game.sides.every((sideRow) => sideRow.legsWon === null) && game.finished ? null : flipOf(game) ? [game.sides[1].legsWon ?? 0, game.sides[0].legsWon ?? 0] : [game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0];
 
   // Card score: n01's live count when there is one (it includes the game just won), else the board's.
   const liveFlip = live?.sides[0].teamId === card.teams[1].id;
@@ -550,7 +564,8 @@ function FocusCard({
       ? projectMany(
           data.season.pointRule,
           group,
-          todayCards
+          // The card shown counts once it has started (by its live state too, before the board has it).
+          (todayCards.some((entry) => entry.tmid === card.tmid) || (card.games.length === 0 && !live) ? todayCards : [...todayCards, card])
             .filter((entry) => entry.divisionIndex === card.divisionIndex)
             .map((entry) => {
               const official = data.cards.find((c) => c.lsid === entry.lsid && c.divisionIndex === entry.divisionIndex);
@@ -612,12 +627,12 @@ function FocusCard({
     const isLive = liveSchid !== null ? slot.schid === liveSchid : !!game && !game.finished;
     const actual = sideNames(slot.schid);
     if (actual) {
-      const legs = game ? (flipOf(game) ? [game.sides[1].legsWon ?? 0, game.sides[0].legsWon ?? 0] : [game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0]) : null;
+      const legs = legsOf(game);
       return {
         schid: slot.schid,
         label: slot.label,
         sides: [<NameLines key="a" names={actual[0]} />, <NameLines key="b" names={actual[1]} />],
-        state: isLive ? <span className="live-tag">LIVE</span> : game?.finished && legs ? `${legs[0]} - ${legs[1]}／終了` : '進行中',
+        state: isLive ? <span className="live-tag">LIVE</span> : game?.finished ? (legs ? `${legs[0]} - ${legs[1]}／終了` : '終了 (結果を確認中)') : '進行中',
         live: isLive,
       };
     }
@@ -664,7 +679,7 @@ function FocusCard({
           // few seconds older, and right after a game ends they still call the previous game
           // unfinished and do not hold the next one yet.
           const isLive = liveSchid !== null ? slot.schid === liveSchid : !!game && !game.finished;
-          const legs: [number, number] | null = game ? (flipOf(game) ? [game.sides[1].legsWon ?? 0, game.sides[0].legsWon ?? 0] : [game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0]) : null;
+          const legs = legsOf(game);
           return { key: slot.schid, label: slot.label, short: shortSlot(slot.label), legs, winner: cardWinner, live: isLive, playable: true, plan: !game && !isLive && !cardOver ? planOf(slot.schid) : undefined };
         })}
       />

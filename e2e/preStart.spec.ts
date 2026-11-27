@@ -372,6 +372,9 @@ test('ライブ: a game the live state has ended, not yet in the game list, show
   stage = 'after';
   await expect(chip(focus, 'S3')).toContainText('LIVE');
   await expect(chip(focus, 'S2')).not.toContainText('予定');
+  // Its last legs seen (0-0) are not its result: no score, no winner, until the list has it.
+  await expect(chip(focus, 'S2').locator('.r')).toHaveText('—');
+  await expect(chip(focus, 'S2')).not.toHaveClass(/ a| b/u);
   await chip(focus, 'S2').click();
   await expect(focus.getByTestId('planned-game')).toHaveCount(0);
   await expect(focus.getByTestId('game-block')).toContainText('シングルス2');
