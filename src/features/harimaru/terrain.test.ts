@@ -7,6 +7,13 @@ const bounds = { left: 0, right: 2_000 };
 const inset = DEFAULT_TERRAIN.cornerInset;
 
 describe('mergePlatforms', () => {
+  it('ほかの要素に覆われて切れた端 (cutLeft・cutRight) からは角丸の幅を除かない', () => {
+    const [cut] = mergePlatforms([{ left: 240, right: 600, top: 400, inset: 16, cutLeft: true }]);
+    expect(cut.left).toBe(240);
+    expect(cut.right).toBe(600 - 16);
+    const [both] = mergePlatforms([{ left: 240, right: 600, top: 400, cutLeft: true, cutRight: true }]);
+    expect([both.left, both.right]).toEqual([240, 600]);
+  });
   it('隙間のある横並びのタイルはつながない (継ぎ目の隙間と角丸の上を歩かない)。どのタイルも両端の角を避ける', () => {
     const merged = mergePlatforms([
       { left: 0, right: 100, top: 50 },

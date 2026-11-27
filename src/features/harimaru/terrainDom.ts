@@ -425,7 +425,9 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
       if (r - l < 8) continue;
       const left = l + sx;
       const right = r + sx;
-      platforms.push({ left, right, top, inset });
+      const cutLeft = l > rect.left + 0.5;
+      const cutRight = r < rect.right - 0.5;
+      platforms.push({ left, right, top, inset, ...(cutLeft ? { cutLeft } : {}), ...(cutRight ? { cutRight } : {}) });
       elements.push(el);
       boxes.push({ ...page, left, right, top, inset } as Rect);
     }

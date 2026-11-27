@@ -252,6 +252,10 @@ describe('measureTerrain: 見えているデザインはすべて足場の候補
       expect(runs[0][0]).toBeLessThanOrEqual(247);
       expect(runs[0][1]).toBe(600);
       expect(of(hidden)).toEqual([]);
+      // 覆われて切れた端 (左) は要素の角ではない。右の端は要素の角のまま。
+      const lowPlatform = platforms.find((_, i) => elements?.[i] === low)!;
+      expect(lowPlatform.cutLeft).toBe(true);
+      expect(lowPlatform.cutRight).toBeUndefined();
     } finally {
       document.elementFromPoint = original;
       root.remove();

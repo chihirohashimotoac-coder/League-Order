@@ -23,6 +23,12 @@ export interface Platform {
   top: number;
   /** 上辺の両端から除く幅 (角丸の半径と cornerInset の大きい方)。省略時は cornerInset。 */
   inset?: number;
+  /**
+   * 左・右の端が、ほかの要素に覆われて切れた端か (要素の角ではない)。切れた端からは幅を除かない (覆っている要素の
+   * 面の手前まで立てる。そこは側面をよじ登る壁の前)。
+   */
+  cutLeft?: boolean;
+  cutRight?: boolean;
 }
 
 export interface Segment {
@@ -52,7 +58,10 @@ export interface TerrainInput {
 export function mergePlatforms(platforms: readonly Platform[], params: TerrainParams = DEFAULT_TERRAIN): Platform[] {
   const byTop = [...platforms]
     .filter((p) => Number.isFinite(p.left) && Number.isFinite(p.right) && Number.isFinite(p.top) && p.right > p.left)
-    .map((p) => ({ ...p, left: p.left + Math.max(params.cornerInset, p.inset ?? 0), right: p.right - Math.max(params.cornerInset, p.inset ?? 0) }))
+    .map((p) => {
+      const inset = Math.max(params.cornerInset, p.inset ?? 0);
+      return { ...p, left: p.left + (p.cutLeft ? 0 : inset), right: p.right - (p.cutRight ? 0 : inset) };
+    })
     .filter((p) => p.right > p.left)
     .sort((a, b) => a.top - b.top);
   // 高さの差が rowTolerance 以内の足場を 1 つの段にまとめ、段の中で左から順につなぐ (段の高さは最も高い上辺)。
