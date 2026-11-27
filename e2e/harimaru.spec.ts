@@ -531,9 +531,10 @@ test('PC 1100×900: 歩く・駆ける間、足元はいつも 1 つの要素の
   expect(movingFrames, '歩く・駆ける場面がある').toBeGreaterThan(20);
   expect(floating).toEqual([]);
   expect(touching).toEqual([]);
-  // 継ぎ目の手前まで進んだ場面がある (そこで止まるか、ジャンプで渡る)。気まぐれな歩き方では向きが偏るので、
-  // 左右どちらの向きでも渡ることは、controller.dom.test.ts (横並びのタイルの列) で決まった乱数で確かめる。
-  expect(seams.right + seams.left, '継ぎ目・要素の端の手前まで').toBeGreaterThan(0);
+  // 継ぎ目・要素の端の手前まで歩いた回数は記録だけする。幅 1100 では休む・眠る時間が長く、種 1〜40 のどれも 90 秒の間に
+  // 端まで歩かなかった。端の手前で止まる・継ぎ目をジャンプで渡ることは、controller.dom.test.ts (横並びのタイルの列) と
+  // harimaruEntry.spec.ts の検証用の足場 (隙間 10px・36px) で決まった条件で確かめる。
+  test.info().annotations.push({ type: '端の手前まで歩いた回数', description: String(seams.right + seams.left) });
 });
 
 test('速くスクロールしても位置が崩れず、止まったあとも重ならない', async ({ page }) => {

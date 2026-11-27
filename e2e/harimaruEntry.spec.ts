@@ -243,7 +243,8 @@ async function lab(page: Page, cards: [number, number, number, number][], height
       document.querySelector<HTMLElement>('.demo-banner')!.style.display = 'none';
       const wrap = document.createElement('div');
       wrap.id = 'harimaru-lab';
-      wrap.style.cssText = `position:relative;height:${height}px`;
+      // 入場のフェード (.page-view の子の section-in) は、時計を止めている間は進まないので付けない。
+      wrap.style.cssText = `position:relative;height:${height}px;animation:none`;
       for (const [left, top, width, h] of cards) {
         const card = document.createElement('div');
         card.className = 'card';
@@ -280,11 +281,11 @@ test('検証用の足場: 下へ抜けたあと下端から戻るときは、画
   // 先頭へ戻す: A (と体) は画面の下へ抜ける。下端から、画面の下へ続く B の側面をよじ登って戻る。
   const trail = await record(page);
   await page.evaluate(() => window.scrollTo(0, 0));
-  // 抜けて見えなくなるまで (スクロールの処理を待つ)。
+  // 下の端から入り直し始めるまで (体は下部ナビの裏に抜けたまま描かれていることがある)。
   await expect.poll(async () => {
     await page.clock.runFor(100);
-    return sprite(page).getAttribute('data-visible');
-  }).toBe('false');
+    return sprite(page).getAttribute('data-action');
+  }).toBe('enter');
   await untilStanding(page);
   const all = await trail();
   const view = await viewport(page);
