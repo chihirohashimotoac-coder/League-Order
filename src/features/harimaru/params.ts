@@ -309,7 +309,7 @@ export const DEFAULT_MOTION: MotionParams = {
   entryMaxGap: 24,
   hopMaxGap: 40,
   textTouchWeight: 0.5,
-  textHoldMs: 4_500,
+  textHoldMs: 3_500,
   entryMaxDrop: 240,
   entryMaxClimb: 240,
   edgeOverhang: 8,
