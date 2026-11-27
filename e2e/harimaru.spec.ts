@@ -307,33 +307,46 @@ async function waitStanding(page: Page): Promise<void> {
 }
 
 test('顔をタップ・クリックすると喜び、下の画面の操作には何も起きない', async ({ page }) => {
+  test.setTimeout(150_000);
+  // 乱数の種と時計を固定し、時計を進めて、顔の近くに操作部品のない位置で静かにしている瞬間を待つ。体はボタンに
+  // 重なってよく、ボタンの上の顔を触ると、触った操作はボタンに届く (ハリマルはクリックを受け取らない。その場合は
+  // 喜ばない)。タッチ (スマホ) は位置の補正が届く周り 16px も確かめる (足元の側は足場なので除く)。
+  // 種 7: スマホ・PC (幅 1100) とも、顔の近くに操作部品のない位置に立つ (本番のビルドで 1〜8 を試した。スマホで
+  // 立ったのは 3・7 だけ。ほかの種はタイル (ボタン) の中の要素の上辺に立ち、顔がボタンの中にある)。
+  const start = Date.parse('2026-11-26T03:00:00Z');
+  await seedRandom(page, 7);
+  await page.clock.install({ time: start });
+  await page.clock.pauseAt(start + 1_000);
   await openSampleHome(page);
-  // 顔の近く (タッチの位置の補正が届く 16px。足元の側は足場なので除く) に操作部品がない位置に立つまで待つ。体はボタンに重なってよく、ボタンの上の
-  // 顔を触ると、触った操作はボタンに届く (ハリマルはクリックを受け取らない。その場合は喜ばない)。
+  const touch = page.viewportSize()!.width < 600;
   let clear = false;
-  for (let attempt = 0; attempt < 20 && !clear; attempt += 1) {
-    await waitStanding(page);
-    const p = await body(page);
-    // マウス (PC) は触った点だけ。タッチ (スマホ) は位置の補正が届く周り 16px も。
-    const touch = page.viewportSize()!.width < 600;
-    clear = await page.evaluate(({ x, y, touch }) => {
+  for (let spent = 0; spent < 120_000 && !clear; spent += 250) {
+    await page.clock.runFor(250);
+    clear = await sprite(page).evaluate((el, touch) => {
+      if (el.dataset.visible !== 'true' || el.style.clipPath || !['idle', 'look', 'rest'].includes(el.dataset.action ?? '')) return false;
+      const r = el.getBoundingClientRect();
+      const dir = /scaleX\(-1\)/.test(el.style.transform) ? 1 : -1;
+      const x = dir < 0 ? r.left + 7 : r.right - 7;
+      const y = r.top + r.height / 2 - 5;
       const offsets = touch ? [[0, 0], [-16, 0], [16, 0], [0, -16]] : [[0, 0]];
-      const near = offsets.map(([dx, dy]) => document.elementFromPoint(x + dx, y + dy));
-      return near.every((e) => !e?.closest('button, a, input, select, textarea, label, [role="button"], [tabindex="0"]'));
-    }, { x: p.faceX, y: p.y - 5, touch });
-    if (!clear) await page.waitForTimeout(1_500);
+      return offsets.every(([dx, dy]) => !document.elementFromPoint(x + dx, y + dy)?.closest('button, a, input, select, textarea, label, [role="button"], [tabindex="0"]'));
+    }, touch);
   }
-  expect(clear, '顔の近くに操作部品のない位置に立つ').toBe(true);
-  await waitStanding(page);
+  expect(clear, '顔の近くに操作部品のない位置で静かにしている').toBe(true);
   const url = page.url();
   const actions = await watchActions(page);
   const point = await body(page);
   // 顔の上の方 (頭の高さ) を触る。足元の足場がボタン (タイル) のとき、足元に近い点を触ると、ブラウザーのタッチの
   // 位置の補正で下のボタンが押されることがある (ハリマルはクリックを受け取らない)。
   const faceY = point.y - 5;
-  if (page.viewportSize()!.width < 600) await page.touchscreen.tap(point.faceX, faceY);
+  if (touch) await page.touchscreen.tap(point.faceX, faceY);
   else await page.mouse.click(point.faceX, faceY);
-  await expect.poll(actions, { timeout: 3_000 }).toContain('happy');
+  let happy = false;
+  for (let spent = 0; spent < 3_000 && !happy; spent += 100) {
+    await page.clock.runFor(100);
+    happy = (await actions()).includes('happy');
+  }
+  expect(happy, '喜ぶ').toBe(true);
   // 画面は変わらず、ダイアログも開かない。
   expect(page.url()).toBe(url);
   await expect(page.getByRole('dialog')).toHaveCount(0);
