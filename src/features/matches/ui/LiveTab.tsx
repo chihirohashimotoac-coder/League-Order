@@ -509,20 +509,27 @@ function FocusCard({
   const bySchid = new Map(card.games.map((game) => [game.schid, game]));
   for (const [schid, state] of seen) {
     const row = bySchid.get(schid);
-    if (row) {
-      // The list's row of the same game, still in progress, while n01 has said it ended: its end
-      // and final legs (as the results view does). Another game (a replay) keeps the list's row.
-      if (row.mid === state.mid && state.gameEnded && !row.finished) {
-        bySchid.set(schid, { ...row, finished: true, sides: row.sides.map((sideRow) => ({ ...sideRow, legsWon: state.sides[0].teamId === sideRow.teamId ? state.legs[0] : state.legs[1] })) as GameRow['sides'] });
-      }
-      continue;
-    }
     // Over once n01 says so, or once the card has moved on to another game — then its result is not
     // known (the last legs seen may not be the last ones): no legs, no winner until the list has it.
     const ended = state.gameEnded;
     const movedOn = !ended && live !== null && live.mid !== state.mid;
+    const unknown = (base: GameRow): GameRow => ({ ...base, finished: true, sides: base.sides.map((sideRow) => ({ ...sideRow, legsWon: null })) as GameRow['sides'] });
+    if (row) {
+      // The list's row of the same game still in progress, while n01 has said it ended (or moved on):
+      // its end, with the final legs when n01 said them and each side is matched by its team id.
+      // Another game (a replay) keeps the list's row.
+      if (row.mid !== state.mid || row.finished || (!ended && !movedOn)) continue;
+      if (movedOn) {
+        bySchid.set(schid, unknown(row));
+        continue;
+      }
+      const legsFor = (teamId: string): number | null => (state.sides[0].teamId === teamId ? state.legs[0] : state.sides[1].teamId === teamId ? state.legs[1] : null);
+      const sides = row.sides.map((sideRow) => ({ ...sideRow, legsWon: legsFor(sideRow.teamId) })) as GameRow['sides'];
+      bySchid.set(schid, sides.some((sideRow) => sideRow.legsWon === null) ? unknown(row) : { ...row, finished: true, sides });
+      continue;
+    }
     const recorded = gameRowOfLive(state);
-    bySchid.set(schid, movedOn ? { ...recorded, finished: true, sides: recorded.sides.map((sideRow) => ({ ...sideRow, legsWon: null })) as GameRow['sides'] } : { ...recorded, finished: ended });
+    bySchid.set(schid, movedOn ? unknown(recorded) : { ...recorded, finished: ended });
   }
   const currentSchid = live && !live.gameEnded ? live.schid : card.current?.schid ?? null;
   // The game picked before it started has started: it is followed again (its live view, then the
@@ -544,7 +551,8 @@ function FocusCard({
   // Estimate: season win rates per kind (without this card's games), the game in progress by its
   // legs; and the same estimate after each game so far (カード勝率の推移).
   const { chance, seasonGames } = slotChances(data.season, data.cards, data.games, [card.teams[0].id, card.teams[1].id], new Set(card.games.map((game) => game.mid)), schedule);
-  const results = card.games.flatMap((game) => {
+  // The games' results as shown (the list, with what the live states have said of their ends).
+  const results = [...bySchid.values()].flatMap((game) => {
     const winner = game.finished ? gameWinner(game) : null;
     return winner === null || !game.schid ? [] : [{ schid: game.schid, winner: (flipOf(game) ? 1 - winner : winner) as 0 | 1, endedAt: game.updateTime }];
   });

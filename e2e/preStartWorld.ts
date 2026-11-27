@@ -79,7 +79,7 @@ export interface PreStartOptions {
    * シングルス2 started in `match/live` only (`next`, the list a step behind), then シングルス3
    * started (`after`: シングルス2 over, still not in the list).
    */
-  c003Break?: () => 'break' | 'next' | 'after';
+  c003Break?: () => 'break' | 'next' | 'after' | 'afterListed';
 }
 
 const c003Rows = (sg01Finished = false): unknown[] => [
@@ -126,9 +126,15 @@ export async function servePreStart(page: Page, options: PreStartOptions = {}): 
     else if (operation === 'league/schedule/get') body = fixtureBody;
     else if (operation === 'tournament/standings')
       body = { result: 0, tdid: TDID, groups: [{ kind: 'lg', index: 0, title: 'A Division', players: ['AAAA', 'BBBB', 'CCCC', 'DDDD'].map((tpid) => ({ tpid, name: tpid, rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 })) }] };
-    else if (operation === 'match/list') body = list([...c003Rows(!!options.c003Break), ...c004Rows()]);
+    else if (operation === 'match/list') {
+      // 「afterListed」: the list now holds シングルス2 — an old read of it, still in progress at 1-0.
+      const late = options.c003Break?.() === 'afterListed'
+        ? [{ ...(gameRow('c003', 'AAAA', 'CCCC', 'sg02', [side('AAAA', [PEOPLE.AAAA[1]], 1, 400, 18), side('CCCC', [PEOPLE.CCCC[1]], 0, 300, 18)], { start: 1_800_004_000, finished: false, mid: 'c003_sg02' }) as object), tmid: C003 }]
+        : [];
+      body = list([...c003Rows(!!options.c003Break), ...late, ...c004Rows()]);
+    }
     else if (operation === 'match/throws') body = { result: 0, changed: 1, mid: q.get('mid'), match_type: '01', end_match: 1, updateTime: 1_800_000_500_000, leg_data: [] };
-    else if (operation === 'match/live' && q.get('tmid') === C003 && options.c003Break?.() === 'after')
+    else if (operation === 'match/live' && q.get('tmid') === C003 && (options.c003Break?.() === 'after' || options.c003Break?.() === 'afterListed'))
       body = liveBody({
         mid: 'c003_sg03',
         tmid: C003,

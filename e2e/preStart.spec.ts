@@ -359,7 +359,7 @@ test('日程・結果: a card of today opened between two games — a planned ga
 });
 
 test('ライブ: a game the live state has ended, not yet in the game list, shows its record — never its plan', async ({ page }) => {
-  let stage: 'break' | 'next' | 'after' = 'break';
+  let stage: 'break' | 'next' | 'after' | 'afterListed' = 'break';
   await servePreStart(page, { c003Break: () => stage });
   await page.goto('/');
   await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
@@ -379,6 +379,11 @@ test('ライブ: a game the live state has ended, not yet in the game list, show
   await expect(focus.getByTestId('planned-game')).toHaveCount(0);
   await expect(focus.getByTestId('game-block')).toContainText('シングルス2');
   await expect(focus.getByTestId('game-block')).toContainText('井上 次郎');
+  // An old read of シングルス2 (in progress, 1-0) reaches the list afterwards: still over, result still unknown.
+  stage = 'afterListed';
+  await page.waitForTimeout(7_000);
+  await expect(chip(focus, 'S2').locator('.r')).toHaveText('—');
+  await expect(chip(focus, 'S2')).not.toHaveClass(/ a| b|is-live/u);
 });
 
 /** Every chip on one line, nothing clipped, no sideways scroll — measured, not looked at. */
