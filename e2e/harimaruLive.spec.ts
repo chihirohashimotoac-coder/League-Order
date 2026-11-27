@@ -327,7 +327,10 @@ test('過去の Leg から戻った直後: 閲覧中の得点には反応せず�
   ];
   const game: LiveGame = { mid: `${LSID}_c2`, schid: 'c2', visits: [{ p: 0, r: 1, score: 100 }, { p: 1, r: 1, score: 100 }], legs: [1, 0], sets: [2, 1], gameEnded: false, cardEnded: false, rev: 0, leg: 1, past: [leg1], honorSince: true };
   // 気まぐれな動作の抽選を毎回同じにする (長い動作の途中で 180 が届き、待ちきれずに捨てる回を作らない)。
-  await seedRandom(page, 1);
+  // 種 4: エフェクトの余白のある足場に立つ回。文字以外のデザインを足場にしてから、スマホの観戦の画面では観戦バーの
+  // すぐ下の切り替えボタンの上辺に立つことが多く、そこでは 180 のエフェクトが上のボタンの文字にかかるため見送る
+  // (種 1〜6 のうち 5 つ。HANDOFF §10 の要相談)。
+  await seedRandom(page, 4);
   const log = await openNight(page, game);
   await waitHarimaru(page);
   const result = await watchLive(page);
