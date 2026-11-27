@@ -74,15 +74,21 @@ export interface PreStartOptions {
   c004Started?: () => boolean;
   /** Fail every order read (HTTP 503). */
   ordersDown?: () => boolean;
+  /**
+   * c003 between games: シングルス1 over in the game list and in `match/live` (`break`), then
+   * シングルス2 started in `match/live` only (`next`, the list a step behind), then シングルス3
+   * started (`after`: シングルス2 over, still not in the list).
+   */
+  c003Break?: () => 'break' | 'next' | 'after';
 }
 
-const c003Rows = (): unknown[] => [
+const c003Rows = (sg01Finished = false): unknown[] => [
   gameRow('c003', 'AAAA', 'CCCC', 'tm01', [side('AAAA', PEOPLE.AAAA, 1, 1001, 33), side('CCCC', PEOPLE.CCCC, 0, 692, 30)], { start: 1_800_000_000, mid: 'c003_tm01' }),
   // n01 lists Corks first in this row: the plan and the record must still sit on the right side.
   gameRow('c003', 'CCCC', 'AAAA', 'db01', [side('CCCC', [PEOPLE.CCCC[0], PEOPLE.CCCC[1]], 2, 1267, 48), side('AAAA', [PEOPLE.AAAA[0], PEOPLE.AAAA[1]], 1, 1153, 45)], { start: 1_800_000_900, mid: 'c003_db01' }),
   gameRow('c003', 'AAAA', 'CCCC', 'db02', [side('AAAA', [PEOPLE.AAAA[2], PEOPLE.AAAA[3]], 2, 0, 90, 190), side('CCCC', [PEOPLE.CCCC[2], PEOPLE.CCCC[3]], 0, 0, 90, 150)], { start: 1_800_001_800, mid: 'c003_db02' }),
   // シングルス1 in progress: played by 上田 三郎 (not the planned 青木 一郎) — the record wins.
-  gameRow('c003', 'AAAA', 'CCCC', 'sg01', [side('AAAA', [PEOPLE.AAAA[2]], 1, 1213, 60), side('CCCC', [PEOPLE.CCCC[0]], 1, 1092, 57)], { start: 1_800_002_700, finished: false, mid: 'c003_sg01' }),
+  gameRow('c003', 'AAAA', 'CCCC', 'sg01', [side('AAAA', [PEOPLE.AAAA[2]], sg01Finished ? 2 : 1, 1213, 60), side('CCCC', [PEOPLE.CCCC[0]], 1, 1092, 57)], { start: 1_800_002_700, finished: sg01Finished, mid: 'c003_sg01' }),
 ].map((row) => ({ ...(row as object), tmid: C003 }));
 
 const c004Live = (): unknown =>
@@ -120,8 +126,50 @@ export async function servePreStart(page: Page, options: PreStartOptions = {}): 
     else if (operation === 'league/schedule/get') body = fixtureBody;
     else if (operation === 'tournament/standings')
       body = { result: 0, tdid: TDID, groups: [{ kind: 'lg', index: 0, title: 'A Division', players: ['AAAA', 'BBBB', 'CCCC', 'DDDD'].map((tpid) => ({ tpid, name: tpid, rank: 0, p: 0, w: 0, d: 0, l: 0, pts: 0 })) }] };
-    else if (operation === 'match/list') body = list([...c003Rows(), ...c004Rows()]);
+    else if (operation === 'match/list') body = list([...c003Rows(!!options.c003Break), ...c004Rows()]);
     else if (operation === 'match/throws') body = { result: 0, changed: 1, mid: q.get('mid'), match_type: '01', end_match: 1, updateTime: 1_800_000_500_000, leg_data: [] };
+    else if (operation === 'match/live' && q.get('tmid') === C003 && options.c003Break?.() === 'after')
+      body = liveBody({
+        mid: 'c003_sg03',
+        tmid: C003,
+        schid: 'sg03',
+        title: 'Test League A Division シングルス3',
+        updateTime: 1_800_005_000_000,
+        sets: [4, 1],
+        legs: [0, 0],
+        current_set: 5,
+        current_leg: 0,
+        format: { limit_leg: 2, limit_set: 7, draw_mode: 0, schedule: 1, start_score: 501 },
+        players: [{ name: 'Arrows', tpid: 'AAAA', order: [{ oid: 'a3', name: '上田 三郎' }] }, { name: 'Corks', tpid: 'CCCC', order: [{ oid: 'c3', name: '工藤 仁' }] }],
+      });
+    else if (operation === 'match/live' && q.get('tmid') === C003 && options.c003Break?.() === 'next')
+      body = liveBody({
+        mid: 'c003_sg02',
+        tmid: C003,
+        schid: 'sg02',
+        title: 'Test League A Division シングルス2',
+        updateTime: 1_800_004_000_000,
+        sets: [3, 1],
+        legs: [0, 0],
+        current_set: 4,
+        current_leg: 0,
+        format: { limit_leg: 2, limit_set: 7, draw_mode: 0, schedule: 1, start_score: 501 },
+        players: [{ name: 'Arrows', tpid: 'AAAA', order: [{ oid: 'a2', name: '井上 次郎' }] }, { name: 'Corks', tpid: 'CCCC', order: [{ oid: 'c2', name: '木村 守' }] }],
+      });
+    else if (operation === 'match/live' && q.get('tmid') === C003 && options.c003Break?.() === 'break')
+      body = liveBody({
+        mid: 'c003_sg01',
+        tmid: C003,
+        schid: 'sg01',
+        title: 'Test League A Division シングルス1',
+        updateTime: 1_800_003_500_000,
+        end_match: 1,
+        sets: [3, 1],
+        legs: [2, 1],
+        current_leg: 2,
+        format: { limit_leg: 2, limit_set: 7, draw_mode: 0, schedule: 1, start_score: 501 },
+        players: [{ name: 'Arrows', tpid: 'AAAA', order: [{ oid: 'a3', name: '上田 三郎' }] }, { name: 'Corks', tpid: 'CCCC', order: [{ oid: 'c1', name: '加藤 健' }] }],
+      });
     else if (operation === 'match/live' && q.get('tmid') === C003)
       body = liveBody({
         mid: 'c003_sg01',

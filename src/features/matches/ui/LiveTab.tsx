@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/icons';
 import type { MatchesApi } from '../api';
 import type { GameRow, LiveState, SeasonDocument } from '../parse';
-import { parseLeagueTmid, slotOf, slotsFor } from '../parse';
+import { gameRowOfLive, parseLeagueTmid, slotOf, slotsFor } from '../parse';
 import type { MatchCard } from '../cards';
 import { gameWinner, slotKindLabel } from '../cards';
 import { PLAN_TEXT, isFixtureToday, leagueCardTmid, planCard } from '../plannedOrders';
@@ -348,11 +348,11 @@ export function LiveTab({
       </ul>
       {pair && focus && right ? (
         <div className="focus-pair" data-testid="focus-pair">
-          <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} pane="left" />
-          <FocusCard key={right.tmid} card={right} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} pane="right" />
+          <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={played} factory={factory} api={api} onPlayer={onPlayer} pane="left" />
+          <FocusCard key={right.tmid} card={right} data={data} registered={registered} todayCards={played} factory={factory} api={api} onPlayer={onPlayer} pane="right" />
         </div>
       ) : focus ? (
-        <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={cards} factory={factory} api={api} onPlayer={onPlayer} />
+        <FocusCard key={focus.tmid} card={focus} data={data} registered={registered} todayCards={played} factory={factory} api={api} onPlayer={onPlayer} />
       ) : null}
     </div>
   );
@@ -497,7 +497,22 @@ function FocusCard({
     [orders.rows, card.tmid, card.teams[0].id, card.teams[1].id, data.season, card.divisionIndex],
   );
   const flipOf = (game: GameRow): boolean => game.sides[0].teamId === card.teams[1].id;
+  // The last live state seen of each game (by slot): a game the list does not hold yet — it lags
+  // a few seconds behind, or a game ended and the next one started meanwhile — is shown from what
+  // `match/live` said of it (its record), never from its plan. The list's own row wins once it has one.
+  const [seen, setSeen] = useState<ReadonlyMap<string, LiveState>>(() => new Map());
+  const [seenFrom, setSeenFrom] = useState<LiveState | null>(null);
+  if (live !== seenFrom) {
+    setSeenFrom(live);
+    if (live?.schid && live.tmid === card.tmid) setSeen((map) => (map.get(live.schid!) === live ? map : new Map(map).set(live.schid!, live)));
+  }
   const bySchid = new Map(card.games.map((game) => [game.schid, game]));
+  for (const [schid, state] of seen) {
+    if (bySchid.has(schid)) continue;
+    // Over once n01 says so or once the card has moved on to another game.
+    const over = state.gameEnded || (live !== null && live.mid !== state.mid);
+    bySchid.set(schid, { ...gameRowOfLive(state), finished: over });
+  }
   const currentSchid = live && !live.gameEnded ? live.schid : card.current?.schid ?? null;
   // The game picked before it started has started: it is followed again (its live view, then the
   // card's next game as usual). Another game starting leaves the pick alone.

@@ -137,3 +137,23 @@ describe('isFixtureToday (JST)', () => {
     expect(isFixtureToday('第3節', Date.UTC(2026, 10, 27, 0))).toBe(false);
   });
 });
+
+describe('orderTmidOf', () => {
+  const card = { tournamentId: TD, divisionIndex: 2, lsid: '5ua6', teams: [{ id: 'iTGA' }, { id: '7v1X' }] as const, tmid: null as string | null };
+  it('a game row’s tmid naming this card and both teams; else n01’s form', async () => {
+    const { orderTmidOf } = await import('./plannedOrders');
+    expect(orderTmidOf(card)).toBe(TMID);
+    expect(orderTmidOf({ ...card, tmid: 't_ABvC_5234_lg_2_5ua6_iTGA_7v1X' })).toBe('t_ABvC_5234_lg_2_5ua6_iTGA_7v1X');
+    // A row of the same card id with another team: not trusted.
+    expect(orderTmidOf({ ...card, tmid: 't_ABvC_5234_lg_2_5ua6_7v1X_pzDR' })).toBe(TMID);
+    expect(orderTmidOf({ ...card, tmid: 't_OTHER_lg_2_5ua6_7v1X_iTGA' })).toBe(TMID);
+  });
+});
+
+describe('parseOrders (no list)', () => {
+  it('an answer without its list is a failed read, never "no orders"', () => {
+    expect(() => parseOrders({ result: 0 })).toThrow();
+    expect(() => parseOrders({ result: 0, order_list: {} })).toThrow();
+    expect(parseOrders({ result: 0, list: [] })).toEqual([]);
+  });
+});

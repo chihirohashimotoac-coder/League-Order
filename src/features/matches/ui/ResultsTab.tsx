@@ -24,7 +24,7 @@ import { CardTrail } from './CardTrail';
 import { outlookTrail, slotChances } from '../cardTrail';
 import type { HighlightFocus } from './Highlights';
 import { useHarimaruLive } from '../../harimaru/useHarimaruLive';
-import { PLAN_TEXT, isFixtureToday, leagueCardTmid, planCard } from '../plannedOrders';
+import { PLAN_TEXT, isFixtureToday, orderTmidOf, planCard } from '../plannedOrders';
 import { useCardOrders, useCardStart } from './useCardOrders';
 import { NameLines, OrderOverview, PlannedGameView, planStatusOf, plannedNames } from './PlannedParts';
 import type { OverviewRow } from './PlannedParts';
@@ -252,10 +252,12 @@ function MatchCenter({
   // A card none of whose games the list holds (開始前) has no `tmid` from a game row: n01's form of
   // it is used. Dated today (JST), its start is checked every 30 s; once a game is seen it is
   // followed as a card in progress.
-  const tmid = listed.tmid ?? leagueCardTmid(data.season.tournamentId, listed.divisionIndex, listed.lsid, [listed.teams[0].id, listed.teams[1].id]);
+  const tmid = orderTmidOf(listed);
   const [openedAt] = useState(() => Date.now());
   const today = !listed.official && data.season.status !== 40 && isFixtureToday(listed.title, openedAt);
-  const started = useCardStart(api, tmid, listed.state === 'scheduled' && today);
+  // A card of today not followed yet: before its first game (scheduled), or between two games when
+  // the list was read (every game finished, no result yet) — the next game's start is caught too.
+  const started = useCardStart(api, tmid, (listed.state === 'scheduled' || listed.state === 'unrecorded') && today);
   const following = listed.state === 'live' || started;
   const { live: polled, status } = useCardLive(api, following ? tmid : null, (state) => !liveSuperseded(listed, state));
   // 対戦が進行中の間、画面の自動スリープを防ぐ (ライブタブと同じく、終了はポーラーの判定に従う。

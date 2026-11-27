@@ -162,6 +162,18 @@ describe('useCardOrders', () => {
     expect(calls).toHaveLength(3);
   });
 
+  it('opened while hidden: no read until shown, polled or not', async () => {
+    const { api, calls } = fakeApi();
+    hidden = true;
+    renderHook(() => useCardOrders(api, 't', 'T9', { poll: false }));
+    expect(calls).toHaveLength(0);
+    hidden = false;
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(calls).toHaveLength(1);
+  });
+
   it('no card, no read', () => {
     const { api, calls } = fakeApi();
     const { result } = renderHook(() => useCardOrders(api, 't', null, { poll: true }));
@@ -201,6 +213,19 @@ describe('useCardStart', () => {
       vi.advanceTimersByTime(ORDER_POLL_MS * 4);
     });
     expect(count).toBe(3);
+  });
+
+  it('opened while hidden: the first check waits for the page to be shown', () => {
+    let count = 0;
+    const api = { live: () => ((count += 1), Promise.reject(new N01Error('notFound', 'x'))) } as unknown as MatchesApi;
+    hidden = true;
+    renderHook(() => useCardStart(api, 'T1', true));
+    expect(count).toBe(0);
+    hidden = false;
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(count).toBe(1);
   });
 
   it('not enabled: no read', () => {

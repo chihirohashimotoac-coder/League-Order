@@ -31,6 +31,21 @@ export function leagueCardTmid(tournamentId: string, divisionIndex: number, lsid
   return `${tournamentId}_lg_${divisionIndex}_${lsid}_${a}_${b}`;
 }
 
+/**
+ * The `tmid` to read a card's orders by: the one of its game rows when that row's `tmid` names this
+ * season, division, card and both teams (in either order), else n01's form for the card. A row
+ * placed on the card by its division and card id only is never trusted for the teams.
+ */
+export function orderTmidOf(card: { tournamentId: string; divisionIndex: number; lsid: string; teams: readonly [{ id: string }, { id: string }]; tmid: string | null }): string {
+  const own = leagueCardTmid(card.tournamentId, card.divisionIndex, card.lsid, [card.teams[0].id, card.teams[1].id]);
+  if (!card.tmid) return own;
+  const prefix = `${card.tournamentId}_lg_${card.divisionIndex}_${card.lsid}_`;
+  if (!card.tmid.startsWith(prefix)) return own;
+  const ids = card.tmid.slice(prefix.length).split('_');
+  const want = [card.teams[0].id, card.teams[1].id];
+  return ids.length === 2 && ids.includes(want[0]) && ids.includes(want[1]) && want[0] !== want[1] ? card.tmid : own;
+}
+
 export type SideOrderState = 'fixed' | 'unfixed' | 'unknownFix' | 'none' | 'duplicate';
 
 export interface SideOrder {

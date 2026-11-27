@@ -7,9 +7,9 @@ import { describeN01Error } from '../../../integrations/n01/client';
  * The orders of one league card (`team/order/list` by `tmid`), shared by every 観戦 view of a card
  * (ライブ・日程・結果・PC の 2 カード表示): one request for the whole card, never one per game.
  *
- * - Read when the view opens; with `poll`, again every {@link ORDER_POLL_MS} (30 s) while the page
- *   is visible. A hidden page sends nothing; coming back reads at once when the last read is older
- *   than the interval.
+ * - Read when the view opens (or, opened while the page is hidden, when it is shown); with `poll`,
+ *   again every {@link ORDER_POLL_MS} (30 s) while the page is visible. A hidden page sends nothing;
+ *   coming back reads at once when the last read is older than the interval.
  * - One read at a time per view (and `MatchesApi.cardOrders` shares one request between views
  *   asking for the same card). `refresh()` reads now (the manual 再取得), unless a read is on.
  * - A failure keeps the last good orders and says so (`error`, `failedAt`); the next try waits
@@ -95,14 +95,20 @@ export function useCardOrders(api: MatchesApi, tournamentId: string, tmid: strin
         clear();
         return;
       }
-      if (!poll || controller) return;
+      if (controller) return;
+      // Never read yet (opened while hidden): now, polled or not.
+      if (lastTry === 0) {
+        load();
+        return;
+      }
+      if (!poll) return;
       const waited = Date.now() - lastTry;
       if (waited >= ORDER_POLL_MS) load();
       else if (timer === null) schedule();
     };
     refreshRef.current = load;
     document.addEventListener('visibilitychange', onVisibility);
-    load();
+    if (!hidden()) load();
     return () => {
       alive = false;
       clear();
@@ -179,7 +185,8 @@ export function useCardStart(api: MatchesApi, tmid: string | null, enabled: bool
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
-    check();
+    // Opened while hidden: the first check waits for the page to be shown.
+    if (!hidden()) check();
     return () => {
       alive = false;
       if (timer !== null) clearTimeout(timer);

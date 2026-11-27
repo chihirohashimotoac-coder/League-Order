@@ -752,8 +752,9 @@ export interface CardOrder {
 
 export function parseOrders(raw: unknown): CardOrder[] {
   const body = ok('team/order/list', raw);
-  if (body.list !== undefined && !Array.isArray(body.list)) throw new MatchSchemaError('team/order/list', 'team/order/list: オーダー一覧 (list) が配列ではありません。');
-  const list = Array.isArray(body.list) ? body.list : Array.isArray(body.order_list) ? body.order_list : [];
+  // An answer without its list (or with one that is not a list) is not "no orders": it is a failed read.
+  const list = Array.isArray(body.list) ? body.list : Array.isArray(body.order_list) ? body.order_list : null;
+  if (list === null) throw new MatchSchemaError('team/order/list', 'team/order/list: オーダー一覧 (list) がありません。');
   const orders: CardOrder[] = [];
   for (const row of list) {
     if (!isRec(row)) continue;

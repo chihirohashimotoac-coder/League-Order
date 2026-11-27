@@ -342,6 +342,42 @@ test('日程・結果: the card starts while a planned game of it is open — it
   await expect.poll(() => page.evaluate(() => (window as unknown as { __wake: { active: number } }).__wake.active)).toBe(1);
 });
 
+test('日程・結果: a card of today opened between two games — a planned game opened by its link turns live when it starts', async ({ page }) => {
+  let stage: 'break' | 'next' = 'break';
+  await page.clock.install();
+  await servePreStart(page, { c003Break: () => stage });
+  await page.goto('/#/watch?l=lg_l3hI_3397&t=t_Test_0001&c=0_c003&g=sg02');
+  const detail = page.getByTestId('match-detail');
+  await expect(detail.getByTestId('planned-game')).toContainText('シングルス2');
+  await expect(chip(detail, 'S1')).toContainText('2-1');
+  stage = 'next';
+  await page.clock.runFor(31_000);
+  await expect(chip(detail, 'S2')).toContainText('LIVE');
+  await expect(detail.getByTestId('planned-game')).toHaveCount(0);
+  await expect(detail.getByTestId('game-panel')).toBeVisible();
+  await expect(page).not.toHaveURL(/g=sg02/u);
+});
+
+test('ライブ: a game the live state has ended, not yet in the game list, shows its record — never its plan', async ({ page }) => {
+  let stage: 'break' | 'next' | 'after' = 'break';
+  await servePreStart(page, { c003Break: () => stage });
+  await page.goto('/');
+  await page.getByRole('group', { name: 'よく使われるリーグ' }).getByRole('button', { name: 'ATDO' }).click();
+  const focus = page.getByTestId('focus-card');
+  await expect(chip(focus, 'S1')).toContainText('2-1');
+  // シングルス2 starts: the live state says so; the game list (read less often) still ends at シングルス1.
+  stage = 'next';
+  await expect(chip(focus, 'S2')).toContainText('LIVE');
+  // シングルス3 starts; シングルス2 is over but the list does not hold it yet.
+  stage = 'after';
+  await expect(chip(focus, 'S3')).toContainText('LIVE');
+  await expect(chip(focus, 'S2')).not.toContainText('予定');
+  await chip(focus, 'S2').click();
+  await expect(focus.getByTestId('planned-game')).toHaveCount(0);
+  await expect(focus.getByTestId('game-block')).toContainText('シングルス2');
+  await expect(focus.getByTestId('game-block')).toContainText('井上 次郎');
+});
+
 /** Every chip on one line, nothing clipped, no sideways scroll — measured, not looked at. */
 async function measureRow(page: Page, scope: Locator): Promise<void> {
   const m = await scope.getByTestId('game-tabs').evaluate((list) => {
