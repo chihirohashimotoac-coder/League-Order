@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seededRng } from './behavior';
 import { DEFAULT_LIVE, HarimaruController } from './controller';
-import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, DEFAULT_TIMING } from './params';
+import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, DEFAULT_TIMING, DEFAULT_MOTION } from './params';
 import { CLIP_IDS, REACTION_IDS, REACTIONS } from './sprite';
 import type { Rect } from './terrain';
 import type { MeasuredTerrain } from './terrainDom';
@@ -43,6 +43,8 @@ const quiet = {
 
 function make(options: { seed?: number; reactions?: boolean } = {}): HarimaruController {
   controller = new HarimaruController({
+    // 登場の端からカードまでの空白は 100px 前後 (この組のテストは登場の距離の上限を調べない)。
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120 },
     sprite,
     effect,
     root,
@@ -310,6 +312,8 @@ describe('安全: エフェクトの範囲・素材の読み込み・後片付�
     // 演出するかは obstaclesIn の差し替えで決まる: ここでは controller を作り直す。
     controller.destroy();
     controller = new HarimaruController({
+    // 登場の端からカードまでの空白は 100px 前後 (この組のテストは登場の距離の上限を調べない)。
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120 },
       sprite, effect, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => terrain(),
       obstaclesIn: inside, behavior: quiet, finePointer: false, interaction: DEFAULT_INTERACTION,
     });

@@ -62,6 +62,26 @@ describe('左右の端からの登場', () => {
     expect(entryPlans('left', [segmentOf(far)], [far], VIEW, peek)).toHaveLength(0);
   });
 
+  it('画面の端と要素の間の実際の空白が entryMaxGap (24px) までなら入り、それより広い空白は跳び越えない', () => {
+    const at = (left: number) => ({ left, right: left + 180, top: 300, bottom: 400 });
+    const edge = at(VIEW.left + DEFAULT_MOTION.entryMaxGap);
+    expect(entryPlans('left', [segmentOf(edge)], [edge], VIEW, peek).length).toBeGreaterThan(0);
+    const over = at(VIEW.left + DEFAULT_MOTION.entryMaxGap + 1);
+    expect(entryPlans('left', [segmentOf(over)], [over], VIEW, peek)).toHaveLength(0);
+    // 右端も同じ (要素の右の角から画面の右端まで)。
+    const right = { left: 150, right: VIEW.right - DEFAULT_MOTION.entryMaxGap - 1, top: 300, bottom: 400 };
+    expect(entryPlans('right', [segmentOf(right)], [right], VIEW, peek)).toHaveLength(0);
+  });
+
+  it('足場が複数の要素にまたがるときは、入る側の端の要素と画面の端の空白で決める', () => {
+    const near = { left: 12, right: 200, top: 300, bottom: 400 };
+    const far = { left: 180, right: 360, top: 300, bottom: 400 };
+    const merged: Segment = { top: 300, left: 24, right: 348, minX: 24 - SPRITE.sideInset, maxX: 348 - SPRITE.width + SPRITE.sideInset };
+    expect(entryPlans('left', [merged], [near, far], VIEW, peek).length).toBeGreaterThan(0);
+    // 右端の空白は 390 - 360 = 30 px (> 24): 右からは入らない。
+    expect(entryPlans('right', [merged], [near, far], VIEW, peek)).toHaveLength(0);
+  });
+
   it('のぞいて引っ込む経路: のぞく位置まで同じで、同じ端の外へ戻る。着いた先は持たない', () => {
     const plan = entryPlans('right', [target], [box], VIEW, peek)[0];
     const back = retreatOf(plan);

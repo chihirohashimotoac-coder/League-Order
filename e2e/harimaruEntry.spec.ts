@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { blocking, harimaruOverlaps } from './harimaruOverlap';
 import { seedRandom } from './seededRandom';
 
 /**
@@ -109,63 +110,33 @@ function checkEntry(trail: Sample[], view: { top: number; bottom: number; width:
   return { edge, first: last[0], last: last[last.length - 1] };
 }
 
-/** 表示枠に重なる操作部品・文字・固定バー (0.5px 未満の接触は除く)。 */
+/** 表示枠が重なってはいけないもの (harimaruOverlap.ts の規則。移動中の文字の短いかぶりは除く)。 */
 async function overlaps(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const el = document.querySelector('[data-testid="harimaru"]')!;
-    const r = el.getBoundingClientRect();
-    const box = { left: r.left + 2.5, right: r.right - 2.5, top: r.top + 0.5, bottom: r.bottom - 0.5 };
-    // 固定ヘッダー・下部ナビの裏 (画面の端から入る途中) の部分は描かれていないので数えない。
-    box.top = Math.max(box.top, document.querySelector('.app-header')!.getBoundingClientRect().bottom);
-    box.bottom = Math.min(box.bottom, document.querySelector('.tab-bar')!.getBoundingClientRect().top);
-    if (box.bottom <= box.top) return [];
-    const hit = (q: DOMRect): boolean => q.right > box.left && q.left < box.right && q.bottom > box.top && q.top < box.bottom;
-    const found: string[] = [];
-    for (const node of Array.from(document.querySelectorAll('.app *'))) {
-      if (!hit(node.getBoundingClientRect())) continue;
-      if (node.matches('input, select, textarea, label, .app-header, .tab-bar, .action-bar')) found.push(`${node.tagName}.${node.className}`);
-      for (const child of Array.from(node.childNodes)) {
-        if (child.nodeType !== 3 || !child.textContent?.trim()) continue;
-        const range = document.createRange();
-        range.selectNodeContents(child);
-        if (Array.from(range.getClientRects()).some(hit)) found.push(`TEXT:${child.textContent.trim().slice(0, 16)}`);
-      }
-    }
-    return found;
-  });
+  return blocking(await page.evaluate(harimaruOverlaps));
 }
 
-test('実際のホーム: 画面の端から、見える画素が端から増えていくように入り、最初の足場に立つ (スマホは左右、PC は上端)', async ({ page }, info) => {
+/** PC の配置のまま、左右の端から 20px にカードがある幅 (1189 以上は列の外の空白が 24px を超え、左右から入れない)。 */
+const PC_ENTRY = { width: 1100, height: 720 };
+
+test('実際のホーム: 画面の左右の端から、見える画素が端から増えていくように入り、最初の足場に立つ (スマホ・PC 1100)', async ({ page }, info) => {
+  const mobile = info.project.name === 'mobile';
+  if (!mobile) await page.setViewportSize(PC_ENTRY);
   await fixed(page, 20261126);
   await openSample(page);
-  const mobile = info.project.name === 'mobile';
-  // スマホ: 先頭 (右端・左端からタイルへ跳んで入る)。PC: 左右の端からカードまで遠いので、上端からタイルへ落ちる位置。
-  await page.evaluate((m) => {
-    if (m) window.scrollTo(0, 0);
-    else {
-      const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
-      window.scrollTo(0, Math.round(card.bottom + window.scrollY - document.querySelector('.app-header')!.getBoundingClientRect().bottom + 6));
-    }
-  }, mobile);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(1_500);
   const trail = await record(page);
   await untilStanding(page);
   const view = await viewport(page);
   const { edge, last } = checkEntry(await trail(), view);
-  if (mobile) expect(['left', 'right']).toContain(edge);
-  else expect(edge).toBe('top');
+  expect(['left', 'right']).toContain(edge);
   const frames = (await trail()).filter((s) => s.action === 'enter').map((s) => s.frame.split(':')[0]);
-  if (edge === 'top') {
-    expect(frames).toEqual(expect.arrayContaining(['peekTop', 'dropAir', 'dropLand']));
-    expect(frames.indexOf('peekTop')).toBeLessThan(frames.indexOf('dropAir'));
-  } else {
-    expect(frames).toEqual(expect.arrayContaining(['jumpAir', 'jumpLand']));
-  }
-  // 立った位置は、足元の真下に足場 (タイル) の上辺がある。
+  expect(frames).toEqual(expect.arrayContaining(['jumpAir', 'jumpLand']));
+  // 立った位置は、足元の真下に見えているデザイン (カード・タイル・ボタンなど) の上辺がある。
   const foot = await sprite(page).evaluate((el) => {
     const r = el.getBoundingClientRect();
-    const below = document.elementsFromPoint(r.left + r.width / 2, r.bottom + 2).find((e) => e.matches('.quick-tile, .card'));
-    return below ? Math.abs(below.getBoundingClientRect().top - r.bottom) : null;
+    const tops = document.elementsFromPoint(r.left + r.width / 2, r.bottom + 2).filter((e) => e.closest('.app-main')).map((e) => Math.abs(e.getBoundingClientRect().top - r.bottom));
+    return tops.length > 0 ? Math.min(...tops) : null;
   });
   expect(foot).not.toBeNull();
   expect(foot!).toBeLessThanOrEqual(1);
@@ -173,37 +144,49 @@ test('実際のホーム: 画面の端から、見える画素が端から増え
   expect(await overlaps(page)).toEqual([]);
 });
 
-test('PC: サンプルのホームの初期位置 (端からの安全な経路がない) では画面の外で待ち、スクロールで経路ができると端から入る', async ({ page }, info) => {
-  test.skip(info.project.name !== 'desktop', 'PC のホーム (左右の端からカードまで遠い)');
+test('PC 1280・1920: 左右の端の空白が広いホームでは、上下の端からも入らず画面の外で待つ。幅を 1100 に狭めると左右の端から入る', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'PC のホーム (コンテンツの列の外の空白が広い)');
+  test.setTimeout(120_000);
+  await fixed(page, 20261126);
+  for (const size of [{ width: 1280, height: 720 }, { width: 1920, height: 1080 }]) {
+    await page.setViewportSize(size);
+    await openSample(page);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(1_500);
+    const gutter = await page.evaluate(() => {
+      const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
+      return { left: card.left, right: document.documentElement.clientWidth - card.right };
+    });
+    expect(Math.min(gutter.left, gutter.right), `${size.width}: 端からカードまでの空白`).toBeGreaterThan(24);
+    // 先頭・次の試合のカードの下端が上端のすぐ下に来る位置 (以前は上端から落ちて入れた位置) のどちらでも待つ。
+    for (const at of ['top', 'card'] as const) {
+      await page.evaluate((where) => {
+        if (where === 'top') window.scrollTo(0, 0);
+        else {
+          const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
+          window.scrollTo(0, Math.round(card.bottom + window.scrollY - document.querySelector('.app-header')!.getBoundingClientRect().bottom + 6));
+        }
+      }, at);
+      for (let i = 0; i < 12; i += 1) {
+        await page.clock.runFor(1_000);
+        expect(await sprite(page).getAttribute('data-visible'), `${size.width} ${at} ${i} 秒`).toBe('false');
+      }
+    }
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const trail = await record(page);
+  await page.setViewportSize(PC_ENTRY);
+  await untilStanding(page);
+  const { edge } = checkEntry(await trail(), await viewport(page));
+  expect(['left', 'right']).toContain(edge);
+});
+
+test('PC 1100: 体が上へ完全に抜けるまでスクロールすると、元の位置で待つ。逆にスクロールすれば、元の位置がそのまま見えてくる', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'PC のホーム');
+  await page.setViewportSize(PC_ENTRY);
   await fixed(page, 20261126);
   await openSample(page);
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(1_500);
-  // 先頭: 左右の端からは遠く、上端からはカードにふさがれる。置き直さずに待つ。
-  for (let i = 0; i < 20; i += 1) {
-    await page.clock.runFor(1_000);
-    expect(await sprite(page).getAttribute('data-visible'), `${i} 秒`).toBe('false');
-  }
-  const trail = await record(page);
-  await page.evaluate(() => {
-    const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
-    window.scrollTo(0, Math.round(card.bottom + window.scrollY - document.querySelector('.app-header')!.getBoundingClientRect().bottom + 6));
-  });
-  await untilStanding(page);
-  const { edge } = checkEntry(await trail(), await viewport(page));
-  expect(edge).toBe('top');
-});
-
-test('PC: 体が上へ完全に抜けるまでスクロールすると、元の位置で待つ。逆にスクロールすれば、元の位置がそのまま見えてくる', async ({ page }, info) => {
-  test.skip(info.project.name !== 'desktop', 'PC のホーム (上端から入れる位置がある)');
-  await fixed(page, 20261126);
-  await openSample(page);
-  const entryY = await page.evaluate(() => {
-    const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
-    const y = Math.round(card.bottom + window.scrollY - document.querySelector('.app-header')!.getBoundingClientRect().bottom + 6);
-    window.scrollTo(0, y);
-    return y;
-  });
   await page.waitForTimeout(1_500);
   await untilStanding(page);
   const before = await sprite(page).evaluate((el) => ({ x: el.getBoundingClientRect().left, y: el.getBoundingClientRect().top + window.scrollY }));
@@ -214,7 +197,7 @@ test('PC: 体が上へ完全に抜けるまでスクロールすると、元の�
   expect(away.bottom).toBeLessThanOrEqual(away.header);
   expect(away.action).not.toBe('enter');
   // 戻す: 同じ場所に (置き直さずに) いる。
-  await page.evaluate((y) => window.scrollTo(0, y), entryY);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.clock.runFor(1_500);
   const after = await sprite(page).evaluate((el) => ({ x: el.getBoundingClientRect().left, y: el.getBoundingClientRect().top + window.scrollY, visible: el.dataset.visible }));
   expect(after.visible).toBe('true');
@@ -266,13 +249,34 @@ async function lab(page: Page, cards: [number, number, number, number][], height
   );
 }
 
-test('検証用の足場: 下端から入るときは、画面の下へ続くカードの側面をよじ登り (前足は側面の線の上)、上辺に乗る', async ({ page }, info) => {
-  test.skip(info.project.name !== 'desktop', 'PC 1280×720 の配置で確かめる (左右・上端からは届かない位置のカード)');
+test('検証用の足場: 下へ抜けたあと下端から戻るときは、画面の下へ続くカードの側面をよじ登り (前足は側面の線の上)、上辺に乗る', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'PC 1280×720 の配置で確かめる (左右の端から届かない位置の高いカード)');
   await fixed(page, 7);
   await openSample(page);
-  // 左右の端から 120px より遠く、上端から 240px より低く、画面の下 (720) へ続くカード。上辺 = 77 + 460 = 537。
-  await lab(page, [[300, 460, 260, 800]], 1_400);
+  // A: 左端まで続く低い位置のカード (左から歩いて入る)。B: 左右の端から遠い、画面の下へ続く高いカード (上辺 460)。
+  await lab(page, [[-80, 1_100, 380, 120], [500, 460, 260, 1_200]], 2_000);
+  // 初めは先頭 (A は画面の下の外、B は端から遠い): 左右から入れないので待つ (上下の端からは入らない)。
+  for (let i = 0; i < 6; i += 1) {
+    await page.clock.runFor(1_000);
+    expect(await sprite(page).getAttribute('data-visible'), `先頭 ${i} 秒`).toBe('false');
+  }
+  // A が画面の下の方に見える位置へ: 左の端から A に入る。
+  const down = await page.evaluate(() => {
+    const a = document.querySelectorAll('#harimaru-lab > .card')[0].getBoundingClientRect();
+    const y = Math.round(a.top + window.scrollY - 600);
+    window.scrollTo(0, y);
+    return y;
+  });
+  expect(down).toBeGreaterThan(0);
+  await untilStanding(page);
+  // 先頭へ戻す: A (と体) は画面の下へ抜ける。下端から、画面の下へ続く B の側面をよじ登って戻る。
   const trail = await record(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  // 抜けて見えなくなるまで (スクロールの処理を待つ)。
+  await expect.poll(async () => {
+    await page.clock.runFor(100);
+    return sprite(page).getAttribute('data-visible');
+  }).toBe('false');
   await untilStanding(page);
   const all = await trail();
   const view = await viewport(page);
@@ -282,7 +286,7 @@ test('検証用の足場: 下端から入るときは、画面の下へ続くカ
   expect(order.slice(order.indexOf('sideMount'))).toEqual(['sideMount', 'sideClimb', 'sideLedge', 'climb', 'base']);
   // 前足 (基準点) は側面の線の上 (画素への丸めの範囲)。
   const card = await page.evaluate(() => {
-    const r = document.querySelectorAll('#harimaru-lab > .card')[0].getBoundingClientRect();
+    const r = document.querySelectorAll('#harimaru-lab > .card')[1].getBoundingClientRect();
     return { left: r.left, right: r.right, top: r.top };
   });
   for (const s of all.filter((x) => x.frame.startsWith('sideClimb'))) {
@@ -307,8 +311,8 @@ async function watchUntil<T>(page: Page, trail: () => Promise<Sample[]>, found: 
 }
 
 /** 記録の中の横の小ジャンプ (構え → 空中 → 着地)。着地 0 → 1 の間に横へ動いた回数も数える。 */
-function hopsIn(all: Sample[]): { arc: number; distance: number; slid: boolean }[] {
-  const hops: { arc: number; distance: number; slid: boolean }[] = [];
+function hopsIn(all: Sample[]): { arc: number; distance: number; slid: boolean; from: number; to: number }[] {
+  const hops: { arc: number; distance: number; slid: boolean; from: number; to: number }[] = [];
   for (let i = 0; i < all.length; i += 1) {
     if (!all[i].frame.startsWith('jumpPrep')) continue;
     let j = i + 1;
@@ -317,7 +321,8 @@ function hopsIn(all: Sample[]): { arc: number; distance: number; slid: boolean }
     if (air.length < 3 || !all[j]?.frame.startsWith('jumpLand')) continue;
     const land: Sample[] = [];
     for (let k = j; k < all.length && all[k].frame.startsWith('jumpLand'); k += 1) land.push(all[k]);
-    hops.push({ arc: all[i].top - Math.min(...air.map((s) => s.top)), distance: Math.abs(all[j].left - all[i].left), slid: new Set(land.map((s) => Math.round(s.left))).size > 1 });
+    // 体の中心 (表示枠の中央) の、構えと着地の x。
+    hops.push({ arc: all[i].top - Math.min(...air.map((s) => s.top)), distance: Math.abs(all[j].left - all[i].left), slid: new Set(land.map((s) => Math.round(s.left))).size > 1, from: all[i].left + 15, to: all[j].left + 15 });
   }
   return hops;
 }
@@ -327,17 +332,23 @@ test('検証用の足場: 狭い隙間と広い隙間の小ジャンプは弧の
   test.setTimeout(300_000);
   await fixed(page, 11);
   await openSample(page);
-  // 左端まで続くカード (歩いて入る) → 隙間 10px → 隙間 60px。
-  await lab(page, [[-80, 300, 380, 120], [310, 300, 200, 120], [570, 300, 200, 120]], 600);
+  // 左端まで続くカード (歩いて入る) → 隙間 10px → 隙間 36px (跳び越える空白の上限 hopMaxGap 40px の内側)。
+  await lab(page, [[-80, 300, 380, 120], [310, 300, 200, 120], [546, 300, 200, 120]], 600);
+  // 2 つの隙間の中央 (画面の x)。小ジャンプは、どちらの隙間をまたいだかで分ける。
+  const mids = await page.evaluate(() => {
+    const q = Array.from(document.querySelectorAll('#harimaru-lab > .card')).map((c) => c.getBoundingClientRect());
+    return [(q[0].right + q[1].left) / 2, (q[1].right + q[2].left) / 2];
+  });
   const trail = await record(page);
   await untilStanding(page);
+  const across = (h: { from: number; to: number }, mid: number): boolean => Math.min(h.from, h.to) < mid && Math.max(h.from, h.to) > mid;
   const hops = await watchUntil(page, trail, (all) => {
     const list = hopsIn(all);
-    return list.some((h) => h.distance < 100) && list.some((h) => h.distance > 105) ? list : null;
+    return list.some((h) => across(h, mids[0])) && list.some((h) => across(h, mids[1])) ? list : null;
   });
   expect(hops, '狭い隙間・広い隙間の両方の小ジャンプ').not.toBeNull();
-  const narrow = hops!.filter((h) => h.distance < 100);
-  const wide = hops!.filter((h) => h.distance > 105);
+  const narrow = hops!.filter((h) => across(h, mids[0]));
+  const wide = hops!.filter((h) => across(h, mids[1]));
   expect(Math.max(...wide.map((h) => h.arc))).toBeGreaterThan(Math.max(...narrow.map((h) => h.arc)) + 4);
   expect(hops!.filter((h) => h.slid)).toEqual([]);
 });

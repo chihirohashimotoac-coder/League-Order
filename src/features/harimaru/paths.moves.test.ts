@@ -42,17 +42,24 @@ describe('横の小ジャンプ', () => {
 
   it('狭い隙間は低い弧、広い隙間は高い弧 (高さは隙間に合わせて連続して変わる)', () => {
     const narrow = world([{ left: 100, right: 300, top: 400, bottom: 520 }, { left: 310, right: 500, top: 400, bottom: 520 }]);
-    const wide = world([{ left: 100, right: 300, top: 400, bottom: 520 }, { left: 360, right: 560, top: 400, bottom: 520 }]);
+    const wide = world([{ left: 100, right: 300, top: 400, bottom: 520 }, { left: 336, right: 536, top: 400, bottom: 520 }]);
     const arcOf = (w: ReturnType<typeof world>) => {
       const plan = hopPlans(at(w.segments, 400, 100), w.segments, w.boxes)[0];
       const air = plan.steps.find((s) => s.pose.sheet === 'jumpAir')!;
       return typeof air.tween === 'object' ? air.tween.arc : 0;
     };
     expect(arcOf(narrow)).toBeCloseTo(hopArcHeight(10), 6);
-    expect(arcOf(wide)).toBeCloseTo(hopArcHeight(60), 6);
+    expect(arcOf(wide)).toBeCloseTo(hopArcHeight(36), 6);
     expect(arcOf(wide)).toBeGreaterThan(arcOf(narrow) + 8);
     expect(hopArcHeight(0)).toBe(DEFAULT_MOTION.hopArc.min);
     expect(hopArcHeight(1_000)).toBe(DEFAULT_MOTION.hopArc.max);
+  });
+
+  it('要素どうしの実際の隙間が hopMaxGap を超える広い空白は跳び越えない', () => {
+    const edge = world([{ left: 100, right: 300, top: 400, bottom: 520 }, { left: 300 + DEFAULT_MOTION.hopMaxGap, right: 560, top: 400, bottom: 520 }]);
+    expect(hopPlans(at(edge.segments, 400, 100), edge.segments, edge.boxes).some((p) => p.end!.segment.left >= 300)).toBe(true);
+    const over = world([{ left: 100, right: 300, top: 400, bottom: 520 }, { left: 300 + DEFAULT_MOTION.hopMaxGap + 1, right: 560, top: 400, bottom: 520 }]);
+    expect(hopPlans(at(over.segments, 400, 100), over.segments, over.boxes)).toHaveLength(0);
   });
 
   it('届かない距離・高さの違う足場・文字で切れた端からは跳ばない。経路の上に文字があれば安全でない', () => {

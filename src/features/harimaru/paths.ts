@@ -97,24 +97,38 @@ function union(a: Rect, b: Rect): Rect {
  * 見逃さないよう、4 px ごと (最低 2 点) に取る。
  */
 export function sweptBoxes(steps: readonly Step[]): Rect[] {
-  const boxes: Rect[] = [];
-  for (let i = 0; i < steps.length; i += 1) {
-    const step = steps[i];
-    const next = steps[i + 1];
-    let previous = poseBox(step.pose, step.x, step.y, step.dir);
-    boxes.push(previous);
-    if (!next || step.tween === 'hold') continue;
-    const end = stepAt(steps, i, 1);
-    const lift = typeof step.tween === 'object' ? step.tween.arc : 0;
-    const n = Math.max(2, Math.ceil((Math.hypot(end.x - step.x, end.y - step.y) + lift * 2) / 4));
-    for (let k = 1; k <= n; k += 1) {
-      const p = stepAt(steps, i, k / n);
-      const box = poseBox(step.pose, p.x, p.y, step.dir);
-      boxes.push(union(previous, box));
-      previous = box;
-    }
+  return steps.flatMap((_, i) => stepSweep(steps, i));
+}
+
+/** 段 i の間に掃く範囲 (止まる段はその姿 1 つ)。 */
+export function stepSweep(steps: readonly Step[], i: number): Rect[] {
+  const step = steps[i];
+  const next = steps[i + 1];
+  let previous = poseBox(step.pose, step.x, step.y, step.dir);
+  const boxes: Rect[] = [previous];
+  if (!next || step.tween === 'hold') return boxes;
+  const end = stepAt(steps, i, 1);
+  const lift = typeof step.tween === 'object' ? step.tween.arc : 0;
+  const n = Math.max(2, Math.ceil((Math.hypot(end.x - step.x, end.y - step.y) + lift * 2) / 4));
+  for (let k = 1; k <= n; k += 1) {
+    const p = stepAt(steps, i, k / n);
+    const box = poseBox(step.pose, p.x, p.y, step.dir);
+    boxes.push(union(previous, box));
+    previous = box;
   }
   return boxes;
+}
+
+/** 障害物の種類 (terrainDom の collectObstacles が付ける。種類のない矩形は hard)。 */
+function kindOf(rect: Rect): 'hard' | 'soft' {
+  return (rect as Rect & { kind?: 'hard' | 'soft' }).kind ?? 'hard';
+}
+
+/** 矩形を変えた写しに、障害物の種類を引き継ぐ。 */
+function keepKind(from: Rect, to: Rect): Rect {
+  const kind = (from as Rect & { kind?: string }).kind;
+  if (kind) Object.defineProperty(to, 'kind', { value: kind, enumerable: false });
+  return to;
 }
 
 export function boundsOf(boxes: readonly Rect[]): Rect {
@@ -136,6 +150,12 @@ export interface ClearOptions {
   /** 体が重なってよい、候補の要素自身の箱 (この幅だけ内側へ縮めて数える)。 */
   selfBoxes?: readonly Rect[];
   decor?: number;
+  /**
+   * 文字・アイコン (soft の障害物) に、移動の途中でかぶってよい時間の合計 (ms)。止まる段 (softHoldMs を超えて同じ
+   * 姿のまま) では、かぶってはいけない。省略・0 なら soft も hard と同じく重ならない。
+   */
+  softPassMs?: number;
+  softHoldMs?: number;
 }
 
 /** 障害物のうち、候補の要素自身の箱を decor だけ内側へ縮める (背景・枠への軽いかぶりを許す)。 */
@@ -143,25 +163,41 @@ export function allowSelf(obstacles: readonly Rect[], selfBoxes: readonly Rect[]
   if (selfBoxes.length === 0 || decor <= 0) return [...obstacles];
   const same = (a: Rect, b: Rect): boolean =>
     Math.abs(a.left - b.left) <= 1 && Math.abs(a.right - b.right) <= 1 && Math.abs(a.top - b.top) <= 1 && Math.abs(a.bottom - b.bottom) <= 1;
-  return obstacles.map((o) => (selfBoxes.some((s) => same(s, o)) ? { left: o.left + decor, top: o.top, right: o.right - decor, bottom: o.bottom - decor } : o));
+  return obstacles.map((o) => (selfBoxes.some((s) => same(s, o)) ? keepKind(o, { left: o.left + decor, top: o.top, right: o.right - decor, bottom: o.bottom - decor }) : o));
 }
 
 /** 経路の全体が、見えている範囲に収まり (登場の端の向こう・左右の出てよい幅を除く)、障害物に重ならないか。 */
 export function stepsAreClear(steps: readonly Step[], obstacles: readonly Rect[], options: ClearOptions): boolean {
   const { view, beyond, overhang = 0, docBottom } = options;
   const list = allowSelf(obstacles, options.selfBoxes, options.decor);
+  const budget = options.softPassMs ?? 0;
+  const hard = budget > 0 ? list.filter((o) => kindOf(o) === 'hard') : list;
+  const soft = budget > 0 ? list.filter((o) => kindOf(o) === 'soft') : [];
+  const holdLimit = options.softHoldMs ?? 0;
   if (docBottom !== undefined && steps.some((s) => s.y + SPRITE.height > docBottom + 0.5)) return false;
-  for (const raw of sweptBoxes(steps)) {
-    const box = { ...raw };
-    // 登場の端の向こうに出た部分は描かれない (画面の外・固定バーの裏): 見えている部分だけを確かめる。
-    if (beyond === 'left') box.left = Math.max(box.left, view.left);
-    if (beyond === 'right') box.right = Math.min(box.right, view.right);
-    if (beyond === 'top') box.top = Math.max(box.top, view.top);
-    if (beyond === 'bottom') box.bottom = Math.min(box.bottom, view.bottom);
-    if (box.right <= box.left + 0.5 || box.bottom <= box.top + 0.5) continue;
-    if (box.top < view.top - 0.5 || box.bottom > view.bottom + 0.5) return false;
-    if (box.left < view.left - overhang - 0.5 || box.right > view.right + overhang + 0.5) return false;
-    if (list.some((o) => overlaps(box, o))) return false;
+  let softMs = 0;
+  for (let i = 0; i < steps.length; i += 1) {
+    let touched = false;
+    for (const raw of stepSweep(steps, i)) {
+      const box = { ...raw };
+      // 登場の端の向こうに出た部分は描かれない (画面の外・固定バーの裏): 見えている部分だけを確かめる。
+      if (beyond === 'left') box.left = Math.max(box.left, view.left);
+      if (beyond === 'right') box.right = Math.min(box.right, view.right);
+      if (beyond === 'top') box.top = Math.max(box.top, view.top);
+      if (beyond === 'bottom') box.bottom = Math.min(box.bottom, view.bottom);
+      if (box.right <= box.left + 0.5 || box.bottom <= box.top + 0.5) continue;
+      if (box.top < view.top - 0.5 || box.bottom > view.bottom + 0.5) return false;
+      if (box.left < view.left - overhang - 0.5 || box.right > view.right + overhang + 0.5) return false;
+      if (hard.some((o) => overlaps(box, o))) return false;
+      if (!touched && soft.some((o) => overlaps(box, o))) touched = true;
+    }
+    if (!touched) continue;
+    // 文字・アイコンには、動いている途中に短くかぶるだけ (その上で止まらない・合計が長くならない)。
+    const step = steps[i];
+    const last = i === steps.length - 1;
+    if (last || (step.tween === 'hold' && step.ms > holdLimit)) return false;
+    softMs += step.ms;
+    if (softMs > budget) return false;
   }
   return true;
 }
@@ -170,7 +206,7 @@ export function stepsAreClear(steps: readonly Step[], obstacles: readonly Rect[]
 export function stepsMargin(steps: readonly Step[], obstacles: readonly Rect[], options: ClearOptions): number {
   let margin = 0;
   for (const d of [2, 4, 8]) {
-    const grown = obstacles.map((o) => ({ left: o.left - d, top: o.top - d, right: o.right + d, bottom: o.bottom + d }));
+    const grown = obstacles.map((o) => keepKind(o, { left: o.left - d, top: o.top - d, right: o.right + d, bottom: o.bottom + d }));
     const selfBoxes = options.selfBoxes?.map((o) => ({ left: o.left - d, top: o.top - d, right: o.right + d, bottom: o.bottom + d }));
     if (!stepsAreClear(steps, grown, { ...options, selfBoxes, decor: (options.decor ?? 0) + d })) break;
     margin = d;
@@ -260,7 +296,8 @@ export function hopPlans(
       // 要素どうしの隙間 (角丸を含まない、実際の隙間)。
       const gap = dir > 0 ? boxes[toBox].left - boxes[fromBox].right : boxes[fromBox].left - boxes[toBox].right;
       const reach = dir > 0 ? target.left - current.right : current.left - target.right;
-      if (reach > terrain.jumpMaxGap || reach < 4) continue;
+      // 広い空白を飛び越えない (要素どうしの実際の隙間が hopMaxGap まで)。
+      if (gap > motion.hopMaxGap || reach > terrain.jumpMaxGap || reach < 4) continue;
       const arc = hopArcHeight(gap, motion);
       const fromX = dir > 0 ? current.maxX : current.minX;
       for (const x of landings(target, dir, motion.landingInsets)) {
@@ -581,14 +618,21 @@ export function entryPlans(
     for (const target of segments) {
       if (target.top - SPRITE.height < view.top || target.top > view.bottom) continue;
       const gap = edge === 'left' ? target.left - view.left : view.right - target.right;
-      if (gap > motion.entryMaxGap || gap < -SPRITE.width) continue;
       const dir: -1 | 1 = edge === 'left' ? 1 : -1;
       const toBox = endBox(target, boxes, edge, terrain);
-      // 隙間を跳ぶときは、足場の端が要素の角であること (角の手前の文字などをまたがない)。
-      if (gap > EDGE_WALK_GAP && toBox === null) continue;
       const under = boxOfSegment(target, boxes, terrain);
+      // 要素そのものが画面の端まで続いていれば歩いて入る。そうでなければ、画面の端と要素の間の実際の空白が
+      // entryMaxGap 以下のときだけ、端の向こうから小さく跳んで入る (広い空白を飛び越えない)。足場の端が要素の角であること。
+      // 足場が複数の要素にまたがるときは、入る側の端の要素で測る。
+      const near = toBox ?? under;
+      const box = near !== null ? boxes[near] : null;
+      const empty = box ? (edge === 'left' ? box.left - view.left : view.right - box.right) : Infinity;
+      if (gap < -SPRITE.width) continue;
+      if (gap > EDGE_WALK_GAP || empty > 1) {
+        if (toBox === null || empty > motion.entryMaxGap) continue;
+      }
       for (const x of landings(target, dir, motion.landingInsets)) {
-        const steps = sideEntry(edge, target, view, x, options, motion, under !== null ? boxes[under] : undefined);
+        const steps = sideEntry(edge, target, view, x, options, motion, box ?? undefined);
         plans.push(make(steps, target, toBox ?? boxOfSegment(target, boxes, terrain), null, Math.max(0, gap) + Math.abs(x - (dir > 0 ? target.minX : target.maxX))));
       }
     }

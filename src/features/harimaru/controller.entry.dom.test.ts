@@ -49,7 +49,7 @@ function make(options: { seed?: number; motion?: Partial<MotionParams>; entryFro
     obstaclesIn: () => [],
     behavior: calm,
     finePointer: false,
-    motion: { ...DEFAULT_MOTION, entryRetreatChance: 0, ...options.motion },
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120, entryRetreatChance: 0, ...options.motion },
     entryFrom: options.entryFrom ?? null,
   });
   controller.setSheet('base', 'base.png');
@@ -194,6 +194,25 @@ describe('経路がない・中断', () => {
     recordUntilPlaced();
     expect(controller.snapshot().placed).toBe(true);
     expect(entries().filter((e) => !e.startsWith('enter:none'))).toHaveLength(1);
+  });
+
+  it('初回は左右の端からだけ入る: 上から落ちれば届く足場でも、左右の空白が広ければ上下から入らずに待つ', async () => {
+    // 上端から 120 px (上から落ちれば届く高さ)、左右の端から 300 px 以上離れたカード。
+    boxes = [{ left: 320, right: 700, top: 120, bottom: 300 }];
+    make({ motion: { entryMaxGap: DEFAULT_MOTION.entryMaxGap } }).start();
+    advance(20_000);
+    expect(controller.snapshot().placed).toBe(false);
+    expect(sprite.dataset.visible).toBe('false');
+    const tried = controller.snapshot().events.filter((e) => e.startsWith('enter:'));
+    expect(tried.length).toBeGreaterThan(0);
+    expect(tried.every((e) => e === 'enter:none:left/right' || e === 'enter:none:right/left')).toBe(true);
+    // 左端から 24 px のカードが現れたら、そこへ左から入る。
+    boxes = [...boxes, { left: DEFAULT_MOTION.entryMaxGap, right: 300, top: 400, bottom: 500 }];
+    root.append(document.createElement('section'));
+    await Promise.resolve();
+    recordUntilPlaced();
+    expect(controller.snapshot().placed).toBe(true);
+    expect(entries().filter((e) => !e.startsWith('enter:none'))[0]).toMatch(/^enter:left:/);
   });
 
   it('登場の途中のスクロールでは即座に隠れ、止まってから同じ意図で端から入り直す (二重に登場しない)', () => {

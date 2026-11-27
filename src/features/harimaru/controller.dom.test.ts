@@ -21,6 +21,8 @@ let controller: HarimaruController;
 
 function make(seed = 1): HarimaruController {
   controller = new HarimaruController({
+    // 登場の端からカードまでの空白は 100px 前後 (この組のテストは登場の距離の上限を調べない)。
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120 },
     sprite,
     root,
     watch: app,
@@ -440,7 +442,7 @@ function make2(options: { seed?: number; behavior?: typeof DEFAULT_BEHAVIOR; fin
     behavior: options.behavior,
     finePointer: options.finePointer ?? false,
     interaction: { ...DEFAULT_INTERACTION, ...options.interaction },
-    motion: { ...DEFAULT_MOTION, ...options.motion },
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120, ...options.motion },
   });
   return controller;
 }
@@ -626,6 +628,8 @@ describe('HarimaruController (PR2)', () => {
   it('経路に障害物があればジャンプしない', () => {
     current = terrain([{ left: 100, right: 300, top: 300 }, { left: 340, right: 600, top: 290 }]);
     controller = new HarimaruController({
+    // 登場の端からカードまでの空白は 100px 前後 (この組のテストは登場の距離の上限を調べない)。
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120 },
       sprite, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => current,
       // 2 つの足場の間の上に文字がある。
       obstaclesIn: () => [{ left: 270, right: 340, top: 200, bottom: 300 }],
@@ -763,6 +767,8 @@ describe('HarimaruController (PR2)', () => {
     current = terrain([{ left: 100, right: 700, top: 300 }]);
     let obstacles: { left: number; right: number; top: number; bottom: number }[] = [];
     controller = new HarimaruController({
+    // 登場の端からカードまでの空白は 100px 前後 (この組のテストは登場の距離の上限を調べない)。
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120 },
       sprite, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => current,
       obstaclesIn: () => obstacles, behavior: only({ idle: 1 }), finePointer: false,
       interaction: { ...DEFAULT_INTERACTION, approachChance: 1 },
@@ -785,6 +791,8 @@ describe('HarimaruController (PR2)', () => {
     current = terrain([{ left: 100, right: 700, top: 300 }]);
     let obstacles: { left: number; right: number; top: number; bottom: number }[] = [];
     controller = new HarimaruController({
+    // 登場の端からカードまでの空白は 100px 前後 (この組のテストは登場の距離の上限を調べない)。
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120 },
       sprite, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => current,
       obstaclesIn: () => obstacles, behavior: only({ idle: 1 }), finePointer: false,
     });

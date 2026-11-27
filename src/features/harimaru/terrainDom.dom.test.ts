@@ -61,8 +61,8 @@ describe('collectObstacles の seeThrough (カードの内側を調べる)', () 
   const rect = (left: number, top: number, right: number, bottom: number) => () =>
     ({ left, top, right, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
 
-  it('カード自身 (色の付いた箱) は数えず、カードの中の色の付いた要素・ボタンは数える', async () => {
-    const { collectObstacles } = await import('./terrainDom');
+  it('カード・色の付いた箱・ボタンは障害物にしない (足場の候補で、体が重なってよい)。入力欄・重要な表示は hard', async () => {
+    const { collectObstacles, obstacleKind } = await import('./terrainDom');
     const root = document.createElement('main');
     const card = document.createElement('div');
     card.style.backgroundColor = 'rgb(255, 255, 255)';
@@ -71,50 +71,41 @@ describe('collectObstacles の seeThrough (カードの内側を調べる)', () 
     badge.style.backgroundColor = 'rgb(200, 0, 0)';
     badge.getBoundingClientRect = rect(120, 304, 160, 318);
     const button = document.createElement('button');
-    button.getBoundingClientRect = rect(300, 350, 360, 380);
-    card.append(badge, button);
+    button.getBoundingClientRect = rect(300, 304, 360, 330);
+    const input = document.createElement('input');
+    input.getBoundingClientRect = rect(200, 304, 280, 330);
+    const score = document.createElement('div');
+    score.className = 'live-score';
+    score.getBoundingClientRect = rect(400, 304, 480, 330);
+    card.append(badge, button, input, score);
     root.append(card);
     document.body.append(root);
-    const region = { left: 100, top: 300, right: 500, bottom: 312 };
-    // ふつうはカードの箱がまるごと障害物。
-    expect(collectObstacles(root, [region], window)).toContainEqual({ left: 100, top: 300, right: 500, bottom: 400 });
-    const inside = collectObstacles(root, [region], window, card);
-    expect(inside).not.toContainEqual({ left: 100, top: 300, right: 500, bottom: 400 });
-    expect(inside).toContainEqual({ left: 120, top: 304, right: 160, bottom: 318 });
-    // 範囲の外のボタンは数えない。
-    expect(inside).not.toContainEqual({ left: 300, top: 350, right: 360, bottom: 380 });
+    const region = { left: 100, top: 300, right: 500, bottom: 340 };
+    const found = collectObstacles(root, [region], window);
+    expect(found).not.toContainEqual({ left: 100, top: 300, right: 500, bottom: 400 });
+    expect(found).not.toContainEqual({ left: 120, top: 304, right: 160, bottom: 318 });
+    expect(found).not.toContainEqual({ left: 300, top: 304, right: 360, bottom: 330 });
+    expect(found).toEqual([
+      { left: 200, top: 304, right: 280, bottom: 330 },
+      { left: 400, top: 304, right: 480, bottom: 330 },
+    ]);
+    expect(found.map(obstacleKind)).toEqual(['hard', 'hard']);
+    // 範囲の外の入力欄は数えない。
+    expect(collectObstacles(root, [{ left: 0, top: 0, right: 90, bottom: 90 }], window)).toEqual([]);
     root.remove();
   });
 
-  it('足場を包む入れ物 (色付きのカード) は、帯を完全に包むときだけ数えない。中の文字・部品・帯の一部にかかる枠は数える', async () => {
-    const { collectObstacles, containersOf } = await import('./terrainDom');
+  it('操作部品は入れ物にしない (containersOf)', async () => {
+    const { containersOf } = await import('./terrainDom');
     const root = document.createElement('main');
     const outer = document.createElement('section');
-    outer.style.backgroundColor = 'rgb(255, 255, 255)';
-    outer.getBoundingClientRect = rect(0, 100, 400, 900);
     const sheet = document.createElement('div');
-    sheet.getBoundingClientRect = rect(20, 300, 380, 600);
-    const tab = document.createElement('button');
-    tab.getBoundingClientRect = rect(20, 260, 80, 290);
-    const panel = document.createElement('div');
-    panel.style.backgroundColor = 'rgb(240, 240, 240)';
-    panel.getBoundingClientRect = rect(200, 250, 300, 285);
-    outer.append(tab, panel, sheet);
-    root.append(outer);
-    document.body.append(root);
-    const containers = containersOf([sheet], root);
-    expect(containers.has(outer)).toBe(true);
-    const band = { left: 20, right: 380, top: 277, bottom: 300 };
-    const found = collectObstacles(root, [band], window, undefined, containers);
-    expect(found).not.toContainEqual({ left: 0, top: 100, right: 400, bottom: 900 });
-    expect(found).toContainEqual({ left: 20, top: 260, right: 80, bottom: 290 });
-    expect(found).toContainEqual({ left: 200, top: 250, right: 300, bottom: 285 });
-    // 入れ物を渡さなければ、ふつうに色付きの箱として数える (PR2 までと同じ)。
-    expect(collectObstacles(root, [band], window)).toContainEqual({ left: 0, top: 100, right: 400, bottom: 900 });
-    // 操作部品は入れ物にしない。
+    outer.append(sheet);
     const link = document.createElement('a');
     link.append(document.createElement('div'));
-    root.append(link);
+    root.append(outer, link);
+    document.body.append(root);
+    expect(containersOf([sheet], root).has(outer)).toBe(true);
     expect(containersOf([link.firstElementChild!], root).has(link)).toBe(false);
     root.remove();
   });
@@ -130,8 +121,9 @@ describe('collectObstacles の seeThrough (カードの内側を調べる)', () 
   });
 });
 
-describe('collectObstacles の seeThrough は背景色・枠だけを数えない', () => {
-  it('背景の画像・疑似要素の内容・操作部品は、seeThrough でも箱全体を数える', () => {
+describe('collectObstacles の soft (通過中だけ短くかぶってよいもの)', () => {
+  it('画像・役割が img の要素は soft。背景の画像・色だけの箱は数えない。seeThrough の要素自身の画像は数えない', async () => {
+    const { obstacleKind } = await import('./terrainDom');
     const root = document.createElement('main');
     document.body.append(root);
     const make = (tag: string, style: Partial<CSSStyleDeclaration>): HTMLElement => {
@@ -141,16 +133,25 @@ describe('collectObstacles の seeThrough は背景色・枠だけを数えな�
       root.append(el);
       return el;
     };
-    const plain = make('div', { backgroundColor: 'rgb(255, 255, 255)' });
-    const image = make('div', { backgroundImage: 'url("a.png")' });
-    const button = make('button', {});
+    make('div', { backgroundColor: 'rgb(255, 255, 255)' });
+    make('div', { backgroundImage: 'url("a.png")' });
+    make('button', {});
+    const img = make('img', {});
+    const icon = make('span', {});
+    icon.setAttribute('role', 'img');
     const region = [{ left: 0, top: 0, right: 100, bottom: 50 }];
-    expect(collectObstacles(root, region, window, plain)).toHaveLength(2);
-    expect(collectObstacles(root, region, window, new Set<Element>([plain, image, button]))).toHaveLength(2);
+    const found = collectObstacles(root, region, window) as (Rect & { source?: Element })[];
     // 箱の要素がどれかを (列挙しない) source で持つ。
-    const found = collectObstacles(root, region, window, plain) as (Rect & { source?: Element })[];
-    expect(found.map((o) => o.source)).toEqual([image, button]);
+    expect(found.map((o) => o.source)).toEqual([img, icon]);
+    expect(found.map(obstacleKind)).toEqual(['soft', 'soft']);
+    expect(collectObstacles(root, region, window, img).map((o) => (o as Rect & { source?: Element }).source)).toEqual([icon]);
+    expect(collectObstacles(root, region, window, new Set<Element>([img, icon]))).toEqual([]);
     root.remove();
+  });
+
+  it('印のない矩形は hard として扱う', async () => {
+    const { obstacleKind } = await import('./terrainDom');
+    expect(obstacleKind({ left: 0, top: 0, right: 1, bottom: 1 })).toBe('hard');
   });
 });
 
@@ -170,5 +171,55 @@ describe('topCornerRadius', () => {
 
   it('楕円の角丸 (50%) は横の半径が幅の半分 (平らな上辺がない)', () => {
     expect(topCornerRadius(button(120, 32, '50%'))).toBeCloseTo(60, 6);
+  });
+});
+
+describe('measureTerrain: 見えているデザインはすべて足場の候補', () => {
+  const rect = (left: number, top: number, right: number, bottom: number) => () =>
+    ({ left, top, right, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+
+  it('背景・上の枠・影のある要素は上辺、下の枠線だけの仕切りは下の線。文字だけ・入力欄・固定・見えない要素は使わない', async () => {
+    const { measureTerrain } = await import('./terrainDom');
+    const root = document.createElement('main');
+    document.body.append(root);
+    const add = (tag: string, style: Partial<CSSStyleDeclaration>, box: [number, number, number, number], parent: Element = root): HTMLElement => {
+      const el = document.createElement(tag);
+      Object.assign(el.style, style);
+      el.getBoundingClientRect = rect(...box);
+      parent.append(el);
+      return el;
+    };
+    const band = add('div', { backgroundColor: 'rgb(240, 240, 240)' }, [0, 100, 300, 140]);
+    const framed = add('div', { borderTop: '1px solid rgb(0, 0, 0)' }, [0, 200, 300, 260]);
+    const shadowed = add('nav', { boxShadow: '0 1px 2px rgb(0, 0, 0)' }, [0, 300, 300, 340]);
+    const divider = add('div', { borderBottom: '1px solid rgb(200, 200, 200)' }, [0, 400, 300, 420]);
+    const plain = add('p', {}, [0, 500, 300, 520]);
+    plain.textContent = '文字だけ';
+    add('input', { backgroundColor: 'rgb(255, 255, 255)' }, [0, 560, 300, 590]);
+    add('div', { backgroundColor: 'rgb(0, 0, 0)', position: 'fixed' }, [0, 600, 300, 640]);
+    add('div', { backgroundColor: 'rgb(0, 0, 0)', visibility: 'hidden' }, [0, 660, 300, 700]);
+    const scroller = add('div', { overflowX: 'auto' }, [0, 720, 300, 800]);
+    add('div', { backgroundColor: 'rgb(0, 0, 0)' }, [0, 730, 200, 760], scroller);
+    const { elements, platforms } = measureTerrain(root, '', window);
+    expect(elements).toEqual([band, framed, shadowed, divider]);
+    expect(platforms.map((p) => p.top)).toEqual([100, 200, 300, 420]);
+    root.remove();
+  });
+
+  it('スタイルの控えは invalidateStyleCache で捨てる (クラス・style の変化を次の計測に反映する)', async () => {
+    const { measureTerrain, invalidateStyleCache } = await import('./terrainDom');
+    const root = document.createElement('main');
+    document.body.append(root);
+    const el = document.createElement('div');
+    el.getBoundingClientRect = rect(0, 100, 300, 140);
+    root.append(el);
+    invalidateStyleCache();
+    expect(measureTerrain(root, '', window).elements).toEqual([]);
+    el.style.backgroundColor = 'rgb(0, 0, 0)';
+    // 控えを捨てるまでは前の結果のまま。
+    expect(measureTerrain(root, '', window).elements).toEqual([]);
+    invalidateStyleCache();
+    expect(measureTerrain(root, '', window).elements).toEqual([el]);
+    root.remove();
   });
 });

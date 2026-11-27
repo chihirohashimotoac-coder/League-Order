@@ -64,7 +64,7 @@ import {
   type Rect,
   type Segment,
 } from './terrain';
-import { collectObstacles, measureTerrain, topCornerRadius, viewport, type MeasuredTerrain } from './terrainDom';
+import { collectObstacles, invalidateStyleCache, measureTerrain, topCornerRadius, viewport, type MeasuredTerrain } from './terrainDom';
 
 /**
  * 休止の理由。hidden = タブ非表示、modal = モーダル・シート表示中、offscreen = キャラクターが画面外、
@@ -127,7 +127,7 @@ export interface ControllerOptions {
 
 /**
  * 次に入る端の意図。strict = スクロールで体が抜けた端 (その端だけから入る。経路がなければ画面の外で待つ)。
- * strict でなければ左右の好み (なければ乱数) で、左右どちらか、必要なら上下 (sideEntryFallback)。
+ * strict でなければ左右の好み (なければ乱数) で、左右どちらか (上下の端は、スクロールで抜けたときだけ)。
  */
 interface EntryIntent {
   edge: Edge;
@@ -539,6 +539,8 @@ export class HarimaruController {
     });
     add(win, 'scroll', () => this.onScroll(), { passive: true });
     add(win, 'resize', () => {
+      // 画面の幅でスタイル (メディアクエリ) が変わる: 控えを捨てる。
+      invalidateStyleCache();
       this.abortAirborne();
       this.stopLiveOnViewChange();
       this.scheduleRemeasure();
@@ -629,6 +631,8 @@ export class HarimaruController {
     const MO = (win as Window & { MutationObserver?: typeof MutationObserver }).MutationObserver;
     if (MO) {
       const observer = new MO((records) => {
+        // 計算したスタイルの控えを捨てる (クラス・style・中身が変わった)。
+        invalidateStyleCache();
         // インラインの style・文字だけの変化: 経路の途中なら中断し、それ以外はまとめ待ちの計測だけ (毎フレーム変わる
         // style で、そのたびに計測しない)。
         if (records.every((r) => r.type === 'characterData' || (r.type === 'attributes' && r.attributeName === 'style'))) {
@@ -1234,7 +1238,7 @@ export class HarimaruController {
     const intent = this.intent;
     if (intent?.strict) return [intent.edge];
     const side: Edge = intent && (intent.edge === 'left' || intent.edge === 'right') ? intent.edge : this.rng() < 0.5 ? 'left' : 'right';
-    const order: Edge[] = [side, side === 'left' ? 'right' : 'left', ...(this.motion.sideEntryFallback ? (['top', 'bottom'] as Edge[]) : [])];
+    const order: Edge[] = [side, side === 'left' ? 'right' : 'left'];
     // 引っ込んだ端など、意図の端 (上下を含む) があれば最初に試す。
     return intent ? [intent.edge, ...order.filter((e) => e !== intent.edge)] : order;
   }
@@ -1307,6 +1311,8 @@ export class HarimaruController {
         overhang: plan.wallBox !== null ? this.motion.edgeOverhang : 0,
         selfBoxes,
         decor,
+        softPassMs: this.motion.softPassMs,
+        softHoldMs: this.motion.softHoldMs,
       };
       if (!stepsAreClear(plan.steps, obstacles, clear)) continue;
       out.push({ plan, margin: stepsMargin(plan.steps, obstacles, clear), penalty: this.pairPenalty(plan) });

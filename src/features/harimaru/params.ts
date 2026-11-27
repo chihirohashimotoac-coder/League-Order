@@ -60,7 +60,7 @@ export interface BehaviorParams {
 }
 
 export const DEFAULT_BEHAVIOR: BehaviorParams = {
-  weights: { idle: 4, rest: 1.2, look: 1.5, walk: 3, run: 0.45, hop: 0.4, jump: 1.2, hide: 0.35, sleep: 0.35, groom: 0.8, stretch: 0.6 },
+  weights: { idle: 4, rest: 1.2, look: 1.5, walk: 3, run: 0.45, hop: 0.4, jump: 1.2, hide: 0.2, sleep: 0.35, groom: 0.8, stretch: 0.6 },
   repeatPenalty: 0.4,
   repeatTwicePenalty: 0.12,
   afterMovingPenalty: 0.5,
@@ -70,7 +70,7 @@ export const DEFAULT_BEHAVIOR: BehaviorParams = {
   sleepMs: [12_000, 40_000],
   restMs: [6_000, 16_000],
   lookMs: [2_400, 5_000],
-  hiddenMs: [1_200, 3_500],
+  hiddenMs: [800, 2_000],
   walkToEdgeChance: 0.4,
   walkDistance: [18, 150],
   walkSpeed: 20,
@@ -253,14 +253,23 @@ export interface MotionParams {
   retreatCooldownMs: [number, number];
   /** スクロールで画面の外へ出たあと、スクロールが止まってから端に現れるまでの時間。 */
   edgeReturnDelayMs: [number, number];
-  /** 左右の端から入るとき、端から最初の足場 (立てる範囲の端) までの隙間の上限 (CSS px)。超えれば入らない。 */
+  /**
+   * 左右の端から入るとき、画面の端と最初の要素の間の実際の空白の上限 (CSS px)。超えれば入らない (広い空白を
+   * 飛び越える長いジャンプはしない。要素が端まで続いていれば歩いて入る)。
+   */
   entryMaxGap: number;
+  /** 横の小ジャンプで飛び越える、要素どうしの実際の隙間の上限 (CSS px)。 */
+  hopMaxGap: number;
+  /**
+   * 文字・アイコンに、移動の途中でかぶってよい時間の合計 (ms) と、その間に同じ姿で止まってよい時間 (ms)。
+   * 待機・睡眠などで止まる場所は、文字・アイコンにかぶらない場所だけ。
+   */
+  softPassMs: number;
+  softHoldMs: number;
   /** 上端から入るとき、端から足場までの落ちる高さの上限 (CSS px)。 */
   entryMaxDrop: number;
   /** 下端から入るとき、端から上辺までのよじ登る高さの上限 (CSS px)。 */
   entryMaxClimb: number;
-  /** 登場の記録がない・画面遷移で左右のどちらにも安全な経路がないとき、上下の端からの経路も使うか。 */
-  sideEntryFallback: boolean;
   /** 側面をよじ登る間、体 (不透明な部分) が画面の左右の端から外へ出てよい幅 (CSS px。出た部分は描かれない)。 */
   edgeOverhang: number;
   /** 候補にしたカード・ボタン自体の背景・枠に、体が重なってよい幅 (CSS px)。文字・アイコン・入力・周りの要素は保護する。 */
@@ -296,10 +305,12 @@ export const DEFAULT_MOTION: MotionParams = {
   peekHoldMs: [380, 1_000],
   retreatCooldownMs: [4_000, 8_000],
   edgeReturnDelayMs: [500, 1_300],
-  entryMaxGap: 120,
+  entryMaxGap: 24,
+  hopMaxGap: 40,
+  softPassMs: 600,
+  softHoldMs: 200,
   entryMaxDrop: 240,
   entryMaxClimb: 240,
-  sideEntryFallback: true,
   edgeOverhang: 8,
   decorAllowance: 3,
   flatTolerance: 6,

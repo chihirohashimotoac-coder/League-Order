@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seededRng } from './behavior';
 import { HarimaruController } from './controller';
-import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, SPRITE } from './params';
+import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, SPRITE, DEFAULT_MOTION } from './params';
 import { CLIP_IDS, CLIPS, type ClipId } from './sprite';
 import type { Rect } from './terrain';
 import type { MeasuredTerrain } from './terrainDom';
@@ -49,6 +49,8 @@ const only = (weights: Partial<typeof DEFAULT_BEHAVIOR.weights>): typeof DEFAULT
 
 function make(options: { seed?: number; behavior?: typeof DEFAULT_BEHAVIOR; finePointer?: boolean; sheets?: boolean } = {}): HarimaruController {
   controller = new HarimaruController({
+    // 登場の端からカードまでの空白は 100px 前後 (この組のテストは登場の距離の上限を調べない)。
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120 },
     sprite,
     root,
     watch: app,

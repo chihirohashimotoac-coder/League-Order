@@ -197,7 +197,11 @@ async function watchLive(page: Page): Promise<() => Promise<{ live: string[]; ef
       for (const node of Array.from(document.querySelectorAll('.app *'))) {
         const rect = node.getBoundingClientRect();
         if (!hit(rect)) continue;
-        if (node.matches('button, a, input, select, textarea, label, [role="button"], [tabindex="0"], .app-header, .tab-bar, .action-bar')) w.__hl.overlaps.push(`${frame} ${node.tagName}.${node.className}`);
+        // ボタン・カードなどのデザインには重なってよい (harimaruOverlap.ts と同じ規則)。入力欄・固定バー・得点などの重要な表示・文字には重ならない。
+        const hard =
+          'input:not([type="button"]):not([type="submit"]):not([type="reset"]), select, textarea, [contenteditable=""], [contenteditable="true"], ' +
+          '[role="textbox"], [role="combobox"], [role="slider"], [role="spinbutton"], .app-header, .tab-bar, .action-bar, [class*="score"], .n01-sheet, .scoreboard';
+        if (node.matches(hard)) w.__hl.overlaps.push(`${frame} ${node.tagName}.${node.className}`);
         for (const child of Array.from(node.childNodes)) {
           if (child.nodeType !== 3 || !child.textContent?.trim()) continue;
           const range = document.createRange();

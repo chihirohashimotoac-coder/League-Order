@@ -2,6 +2,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { tab } from './nav';
+import { blocking, harimaruOverlaps } from './harimaruOverlap';
 import { seedRandom } from './seededRandom';
 
 /**
@@ -39,23 +40,22 @@ async function openSampleHome(page: Page): Promise<void> {
 }
 
 /**
- * ハリマルが画面の端から入れる位置へスクロールする (登場は端からだけ。端から最初の足場までの安全な経路が要る)。
- * - スマホ: 先頭 (右端の外から「観戦・分析」のタイルへ小さく跳んで入れる)。
- * - PC (横幅 1024 以上): サンプルのホームは左右の端からカードまでが遠く、左右からは入れない (記録がないときの
- *   上下の端の経路を使う)。次の試合のカードの下端が見えている上端のすぐ上に来る位置 = 上端からタイルへ落ちられる。
- * サンプルの読み込み後にアプリがホームを少し下へスクロールする既存の動作は、ここで置き換える。
+ * ハリマルが画面の端から入れる位置 (先頭) へスクロールする。登場は左右の端からだけで、画面の端と要素の間の空白が
+ * entryMaxGap (24px) 以下の足場が要る。スマホは先頭の「次の試合」のカード・タイル (端から 12px)。PC は幅 1100
+ * (下の beforeEach) の先頭 (端から 20px)。サンプルの読み込み後にアプリがホームを少し下へスクロールする既存の動作は、
+ * ここで置き換える。
  */
 async function scrollToEntry(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    if (window.innerWidth < 1024) {
-      window.scrollTo(0, 0);
-      return;
-    }
-    const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
-    const header = document.querySelector('.app-header')!.getBoundingClientRect();
-    window.scrollTo(0, Math.round(Math.max(0, card.bottom + window.scrollY - header.bottom + 6)));
-  });
+  await page.evaluate(() => window.scrollTo(0, 0));
 }
+
+/**
+ * PC は幅 1100 で確かめる (PC の配置のまま、左右の端から 20px にカードがある)。1189 以上はコンテンツの列の外の空白が
+ * 24px を超え (1280 で 70px)、左右から入れないので画面の外で待つ (harimaruEntry.spec.ts で確かめる)。
+ */
+test.beforeEach(async ({ page }, info) => {
+  if (info.project.name === 'desktop') await page.setViewportSize({ width: 1100, height: 720 });
+});
 
 /** 時計を少しずつ進めて、端からの登場が終わり、足場に立つまで待つ (のぞいて引っ込む回・引っ込んだあとの間も含む)。 */
 async function appear(page: Page, maxMs = 30_000): Promise<void> {
@@ -67,41 +67,12 @@ async function appear(page: Page, maxMs = 30_000): Promise<void> {
   throw new Error('ハリマルが端から現れない');
 }
 
-/** 表示枠の見える部分に重なるボタン・リンク・入力・文字・固定バーの一覧 (0.5px 未満の接触は除く)。 */
+/** 表示枠の見える部分が重なってはいけないもの (harimaruOverlap.ts の規則。移動中の文字の短いかぶりは除く)。 */
 async function overlaps(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const el = document.querySelector('[data-testid="harimaru"]');
-    if (!el) return ['no sprite'];
-    const r = el.getBoundingClientRect();
-    // カードの裏に沈んで切り取られている部分 (clip-path の下側) は描かれていないので数えない。
-    const clip = /inset\(0(?:px)? 0(?:px)? ([\d.]+)px/.exec((el as HTMLElement).style.clipPath || '');
-    const clipped = clip ? parseFloat(clip[1]) : 0;
-    const box = { left: r.left + 2.5, right: r.right - 2.5, top: r.top + 0.5, bottom: r.bottom - 0.5 - clipped };
-    // 固定ヘッダー・下部ナビの裏 (画面の端から入る途中) の部分は描かれていないので数えない。
-    box.top = Math.max(box.top, document.querySelector('.app-header')?.getBoundingClientRect().bottom ?? -Infinity);
-    box.bottom = Math.min(box.bottom, document.querySelector('.tab-bar')?.getBoundingClientRect().top ?? Infinity);
-    if (box.bottom <= box.top) return [];
-    const hit = (q: { left: number; right: number; top: number; bottom: number }): boolean =>
-      q.right > box.left && q.left < box.right && q.bottom > box.top && q.top < box.bottom;
-    const found: string[] = [];
-    for (const node of Array.from(document.querySelectorAll('.app *'))) {
-      const rect = node.getBoundingClientRect();
-      if (!hit(rect)) continue;
-      if (node.matches('button, a, input, select, textarea, label, [role="button"], [tabindex="0"], .app-header, .tab-bar, .action-bar')) {
-        found.push(`${node.tagName}.${node.className}`);
-      }
-      for (const child of Array.from(node.childNodes)) {
-        if (child.nodeType !== 3 || !child.textContent?.trim()) continue;
-        const range = document.createRange();
-        range.selectNodeContents(child);
-        if (Array.from(range.getClientRects()).some(hit)) found.push(`TEXT:${child.textContent.trim().slice(0, 16)}`);
-      }
-    }
-    return found;
-  });
+  return blocking(await page.evaluate(harimaruOverlaps));
 }
 
-test('ホームに 1 体だけ現れ、UI に重ならずに歩き、クリックを妨げない', async ({ page }) => {
+test('ホームに 1 体だけ現れ、入力欄・固定バー・重要な表示に重ならず、文字に長くかぶらずに歩き、クリックを妨げない', async ({ page }) => {
   // 気まぐれな動作の抽選と時計を固定する。固定しないと、眠り・待機が続いて 120 秒の間に 2 か所以下しか
   // 立たない回があった (CI の run #60 と手元で 60 回に 1 回)。本番の抽選は変えない (seededRandom.ts)。
   // 時計は読み込みの前から決まった時刻で止め、runFor でだけ進める (実時間で進むと、抽選の時刻・回数が実行ごとに変わる)。
@@ -119,12 +90,21 @@ test('ホームに 1 体だけ現れ、UI に重ならずに歩き、クリッ�
   expect(size).toBe(20);
 
   const xs = new Set<number>();
+  // 移動中に文字へかぶったもの (前の標本)。1.5 秒おきの標本で続けて同じ文字にかぶっていれば、長く隠している。
+  let passed: string[] = [];
   for (let i = 0; i < 80; i += 1) {
     await page.clock.runFor(1_500);
     const state = await sprite(page).evaluate((el) => ({ x: Math.round(el.getBoundingClientRect().left), visible: el.getAttribute('data-visible') }));
-    if (state.visible !== 'true') continue;
+    if (state.visible !== 'true') {
+      passed = [];
+      continue;
+    }
     xs.add(state.x);
-    expect(await overlaps(page), `step ${i}`).toEqual([]);
+    const found = await page.evaluate(harimaruOverlaps);
+    expect(blocking(found), `step ${i}`).toEqual([]);
+    const now = found.filter((f) => f.startsWith('pass:'));
+    expect(now.filter((f) => passed.includes(f)), `step ${i}: 同じ文字に長くかぶり続けない`).toEqual([]);
+    passed = now;
   }
   expect(xs.size, 'ハリマルが実際に移動する').toBeGreaterThan(2);
 
@@ -203,12 +183,12 @@ test('「動きを減らす」設定では描画しない', async ({ page }) => 
 test('安全な足場がなくなると即座に消え、足場が戻ると安全な場所から現れる', async ({ page }) => {
   await page.clock.install();
   await openSampleHome(page);
-  // フィクスチャ: 枠の付いた透明な板でホーム全体を覆い、すべての足場の上をふさぐ (見た目以外は既存と同じ)。
+  // フィクスチャ: 透明な板 (デザインなし) でホーム全体を覆い、すべての足場の辺を隠す (覆われた辺は足場にしない)。
   const block = async (): Promise<void> => {
     await page.evaluate(() => {
       const cover = document.createElement('div');
       cover.id = 'harimaru-blocker';
-      cover.style.cssText = 'position:absolute;inset:0;border:1px solid rgb(0 0 0 / 5%);pointer-events:none';
+      cover.style.cssText = 'position:absolute;inset:0;z-index:5';
       const main = document.querySelector<HTMLElement>('.app-main')!;
       main.style.position = 'relative';
       main.append(cover);
@@ -329,7 +309,7 @@ test('長押し・ドラッグでは反応しない', async ({ page }, info) => 
   expect(await actions()).not.toContain('turn');
 });
 
-test('どの画面でも、出るときは文字・操作部品・固定バーに重ならない (メンバー・フォーマット・履歴・設定・その他・観戦)', async ({ page }) => {
+test('どの画面でも、入力欄・固定バーに重ならず、立っている間は文字に重ならない (メンバー・フォーマット・履歴・設定・その他・観戦)', async ({ page }) => {
   test.setTimeout(180_000);
   await openSampleHome(page);
   const screens: [string, () => Promise<void>][] = [
@@ -426,7 +406,7 @@ test('PC: 近くで止まったカーソルに、気まぐれに近づくか顔�
   expect(await overlaps(page)).toEqual([]);
 });
 
-test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカードの上 (横並びのカードの隙間・角丸の上を歩かない)', async ({ browser }, info) => {
+test('PC 1100×900: 歩く・駆ける間、足元はいつも 1 つの要素の辺の上 (横並びのカードの隙間・角丸の上を歩かない)', async ({ browser }, info) => {
   test.skip(info.project.name !== 'desktop', 'PC の横並びのカード (サンプルのホーム) で確かめる');
   test.setTimeout(300_000);
   let movingFrames = 0;
@@ -442,7 +422,7 @@ test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカード
   // なって歩き方が変わったため、1〜16 を試して選び直した。9・14 は継ぎ目まで歩かなくなった)。
   // 種ごとに新しいページで、時計を読み込みの前から止めて進める (同じ種なら同じ歩き方になる)。
   for (const seed of [1, 10, 12]) {
-    const context = await browser.newContext({ ...info.project.use, viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, serviceWorkers: 'block' });
+    const context = await browser.newContext({ ...info.project.use, viewport: { width: 1100, height: 900 }, deviceScaleFactor: 1, serviceWorkers: 'block' });
     const page = await context.newPage();
     await seedRandom(page, seed);
     await page.clock.install({ time: CURSOR_CLOCK });
@@ -462,7 +442,18 @@ test('PC 1280×900: 歩く・駆ける間、足元はいつも 1 枚のカード
         // 足元の見える範囲 (表示枠の左右の透明な余白 2px を除く)。右向きは scaleX(-1)。
         const left = r.left + 2;
         const right = r.right - 2;
-        const cards = Array.from(document.querySelectorAll('.app-main .card, .app-main .next-match-card, .app-main .quick-tile')).map((card) => ({ q: card.getBoundingClientRect(), radius: parseFloat(getComputedStyle(card).borderTopLeftRadius) || 0 }));
+        // 足場になりうる要素: 背景・上の枠・影のある要素 (上辺) と、下の枠線だけの仕切り (下の線)。
+        const visible = (c: string): boolean => !!c && c !== 'transparent' && !/rgba?\([^)]*,\s*0\)$/.test(c) && !/\/\s*0\)$/.test(c);
+        const cards = Array.from(document.querySelectorAll('.app-main *')).flatMap((card) => {
+          const st = getComputedStyle(card);
+          const border = (side: 'top' | 'bottom'): boolean => parseFloat(st.getPropertyValue(`border-${side}-width`)) > 0 && st.getPropertyValue(`border-${side}-style`) !== 'none' && visible(st.getPropertyValue(`border-${side}-color`));
+          const design = visible(st.backgroundColor) || st.backgroundImage !== 'none' || border('top') || st.boxShadow !== 'none';
+          const q = card.getBoundingClientRect();
+          if (q.width < 8) return [];
+          if (design) return [{ q, radius: parseFloat(st.borderTopLeftRadius) || 0 }];
+          if (border('bottom')) return [{ q: { left: q.left, right: q.right, top: q.bottom, bottom: q.bottom } as DOMRect, radius: 0 }];
+          return [];
+        });
         let gap = Infinity;
         let seam: 'right' | 'left' | null = null;
         let card = -1;
