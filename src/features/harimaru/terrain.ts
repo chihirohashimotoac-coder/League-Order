@@ -29,6 +29,11 @@ export interface Platform {
    */
   cutLeft?: boolean;
   cutRight?: boolean;
+  /**
+   * 画面に固定された要素 (下部ナビ) の上辺か。座標は計測したときのスクロール位置でのページ座標。立っている間に
+   * スクロールしたら、体を画面に対して止めたまま、ページ座標をずらして合わせる (controller.ts)。
+   */
+  fixed?: boolean;
 }
 
 export interface Segment {
@@ -40,6 +45,8 @@ export interface Segment {
   /** 表示枠 (幅 SPRITE.width) の左端 x が取りうる範囲。 */
   minX: number;
   maxX: number;
+  /** 画面に固定された要素 (下部ナビ) の上辺の足場か (Platform.fixed)。 */
+  fixed?: boolean;
 }
 
 export interface TerrainInput {
@@ -68,7 +75,8 @@ export function mergePlatforms(platforms: readonly Platform[], params: TerrainPa
   const rows: Platform[][] = [];
   for (const platform of byTop) {
     const row = rows[rows.length - 1];
-    if (row && platform.top - row[0].top <= params.rowTolerance) row.push(platform);
+    // 画面に固定された足場は、スクロールで動く足場とつながない。
+    if (row && platform.top - row[0].top <= params.rowTolerance && !!row[0].fixed === !!platform.fixed) row.push(platform);
     else rows.push([platform]);
   }
   const merged: Platform[] = [];
@@ -124,7 +132,7 @@ export function computeSegments(input: TerrainInput, params: TerrainParams = DEF
       const minX = freeLeft - SPRITE.sideInset;
       const maxX = freeRight - SPRITE.width + SPRITE.sideInset;
       if (maxX < minX) continue;
-      segments.push({ top: platform.top, left: freeLeft, right: freeRight, minX, maxX });
+      segments.push({ top: platform.top, left: freeLeft, right: freeRight, minX, maxX, ...(platform.fixed ? { fixed: true } : {}) });
     }
   }
   return segments;

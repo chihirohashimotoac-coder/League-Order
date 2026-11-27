@@ -33,7 +33,9 @@ export interface BehaviorParams {
   repeatTwicePenalty: number;
   /** 動く行動 (歩く・走る・跳ねる・ジャンプ) のあとに、動く行動の重みに掛ける係数。2 回続いたら 0。 */
   afterMovingPenalty: number;
-  /** 無操作がこの時間続くと、眠る重みを sleepWhenInactive に上げる。 */
+  /** 静かな行動 (待機・見回す・毛づくろい・伸び) のあとに、静かな行動の重みに掛ける係数 (無操作になるまで。2 回続いたら 0)。 */
+  afterQuietPenalty: number;
+  /** 無操作がこの時間続くと、眠る重みを sleepWhenInactive に上げる (それまでは眠り・伏せて休むを選ばない)。 */
   inactiveSleepAfterMs: number;
   sleepWhenInactive: number;
   /** 待機の長さ (最小・最大)。 */
@@ -60,19 +62,20 @@ export interface BehaviorParams {
 }
 
 export const DEFAULT_BEHAVIOR: BehaviorParams = {
-  weights: { idle: 4, rest: 1.2, look: 1.5, walk: 3, run: 0.45, hop: 0.4, jump: 1.2, hide: 0.2, sleep: 0.35, groom: 0.8, stretch: 0.6 },
+  weights: { idle: 3, rest: 1.2, look: 1.5, walk: 3.5, run: 0.45, hop: 0.3, jump: 2, hide: 0.2, sleep: 0.35, groom: 0.8, stretch: 0.6 },
   repeatPenalty: 0.4,
   repeatTwicePenalty: 0.12,
   afterMovingPenalty: 0.5,
+  afterQuietPenalty: 0.35,
   inactiveSleepAfterMs: 45_000,
   sleepWhenInactive: 6,
-  idleMs: [2_500, 7_000],
+  idleMs: [1_200, 3_500],
   sleepMs: [12_000, 40_000],
   restMs: [6_000, 16_000],
-  lookMs: [2_400, 5_000],
+  lookMs: [1_500, 3_000],
   hiddenMs: [800, 2_000],
   walkToEdgeChance: 0.4,
-  walkDistance: [18, 150],
+  walkDistance: [30, 160],
   walkSpeed: 20,
   runDistance: [40, 180],
   runSpeed: 64,
@@ -235,7 +238,7 @@ export const DEFAULT_TIMING: TimingParams = {
   enterDelayMs: [1_200, 2_600],
   remeasureDebounceMs: 200,
   scrollIdleMs: 260,
-  wakeOnActivityChance: 0.5,
+  wakeOnActivityChance: 1,
 };
 
 /**
@@ -261,11 +264,11 @@ export interface MotionParams {
   /** 横の小ジャンプで飛び越える、要素どうしの実際の隙間の上限 (CSS px)。 */
   hopMaxGap: number;
   /**
-   * 文字・アイコンに、移動の途中でかぶってよい時間の合計 (ms) と、その間に同じ姿で止まってよい時間 (ms)。
-   * 待機・睡眠などで止まる場所は、文字・アイコンにかぶらない場所だけ。
+   * 経路の選びやすさに掛ける係数。文字・アイコンにかかる経路 (体は重なってよい。読みやすい経路を選びやすくする) と、
+   * 観戦中に大きいリアクションの体とエフェクトが収まる着地点。
    */
-  softPassMs: number;
-  softHoldMs: number;
+  textTouchWeight: number;
+  liveRoomWeight: number;
   /** 上端から入るとき、端から足場までの落ちる高さの上限 (CSS px)。 */
   entryMaxDrop: number;
   /** 下端から入るとき、端から上辺までのよじ登る高さの上限 (CSS px)。 */
@@ -307,8 +310,8 @@ export const DEFAULT_MOTION: MotionParams = {
   edgeReturnDelayMs: [500, 1_300],
   entryMaxGap: 24,
   hopMaxGap: 40,
-  softPassMs: 600,
-  softHoldMs: 200,
+  textTouchWeight: 0.5,
+  liveRoomWeight: 3,
   entryMaxDrop: 240,
   entryMaxClimb: 240,
   edgeOverhang: 8,

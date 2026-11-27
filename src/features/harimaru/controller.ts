@@ -31,7 +31,7 @@ import {
   type MotionParams,
   type TimingParams,
 } from './params';
-import { climbPlans, dropPlans, entryPlans, hopPlans, pickPlan, retreatOf, stepAt, stepsAreClear, stepsMargin, type Edge, type EntryMode, type MovePlan, type Pose, type Step } from './paths';
+import { climbPlans, dropPlans, entryPlans, hopPlans, pickPlan, retreatOf, stepAt, stepsAreClear, stepsMargin, stepsTouching, type Edge, type EntryMode, type MovePlan, type Pose, type Step } from './paths';
 import {
   BACKGROUND_SIZE,
   CLIPS,
@@ -64,7 +64,7 @@ import {
   type Rect,
   type Segment,
 } from './terrain';
-import { collectObstacles, invalidateStyleCache, measureTerrain, topCornerRadius, viewport, type MeasuredTerrain } from './terrainDom';
+import { collectObstacles, invalidateStyleCache, measureTerrain, obstacleKind, topCornerRadius, viewport, type MeasuredTerrain } from './terrainDom';
 
 /**
  * 休止の理由。hidden = タブ非表示、modal = モーダル・シート表示中、offscreen = キャラクターが画面外、
@@ -142,11 +142,13 @@ export interface LiveParams {
   scoreCooldownMs: number;
   /** 重要な出来事 (優先度 4 以上) を、足場の外にいる途中などで始められないとき、待つ最長の時間。 */
   pendingMs: number;
+  /** 余白がないとき、同じ足場の上で体とエフェクトが収まる位置を探す左右の距離 (CSS px)。 */
+  roomSearchPx: number;
   /** 待っている間の確かめの間隔。 */
   pendingCheckMs: number;
 }
 
-export const DEFAULT_LIVE: LiveParams = { scoreCooldownMs: 4_000, pendingMs: 3_000, pendingCheckMs: 200 };
+export const DEFAULT_LIVE: LiveParams = { scoreCooldownMs: 4_000, pendingMs: 4_500, pendingCheckMs: 200, roomSearchPx: 80 };
 /** この優先度以下 (数が小さい) は重要な出来事: 得点のクールダウンを受けず、少し待ってでも演出する。 */
 const IMPORTANT_PRIORITY = 4;
 
@@ -227,6 +229,11 @@ export class HarimaruController {
   private nearTimer: number | null = null;
   /** 足元の足場の要素 (footTop で見つけたもの)。 */
   private footEl: Element | null = null;
+  /** 下部ナビ (画面に固定された足場) の上でスクロールしている間、画面に固定して描くか。乗っているナビの要素。 */
+  private pinned = false;
+  private rideEl: Element | null = null;
+  /** 最後に位置を合わせたときのスクロール位置。 */
+  private seenScroll = { x: 0, y: 0 };
   /** 直前に渡った 2 つの要素 (往復を選びにくくする)。 */
   private lastPair: { a: Element | null; b: Element | null; at: number } | null = null;
   /** 読み込めた画像 (base = v0.2 のアトラス、ほかは v0.9 の動作ごとのアトラス) と、いま表示している画像。 */
@@ -240,6 +247,10 @@ export class HarimaruController {
   private liveNow: { kind: LiveReaction; priority: number; id: ReactionId | null } | null = null;
   private lastScoreAt = -Infinity;
   private pendingLive: { kind: LiveReaction; until: number } | null = null;
+  /** 観戦の画面が状態を流している間 (観戦リアクションの余白のある足場を選びやすくする)。 */
+  private liveWatching = false;
+  /** 観戦リアクションの余白を探して歩いている途中か (1 つの出来事で 1 回だけ)。 */
+  private seekingRoom = false;
   private pendingTimer: number | null = null;
 
   /** 行動に属するタイマー (中断で消す)。 */
@@ -854,7 +865,13 @@ export class HarimaruController {
   }
 
   private noteActivity(): void {
+    const wasInactive = this.now() - this.lastActivityAt >= this.behavior.inactiveSleepAfterMs;
     this.lastActivityAt = this.now();
+    // 無操作のあいだに伏せて休んでいた: 操作が戻ったら、少しして動き出す (眠りは下で起きる)。
+    if (wasInactive && this.action === 'rest' && this.placed && this.pauses.size === 0 && !this.airborne) {
+      this.interrupt();
+      this.after(between(this.rng, [300, 1_200]), () => this.nextAction());
+    }
     if (this.action === 'sleep' && !this.wakeRolled && this.pauses.size === 0) {
       this.wakeRolled = true;
       if (this.rng() < this.timing.wakeOnActivityChance) {
@@ -891,10 +908,44 @@ export class HarimaruController {
     });
   }
 
+  /**
+   * 画面に固定された足場 (下部ナビ) に立っている間のスクロール・画面の高さの変化: 足元をナビの上辺に合わせて
+   * ページ座標をずらし、描画は画面に固定する (スクロールの通知が描画より遅れても、ナビから浮いて見えない)。
+   * 立っていなければ false。ナビが見えなくなったら隠れて出直す。
+   */
+  private rideFixed(): boolean {
+    if (!this.placed || this.airborne || !this.segment?.fixed) return false;
+    if (!this.rideEl) {
+      const index = this.boxes.findIndex((b) => (b as Rect & { fixed?: boolean }).fixed && Math.abs(b.top - this.top) <= SNAP_TOLERANCE + 1);
+      this.rideEl = index >= 0 ? (this.platformEls[index] ?? null) : null;
+    }
+    const el = this.rideEl;
+    const rect = el?.isConnected ? el.getBoundingClientRect() : null;
+    if (!rect || rect.width <= 0 || rect.height <= 0 || rect.top <= 0 || rect.top >= this.win.innerHeight) {
+      this.rideEl = null;
+      this.pinned = false;
+      this.vanish(between(this.rng, this.timing.enterDelayMs));
+      return true;
+    }
+    const top = rect.top + this.win.scrollY;
+    const dx = this.win.scrollX - this.seenScroll.x;
+    const dy = top - this.top;
+    this.seenScroll = { x: this.win.scrollX, y: this.win.scrollY };
+    this.top = top;
+    this.x += dx;
+    const s = this.segment;
+    this.segment = { ...s, top: s.top + dy, left: s.left + dx, right: s.right + dx, minX: s.minX + dx, maxX: s.maxX + dx };
+    this.pinned = true;
+    this.place();
+    return true;
+  }
+
   private onScroll(): void {
     this.abortAirborne();
     this.stopLiveOnViewChange();
     this.noteActivity();
+    const riding = this.rideFixed();
+    this.seenScroll = { x: this.win.scrollX, y: this.win.scrollY };
     // スクロールの速さ (CSS px / 秒) の最大を、止まるまで覚えておく。
     const t = this.now();
     const y = this.win.scrollY;
@@ -905,7 +956,8 @@ export class HarimaruController {
     this.lastScroll = { y, t };
     this.clearTimer('scroll');
     if (this.destroyed || this.blocked()) return;
-    this.noteExit();
+    // 下部ナビの上に立っている体は、画面に対して止まっている (抜けない)。
+    if (!riding) this.noteExit();
     // 画面の外で端から出直すのを待っている間・まだ入れていない間にスクロールした: 予約を消し、止まってから確かめ直す。
     if ((this.placed && this.pauses.has('offscreen')) || (!this.placed && !this.entering)) this.clearActionTimers();
     this.scrollTimer = this.win.setTimeout(() => {
@@ -938,6 +990,12 @@ export class HarimaruController {
     const fast = this.scrollPeak >= this.interaction.fastScroll;
     this.scrollPeak = 0;
     this.lastScroll = null;
+    // 下部ナビの上で画面に固定していた描画を、ページ座標に戻す (位置はスクロールのたびに合わせてある)。
+    if (this.pinned) {
+      this.pinned = false;
+      this.rideEl = null;
+      this.place();
+    }
     if (this.destroyed || this.blocked()) return;
     if (!this.placed) {
       // 登場の途中で止められた・まだ入れていない: 同じ意図のまま、止まった画面でもう一度確かめる。
@@ -1202,6 +1260,7 @@ export class HarimaruController {
   /** 計測して、足場の一覧・要素・箱・見えている範囲を覚える。 */
   private survey(): MeasuredTerrain {
     const terrain = this.measureFn(this.root, this.selector, this.win);
+    if (!this.pinned) this.seenScroll = { x: this.win.scrollX, y: this.win.scrollY };
     this.view = terrain.view;
     this.platformEls = terrain.elements ?? [];
     this.containers = terrain.containers;
@@ -1286,6 +1345,8 @@ export class HarimaruController {
     const view = this.view;
     if (!view || plans.length === 0) return [];
     const out: { plan: MovePlan; margin: number; penalty: number }[] = [];
+    const onwardCache = new Map<string, number>();
+    const roomCache = new Map<string, number>();
     // 障害物は、経路の組 (つかまる側面の要素・出発と着地の要素) ごとに 1 回だけ集める。出発・着地の要素を包む入れ物
     // (カードの中の枠など) の背景・枠は、その上に立っているときと同じく数えない (中の文字・部品は数える)。
     const groups = new Map<string, Rect[]>();
@@ -1308,7 +1369,11 @@ export class HarimaruController {
       // 候補の要素自身 (出発・着地・つかまる側面) の箱だけを decorAllowance だけ縮める (座標ではなく要素で見分ける)。
       const selfEls = new Set([plan.fromBox, plan.toBox, plan.wallBox].filter((i): i is number => i !== null).map((i) => this.platformEls[i]).filter(Boolean));
       const decor = this.motion.decorAllowance;
-      const obstacles = groups.get(keyOf(plan))!.map((o) => {
+      // 体が重なってはいけないもの (hard) だけで安全を確かめる。文字・画像 (soft) には重なってよい (読みやすい経路を
+      // 選びやすくするだけ)。
+      const found = groups.get(keyOf(plan))!;
+      const soft = found.filter((o) => obstacleKind(o) === 'soft');
+      const obstacles = found.filter((o) => obstacleKind(o) === 'hard').map((o) => {
         const source = (o as Rect & { source?: Element }).source;
         return source && selfEls.has(source) && this.decorative(source) ? { left: o.left + decor, top: o.top, right: o.right - decor, bottom: o.bottom - decor } : o;
       });
@@ -1321,13 +1386,56 @@ export class HarimaruController {
         overhang: plan.wallBox !== null ? this.motion.edgeOverhang : 0,
         selfBoxes,
         decor,
-        softPassMs: this.motion.softPassMs,
-        softHoldMs: this.motion.softHoldMs,
       };
       if (!stepsAreClear(plan.steps, obstacles, clear)) continue;
-      out.push({ plan, margin: stepsMargin(plan.steps, obstacles, clear), penalty: this.pairPenalty(plan) });
+      // 選びやすさ: 往復の抑制、文字にかからない経路、着いた先で歩ける幅とその先へ進める経路、観戦中はリアクションの
+      // 余白のある着地点。
+      const readable = stepsTouching(plan.steps, soft) > 0 ? this.motion.textTouchWeight : 1;
+      const penalty = this.pairPenalty(plan) * readable * this.onward(plan.end?.segment ?? null, onwardCache) * this.liveRoomWeight(plan, roomCache);
+      out.push({ plan, margin: stepsMargin(plan.steps, obstacles, clear), penalty });
     }
     return out;
+  }
+
+  /** 体が重なってはいけないもの (hard: 入力欄・重要な表示・フォーカスの輪など)。文字・画像には体が重なってよい。 */
+  private bodyObstacles(regions: readonly Rect[]): Rect[] {
+    return this.obstaclesIn(this.root, regions, this.win, undefined, this.containers).filter((o) => obstacleKind(o) === 'hard');
+  }
+
+  /**
+   * 着いた先の足場の選びやすさ: 歩ける幅と、その先へ移れる経路 (小ジャンプ・飛び降り・よじ登りの候補。安全の確認は
+   * しない形だけの数) が多いほど大きい。幅いっぱいのカードの上辺など、着いたあと動けない足場を選びにくくする。
+   */
+  private onward(segment: Segment | null, cache: Map<string, number>): number {
+    if (!segment || !this.view) return 1;
+    const key = `${segment.top}:${segment.left}:${segment.right}`;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const visible = visibleSegments(this.segments, this.view);
+    const current = visible.find((s) => s.top === segment.top && s.left === segment.left && s.right === segment.right) ?? segment;
+    const targets = new Set<string>();
+    const plans = [
+      ...hopPlans(current, visible, this.boxes, DEFAULT_TERRAIN, this.motion),
+      ...dropPlans(current, visible, this.boxes, DEFAULT_TERRAIN, this.motion),
+      ...climbPlans(current, visible, this.boxes, DEFAULT_TERRAIN, this.motion),
+    ];
+    for (const p of plans) if (p.end) targets.add(`${p.end.segment.top}:${p.end.segment.left}`);
+    const width = Math.max(0, current.maxX - current.minX);
+    const value = (0.4 + Math.min(width, 200) / 200) * (0.5 + Math.min(targets.size, 4) * 0.375);
+    cache.set(key, value);
+    return value;
+  }
+
+  /** 観戦中は、着いた位置で大きいリアクション (180 のボード) の体とエフェクトが収まる経路を選びやすくする。 */
+  private liveRoomWeight(plan: MovePlan, cache: Map<string, number>): number {
+    if (!this.liveWatching || !plan.end) return 1;
+    const key = `${Math.round(plan.end.x)}:${plan.end.top}`;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const fits = ([-1, 1] as const).some((dir) => this.reactionRoom('surprise180', dir, plan.end!.x, plan.end!.top));
+    const value = fits ? this.motion.liveRoomWeight : 1;
+    cache.set(key, value);
+    return value;
   }
 
   /**
@@ -1534,7 +1642,7 @@ export class HarimaruController {
       bottom: this.top - SPRITE.height,
     };
     if (!this.view) return false;
-    return boxIsClear(region, this.obstaclesIn(this.root, [region], this.win, undefined, this.containers), this.view);
+    return boxIsClear(region, this.bodyObstacles([region]), this.view);
   }
 
   /**
@@ -2260,6 +2368,11 @@ export class HarimaruController {
    * 観戦の対象が変わった・観戦画面を離れた: 待っている出来事を捨て、演出中のリアクションを (エフェクトを残さずに)
    * やめて待機に戻る。演出していなければ何もしない。
    */
+  /** 観戦の画面が状態を流し始めた・離れた (HarimaruLayer)。観戦中は、リアクションの余白のある足場を選びやすくする。 */
+  setLiveWatching(on: boolean): void {
+    this.liveWatching = on;
+  }
+
   cancelLive(): void {
     if (this.destroyed) return;
     this.dropPendingLive();
@@ -2369,9 +2482,36 @@ export class HarimaruController {
       return false;
     }
     if (!this.reactionRoom(id, this.dir)) {
-      this.log(`live:${kind}:skipped:room`);
-      return false;
+      // 向きを変えれば収まる: 振り向いてから演出する (180 のボードは右向きでも反転しない)。
+      if (this.reactionRoom(id, this.dir > 0 ? -1 : 1)) {
+        this.dir = this.dir > 0 ? -1 : 1;
+      } else {
+        // 重要な出来事は、同じ足場の近くで体とエフェクトが収まる位置へ歩いてから演出する (待てる時間の中で 1 回だけ)。
+        const spot = priority <= IMPORTANT_PRIORITY && !this.seekingRoom ? this.roomSpot(id) : null;
+        if (!spot) {
+          this.log(`live:${kind}:skipped:room`);
+          return false;
+        }
+        this.log(`live:${kind}:seeking`);
+        const until = this.now() + this.liveParams.pendingMs;
+        this.interrupt();
+        this.seekingRoom = true;
+        this.action = 'walk';
+        this.walk(spot.x, false, () => {
+          this.seekingRoom = false;
+          if (this.now() > until) {
+            this.log(`live:${kind}:dropped:expired`);
+            this.nextAction();
+            return;
+          }
+          this.dir = spot.dir;
+          this.place();
+          if (!this.reactLive(kind)) this.nextAction();
+        });
+        return false;
+      }
     }
+    this.seekingRoom = false;
     this.startLive(kind, priority, id);
     const spec = REACTIONS[id];
     let frame = 0;
@@ -2420,19 +2560,35 @@ export class HarimaruController {
    * リアクションを出す余白: 全コマの本体 (移動を含む) とエフェクトの描かれる範囲を包む矩形が、見えている範囲に
    * 収まり、文字・操作部品・色の付いた要素に重ならないか。範囲の下端は足場の上辺 (エフェクトは足元より下に出ない)。
    */
-  private reactionRoom(id: ReactionId, dir: -1 | 1): boolean {
+  /** いまの足場の上で、体とエフェクトが収まる近い位置と向き (左右 roomSearchPx 以内、近い順)。なければ null。 */
+  private roomSpot(id: ReactionId): { x: number; dir: -1 | 1 } | null {
+    const segment = this.currentSegment();
+    if (!segment) return null;
+    const bounds = this.walkBounds(segment);
+    if (!bounds) return null;
+    const range = this.liveParams.roomSearchPx;
+    const xs: number[] = [];
+    for (let d = 6; d <= range; d += 6) xs.push(this.x - d, this.x + d);
+    for (const x of xs) {
+      if (x < bounds.minX || x > bounds.maxX) continue;
+      for (const dir of [this.dir, this.dir > 0 ? -1 : 1] as const) if (this.reactionRoom(id, dir, x, this.top)) return { x, dir };
+    }
+    return null;
+  }
+
+  private reactionRoom(id: ReactionId, dir: -1 | 1, atX = this.x, atTop = this.top): boolean {
     const view = this.view;
     if (!view || !this.placed) return false;
     const spec = REACTIONS[id];
-    const top = this.top - SPRITE.height;
+    const top = atTop - SPRITE.height;
     // 本体: 枠いっぱい (1x の縮小のにじみ・画素への丸めを含めて左右 1px の余裕) を、移動量ごとに包む。
     let left = Infinity;
     let right = -Infinity;
     let upper = Infinity;
     for (const [ox, oy] of spec.bodyOffsets) {
       const dx = dir < 0 ? ox : -ox;
-      left = Math.min(left, this.x + dx - 1);
-      right = Math.max(right, this.x + dx + SPRITE.width + 1);
+      left = Math.min(left, atX + dx - 1);
+      right = Math.max(right, atX + dx + SPRITE.width + 1);
       upper = Math.min(upper, top + oy - 1);
     }
     // エフェクト: 右向きでは本体の中心 (x = 15) で左右反転する。文字のあるものは反転せずにずらす。
@@ -2441,16 +2597,16 @@ export class HarimaruController {
     const mirror = dir > 0 && spec.textShift === undefined;
     const effectLeft = (mirror ? SPRITE.width - box.right : box.left) + shift;
     const effectRight = (mirror ? SPRITE.width - box.left : box.right) + shift;
-    left = Math.min(left, this.x + effectLeft - 1);
-    right = Math.max(right, this.x + effectRight + 1);
+    left = Math.min(left, atX + effectLeft - 1);
+    right = Math.max(right, atX + effectRight + 1);
     upper = Math.min(upper, top + box.top - 1);
-    const region: Rect = { left, right, top: upper, bottom: this.top };
+    const region: Rect = { left, right, top: upper, bottom: atTop };
     const obstacles = this.obstaclesIn(this.root, [region], this.win, undefined, this.containers);
-    if (!boxIsClear({ ...region, bottom: this.top - 0.5 }, obstacles, view)) return false;
+    if (!boxIsClear({ ...region, bottom: atTop - 0.5 }, obstacles, view)) return false;
     // 足元より下 (カードの面) に出るエフェクト (敗北の砂ぼこり): その範囲がカードの内側の余白に収まるときだけ。
     if (box.bottom > SPRITE.height) {
-      const below: Rect = { left: this.x + effectLeft - 1, right: this.x + effectRight + 1, top: this.top, bottom: this.top + (box.bottom - SPRITE.height) + 1 };
-      if (!this.cardBelowClear(below)) return false;
+      const below: Rect = { left: atX + effectLeft - 1, right: atX + effectRight + 1, top: atTop, bottom: atTop + (box.bottom - SPRITE.height) + 1 };
+      if (!this.cardBelowClear(below, atTop)) return false;
     }
     return true;
   }
@@ -2484,14 +2640,14 @@ export class HarimaruController {
    * カードの中の文字・スコア・操作部品・色の付いた要素に重ならず、見えている範囲に収まるか。そのカード (なければ null)。
    * 足場そのものが操作部品 (ボタンのタイルなど) なら null。
    */
-  private cardBelowClear(box: Rect): Element | null {
+  private cardBelowClear(box: Rect, footTop = this.top): Element | null {
     const view = this.view;
     if (!view || box.bottom > view.bottom) return null;
     const sx = this.win.scrollX;
     const sy = this.win.scrollY;
     const card = this.platformEls.find((el) => {
       const rect = el.getBoundingClientRect();
-      if (Math.abs(rect.top + sy - this.top) > 1) return false;
+      if (Math.abs(rect.top + sy - footTop) > 1) return false;
       const inset = Math.max(DEFAULT_TERRAIN.cornerInset, topCornerRadius(el, this.win));
       return rect.left + sx + inset <= box.left && box.right <= rect.right + sx - inset && rect.bottom + sy >= box.bottom + 1;
     });
@@ -2691,7 +2847,7 @@ export class HarimaruController {
       bottom: this.top,
     };
     // 経路の下端は足場の上辺 (足場そのものとは重ならない)。
-    const obstacles = this.obstaclesIn(this.root, [path], this.win, undefined, this.containers);
+    const obstacles = this.bodyObstacles([path]);
     if (!boxIsClear({ ...path, bottom: this.top - 0.5 }, obstacles, this.view)) return null;
     return poses;
   }
@@ -2910,8 +3066,12 @@ export class HarimaruController {
     // 跳ねている間は lift だけ上、沈んでいる間は sink だけ下。
     // 縁にしがみつく・ぶら下がるなどの間は、コマの基準点に合わせたずれ (poseX / poseY) だけ動かす。
     const y = Math.floor((this.abs ? this.abs.y : this.top - SPRITE.height - this.lift + this.sink + this.poseY) * dpr + FOOT_SNAP) / dpr;
-    // 元の絵は左向き。右へ向くときだけ左右反転する。
-    this.sprite.style.transform = `translate3d(${x}px, ${y}px, 0) scaleX(${this.dir > 0 ? -1 : 1})`;
+    // 元の絵は左向き。右へ向くときだけ左右反転する。下部ナビの上でスクロールしている間は、画面に固定して描く。
+    const fixed = this.pinned;
+    this.sprite.style.position = fixed ? 'fixed' : '';
+    const fx = fixed ? x - this.win.scrollX : x;
+    const fy = fixed ? y - this.win.scrollY : y;
+    this.sprite.style.transform = `translate3d(${fx}px, ${fy}px, 0) scaleX(${this.dir > 0 ? -1 : 1})`;
     // カードの裏に沈んでいる部分 (足場の上辺より下) は描かない。
     const hidden = Math.min(SPRITE.height, Math.max(0, this.sink));
     this.sprite.style.clipPath = hidden > 0 ? `inset(0 0 ${hidden.toFixed(2)}px 0)` : '';
@@ -3014,6 +3174,7 @@ export class HarimaruController {
     this.clearActionTimers();
     this.cancelFrame();
     this.grip = null;
+    this.seekingRoom = false;
     this.hideEffect();
     this.liveNow = null;
     // 途中の経路 (登場など) をやめる。登場の意図は残す (呼ぶ側が姿を消して、同じ端から出直す)。

@@ -16,6 +16,8 @@ export const ACTIONS: readonly HarimaruAction[] = ['idle', 'rest', 'look', 'walk
 
 /** 体が動く行動 (続けて選ばれにくくする。画面の中で動きっぱなしにしない)。 */
 export const MOVING: ReadonlySet<HarimaruAction> = new Set(['walk', 'run', 'hop', 'jump']);
+/** その場で止まっている行動 (眠り・伏せるを除く)。 */
+export const QUIET: ReadonlySet<HarimaruAction> = new Set(['idle', 'look', 'groom', 'stretch']);
 /** 静かな行動。 */
 export const CALM: ReadonlySet<HarimaruAction> = new Set(['idle', 'rest', 'look', 'sleep', 'groom', 'stretch']);
 
@@ -91,16 +93,17 @@ export function actionWeights(input: DecisionInput, params: BehaviorParams = DEF
   const runRoom = walkRoom(input, params, params.runDistance);
   const inactive = input.now - input.lastActivityAt >= params.inactiveSleepAfterMs;
   const w = params.weights;
+  // 無操作になるまでは、眠り・長い休み (伏せる) を選ばない (画面を使っている間に長く止まらない)。
   const weights: Record<HarimaruAction, number> = {
     idle: w.idle,
-    rest: inactive ? w.rest * 2 : w.rest,
+    rest: inactive ? w.rest * 2 : 0,
     look: w.look,
     walk: room.left > 0 || room.right > 0 ? w.walk : 0,
     run: runRoom.left > 0 || runRoom.right > 0 ? w.run : 0,
     hop: input.canHop ? w.hop : 0,
     jump: input.canJump ? w.jump : 0,
     hide: input.canRelocate ? w.hide : 0,
-    sleep: inactive ? params.sleepWhenInactive : w.sleep,
+    sleep: inactive ? params.sleepWhenInactive : 0,
     groom: w.groom,
     stretch: w.stretch,
   };
@@ -110,6 +113,13 @@ export function actionWeights(input: DecisionInput, params: BehaviorParams = DEF
   // 動いたあとは静かな行動を選びやすく (動きっぱなしにしない)。
   if (last && MOVING.has(last)) for (const action of MOVING) weights[action] *= params.afterMovingPenalty;
   if (last && beforeLast && MOVING.has(last) && MOVING.has(beforeLast)) for (const action of MOVING) weights[action] = 0;
+  // 無操作になるまでは、静かな行動 (待機・見回す・毛づくろい・伸び) を続けない: 1 回のあとは弱め、2 回続いたら、
+  // 位置の変わる行動 (歩く・駆ける・ほかの足場へ移る) があれば選ばない。
+  const moves = weights.walk + weights.run + weights.jump;
+  if (!inactive && moves > 0 && last && QUIET.has(last)) {
+    const factor = beforeLast && QUIET.has(beforeLast) ? 0 : params.afterQuietPenalty;
+    for (const action of QUIET) weights[action] *= factor;
+  }
   // 休んだあとは眠りやすく、眠り・休みのあとは伸びをしやすい。目覚めた直後にすぐ眠り直さない。
   if (last === 'rest') weights.sleep *= 2;
   if (last === 'sleep' || last === 'rest') weights.stretch *= 3;
@@ -128,7 +138,8 @@ export function decideNext(input: DecisionInput, rng: Rng, params: BehaviorParam
     const distanceRange = action === 'run' ? params.runDistance : params.walkDistance;
     const speed = action === 'run' ? params.runSpeed : params.walkSpeed;
     const room = walkRoom(input, params, distanceRange);
-    const direction = room.left > 0 && room.right > 0 ? (rng() < 0.5 ? -1 : 1) : room.left > 0 ? -1 : 1;
+    // 歩ける距離の長い向きを選びやすく (端に寄った位置で、短い往復を繰り返さない)。
+    const direction = room.left > 0 && room.right > 0 ? (rng() < room.left / (room.left + room.right) ? -1 : 1) : room.left > 0 ? -1 : 1;
     const limit = direction < 0 ? room.left : room.right;
     const distance = Math.min(limit, between(rng, [distanceRange[0], Math.max(distanceRange[0], limit)]));
     const targetX = clamp(input.x + direction * distance, input.minX, input.maxX);

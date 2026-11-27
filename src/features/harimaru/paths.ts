@@ -119,11 +119,6 @@ export function stepSweep(steps: readonly Step[], i: number): Rect[] {
   return boxes;
 }
 
-/** 障害物の種類 (terrainDom の collectObstacles が付ける。種類のない矩形は hard)。 */
-function kindOf(rect: Rect): 'hard' | 'soft' {
-  return (rect as Rect & { kind?: 'hard' | 'soft' }).kind ?? 'hard';
-}
-
 /** 矩形を変えた写しに、障害物の種類を引き継ぐ。 */
 function keepKind(from: Rect, to: Rect): Rect {
   const kind = (from as Rect & { kind?: string }).kind;
@@ -150,12 +145,6 @@ export interface ClearOptions {
   /** 体が重なってよい、候補の要素自身の箱 (この幅だけ内側へ縮めて数える)。 */
   selfBoxes?: readonly Rect[];
   decor?: number;
-  /**
-   * 文字・アイコン (soft の障害物) に、移動の途中でかぶってよい時間の合計 (ms)。止まる段 (softHoldMs を超えて同じ
-   * 姿のまま) では、かぶってはいけない。省略・0 なら soft も hard と同じく重ならない。
-   */
-  softPassMs?: number;
-  softHoldMs?: number;
 }
 
 /** 障害物のうち、候補の要素自身の箱を decor だけ内側へ縮める (背景・枠への軽いかぶりを許す)。 */
@@ -170,36 +159,27 @@ export function allowSelf(obstacles: readonly Rect[], selfBoxes: readonly Rect[]
 export function stepsAreClear(steps: readonly Step[], obstacles: readonly Rect[], options: ClearOptions): boolean {
   const { view, beyond, overhang = 0, docBottom } = options;
   const list = allowSelf(obstacles, options.selfBoxes, options.decor);
-  const budget = options.softPassMs ?? 0;
-  const hard = budget > 0 ? list.filter((o) => kindOf(o) === 'hard') : list;
-  const soft = budget > 0 ? list.filter((o) => kindOf(o) === 'soft') : [];
-  const holdLimit = options.softHoldMs ?? 0;
   if (docBottom !== undefined && steps.some((s) => s.y + SPRITE.height > docBottom + 0.5)) return false;
-  let softMs = 0;
-  for (let i = 0; i < steps.length; i += 1) {
-    let touched = false;
-    for (const raw of stepSweep(steps, i)) {
-      const box = { ...raw };
-      // 登場の端の向こうに出た部分は描かれない (画面の外・固定バーの裏): 見えている部分だけを確かめる。
-      if (beyond === 'left') box.left = Math.max(box.left, view.left);
-      if (beyond === 'right') box.right = Math.min(box.right, view.right);
-      if (beyond === 'top') box.top = Math.max(box.top, view.top);
-      if (beyond === 'bottom') box.bottom = Math.min(box.bottom, view.bottom);
-      if (box.right <= box.left + 0.5 || box.bottom <= box.top + 0.5) continue;
-      if (box.top < view.top - 0.5 || box.bottom > view.bottom + 0.5) return false;
-      if (box.left < view.left - overhang - 0.5 || box.right > view.right + overhang + 0.5) return false;
-      if (hard.some((o) => overlaps(box, o))) return false;
-      if (!touched && soft.some((o) => overlaps(box, o))) touched = true;
-    }
-    if (!touched) continue;
-    // 文字・アイコンには、動いている途中に短くかぶるだけ (その上で止まらない・合計が長くならない)。
-    const step = steps[i];
-    const last = i === steps.length - 1;
-    if (last || (step.tween === 'hold' && step.ms > holdLimit)) return false;
-    softMs += step.ms;
-    if (softMs > budget) return false;
+  for (const raw of sweptBoxes(steps)) {
+    const box = { ...raw };
+    // 登場の端の向こうに出た部分は描かれない (画面の外・固定バーの裏): 見えている部分だけを確かめる。
+    if (beyond === 'left') box.left = Math.max(box.left, view.left);
+    if (beyond === 'right') box.right = Math.min(box.right, view.right);
+    if (beyond === 'top') box.top = Math.max(box.top, view.top);
+    if (beyond === 'bottom') box.bottom = Math.min(box.bottom, view.bottom);
+    if (box.right <= box.left + 0.5 || box.bottom <= box.top + 0.5) continue;
+    if (box.top < view.top - 0.5 || box.bottom > view.bottom + 0.5) return false;
+    if (box.left < view.left - overhang - 0.5 || box.right > view.right + overhang + 0.5) return false;
+    if (list.some((o) => overlaps(box, o))) return false;
   }
   return true;
+}
+
+/** 経路の掃いた範囲が重なる障害物の数 (文字・アイコンなど、重なってよいが避けたいものの数え上げ。読みやすさの優先に使う)。 */
+export function stepsTouching(steps: readonly Step[], obstacles: readonly Rect[]): number {
+  if (obstacles.length === 0) return 0;
+  const swept = sweptBoxes(steps);
+  return obstacles.filter((o) => swept.some((box) => overlaps(box, o))).length;
 }
 
 /** 経路の周りの余裕 (0・2・4・8 px のうち、障害物を膨らませても重ならない最大)。余裕のある経路を選びやすくする。 */
@@ -478,10 +458,18 @@ export function climbPlans(
     const mountY = current.top - SPRITE.height;
     if (box.bottom < mountY + 2) continue;
     const dir: -1 | 1 = wall.side === 'right' ? -1 : 1;
-    // 立ち位置: 側面のすぐ横 (いまの足場の、側面の側の端)。
-    const standX = dir < 0 ? current.minX : current.maxX;
-    const near = dir < 0 ? standX - wall.face : wall.face - (standX + SPRITE.width);
-    if (near < -3 || near > 10) continue;
+    // 立ち位置: 側面のすぐ横。いまの足場の側面の側の端が側面のすぐ横で切れていればそこ (従来)。そうでなければ、
+    // いまの足場の途中に側面が立っているとき (箱は障害物にしないので、足場は側面の前を通って続く)、側面に体の
+    // 前を合わせた位置。どちらも、側面が前足をかける高さ (体の上端) まで下りていること (上の確認)。
+    const end = dir < 0 ? current.minX : current.maxX;
+    const endNear = dir < 0 ? end - wall.face : wall.face - (end + SPRITE.width);
+    const inside = dir < 0 ? wall.face - SPRITE.sideInset : wall.face - SPRITE.width + SPRITE.sideInset;
+    let standX: number;
+    if (endNear >= -3 && endNear <= 10) standX = end;
+    else if (inside >= current.minX && inside <= current.maxX && box.top < current.top) standX = inside;
+    else continue;
+    // 登る要素の上辺 (着地先) と、いまの足場が同じ要素の同じ辺なら登らない。
+    if (Math.abs(box.top - current.top) < 1) continue;
     const finalX = dir < 0 ? wall.target.maxX : wall.target.minX;
     const y = current.top - SPRITE.height;
     // 側面に目を向けて、1 歩 (3 px) 寄ってから前足をかける。

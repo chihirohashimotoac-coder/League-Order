@@ -179,6 +179,36 @@ describe('左右の端からの登場', () => {
   });
 });
 
+describe('文字・ラベルには体が重なってよい (立つ・着地する位置でも)。入力欄などには重ならない', () => {
+  const tagged = (rect: Rect, kind: 'hard' | 'soft'): Rect => Object.defineProperty({ ...rect }, 'kind', { value: kind, enumerable: false });
+  /** 足場の上辺のすぐ上 (立つ帯) 全体にかかる矩形。 */
+  const band = (): Rect => ({ left: 0, right: 1_024, top: 300 - SPRITE.height, bottom: 300 });
+
+  function makeWith(found: Rect[]): HarimaruController {
+    controller = new HarimaruController({
+      sprite, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => terrain(),
+      obstaclesIn: () => found, behavior: calm, finePointer: false,
+      motion: { ...DEFAULT_MOTION, entryMaxGap: 120, entryRetreatChance: 0 },
+    });
+    controller.setSheet('base', 'base.png');
+    for (const id of CLIP_IDS) controller.setSheet(id, `${id}.png`);
+    return controller;
+  }
+
+  it('立つ帯が文字 (soft) で埋まっていても入り、そこに立つ', () => {
+    makeWith([tagged(band(), 'soft')]).start();
+    recordUntilPlaced();
+    expect(controller.snapshot().placed).toBe(true);
+    expect(controller.snapshot().top).toBe(300);
+  });
+
+  it('立つ帯が入力欄など (hard) で埋まっていれば入らずに待つ', () => {
+    makeWith([tagged(band(), 'hard')]).start();
+    advance(8_000);
+    expect(controller.snapshot().placed).toBe(false);
+  });
+});
+
 describe('経路がない・中断', () => {
   it('安全な経路がなければ画面の外で待ち (置き直さない)、DOM の変化で経路ができたら端から入る', async () => {
     // 端から遠いカード (左右の隙間・上からの落下が長すぎる)。

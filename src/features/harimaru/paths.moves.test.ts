@@ -154,6 +154,42 @@ describe('側面のよじ登り (上向きのジャンプの代わり)', () => {
   });
 });
 
+describe('足場の途中に立つ縦の辺のよじ登り (箱は障害物にしないので、足場は側面の前を通って続く)', () => {
+  /** 箱を障害物にしない地形 (いまの計測と同じ。足場は文字・入力欄などの hard だけで切れる)。 */
+  function open(boxes: Rect[]) {
+    const segments = computeSegments({ platforms: boxes.map((b) => ({ left: b.left, right: b.right, top: b.top })), obstacles: [], bounds: { left: 0, right: 1_400 } });
+    return { boxes, segments };
+  }
+
+  it('いまの足場の途中から立ち上がる要素の側面を、前足を側面の線に掛けて登り、上辺に乗る', () => {
+    // 低い面 (上辺 400) の上に、要素 (上辺 350) が立っている。要素の下端は低い面の高さまで届く。
+    const w = open([{ left: 100, right: 600, top: 400, bottom: 520 }, { left: 300, right: 380, top: 350, bottom: 420 }]);
+    const floor = at(w.segments, 400, 100);
+    const plans = climbPlans(floor, w.segments, w.boxes);
+    const faces = plans.map((p) => (p.wallBox === 1 ? p.steps.find((s) => s.pose.sheet === 'sideClimb') : null)).filter(Boolean);
+    expect(plans.filter((p) => p.wallBox === 1).length).toBe(2);
+    expect(faces.length).toBe(2);
+    for (const plan of plans.filter((p) => p.wallBox === 1)) {
+      expect(plan.end!.top).toBe(350);
+      // 立ち位置 (歩いて寄る位置) はいまの足場の中。
+      expect(plan.startX!).toBeGreaterThanOrEqual(floor.minX);
+      expect(plan.startX!).toBeLessThanOrEqual(floor.maxX);
+      expect(frames(plan.steps)).toEqual(expect.arrayContaining(['sideMount:0', 'sideClimb:0', 'sideLedge:0', 'climb:0']));
+    }
+  });
+
+  it('前足をかける高さ (体の上端) まで下りていない側面・低すぎる・高すぎる側面は登らない。隙間 12px なら登る', () => {
+    const gap = open([{ left: 100, right: 600, top: 400, bottom: 520 }, { left: 300, right: 380, top: 260, bottom: 388 }]);
+    expect(climbPlans(at(gap.segments, 400, 100), gap.segments, gap.boxes).filter((p) => p.wallBox === 1).length).toBe(2);
+    const floating = open([{ left: 100, right: 600, top: 400, bottom: 520 }, { left: 300, right: 380, top: 300, bottom: 380 }]);
+    expect(climbPlans(at(floating.segments, 400, 100), floating.segments, floating.boxes).filter((p) => p.wallBox === 1)).toHaveLength(0);
+    const low = open([{ left: 100, right: 600, top: 400, bottom: 520 }, { left: 300, right: 380, top: 400 - DEFAULT_MOTION.climbMinRise + 2, bottom: 420 }]);
+    expect(climbPlans(at(low.segments, 400, 100), low.segments, low.boxes).filter((p) => p.wallBox === 1)).toHaveLength(0);
+    const high = open([{ left: 100, right: 600, top: 400, bottom: 520 }, { left: 300, right: 380, top: 400 - DEFAULT_MOTION.climbMaxRise - 2, bottom: 420 }]);
+    expect(climbPlans(at(high.segments, 400, 100), high.segments, high.boxes).filter((p) => p.wallBox === 1)).toHaveLength(0);
+  });
+});
+
 describe('選び方', () => {
   it('余裕のある経路ほど選ばれやすく、直前に渡った組 (penalty) は選ばれにくい', () => {
     const plan = (distance: number): MovePlan => ({ kind: 'hop', startX: 0, steps: [], end: null, bounds: { left: 0, top: 0, right: 0, bottom: 0 }, fromBox: 0, toBox: 1, wallBox: null, distance });

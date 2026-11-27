@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Rect } from './terrain';
 import { collectObstacles, isSolid, topCornerRadius } from './terrainDom';
 
@@ -261,4 +261,42 @@ describe('measureTerrain: 見えているデザインはすべて足場の候補
       root.remove();
     }
   });
+
+  it('画面に固定された下部ナビ (.tab-bar) の上辺は、固定の足場 (fixed) にする。ナビの中のボタン・ほかの固定の要素は使わない', async () => {
+    const { measureTerrain, invalidateStyleCache } = await import('./terrainDom');
+    invalidateStyleCache();
+    const root = document.createElement('main');
+    const nav = document.createElement('nav');
+    nav.className = 'tab-bar';
+    nav.style.position = 'fixed';
+    nav.style.backgroundColor = 'rgb(255, 255, 255)';
+    nav.getBoundingClientRect = rect(0, 700, 1024, 768);
+    const tab = document.createElement('button');
+    tab.style.backgroundColor = 'rgb(0, 0, 0)';
+    tab.getBoundingClientRect = rect(0, 704, 200, 760);
+    nav.append(tab);
+    const other = document.createElement('div');
+    other.style.position = 'fixed';
+    other.style.backgroundColor = 'rgb(0, 0, 0)';
+    other.getBoundingClientRect = rect(0, 600, 300, 640);
+    root.append(other);
+    document.body.append(root, nav);
+    const scroll = vi.spyOn(window, 'scrollY', 'get').mockReturnValue(500);
+    try {
+      const { elements, platforms, boxes } = measureTerrain(root, '', window);
+      expect(elements).toEqual([nav]);
+      // ページ座標 (計測したときのスクロール位置 500 を足す)。
+      expect(platforms).toEqual([{ left: 0, right: 1024, top: 1_200, inset: 0, fixed: true }]);
+      expect((boxes![0] as Rect & { fixed?: boolean }).fixed).toBe(true);
+      // 隠れているナビは使わない。
+      invalidateStyleCache();
+      nav.style.visibility = 'hidden';
+      expect(measureTerrain(root, '', window).elements).toEqual([]);
+    } finally {
+      scroll.mockRestore();
+      root.remove();
+      nav.remove();
+    }
+  });
 });
+

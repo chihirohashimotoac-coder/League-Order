@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MOTION, SPRITE } from './params';
-import { allowSelf, entryPlans, retreatOf, stepAt, stepsAreClear, sweptBoxes, type Step, type View } from './paths';
+import { allowSelf, entryPlans, retreatOf, stepAt, stepsAreClear, stepsTouching, sweptBoxes, type Step, type View } from './paths';
 import { CLIPS } from './sprite';
 import type { Rect, Segment } from './terrain';
 
@@ -205,3 +205,17 @@ describe('経路の安全判定', () => {
     expect(allowSelf([self], [], 3)).toEqual([self]);
   });
 });
+
+describe('stepsTouching (読みやすい経路の優先に使う、重なってよいものの数)', () => {
+  it('経路の掃いた範囲が重なる矩形の数。重ならなければ 0', () => {
+    const steps: Step[] = [
+      { pose: { sheet: 'base', row: 0, column: 0 }, x: 100, y: 280, dir: 1, ms: 300, tween: 'linear' },
+      { pose: { sheet: 'base', row: 0, column: 0 }, x: 200, y: 280, dir: 1, ms: 0, tween: 'hold' },
+    ];
+    expect(stepsTouching(steps, [])).toBe(0);
+    expect(stepsTouching(steps, [{ left: 150, right: 160, top: 285, bottom: 295 }, { left: 500, right: 510, top: 285, bottom: 295 }])).toBe(1);
+    // 安全の判定 (stepsAreClear) は、渡した矩形をすべて障害物として数える (呼ぶ側が hard だけを渡す)。
+    expect(stepsAreClear(steps, [{ left: 150, right: 160, top: 285, bottom: 295 }], { view: { top: 0, bottom: 800, left: 0, right: 1_000 } })).toBe(false);
+  });
+});
+

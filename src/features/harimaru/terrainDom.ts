@@ -32,6 +32,8 @@ const INTERACTIVE_ROLES = new Set([
 ]);
 /** 画面に固定された帯 (この範囲にはキャラクターを出さない)。 */
 const FIXED_BARS = '.app-header, .tab-bar, .action-bar';
+/** 足場にする、画面に固定された要素 (下部ナビ)。上辺の上に体の高さの余白があり、操作バーに覆われていない区間だけ使う。 */
+const FIXED_PLATFORMS = '.tab-bar';
 
 function toPage(rect: DOMRect, sx: number, sy: number): Rect {
   return { left: rect.left + sx, top: rect.top + sy, right: rect.right + sx, bottom: rect.bottom + sy };
@@ -433,6 +435,26 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
     }
   }
 
+  // 画面に固定された下部ナビの上辺 (root の外)。見えていて、上辺が覆われていない区間だけ。座標は計測したときの
+  // ページ座標 (fixed: 立っている間のスクロールは controller.ts が画面に対して止めて合わせる)。
+  for (const el of Array.from(doc.querySelectorAll(FIXED_PLATFORMS))) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height <= 0 || rect.top <= 0 || rect.top >= win.innerHeight) continue;
+    if (styleOf(el, win).hidden) continue;
+    const page = toPage(rect, sx, sy);
+    const runs = edgeVisible(el, rect.left, rect.right, rect.top + 1, win);
+    for (const [l, r] of runs ?? [[rect.left, rect.right]]) {
+      if (r - l < 8) continue;
+      const left = l + sx;
+      const right = r + sx;
+      const cutLeft = l > rect.left + 0.5;
+      const cutRight = r < rect.right - 0.5;
+      platforms.push({ left, right, top: page.top, inset: 0, fixed: true, ...(cutLeft ? { cutLeft } : {}), ...(cutRight ? { cutRight } : {}) });
+      elements.push(el);
+      boxes.push({ ...page, left, right, inset: 0, fixed: true } as Rect);
+    }
+  }
+
   const bands: Rect[] = platforms.map((p) => ({
     left: p.left,
     right: p.right,
@@ -440,7 +462,8 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
     bottom: p.top,
   }));
   const containers = containersOf(elements, root);
-  const obstacles = collectObstacles(root, bands, win, undefined, containers);
+  // 足場を切るのは、体が重なってはいけないもの (hard) だけ。文字・画像 (soft) には体が重なってよい。
+  const obstacles = collectObstacles(root, bands, win, undefined, containers).filter((o) => obstacleKind(o) === 'hard');
 
   return {
     platforms,

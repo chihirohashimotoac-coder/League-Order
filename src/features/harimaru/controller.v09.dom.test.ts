@@ -394,7 +394,8 @@ describe('転ぶ・寝ぼける', () => {
   });
 
   it('眠っている途中に、気まぐれに寝ぼける (縁の下に文字があれば見送る)', () => {
-    const sleepy = { ...only({ sleep: 1, idle: 0.0001 }), sleepWhenInactive: 1, sleepMs: [14_000, 15_000] as [number, number], sleepyFallChance: 1 };
+    // 眠るのは無操作になってから (inactiveSleepAfterMs)。このテストはすぐに眠らせる。
+    const sleepy = { ...only({ sleep: 1, idle: 0.0001 }), inactiveSleepAfterMs: 0, sleepWhenInactive: 1, sleepMs: [14_000, 15_000] as [number, number], sleepyFallChance: 1 };
     make({ behavior: sleepy }).start();
     const seen = new Set<string>();
     for (let i = 0; i < 3_000 && !seen.has('action:sleepyFall'); i += 1) {
@@ -579,7 +580,8 @@ describe('カーソルにぶら下がる (PC)', () => {
   });
 
   it('近くで止まったカーソルに、気まぐれに見上げる・首をかしげる・ぶら下がる (高い頻度で繰り返さない)', () => {
-    standing({ finePointer: true, behavior: only({ idle: 1 }) });
+    // 待機の長さは、カーソルが止まってから反応を考えるまで (cursorStillMs) より長くする。
+    standing({ finePointer: true, behavior: { ...only({ idle: 1 }), idleMs: [2_500, 7_000] } });
     const seen = new Set<string>();
     let reactions = 0;
     for (let i = 0; i < 60; i += 1) {

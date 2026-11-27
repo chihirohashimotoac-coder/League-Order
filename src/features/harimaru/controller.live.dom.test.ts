@@ -307,8 +307,8 @@ describe('安全: エフェクトの範囲・素材の読み込み・後片付�
   it('足元より下に出るエフェクト (敗北の砂ぼこり) は、カードの面の文字・カードの角に重なるなら演出しない', () => {
     standing();
     const { x, top } = controller.snapshot();
-    // カードの面 (足元のすぐ下) に、左右どちらの向きの砂ぼこりにもかかる幅の文字。
-    const inside = (_root: Element, _regions: readonly Rect[], _win: Window, seeThrough?: Element | ReadonlySet<Element>) => (seeThrough ? [{ left: x - 20, right: x + 50, top: top + 1, bottom: top + 3 }] : []);
+    // カードの面 (足元のすぐ下) に、左右どちらの向きの砂ぼこりにもかかる幅の文字 (近くへ歩いても収まらない幅)。
+    const inside = (_root: Element, _regions: readonly Rect[], _win: Window, seeThrough?: Element | ReadonlySet<Element>) => (seeThrough ? [{ left: x - 200, right: x + 230, top: top + 1, bottom: top + 3 }] : []);
     // 演出するかは obstaclesIn の差し替えで決まる: ここでは controller を作り直す。
     controller.destroy();
     controller = new HarimaruController({
@@ -354,8 +354,8 @@ describe('安全: エフェクトの範囲・素材の読み込み・後片付�
   it('エフェクトの範囲 (本体より広い) に文字・操作部品があれば演出しない。演出中に入ってきたらやめる', async () => {
     standing();
     const { x, top } = controller.snapshot();
-    // 180 のボードは頭の上 14px まで。そこに文字。
-    obstacles = [{ left: x + 5, right: x + 25, top: top - 20 - 12, bottom: top - 20 - 2 }];
+    // 180 のボードは頭の上 14px まで。そこに、近くへ歩いても収まらない幅の文字。
+    obstacles = [{ left: x - 200, right: x + 230, top: top - 20 - 12, bottom: top - 20 - 2 }];
     expect(controller.reactLive('surprise180')).toBe(false);
     expect(controller.snapshot().events.at(-1)).toBe('live:surprise180:skipped:room');
     // 本体の帯の外、エフェクトの届かない場所の文字は関係ない。
@@ -369,6 +369,27 @@ describe('安全: エフェクトの範囲・素材の読み込み・後片付�
     advance(32);
     expect(controller.snapshot().events).toContain('live:stopped:room');
     expect(effect.dataset.active).toBe('false');
+  });
+
+  it('その場に余白がなければ、同じ足場の近くで体とエフェクトが収まる位置へ歩いてから演出する (重要な出来事だけ)', () => {
+    standing();
+    const { x, top } = controller.snapshot();
+    // ボードの高さに、いまの位置だけにかかる文字。左右 roomSearchPx の中に収まる位置がある。
+    obstacles = [{ left: x - 10, right: x + 40, top: top - 20 - 12, bottom: top - 20 - 2 }];
+    expect(controller.reactLive('surprise180')).toBe(false);
+    expect(controller.snapshot().events.at(-1)).toBe('live:surprise180:seeking');
+    advance(6_000);
+    const events = controller.snapshot().events;
+    expect(events).toContain('live:surprise180');
+    const after = controller.snapshot().x;
+    expect(Math.abs(after - x)).toBeGreaterThan(5);
+    expect(Math.abs(after - x)).toBeLessThanOrEqual(DEFAULT_LIVE.roomSearchPx);
+    // 通常の得点 (重要でない) は探さずに見送る。
+    obstacles = [{ left: after - 10, right: after + 40, top: top - 20 - 12, bottom: top - 20 - 2 }];
+    advance(DEFAULT_LIVE.scoreCooldownMs + 2_000);
+    for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
+    controller.reactLive('cheer');
+    expect(controller.snapshot().events.at(-1)).not.toBe('live:cheer:seeking');
   });
 
   it('リアクションの画像を読み込めていなければ演出しない (逆転・Leg やゲームの結果は PR2 の動作で演出する)', () => {
