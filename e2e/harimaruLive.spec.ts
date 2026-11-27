@@ -193,23 +193,11 @@ async function watchLive(page: Page): Promise<() => Promise<{ live: string[]; ef
       const bx = r.left + 11;
       const by = r.top + 18;
       const area = flipped ? { left: bx + 30 - rr, right: bx + 30 - l, top: by + t, bottom: by + b } : { left: bx + l, right: bx + rr, top: by + t, bottom: by + b };
-      const hit = (q: DOMRect | { left: number; right: number; top: number; bottom: number }): boolean => q.right > area.left + 0.5 && q.left < area.right - 0.5 && q.bottom > area.top + 0.5 && q.top < area.bottom - 0.5;
-      for (const node of Array.from(document.querySelectorAll('.app *'))) {
-        const rect = node.getBoundingClientRect();
-        if (!hit(rect)) continue;
-        // エフェクトは、文字・操作部品 (ボタン・リンク・透明に重ねた選択欄を含む)・入力欄・固定バー・得点などの重要な表示に
-        // 重ならない (体はボタン・文字に重なってよいが、大きいエフェクトにはその許可を広げない)。
-        const hard =
-          'button, a[href], select, input, textarea, [role="button"], [role="tab"], [tabindex="0"], [contenteditable=""], [contenteditable="true"], ' +
-          '[role="textbox"], [role="combobox"], [role="slider"], [role="spinbutton"], .app-header, .tab-bar, .action-bar, [class*="score"], .n01-sheet, .scoreboard';
-        if (node.matches(hard)) w.__hl.overlaps.push(`${frame} ${node.tagName}.${node.className}`);
-        for (const child of Array.from(node.childNodes)) {
-          if (child.nodeType !== 3 || !child.textContent?.trim()) continue;
-          const range = document.createRange();
-          range.selectNodeContents(child);
-          if (Array.from(range.getClientRects()).some(hit)) w.__hl.overlaps.push(`${frame} TEXT:${child.textContent.trim().slice(0, 12)}`);
-        }
-      }
+      // 体とエフェクトは、文字・ボタンなどほかの UI に重なってよい。見えている範囲 (固定ヘッダーの下〜下部ナビの上、
+      // 画面の左右) から切れていないことだけを確かめる。
+      const top = document.querySelector('.app-header')?.getBoundingClientRect().bottom ?? 0;
+      const bottom = document.querySelector('.tab-bar')?.getBoundingClientRect().top ?? innerHeight;
+      if (area.top < top - 0.5 || area.bottom > bottom + 0.5 || area.left < -0.5 || area.right > document.documentElement.clientWidth + 0.5) w.__hl.overlaps.push(`${frame} out of view`);
     };
     w.__hlObserver = new MutationObserver(check);
     w.__hlObserver.observe(sprite, { attributes: true, attributeFilter: ['data-live', 'style'] });

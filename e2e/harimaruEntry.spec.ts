@@ -132,10 +132,10 @@ test('実際のホーム: 画面の左右の端から、見える画素が端か
   expect(['left', 'right']).toContain(edge);
   const frames = (await trail()).filter((s) => s.action === 'enter').map((s) => s.frame.split(':')[0]);
   expect(frames).toEqual(expect.arrayContaining(['jumpAir', 'jumpLand']));
-  // 立った位置は、足元の真下に見えているデザイン (カード・タイル・ボタンなど) の上辺がある。
+  // 立った位置は、足元の真下に見えているデザイン (カード・タイル・ボタン・下部ナビなど) の上辺がある。
   const foot = await sprite(page).evaluate((el) => {
     const r = el.getBoundingClientRect();
-    const tops = document.elementsFromPoint(r.left + r.width / 2, r.bottom + 2).filter((e) => e.closest('.app-main')).map((e) => Math.abs(e.getBoundingClientRect().top - r.bottom));
+    const tops = document.elementsFromPoint(r.left + r.width / 2, r.bottom + 2).filter((e) => e.closest('.app-main, .tab-bar')).map((e) => Math.abs(e.getBoundingClientRect().top - r.bottom));
     return tops.length > 0 ? Math.min(...tops) : null;
   });
   expect(foot).not.toBeNull();
@@ -161,17 +161,22 @@ test('PC 1280・1920: 左右の端から下部ナビの上辺に入り、ナビ�
     // 足元は下部ナビの上辺 (列の外の空白が広く、ほかに画面の端から届く足場はない)。
     const onNav = () => sprite(page).evaluate((el) => Math.abs(el.getBoundingClientRect().bottom - document.querySelector('.tab-bar')!.getBoundingClientRect().top) <= 1);
     expect(await onNav(), `${size.width}: ナビの上辺に立つ`).toBe(true);
-    // 時間をかけてナビの上を動く (位置が変わる)。無操作にならないよう、ときどきキーを押す。
-    const xs = new Set<number>();
+    // 時間をかけて動く (ナビの上を歩く、ナビからコンテンツへ渡るなど。位置が変わる)。無操作にならないよう、ときどきキーを押す。
+    const xs = new Set<string>();
     for (let i = 0; i < 40; i += 1) {
       if (i % 8 === 0) await page.keyboard.press('Shift');
       await page.clock.runFor(1_000);
-      if ((await sprite(page).getAttribute('data-visible')) === 'true' && (await onNav())) xs.add(Math.round((await sprite(page).boundingBox())!.x));
+      if ((await sprite(page).getAttribute('data-visible')) === 'true') {
+        const box = (await sprite(page).boundingBox())!;
+        xs.add(`${Math.round(box.x)},${Math.round(box.y)}`);
+      }
     }
-    expect(xs.size, `${size.width}: ナビの上で位置が変わる`).toBeGreaterThan(1);
+    expect(xs.size, `${size.width}: 位置が変わる`).toBeGreaterThan(1);
     expect(await overlaps(page)).toEqual([]);
     // ナビの上に立ったままスクロールする: スクロールの途中も止まったあとも、ナビの上辺に接地したまま見えている。
-    await page.clock.runFor(3_000);
+    // ナビの上に立っている間にスクロールする (コンテンツへ渡っていれば、ナビへ戻るまで待つ。戻らなければ省く)。
+    for (let i = 0; i < 30 && !((await sprite(page).getAttribute('data-visible')) === 'true' && (await onNav())); i += 1) await page.clock.runFor(1_000);
+    test.info().annotations.push({ type: `${size.width}: スクロールの確認`, description: (await onNav()) ? 'ナビの上で確認した' : 'ナビへ戻らず省いた' });
     if ((await sprite(page).getAttribute('data-visible')) === 'true' && (await onNav())) {
       await page.mouse.move(size.width / 2, 300);
       for (let i = 0; i < 4; i += 1) {

@@ -72,7 +72,7 @@ async function overlaps(page: Page): Promise<string[]> {
   return blocking(await page.evaluate(harimaruOverlaps));
 }
 
-test('ホームに 1 体だけ現れ、入力欄・固定バー・重要な表示に重ならず、長く止まらずに動き、クリックを妨げない', async ({ page }) => {
+test('ホームに 1 体だけ現れ、入力欄・固定バー・重要な表示に重ならず、同じ文字を 5 秒以上隠さず、長く止まらずに動き、クリックを妨げない', async ({ page }) => {
   // 気まぐれな動作の抽選と時計を固定する。固定しないと、眠り・待機が続いて 120 秒の間に 2 か所以下しか
   // 立たない回があった (CI の run #60 と手元で 60 回に 1 回)。本番の抽選は変えない (seededRandom.ts)。
   // 時計は読み込みの前から決まった時刻で止め、runFor でだけ進める (実時間で進むと、抽選の時刻・回数が実行ごとに変わる)。
@@ -90,16 +90,19 @@ test('ホームに 1 体だけ現れ、入力欄・固定バー・重要な表�
   expect(size).toBe(20);
 
   const xs = new Set<number>();
-  // 1.5 秒おきの標本で、同じ位置に続けて止まっていた最長の時間と、足元の要素が変わった回数 (足場の間の移動)。
-  // 無操作 (45 秒) にならないよう、ときどきキーを押す (無操作のあとは眠ってよい)。
+  // 0.5 秒おきの標本で、同じ位置に続けて止まっていた最長の時間、同じ文字を続けて隠していた最長の時間、足元の要素が
+  // 変わった回数 (足場の間の移動)。無操作 (45 秒) にならないよう、ときどきキーを押す (無操作のあとは眠ってよい)。
+  const STEP = 500;
   let still = 0;
   let longest = 0;
   let last = '';
   let footLast = '';
   let footChanges = 0;
-  for (let i = 0; i < 80; i += 1) {
-    if (i % 6 === 0) await page.keyboard.press('Shift');
-    await page.clock.runFor(1_500);
+  const covering = new Map<string, number>();
+  let longestText = 0;
+  for (let i = 0; i < 240; i += 1) {
+    if (i % 20 === 0) await page.keyboard.press('Shift');
+    await page.clock.runFor(STEP);
     const state = await sprite(page).evaluate((el) => {
       const r = el.getBoundingClientRect();
       const below = document.elementsFromPoint(r.left + r.width / 2, r.bottom + 2).find((e) => e.closest('.app-main, .tab-bar'));
@@ -108,18 +111,31 @@ test('ホームに 1 体だけ現れ、入力欄・固定バー・重要な表�
     if (state.visible !== 'true') {
       still = 0;
       last = '';
+      covering.clear();
       continue;
     }
     xs.add(state.x);
     const at = `${state.x},${state.y}`;
-    still = at === last ? still + 1_500 : 0;
+    still = at === last ? still + STEP : 0;
     longest = Math.max(longest, still);
     last = at;
     if (state.action !== 'enter' && state.foot && footLast && state.foot !== footLast) footChanges += 1;
     if (state.action !== 'enter' && state.foot) footLast = state.foot;
-    expect(blocking(await page.evaluate(harimaruOverlaps)), `step ${i}`).toEqual([]);
+    const found = await page.evaluate(harimaruOverlaps);
+    expect(blocking(found), `step ${i}`).toEqual([]);
+    // 同じ文字 (同じ位置で) を隠し続けた時間。
+    const texts = new Set(found.filter((f) => f.startsWith('text:')).map((f) => `${at}|${f}`));
+    for (const key of [...covering.keys()]) if (!texts.has(key)) covering.delete(key);
+    for (const key of texts) covering.set(key, (covering.get(key) ?? -STEP) + STEP);
+    longestText = Math.max(longestText, ...covering.values(), 0);
   }
-  test.info().annotations.push({ type: '最長の連続停止 (ms)', description: String(longest) }, { type: '足元の要素が変わった回数', description: String(footChanges) });
+  test.info().annotations.push(
+    { type: '最長の連続停止 (ms)', description: String(longest) },
+    { type: '同じ文字を隠し続けた最長 (ms)', description: String(longestText) },
+    { type: '足元の要素が変わった回数', description: String(footChanges) },
+  );
+  // 同じ文字を 5 秒以上隠し続けない (ボタン・カードなどの UI には重なり続けてよい)。
+  expect(longestText, '同じ文字を隠し続ける時間').toBeLessThan(5_000);
   // 操作のある間は、同じ位置に長く止まり続けない (静かな行動は 2 回まで続けて、そのあと位置を変える)。
   expect(longest, '同じ位置に止まり続ける時間').toBeLessThanOrEqual(15_000);
   expect(xs.size, 'ハリマルが実際に移動する').toBeGreaterThan(4);
@@ -527,7 +543,7 @@ test('PC 1100×900: 歩く・駆ける間、足元はいつも 1 つの要素の
         const right = r.right - 2;
         // 足場になりうる要素: 背景・上の枠・影のある要素 (上辺) と、下の枠線だけの仕切り (下の線)。
         const visible = (c: string): boolean => !!c && c !== 'transparent' && !/rgba?\([^)]*,\s*0\)$/.test(c) && !/\/\s*0\)$/.test(c);
-        const cards = Array.from(document.querySelectorAll('.app-main *')).flatMap((card) => {
+        const cards = Array.from(document.querySelectorAll('.app-main *, .tab-bar')).flatMap((card) => {
           const st = getComputedStyle(card);
           const border = (side: 'top' | 'bottom'): boolean => parseFloat(st.getPropertyValue(`border-${side}-width`)) > 0 && st.getPropertyValue(`border-${side}-style`) !== 'none' && visible(st.getPropertyValue(`border-${side}-color`));
           const design = visible(st.backgroundColor) || st.backgroundImage !== 'none' || border('top') || st.boxShadow !== 'none';
