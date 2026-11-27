@@ -196,7 +196,6 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         // 観戦画面・味方が変わった: 判定を作り直し、前の対戦の演出・待っている出来事を取り消す。
         if (tracker) controller?.cancelLive();
         tracker = { source, allyId, judge: new LiveReactionTracker(allyId) };
-        controller?.setLiveWatching(true);
       }
       if (allyId && !reactionsWanted) {
         reactionsWanted = true;
@@ -226,7 +225,6 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
           lastUnit = null;
           lastMid = null;
           controller?.cancelLive();
-          controller?.setLiveWatching(false);
         }
         return;
       }

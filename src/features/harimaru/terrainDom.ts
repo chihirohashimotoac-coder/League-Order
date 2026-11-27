@@ -140,6 +140,17 @@ function tag(rect: Rect, kind: ObstacleKind, source?: Element): Rect {
   return rect;
 }
 
+/** 文字の行の矩形の印 (体は重なってよいが、同じ文字を長く隠し続けない)。 */
+function markText(rect: Rect): Rect {
+  Object.defineProperty(rect, 'text', { value: true, enumerable: false });
+  return rect;
+}
+
+/** 文字の行の矩形か (collectObstacles が印を付ける)。 */
+export function isTextRect(rect: Rect): boolean {
+  return (rect as Rect & { text?: boolean }).text === true;
+}
+
 /** 入力欄 (文字の入力・選択の邪魔をしない)。 */
 const INPUT_LIKE = 'input:not([type="button"]):not([type="submit"]):not([type="reset"]), select, textarea, [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="combobox"], [role="slider"], [role="spinbutton"]';
 /** スコアなどの重要な表示 (移動の途中でも重ならない)。 */
@@ -189,7 +200,7 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
       if (node.nodeType !== 3 || !node.textContent?.trim()) continue;
       range.selectNodeContents(node);
       for (const rect of Array.from(range.getClientRects())) {
-        if (rect.width > 0 && rect.height > 0) obstacles.push(tag(toPage(rect, sx, sy), 'soft', el));
+        if (rect.width > 0 && rect.height > 0) obstacles.push(markText(tag(toPage(rect, sx, sy), 'soft', el)));
       }
     }
   }

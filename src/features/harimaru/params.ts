@@ -263,14 +263,10 @@ export interface MotionParams {
   entryMaxGap: number;
   /** 横の小ジャンプで飛び越える、要素どうしの実際の隙間の上限 (CSS px)。 */
   hopMaxGap: number;
-  /**
-   * 経路の選びやすさに掛ける係数。文字・アイコンにかかる経路 (体は重なってよい。読みやすい経路を選びやすくする) と、
-   * 観戦中に大きいリアクションの体とエフェクトが収まる着地点。
-   */
+  /** 文字・アイコンにかかる経路の選びやすさに掛ける係数 (体は重なってよい。読みやすい経路を選びやすくする)。 */
   textTouchWeight: number;
-  liveRoomWeight: number;
-  /** 観戦中に、いまの位置にリアクションの余白がなく、余白のある着地点へ移れるとき、移る確率 (1 回の行動の選び方ごと)。 */
-  liveMoveChance: number;
+  /** 同じ位置で文字を隠し続けてよい時間の上限 (ms)。これを超える前に、文字を隠さない位置へ離れる (5 秒未満)。 */
+  textHoldMs: number;
   /** 上端から入るとき、端から足場までの落ちる高さの上限 (CSS px)。 */
   entryMaxDrop: number;
   /** 下端から入るとき、端から上辺までのよじ登る高さの上限 (CSS px)。 */
@@ -313,8 +309,7 @@ export const DEFAULT_MOTION: MotionParams = {
   entryMaxGap: 24,
   hopMaxGap: 40,
   textTouchWeight: 0.5,
-  liveRoomWeight: 6,
-  liveMoveChance: 0.7,
+  textHoldMs: 4_500,
   entryMaxDrop: 240,
   entryMaxClimb: 240,
   edgeOverhang: 8,

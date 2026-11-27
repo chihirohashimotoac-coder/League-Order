@@ -64,7 +64,7 @@ import {
   type Rect,
   type Segment,
 } from './terrain';
-import { collectObstacles, invalidateStyleCache, measureTerrain, obstacleKind, topCornerRadius, viewport, type MeasuredTerrain } from './terrainDom';
+import { collectObstacles, invalidateStyleCache, isTextRect, measureTerrain, obstacleKind, topCornerRadius, viewport, type MeasuredTerrain } from './terrainDom';
 
 /**
  * 休止の理由。hidden = タブ非表示、modal = モーダル・シート表示中、offscreen = キャラクターが画面外、
@@ -180,8 +180,6 @@ const NEEDS_SHEET: ReadonlySet<MotionId> = new Set<MotionId>([
 /** カードの縁の下 (カードの内側) で、体の下にさらに空ける余白 (CSS px)。 */
 const EDGE_CLEARANCE = 2;
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
-/** 観戦リアクションのエフェクトがかからないようにする操作部品。 */
-const EFFECT_AVOID = 'button, a[href], select, input, textarea, [role="button"], [role="tab"], [tabindex="0"], [contenteditable="true"]';
 const HISTORY_LENGTH = 6;
 const MAX_ANIMATION_WAITS = 10;
 /** この CSS プロパティのトランジションは要素の位置・大きさを変える (色・影は数えない)。 */
@@ -249,11 +247,11 @@ export class HarimaruController {
   private liveNow: { kind: LiveReaction; priority: number; id: ReactionId | null } | null = null;
   private lastScoreAt = -Infinity;
   private pendingLive: { kind: LiveReaction; until: number } | null = null;
-  /** 観戦の画面が状態を流している間 (観戦リアクションの余白のある足場を選びやすくする)。 */
-  private liveWatching = false;
   /** 観戦リアクションの余白を探して歩いている途中か (1 つの出来事で 1 回だけ)。 */
   private seekingRoom = false;
-  private liveObstacleCache: { t: number; y: number; list: Rect[] } | null = null;
+  /** いまの位置 (に着いた時刻)。文字の上で止まっている時間を数える (同じ文字を長く隠し続けない)。 */
+  private textHold: { key: string; since: number } | null = null;
+  private textTimer: number | null = null;
   private pendingTimer: number | null = null;
 
   /** 行動に属するタイマー (中断で消す)。 */
@@ -369,6 +367,8 @@ export class HarimaruController {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    if (this.textTimer !== null) this.win.clearTimeout(this.textTimer);
+    this.textTimer = null;
     this.interrupt();
     this.dropPendingLive();
     this.clearAuxTimers();
@@ -1218,9 +1218,24 @@ export class HarimaruController {
       this.run({ action: 'idle', durationMs: between(this.rng, this.behavior.idleMs) });
       return;
     }
-    // エフェクトを出している途中に、その範囲へ文字・操作部品が入ってきたら、演出をやめる (重ねない)。
+    // 止まっている間 (眠り・休みを含む) に画面が変わって、体が文字を隠し始めた: 上限の時間のうちに、次の行動を
+    // 決め直して離れる (nextAction が文字を隠さない位置へ動かす)。
+    const resting = ['idle', 'look', 'rest', 'sleep', 'groom', 'stretch'].includes(this.action ?? '');
+    if (resting && !this.liveNow && this.textTimer === null && this.coversText(this.x, this.top)) {
+      this.notePosition();
+      const wait = Math.max(0, this.motion.textHoldMs - 1_500 - (this.now() - this.textHold!.since));
+      this.textTimer = this.win.setTimeout(() => {
+        this.textTimer = null;
+        if (this.destroyed || !this.placed || this.pauses.size > 0 || this.airborne || this.liveNow) return;
+        if (!['idle', 'look', 'rest', 'sleep', 'groom', 'stretch'].includes(this.action ?? '') || !this.coversText(this.x, this.top)) return;
+        this.log('text:recheck');
+        this.interrupt();
+        this.nextAction();
+      }, wait);
+    }
+    // エフェクトを出している途中に、画面が変わってエフェクトが見えている範囲で切れるようになったら、演出をやめる。
     const showing = this.liveNow?.id;
-    if (showing && !this.reactionRoom(showing, this.dir, this.x, this.top, true)) {
+    if (showing && !this.reactionRoom(showing, this.dir)) {
       this.log('live:stopped:room');
       this.endLive();
     }
@@ -1349,7 +1364,6 @@ export class HarimaruController {
     if (!view || plans.length === 0) return [];
     const out: { plan: MovePlan; margin: number; penalty: number }[] = [];
     const onwardCache = new Map<string, number>();
-    const roomCache = new Map<string, number>();
     // 障害物は、経路の組 (つかまる側面の要素・出発と着地の要素) ごとに 1 回だけ集める。出発・着地の要素を包む入れ物
     // (カードの中の枠など) の背景・枠は、その上に立っているときと同じく数えない (中の文字・部品は数える)。
     const groups = new Map<string, Rect[]>();
@@ -1391,10 +1405,9 @@ export class HarimaruController {
         decor,
       };
       if (!stepsAreClear(plan.steps, obstacles, clear)) continue;
-      // 選びやすさ: 往復の抑制、文字にかからない経路、着いた先で歩ける幅とその先へ進める経路、観戦中はリアクションの
-      // 余白のある着地点。
+      // 選びやすさ: 往復の抑制、文字にかからない経路、着いた先で歩ける幅とその先へ進める経路。
       const readable = stepsTouching(plan.steps, soft) > 0 ? this.motion.textTouchWeight : 1;
-      const penalty = this.pairPenalty(plan) * readable * this.onward(plan.end?.segment ?? null, onwardCache) * this.liveRoomWeight(plan, roomCache);
+      const penalty = this.pairPenalty(plan) * readable * this.onward(plan.end?.segment ?? null, onwardCache);
       out.push({ plan, margin: stepsMargin(plan.steps, obstacles, clear), penalty });
     }
     return out;
@@ -1425,18 +1438,6 @@ export class HarimaruController {
     for (const p of plans) if (p.end) targets.add(`${p.end.segment.top}:${p.end.segment.left}`);
     const width = Math.max(0, current.maxX - current.minX);
     const value = (0.4 + Math.min(width, 200) / 200) * (0.5 + Math.min(targets.size, 4) * 0.375);
-    cache.set(key, value);
-    return value;
-  }
-
-  /** 観戦中は、着いた位置で大きいリアクション (180 のボード) の体とエフェクトが収まる経路を選びやすくする。 */
-  private liveRoomWeight(plan: MovePlan, cache: Map<string, number>): number {
-    if (!this.liveWatching || !plan.end) return 1;
-    const key = `${Math.round(plan.end.x)}:${plan.end.top}`;
-    const hit = cache.get(key);
-    if (hit !== undefined) return hit;
-    const fits = ([-1, 1] as const).some((dir) => this.reactionRoom('surprise180', dir, plan.end!.x, plan.end!.top));
-    const value = fits ? this.motion.liveRoomWeight : 1;
     cache.set(key, value);
     return value;
   }
@@ -1700,24 +1701,20 @@ export class HarimaruController {
     // 安全な候補が少ない (直前に渡った組しかない) ときは、待機や別の行動を選びやすくする。
     const score = moves.reduce((sum, o) => sum + o.penalty, 0);
     const behavior = score > 0 && score < 2 ? { ...this.behavior, weights: { ...this.behavior.weights, jump: this.behavior.weights.jump * (score / 2) } } : this.behavior;
-    // 観戦中に、いまの位置では大きいリアクション (180 のボード) の体とエフェクトが収まらない: 同じ足場の中に収まる
-    // 位置があれば歩いて寄り、なければ収まる着地点への移動を選びやすくする (出来事を待たずに備える)。
-    if (this.liveWatching && !this.liveNow && !this.reactionRoom('surprise180', this.dir) && !this.reactionRoom('surprise180', this.dir > 0 ? -1 : 1)) {
-      const spot = this.roomSpot('surprise180');
-      if (spot && Math.abs(spot.x - this.x) >= 6) {
-        this.log('live:prepare:walk');
-        this.run({ action: 'walk', durationMs: (Math.abs(spot.x - this.x) / this.behavior.walkSpeed) * 1000, targetX: spot.x });
-        return;
-      }
-      const roomy = moves.filter((o) => o.plan.end && ([-1, 1] as const).some((d) => this.reactionRoom('surprise180', d, o.plan.end!.x, o.plan.end!.top)));
-      const chosen = roomy.length > 0 && this.rng() < this.motion.liveMoveChance ? pickPlan(this.rng, roomy) : null;
-      if (chosen) {
-        this.log('live:prepare:move');
-        this.move(chosen.plan);
-        return;
-      }
+    let decision = decideNext({ ...input, canJump: moves.length > 0 }, this.rng, behavior);
+    // 同じ文字を長く隠し続けない: この位置に着いてからの時間を数え (文字があとから出てきても)、静かな行動は、離れる
+    // 移動の時間を見込んだ上限の内側に収める。上限に届く・眠る・伏せて休むときは、文字を隠さない位置へ離れる。
+    const t = this.now();
+    this.notePosition();
+    const still = !['walk', 'run', 'jump', 'hide'].includes(decision.action);
+    if (still && this.coversText(this.x, this.top)) {
+      const exit = this.textExit(bounds);
+      const exitMs = exit ? exit.ms : 1_500;
+      const left = this.motion.textHoldMs - (t - this.textHold!.since) - exitMs;
+      const long = decision.action === 'sleep' || decision.action === 'rest';
+      if (!long && left >= Math.min(decision.durationMs, 1_200)) decision = { ...decision, durationMs: Math.min(decision.durationMs, left) };
+      else if (this.leaveText(exit, moves)) return;
     }
-    const decision = decideNext({ ...input, canJump: moves.length > 0 }, this.rng, behavior);
     if (decision.action === 'jump') {
       const chosen = pickPlan(this.rng, moves);
       if (chosen) {
@@ -1726,6 +1723,49 @@ export class HarimaruController {
       }
     }
     this.run(decision);
+  }
+
+  /** 体 (見える部分) が文字の行にかかる位置か。集めた障害物を渡せば集め直さない。 */
+  private coversText(x: number, top: number, found?: readonly Rect[]): boolean {
+    const body: Rect = { left: x + SPRITE.sideInset, right: x + SPRITE.width - SPRITE.sideInset, top: top - SPRITE.height, bottom: top };
+    const list = found ?? this.obstaclesIn(this.root, [body], this.win, undefined, this.containers);
+    return list.some((o) => isTextRect(o) && intersects(body, o));
+  }
+
+  /** 同じ足場の中で、文字を隠さない近い位置と、そこまでの時間 (遠ければ駆け足)。なければ null。 */
+  private textExit(bounds: { minX: number; maxX: number }): { x: number; ms: number; running: boolean } | null {
+    const region: Rect = { left: bounds.minX, right: bounds.maxX + SPRITE.width, top: this.top - SPRITE.height, bottom: this.top };
+    const found = this.obstaclesIn(this.root, [region], this.win, undefined, this.containers);
+    for (let d = 6; d <= bounds.maxX - bounds.minX + 6; d += 6) {
+      for (const x of [this.x - d, this.x + d]) {
+        if (x < bounds.minX || x > bounds.maxX || this.coversText(x, this.top, found)) continue;
+        const running = d > 30 && this.available('run');
+        return { x, running, ms: (d / (running ? this.behavior.runSpeed : this.behavior.walkSpeed)) * 1000 };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 文字の上から離れる: 同じ足場の中の文字を隠さない近い位置へ歩く (遠ければ駆け足)。なければ、文字を隠さない
+   * 着地点への移動。それもなければ隠れて端から出直す (同じ文字を長く隠し続けない)。
+   */
+  private leaveText(exit: { x: number; ms: number; running: boolean } | null, moves: readonly { plan: MovePlan; margin: number; penalty: number }[]): boolean {
+    if (exit) {
+      this.log('text:leave:walk');
+      this.run({ action: exit.running ? 'run' : 'walk', durationMs: exit.ms, targetX: exit.x });
+      return true;
+    }
+    const clear = moves.filter((o) => o.plan.end && !this.coversText(o.plan.end.x, o.plan.end.top));
+    const chosen = pickPlan(this.rng, clear);
+    if (chosen) {
+      this.log('text:leave:move');
+      this.move(chosen.plan, false);
+      return true;
+    }
+    this.log('text:leave:hide');
+    this.vanish(between(this.rng, this.timing.enterDelayMs));
+    return true;
   }
 
   private recordAction(action: HarimaruAction): void {
@@ -2348,7 +2388,8 @@ export class HarimaruController {
    *   Leg やゲームの結果) には効かない。
    * - 足場の外 (ジャンプ・しがみつき・ぶら下がり)・カード裏・跳ねている途中では、重要な出来事だけ少し待つ
    *   (pendingMs まで。途中で休止したら捨てる)。
-   * - エフェクトの範囲 (本体より広い) に文字・操作部品があるときや、画像を読み込めていないときは演出しない。
+   * - 体とエフェクトは文字・ボタンなどほかの UI に重なってよい。見えている範囲に収まらない (固定ヘッダー・下部ナビ・
+   *   画面の端で切れる) ときは、振り向く・近くへ歩いて収める。収まらなければ・画像を読み込めていなければ演出しない。
    */
   reactLive(kind: LiveReaction): boolean {
     if (this.destroyed) return false;
@@ -2388,11 +2429,6 @@ export class HarimaruController {
    * 観戦の対象が変わった・観戦画面を離れた: 待っている出来事を捨て、演出中のリアクションを (エフェクトを残さずに)
    * やめて待機に戻る。演出していなければ何もしない。
    */
-  /** 観戦の画面が状態を流し始めた・離れた (HarimaruLayer)。観戦中は、リアクションの余白のある足場を選びやすくする。 */
-  setLiveWatching(on: boolean): void {
-    this.liveWatching = on;
-  }
-
   cancelLive(): void {
     if (this.destroyed) return;
     this.dropPendingLive();
@@ -2501,7 +2537,7 @@ export class HarimaruController {
       this.log(`live:${kind}:skipped:asset`);
       return false;
     }
-    if (!this.reactionRoom(id, this.dir, this.x, this.top, true)) {
+    if (!this.reactionRoom(id, this.dir)) {
       // 向きを変えれば収まる: 振り向いてから演出する (180 のボードは右向きでも反転しない)。
       if (this.reactionRoom(id, this.dir > 0 ? -1 : 1)) {
         this.dir = this.dir > 0 ? -1 : 1;
@@ -2580,20 +2616,6 @@ export class HarimaruController {
    * リアクションを出す余白: 全コマの本体 (移動を含む) とエフェクトの描かれる範囲を包む矩形が、見えている範囲に
    * 収まり、文字・操作部品・色の付いた要素に重ならないか。範囲の下端は足場の上辺 (エフェクトは足元より下に出ない)。
    */
-  /** 範囲にかかる操作部品の箱 (ページ座標)。透明に重ねた選択欄・入力欄も数える (見た目の部品の上に重ねてあるため)。 */
-  private controlBoxes(region: Rect): Rect[] {
-    const sx = this.win.scrollX;
-    const sy = this.win.scrollY;
-    const out: Rect[] = [];
-    for (const el of Array.from(this.root.querySelectorAll(EFFECT_AVOID))) {
-      const r = el.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue;
-      const box = { left: r.left + sx, top: r.top + sy, right: r.right + sx, bottom: r.bottom + sy };
-      if (box.right > region.left && box.left < region.right && box.bottom > region.top && box.top < region.bottom) out.push(box);
-    }
-    return out;
-  }
-
   /** いまの足場の上で、体とエフェクトが収まる近い位置と向き (左右 roomSearchPx 以内、近い順)。なければ null。 */
   private roomSpot(id: ReactionId): { x: number; dir: -1 | 1 } | null {
     const segment = this.currentSegment();
@@ -2610,23 +2632,7 @@ export class HarimaruController {
     return null;
   }
 
-  /**
-   * 観戦リアクションの余白の確認に使う障害物 (見えている範囲の文字・部品・入力欄など ＋ 操作部品の箱)。下見 (着地点の
-   * 選び方・余白のある位置の探索) では 250ms・同じスクロール位置の間は使い回す。演出を始める直前は集め直す。
-   */
-  private liveObstacles(fresh: boolean): Rect[] {
-    const view = this.view;
-    if (!view) return [];
-    const t = this.now();
-    const cached = this.liveObstacleCache;
-    if (!fresh && cached && t - cached.t <= 250 && cached.y === this.win.scrollY) return cached.list;
-    const region: Rect = { left: view.left, right: view.right, top: view.top, bottom: view.bottom };
-    const list = [...this.obstaclesIn(this.root, [region], this.win, undefined, this.containers), ...this.controlBoxes(region)];
-    this.liveObstacleCache = { t, y: this.win.scrollY, list };
-    return list;
-  }
-
-  private reactionRoom(id: ReactionId, dir: -1 | 1, atX = this.x, atTop = this.top, fresh = false): boolean {
+  private reactionRoom(id: ReactionId, dir: -1 | 1, atX = this.x, atTop = this.top): boolean {
     const view = this.view;
     if (!view || !this.placed) return false;
     const spec = REACTIONS[id];
@@ -2650,16 +2656,11 @@ export class HarimaruController {
     left = Math.min(left, atX + effectLeft - 1);
     right = Math.max(right, atX + effectRight + 1);
     upper = Math.min(upper, top + box.top - 1);
-    const region: Rect = { left, right, top: upper, bottom: atTop };
-    // エフェクトは、文字・アイコン・入力欄などに加えて、操作部品 (透明に重ねた選択欄を含む) の箱にもかからない
-    // (体は重なってよいが、大きいエフェクトで操作部品を隠さない)。
-    const obstacles = this.liveObstacles(fresh);
-    if (!boxIsClear({ ...region, bottom: atTop - 0.5 }, obstacles, view)) return false;
-    // 足元より下 (カードの面) に出るエフェクト (敗北の砂ぼこり): その範囲がカードの内側の余白に収まるときだけ。
-    if (box.bottom > SPRITE.height) {
-      const below: Rect = { left: atX + effectLeft - 1, right: atX + effectRight + 1, top: atTop, bottom: atTop + (box.bottom - SPRITE.height) + 1 };
-      if (!this.cardBelowClear(below, atTop)) return false;
-    }
+    // 体とエフェクトは、文字・ボタンなどほかの UI に重なってよい。画面の見えている範囲 (固定ヘッダー・下部ナビの内側、
+    // 左右の端) に収まって、ボード・エフェクトが切れずに全部見えることだけを確かめる。
+    if (!boxIsClear({ left, right, top: upper, bottom: atTop - 0.5 }, [], view)) return false;
+    // 足元より下に出るエフェクト (敗北の砂ぼこり) も、見えている範囲に収まること。
+    if (box.bottom > SPRITE.height && atTop + (box.bottom - SPRITE.height) + 1 > view.bottom) return false;
     return true;
   }
 
@@ -3110,8 +3111,15 @@ export class HarimaruController {
     if (show()) next();
   }
 
+  /** 描いている位置が変わったら、その位置に着いた時刻を記録する (同じ文字を隠し続けた時間を数える)。 */
+  private notePosition(): void {
+    const key = `${Math.round(this.x)}:${this.top}`;
+    if (!this.textHold || this.textHold.key !== key) this.textHold = { key, since: this.now() };
+  }
+
   private place(): void {
     const dpr = this.win.devicePixelRatio || 1;
+    this.notePosition();
     // 経路の再生中 (登場・小ジャンプ・飛び降り・よじ登り) は、段の位置 (セルの左上) に描く。
     const x = Math.round((this.abs ? this.abs.x : this.x + this.poseX) * dpr) / dpr;
     // 足元が足場に食い込まないよう、上側の画素へ寄せる (食い込みは 0.3px まで: 切り捨てだけだと最大 1px 浮く)。
