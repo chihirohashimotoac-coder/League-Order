@@ -151,7 +151,12 @@ test('PC 1280・1920: 左右の端から下部ナビの上辺に入り、ナビ�
   await page.setViewportSize({ width: 1280, height: 720 });
   await openSample(page);
   for (const size of [{ width: 1280, height: 720 }, { width: 1920, height: 1080 }]) {
-    await page.setViewportSize(size);
+    if (size.width !== 1280) {
+      // 幅を変えて読み込み直す (前の幅で立っていた足場が残っていると、登場し直さない)。
+      await page.setViewportSize(size);
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'サンプルチーム', level: 1 })).toBeVisible();
+    }
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(1_500);
     const trail = await record(page);
@@ -195,6 +200,8 @@ test('PC 1280・1920: 左右の端から下部ナビの上辺に入り、ナビ�
   }
   // ナビのボタンは押せる (ハリマルはクリックを受け取らない)。
   await page.locator('.tab-bar').getByRole('button', { name: '観戦', exact: true }).click();
+  // 時計を止めているので、画面の切り替えのタイマーを進める。
+  for (let i = 0; i < 20 && !(await page.getByTestId('watch-page').isVisible()); i += 1) await page.clock.runFor(250);
   await expect(page.getByTestId('watch-page')).toBeVisible();
 });
 
