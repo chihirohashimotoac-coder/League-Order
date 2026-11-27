@@ -181,7 +181,7 @@ test('PC 1280・1920: 左右の端の空白が広いホームでは、上下の�
   expect(['left', 'right']).toContain(edge);
 });
 
-test('PC 1100: 体が上へ完全に抜けるまでスクロールすると、元の位置で待つ。逆にスクロールすれば、元の位置がそのまま見えてくる', async ({ page }, info) => {
+test('PC 1100: 体が上へ完全に抜けるまでスクロールすると、抜けた記録を残して元の位置で待つ。すぐに逆にスクロールすれば、元の位置がそのまま見えてくる', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'PC のホーム');
   await page.setViewportSize(PC_ENTRY);
   await fixed(page, 20261126);
@@ -190,9 +190,17 @@ test('PC 1100: 体が上へ完全に抜けるまでスクロールすると、�
   await page.waitForTimeout(1_500);
   await untilStanding(page);
   const before = await sprite(page).evaluate((el) => ({ x: el.getBoundingClientRect().left, y: el.getBoundingClientRect().top + window.scrollY }));
-  // 一番下までスクロール (足場のタイルは見えている上端より上へ抜ける)。
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await page.clock.runFor(4_000);
+  // 体が見えている上端より上へちょうど抜けるまでスクロールする (立った位置は乱数で変わるので、体の位置から決める)。
+  const scrolled = await sprite(page).evaluate((el) => {
+    const header = document.querySelector('.app-header')!.getBoundingClientRect().bottom;
+    const y = Math.ceil(el.getBoundingClientRect().bottom - header + 8);
+    window.scrollTo(0, y);
+    return window.scrollY >= y - 1;
+  });
+  expect(scrolled, '体が上へ抜けるだけスクロールできる').toBe(true);
+  // 上の端から戻り始める前 (スクロールが止まってから edgeReturnDelayMs 0.5〜1.3 秒)。
+  await page.waitForTimeout(200);
+  await page.clock.runFor(400);
   const away = await sprite(page).evaluate((el) => ({ bottom: el.getBoundingClientRect().bottom, header: document.querySelector('.app-header')!.getBoundingClientRect().bottom, action: el.dataset.action }));
   expect(away.bottom).toBeLessThanOrEqual(away.header);
   expect(away.action).not.toBe('enter');

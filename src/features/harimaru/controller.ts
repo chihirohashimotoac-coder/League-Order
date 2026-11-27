@@ -609,9 +609,19 @@ export class HarimaruController {
     const root = this.root;
     for (const type of ['transitionrun', 'animationstart']) root.addEventListener(type, onShiftStart, { capture: true, passive: true });
     for (const type of ['transitionend', 'transitioncancel', 'animationend', 'animationcancel']) root.addEventListener(type, onShiftEnd, { capture: true, passive: true });
+    // CSS のアニメーション・トランジション (画面の入場のフェードなど) は DOM の変化を起こさない: 終わったら計算した
+    // スタイルの控えを捨てる (途中の不透明度・色を控えたまま足場を見落とさない)。まだ入っていなければ確かめ直す。
+    const onStyleSettled = (): void => {
+      invalidateStyleCache();
+      if (!this.placed && !this.entering) this.scheduleRemeasure();
+    };
+    for (const type of ['transitionend', 'transitioncancel', 'animationend', 'animationcancel']) root.addEventListener(type, onStyleSettled, { capture: true, passive: true });
     this.cleanups.push(() => {
       for (const type of ['transitionrun', 'animationstart']) root.removeEventListener(type, onShiftStart, { capture: true });
-      for (const type of ['transitionend', 'transitioncancel', 'animationend', 'animationcancel']) root.removeEventListener(type, onShiftEnd, { capture: true });
+      for (const type of ['transitionend', 'transitioncancel', 'animationend', 'animationcancel']) {
+        root.removeEventListener(type, onShiftEnd, { capture: true });
+        root.removeEventListener(type, onStyleSettled, { capture: true });
+      }
     });
 
     const onVisibility = (): void => (doc.hidden ? this.pause('hidden') : this.resume('hidden'));
