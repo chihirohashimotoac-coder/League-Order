@@ -64,7 +64,8 @@ async function appear(page: Page, maxMs = 30_000): Promise<void> {
     if (standing) return;
     await page.clock.runFor(250);
   }
-  throw new Error('ハリマルが端から現れない');
+  const state = await sprite(page).evaluate((el) => ({ visible: el.dataset.visible, action: el.dataset.action, frame: el.dataset.frame, transform: el.style.transform, position: el.style.position, url: location.hash }));
+  throw new Error(`ハリマルが端から現れない: ${JSON.stringify(state)}`);
 }
 
 /** 表示枠の見える部分が重なってはいけないもの (harimaruOverlap.ts の規則。移動中の文字の短いかぶりは除く)。 */
