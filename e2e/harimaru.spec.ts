@@ -72,7 +72,7 @@ async function overlaps(page: Page): Promise<string[]> {
   return blocking(await page.evaluate(harimaruOverlaps));
 }
 
-test('ホームに 1 体だけ現れ、入力欄・固定バー・重要な表示に重ならず、文字に長くかぶらずに歩き、クリックを妨げない', async ({ page }) => {
+test('ホームに 1 体だけ現れ、入力欄・固定バー・重要な表示に重ならず、長く止まらずに動き、クリックを妨げない', async ({ page }) => {
   // 気まぐれな動作の抽選と時計を固定する。固定しないと、眠り・待機が続いて 120 秒の間に 2 か所以下しか
   // 立たない回があった (CI の run #60 と手元で 60 回に 1 回)。本番の抽選は変えない (seededRandom.ts)。
   // 時計は読み込みの前から決まった時刻で止め、runFor でだけ進める (実時間で進むと、抽選の時刻・回数が実行ごとに変わる)。
@@ -90,23 +90,39 @@ test('ホームに 1 体だけ現れ、入力欄・固定バー・重要な表�
   expect(size).toBe(20);
 
   const xs = new Set<number>();
-  // 移動中に文字へかぶったもの (前の標本)。1.5 秒おきの標本で続けて同じ文字にかぶっていれば、長く隠している。
-  let passed: string[] = [];
+  // 1.5 秒おきの標本で、同じ位置に続けて止まっていた最長の時間と、足元の要素が変わった回数 (足場の間の移動)。
+  // 無操作 (45 秒) にならないよう、ときどきキーを押す (無操作のあとは眠ってよい)。
+  let still = 0;
+  let longest = 0;
+  let last = '';
+  let footLast = '';
+  let footChanges = 0;
   for (let i = 0; i < 80; i += 1) {
+    if (i % 6 === 0) await page.keyboard.press('Shift');
     await page.clock.runFor(1_500);
-    const state = await sprite(page).evaluate((el) => ({ x: Math.round(el.getBoundingClientRect().left), visible: el.getAttribute('data-visible') }));
+    const state = await sprite(page).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const below = document.elementsFromPoint(r.left + r.width / 2, r.bottom + 2).find((e) => e.closest('.app-main, .tab-bar'));
+      return { x: Math.round(r.left), y: Math.round(r.top + window.scrollY), visible: el.getAttribute('data-visible'), action: el.dataset.action ?? '', foot: below ? `${below.tagName}.${String(below.className)}` : '' };
+    });
     if (state.visible !== 'true') {
-      passed = [];
+      still = 0;
+      last = '';
       continue;
     }
     xs.add(state.x);
-    const found = await page.evaluate(harimaruOverlaps);
-    expect(blocking(found), `step ${i}`).toEqual([]);
-    const now = found.filter((f) => f.startsWith('pass:'));
-    expect(now.filter((f) => passed.includes(f)), `step ${i}: 同じ文字に長くかぶり続けない`).toEqual([]);
-    passed = now;
+    const at = `${state.x},${state.y}`;
+    still = at === last ? still + 1_500 : 0;
+    longest = Math.max(longest, still);
+    last = at;
+    if (state.action !== 'enter' && state.foot && footLast && state.foot !== footLast) footChanges += 1;
+    if (state.action !== 'enter' && state.foot) footLast = state.foot;
+    expect(blocking(await page.evaluate(harimaruOverlaps)), `step ${i}`).toEqual([]);
   }
-  expect(xs.size, 'ハリマルが実際に移動する').toBeGreaterThan(2);
+  test.info().annotations.push({ type: '最長の連続停止 (ms)', description: String(longest) }, { type: '足元の要素が変わった回数', description: String(footChanges) });
+  // 操作のある間は、同じ位置に長く止まり続けない (静かな行動は 2 回まで続けて、そのあと位置を変える)。
+  expect(longest, '同じ位置に止まり続ける時間').toBeLessThanOrEqual(15_000);
+  expect(xs.size, 'ハリマルが実際に移動する').toBeGreaterThan(4);
 
   const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(sideways).toBeLessThanOrEqual(1);
@@ -183,15 +199,14 @@ test('「動きを減らす」設定では描画しない', async ({ page }) => 
 test('安全な足場がなくなると即座に消え、足場が戻ると安全な場所から現れる', async ({ page }) => {
   await page.clock.install();
   await openSampleHome(page);
-  // フィクスチャ: 透明な板 (デザインなし) でホーム全体を覆い、すべての足場の辺を隠す (覆われた辺は足場にしない)。
+  // フィクスチャ: 透明な板 (デザインなし) で画面全体 (下部ナビを含む) を覆い、すべての足場の辺を隠す (覆われた辺は
+  // 足場にしない)。
   const block = async (): Promise<void> => {
     await page.evaluate(() => {
       const cover = document.createElement('div');
       cover.id = 'harimaru-blocker';
-      cover.style.cssText = 'position:absolute;inset:0;z-index:5';
-      const main = document.querySelector<HTMLElement>('.app-main')!;
-      main.style.position = 'relative';
-      main.append(cover);
+      cover.style.cssText = 'position:fixed;inset:0;z-index:40';
+      document.querySelector<HTMLElement>('.app')!.append(cover);
     });
   };
   await block();
@@ -372,7 +387,7 @@ test('長押し・ドラッグでは反応しない', async ({ page }, info) => 
   expect(await actions()).not.toContain('turn');
 });
 
-test('どの画面でも、入力欄・固定バーに重ならず、立っている間は文字に重ならない (メンバー・フォーマット・履歴・設定・その他・観戦)', async ({ page }, info) => {
+test('どの画面でも、入力欄・固定バー・重要な表示に重ならない (メンバー・フォーマット・履歴・設定・その他・観戦)', async ({ page }, info) => {
   test.setTimeout(180_000);
   await openSampleHome(page);
   const screens: [string, () => Promise<void>][] = [

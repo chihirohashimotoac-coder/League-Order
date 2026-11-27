@@ -144,41 +144,53 @@ test('実際のホーム: 画面の左右の端から、見える画素が端か
   expect(await overlaps(page)).toEqual([]);
 });
 
-test('PC 1280・1920: 左右の端の空白が広いホームでは、上下の端からも入らず画面の外で待つ。幅を 1100 に狭めると左右の端から入る', async ({ page }, info) => {
-  test.skip(info.project.name !== 'desktop', 'PC のホーム (コンテンツの列の外の空白が広い)');
-  test.setTimeout(120_000);
+test('PC 1280・1920: 左右の端から下部ナビの上辺に入り、ナビの上を歩く。スクロールの間もナビの上辺に接地し、ナビの操作を妨げない', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'PC のホーム (コンテンツの列の外の空白が広く、ナビの上辺が画面の端まで続く)');
+  test.setTimeout(180_000);
   await fixed(page, 20261126);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await openSample(page);
   for (const size of [{ width: 1280, height: 720 }, { width: 1920, height: 1080 }]) {
     await page.setViewportSize(size);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(1_500);
-    const gutter = await page.evaluate(() => {
-      const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
-      return { left: card.left, right: document.documentElement.clientWidth - card.right };
-    });
-    expect(Math.min(gutter.left, gutter.right), `${size.width}: 端からカードまでの空白`).toBeGreaterThan(24);
-    // 先頭・次の試合のカードの下端が上端のすぐ下に来る位置 (以前は上端から落ちて入れた位置) のどちらでも待つ。
-    for (const at of ['top', 'card'] as const) {
-      await page.evaluate((where) => {
-        if (where === 'top') window.scrollTo(0, 0);
-        else {
-          const card = document.querySelector('.next-match-card')!.getBoundingClientRect();
-          window.scrollTo(0, Math.round(card.bottom + window.scrollY - document.querySelector('.app-header')!.getBoundingClientRect().bottom + 6));
-        }
-      }, at);
-      for (let i = 0; i < 12; i += 1) {
-        await page.clock.runFor(1_000);
-        expect(await sprite(page).getAttribute('data-visible'), `${size.width} ${at} ${i} 秒`).toBe('false');
+    const trail = await record(page);
+    await untilStanding(page, 60_000);
+    const { edge } = checkEntry(await trail(), await viewport(page));
+    expect(['left', 'right'], `${size.width}: 登場の端`).toContain(edge);
+    // 足元は下部ナビの上辺 (列の外の空白が広く、ほかに画面の端から届く足場はない)。
+    const onNav = () => sprite(page).evaluate((el) => Math.abs(el.getBoundingClientRect().bottom - document.querySelector('.tab-bar')!.getBoundingClientRect().top) <= 1);
+    expect(await onNav(), `${size.width}: ナビの上辺に立つ`).toBe(true);
+    // 時間をかけてナビの上を動く (位置が変わる)。無操作にならないよう、ときどきキーを押す。
+    const xs = new Set<number>();
+    for (let i = 0; i < 40; i += 1) {
+      if (i % 8 === 0) await page.keyboard.press('Shift');
+      await page.clock.runFor(1_000);
+      if ((await sprite(page).getAttribute('data-visible')) === 'true' && (await onNav())) xs.add(Math.round((await sprite(page).boundingBox())!.x));
+    }
+    expect(xs.size, `${size.width}: ナビの上で位置が変わる`).toBeGreaterThan(1);
+    expect(await overlaps(page)).toEqual([]);
+    // ナビの上に立ったままスクロールする: スクロールの途中も止まったあとも、ナビの上辺に接地したまま見えている。
+    await page.clock.runFor(3_000);
+    if ((await sprite(page).getAttribute('data-visible')) === 'true' && (await onNav())) {
+      await page.mouse.move(size.width / 2, 300);
+      for (let i = 0; i < 4; i += 1) {
+        await page.mouse.wheel(0, 150);
+        await page.waitForTimeout(40);
+        expect(await onNav(), `${size.width}: スクロールの途中 ${i}`).toBe(true);
+        expect(await sprite(page).getAttribute('data-visible')).toBe('true');
       }
+      await page.waitForTimeout(400);
+      await page.clock.runFor(400);
+      expect(await onNav(), `${size.width}: スクロールのあと`).toBe(true);
+      expect(await sprite(page).getAttribute('data-visible')).toBe('true');
+      const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(sideways).toBeLessThanOrEqual(0);
     }
   }
-  await page.evaluate(() => window.scrollTo(0, 0));
-  const trail = await record(page);
-  await page.setViewportSize(PC_ENTRY);
-  await untilStanding(page);
-  const { edge } = checkEntry(await trail(), await viewport(page));
-  expect(['left', 'right']).toContain(edge);
+  // ナビのボタンは押せる (ハリマルはクリックを受け取らない)。
+  await page.locator('.tab-bar').getByRole('button', { name: '観戦', exact: true }).click();
+  await expect(page.getByTestId('watch-page')).toBeVisible();
 });
 
 test('PC 1100: 体が上へ完全に抜けるまでスクロールすると、抜けた記録を残して元の位置で待つ。すぐに逆にスクロールすれば、元の位置がそのまま見えてくる', async ({ page }, info) => {
@@ -189,6 +201,13 @@ test('PC 1100: 体が上へ完全に抜けるまでスクロールすると、�
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(1_500);
   await untilStanding(page);
+  // 下部ナビの上に立っていると、スクロールしても画面に対して止まったまま (上へ抜けない)。コンテンツの足場に立つまで待つ。
+  const onContent = () => sprite(page).evaluate((el) => el.dataset.visible === 'true' && el.dataset.action !== 'enter' && Math.abs(el.getBoundingClientRect().bottom - document.querySelector('.tab-bar')!.getBoundingClientRect().top) > 1);
+  for (let i = 0; i < 120 && !(await onContent()); i += 1) {
+    if (i % 8 === 0) await page.keyboard.press('Shift');
+    await page.clock.runFor(500);
+  }
+  expect(await onContent(), 'コンテンツの足場に立つ').toBe(true);
   const before = await sprite(page).evaluate((el) => ({ x: el.getBoundingClientRect().left, y: el.getBoundingClientRect().top + window.scrollY }));
   // 体が見えている上端より上へちょうど抜けるまでスクロールする (立った位置は乱数で変わるので、体の位置から決める)。
   const scrolled = await sprite(page).evaluate((el) => {
@@ -235,12 +254,14 @@ test('スマホ: 端から入っている途中に幅を 393 → 320 px に縮�
   expect(await overlaps(page)).toEqual([]);
 });
 
-/** 検証用の足場 (実アプリの .card と同じ見た目・判定) をホームの先頭に差し込み、ほかの中身を隠す。 */
+/** 検証用の足場 (実アプリの .card と同じ見た目・判定) をホームの先頭に差し込み、ほかの中身と下部ナビを隠す。 */
 async function lab(page: Page, cards: [number, number, number, number][], height: number): Promise<void> {
   await page.evaluate(
     ({ cards, height }) => {
       document.querySelector<HTMLElement>('.home-grid')!.style.display = 'none';
       document.querySelector<HTMLElement>('.demo-banner')!.style.display = 'none';
+      // 下部ナビの上辺も足場になるので、検証用の足場の動きだけを見るために見えなくする (場所はそのまま)。
+      document.querySelector<HTMLElement>('.tab-bar')!.style.visibility = 'hidden';
       const wrap = document.createElement('div');
       wrap.id = 'harimaru-lab';
       // 入場のフェード (.page-view の子の section-in) は、時計を止めている間は進まないので付けない。
