@@ -175,7 +175,10 @@ describe('throws, orders and dates', () => {
   });
 
   it('orders and fixture dates', () => {
-    expect(parseOrders({ result: 0, list: [{ tmid: 'x', tpid: 'AAAA', schid: 's1', fix: 1, order: [{ oid: 'o', oname: '佐藤' }] }] })).toEqual([{ teamId: 'AAAA', schid: 's1', fixed: true, members: ['佐藤'] }]);
+    expect(parseOrders({ result: 0, list: [{ tmid: 'x', tpid: 'AAAA', schid: 's1', fix: 1, order: [{ oid: 'o', oname: '佐藤' }] }] })).toEqual([
+      // 2026-11-27: the card (`tmid`), `fix` as sent and every place of the order (with ids) are kept too, for the 開始前 order view.
+      { tmid: 'x', teamId: 'AAAA', schid: 's1', fixed: true, fix: 1, members: ['佐藤'], entries: [{ oid: 'o', opid: null, name: '佐藤' }] },
+    ]);
     expect(fixtureDate('第1戦 10月1日 木曜日')).toEqual({ month: 10, day: 1 });
     expect(fixtureDate('2026-09-10')).toEqual({ month: 9, day: 10 });
     expect(fixtureDate('第3節')).toBeNull();

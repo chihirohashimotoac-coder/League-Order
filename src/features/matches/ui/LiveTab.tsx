@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/icons';
 import type { MatchesApi } from '../api';
-import type { CardOrder, GameRow, LiveState, SeasonDocument } from '../parse';
+import type { GameRow, LiveState, SeasonDocument } from '../parse';
 import { parseLeagueTmid, slotOf, slotsFor } from '../parse';
-import { gameWinner } from '../cards';
+import type { MatchCard } from '../cards';
+import { gameWinner, slotKindLabel } from '../cards';
+import { PLAN_TEXT, isFixtureToday, leagueCardTmid, planCard } from '../plannedOrders';
 import type { LiveStatus } from '../livePoller';
 import { LivePoller, medianMs } from '../livePoller';
 import type { LiveEvent } from '../gameStats';
@@ -25,6 +27,9 @@ import type { MatchesApiFactory } from '../environment';
 import { ListCoverage, listIncomplete } from './ListCoverage';
 import { n01Avg3 } from '../../analytics/n01Figures';
 import { useScreenWake } from './useScreenWake';
+import { useCardOrders, useCardStart } from './useCardOrders';
+import { NameLines, OrderOverview, PlannedGameView, planStatusOf, plannedNames } from './PlannedParts';
+import type { OverviewRow } from './PlannedParts';
 
 /**
  * LIVE (ライブ). The first screen answers, without scrolling: which cards are on and their score
@@ -36,6 +41,11 @@ import { useScreenWake } from './useScreenWake';
  * one line that keeps the live game in sight and returns to it. Everything else — the estimate,
  * who plays next and how strong they are, the events, the standings if it ended now — follows
  * below, never on another page.
+ *
+ * Today's cards not started yet (their fixture is dated today, JST) are on the board too, as
+ * 開始前: opening one shows its games with the orders both teams have confirmed on n01, read every
+ * 30 s, and it turns into the live view once its first game starts. A card not started is never
+ * counted or shown as in progress.
  *
  * On a large screen (1200 px and up) two cards can be shown side by side (「2 カードを並べる」):
  * the chosen card on the left, another on the right. A tap on a tile not shown puts it in the
@@ -79,6 +89,32 @@ export interface BoardCard {
   games: GameRow[];
   current: GameRow | null;
   finished: boolean;
+  /** Today's card none of whose games has started (from the fixtures, not from a game row). */
+  pending?: boolean;
+}
+
+/**
+ * Today's cards not started yet: fixtures dated today (JST) of a season not over, no game in the
+ * season's list nor on today's board, no result. Their `tmid` is n01's form for the card.
+ */
+export function pendingCards(season: SeasonDocument, cards: readonly MatchCard[], board: readonly BoardCard[], now: number): BoardCard[] {
+  if (season.status === 40) return [];
+  const onBoard = new Set(board.map((card) => `${card.divisionIndex}_${card.lsid}`));
+  return cards
+    .filter((card) => card.state === 'scheduled' && !card.official && !onBoard.has(card.key) && isFixtureToday(card.title, now))
+    .map((card) => ({
+      tmid: card.tmid ?? leagueCardTmid(season.tournamentId, card.divisionIndex, card.lsid, [card.teams[0].id, card.teams[1].id]),
+      divisionIndex: card.divisionIndex,
+      lsid: card.lsid,
+      // The board puts a card's teams in its `tmid` order (boardCards): the same here, so the sides
+      // do not swap when the first game starts and the card joins the board.
+      teams: card.teams[0].id <= card.teams[1].id ? card.teams : [card.teams[1], card.teams[0]],
+      won: [0, 0],
+      games: [],
+      current: null,
+      finished: false,
+      pending: true,
+    }));
 }
 
 export function boardCards(season: SeasonDocument, games: readonly GameRow[]): BoardCard[] {
@@ -132,7 +168,10 @@ export function LiveTab({
   onPlayer?: (player: PlayerRef) => void;
 }): React.JSX.Element {
   const board = useTodayBoard(api, data.season.tournamentId, true);
-  const cards = useMemo(() => (board.games ? boardCards(data.season, board.games) : []), [board.games, data.season]);
+  const played = useMemo(() => (board.games ? boardCards(data.season, board.games) : []), [board.games, data.season]);
+  // Today's cards not started yet join the board (as 開始前) once the board has been read.
+  const cards = useMemo(() => (board.games ? [...played, ...pendingCards(data.season, data.cards, played, Date.now())] : []), [board.games, played, data.season, data.cards]);
+  const waiting = cards.filter((card) => card.pending).length;
   const followed = useFollowed();
   // Followed players on today's cards: the game they are in (in progress first), one line each.
   const spots = useMemo(() => followedSpots(cards, followed.names), [cards, followed.names]);
@@ -233,7 +272,7 @@ export function LiveTab({
     <div className={`live-hub${pair ? ' is-pair' : ''}`} data-testid="live-hub">
       <div className="live-meta-row">
         <p className="muted small-text live-meta">
-          <span className="live-dot" aria-hidden="true" /> 進行中 {cards.filter((card) => card.current).length} ・ 本日 {cards.length} カード ・ 一覧の取得{' '}
+          <span className="live-dot" aria-hidden="true" /> 進行中 {cards.filter((card) => card.current).length} ・ 本日 {cards.length} カード{waiting ? ` (開始前 ${waiting})` : ''} ・ 一覧の取得{' '}
           {formatClock(board.fetchedAt)}
           {board.error ? ` ・ 取得エラー (前回の値を表示中)` : ''}
         </p>
@@ -278,7 +317,7 @@ export function LiveTab({
             <li key={card.tmid}>
               <button
                 type="button"
-                className={`board-tile${game ? ' is-live' : ''}`}
+                className={`board-tile${game ? ' is-live' : ''}${card.pending ? ' is-pending' : ''}`}
                 aria-pressed={paneOf(card.tmid) !== null}
                 onClick={() => pick(card.tmid)}
                 data-testid="board-tile"
@@ -290,9 +329,7 @@ export function LiveTab({
                   </span>
                 ) : null}
                 <span className={`t${registered.includes(card.teams[0].id) ? ' own' : ''}`}>{card.teams[0].name}</span>
-                <strong className="s">
-                  {card.won[0]}-{card.won[1]}
-                </strong>
+                <strong className="s">{card.pending ? 'vs' : `${card.won[0]}-${card.won[1]}`}</strong>
                 <span className={`t${registered.includes(card.teams[1].id) ? ' own' : ''}`}>{card.teams[1].name}</span>
                 <span className="g">
                   {game && legs ? (
@@ -300,7 +337,7 @@ export function LiveTab({
                       <span className="live-tag">LIVE</span> {shortSlot(slotLabel(data.season, game.schid))} ・ Leg {legs[0] + legs[1] + 1} ({flip ? `${legs[1]}-${legs[0]}` : `${legs[0]}-${legs[1]}`})
                     </>
                   ) : (
-                    <span className="muted">{card.finished ? '終了' : '休憩中 (次のゲーム待ち)'}</span>
+                    <span className="muted">{card.pending ? '開始前' : card.finished ? '終了' : '休憩中 (次のゲーム待ち)'}</span>
                   )}
                 </span>
                 {people ? <span className="p muted">{people.join(' vs ')}</span> : null}
@@ -391,15 +428,19 @@ function FocusCard({
   const [status, setStatus] = useState<LiveStatus>({ kind: 'idle' });
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [lag, setLag] = useState<number | null>(null);
-  const [orders, setOrders] = useState<CardOrder[] | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const ages = useRef<number[]>([]);
   const previous = useRef<LiveState | null>(null);
   const names: [string, string] = [card.teams[0].name, card.teams[1].name];
 
+  // A card not started yet is not followed by `match/live` (n01 has nothing to say of it): its
+  // start is checked every 30 s (and the board shows it once a game row exists).
+  const started = useCardStart(api, card.tmid, !!card.pending);
+  const following = !card.pending || started;
+
   // The card in progress is followed by `match/live` (tmid): 1.5 s, paused when hidden.
   useEffect(() => {
-    if (card.finished) return;
+    if (card.finished || !following) return;
     const poller = new LivePoller(liveApi, { tmid: card.tmid }, {
       maxRequests: 20_000,
       onState: (state) => {
@@ -437,34 +478,31 @@ function FocusCard({
       document.removeEventListener('visibilitychange', onVisibility);
       poller.stop();
     };
-  }, [card.tmid, card.finished, liveApi]);
+  }, [card.tmid, card.finished, following, liveApi]);
   // 対戦が進行中の間、画面の自動スリープを防ぐ (終了はポーラーの判定: `end_schedule`、または
   // 1 ゲームの対戦の終了)。ゲームの合間も保持し、再試行中は最後に確認した状態に従う。
   // ポーラーが取得上限 (`budget`) で止まったら解除する。
-  useScreenWake(!card.finished && status.kind !== 'finished' && status.kind !== 'budget' && !(live && (live.cardEnded || (!live.isSchedule && live.gameEnded))));
+  // 開始前のカードを開いただけでは防がない (最初のゲームが始まってから)。
+  useScreenWake(following && !card.finished && status.kind !== 'finished' && status.kind !== 'budget' && !(live && (live.cardEnded || (!live.isSchedule && live.gameEnded))));
 
-  // Who plays which game: read once, again every 2 minutes while the card runs.
-  useEffect(() => {
-    let alive = true;
-    const load = (): void => {
-      api
-        .cardOrders(data.season.tournamentId, card.tmid)
-        .then((list) => alive && setOrders(list))
-        .catch(() => alive && setOrders((held) => held ?? []));
-    };
-    load();
-    const timer = card.finished ? null : setInterval(load, 120_000);
-    return () => {
-      alive = false;
-      if (timer) clearInterval(timer);
-    };
-  }, [api, card.tmid, card.finished, data.season.tournamentId]);
+  // Who plays which game (the whole card in one read): every 30 s until the card is over. A card
+  // over needs no plan (its games are played or never will be).
+  const cardOver = card.finished || !!(live && live.cardEnded);
+  const orders = useCardOrders(api, data.season.tournamentId, cardOver ? null : card.tmid, { poll: !cardOver });
 
   const schedule = slotsFor(data.season, card.divisionIndex);
+  const planned = useMemo(
+    () => (orders.rows ? planCard(orders.rows, { tmid: card.tmid, teamIds: [card.teams[0].id, card.teams[1].id], schids: schedule.map((slot) => slot.schid) }) : null),
+    // The schedule is the season's (stable) list for the division: the season and division stand for it.
+    [orders.rows, card.tmid, card.teams[0].id, card.teams[1].id, data.season, card.divisionIndex],
+  );
   const flipOf = (game: GameRow): boolean => game.sides[0].teamId === card.teams[1].id;
   const bySchid = new Map(card.games.map((game) => [game.schid, game]));
   const currentSchid = live && !live.gameEnded ? live.schid : card.current?.schid ?? null;
-  const selected = picked ?? currentSchid ?? card.games[card.games.length - 1]?.schid ?? null;
+  // The game picked before it started has started: it is followed again (its live view, then the
+  // card's next game as usual). Another game starting leaves the pick alone.
+  if (picked !== null && live && !live.gameEnded && live.schid === picked) setPicked(null);
+  const selected = picked ?? currentSchid ?? card.games[card.games.length - 1]?.schid ?? schedule[0]?.schid ?? null;
   // ハリマル (観戦リアクション): 同じ状態を渡すだけ (取得は増やさない)。2 カード表示では左 (主たる対象) だけ。
   // ライブに追従している間だけ (別のゲームを選んで開いている間は渡さない。ゲームの終了・対戦の終了も追従のまま渡す)。
   const harimaruSource = useHarimaruLive(pane === 'right' || (picked !== null && picked !== live?.schid) ? null : 'watch-live', live, data.season, status);
@@ -510,8 +548,7 @@ function FocusCard({
         )
       : null;
 
-  const orderOf = (teamId: string, schid: string): CardOrder | undefined => orders?.find((order) => order.teamId === teamId && order.schid === schid);
-  const upcoming = schedule.filter((slot) => !bySchid.has(slot.schid));
+  const upcoming = schedule.filter((slot) => !bySchid.has(slot.schid) && slot.schid !== (live && !live.gameEnded ? live.schid : null));
   const minutesPerGame = (() => {
     const done = card.games.filter((game) => game.finished && game.startTime && game.updateTime);
     if (done.length === 0) return null;
@@ -531,27 +568,72 @@ function FocusCard({
   };
   const levels: [PlayerLevel[], PlayerLevel[]] | undefined =
     live && stats.kind === 'ready' ? [live.sides[0].members.map((name) => levelOf(live.sides[0].teamId, name)), live.sides[1].members.map((name) => levelOf(live.sides[1].teamId, name))] : undefined;
-  const withAverage = (teamId: string, members: readonly string[]): string =>
-    members
-      .map((name) => {
-        const average = levelOf(teamId, name).average;
-        return average === null ? name : `${name} (${average.toFixed(1)})`;
-      })
-      .join('・');
+  const withAverage = (teamId: string, name: string): string => {
+    const average = levelOf(teamId, name).average;
+    return average === null ? name : `${name} (${average.toFixed(1)})`;
+  };
   const anyAverage = stats.kind === 'ready' && stats.value.length > 0;
 
   const liveSchid = live && !live.gameEnded ? live.schid : null;
+  // No game started (nothing on the list, nothing live): a 「VS」, never a 0 - 0 score.
+  const notStarted = card.games.length === 0 && !live;
   const showsLive = liveSchid !== null && selected === liveSchid;
   const liveLabel = liveSchid ? slotLabel(data.season, liveSchid) : null;
   const pct = (p: number): string => `${Math.round(p * 100)}%`;
+  const selectedSlot = selected ? schedule.find((slot) => slot.schid === selected) ?? null : null;
+  const planOf = (schid: string) => planStatusOf(orders, planned, schid);
+  // Who plays each game, actual first: the live state, then the board's row, then the plan.
+  const sideNames = (schid: string): [string[], string[]] | null => {
+    if (live && live.schid === schid && (!bySchid.get(schid) || bySchid.get(schid)!.mid === live.mid || !live.gameEnded)) {
+      return liveFlip ? [live.sides[1].members, live.sides[0].members] : [live.sides[0].members, live.sides[1].members];
+    }
+    const game = bySchid.get(schid);
+    if (!game) return null;
+    const sides = flipOf(game) ? [game.sides[1], game.sides[0]] : [game.sides[0], game.sides[1]];
+    return [sides[0].members.map((m) => m.name), sides[1].members.map((m) => m.name)];
+  };
+  const overview: OverviewRow[] = schedule.map((slot) => {
+    const game = bySchid.get(slot.schid);
+    const isLive = liveSchid !== null ? slot.schid === liveSchid : !!game && !game.finished;
+    const actual = sideNames(slot.schid);
+    if (actual) {
+      const legs = game ? (flipOf(game) ? [game.sides[1].legsWon ?? 0, game.sides[0].legsWon ?? 0] : [game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0]) : null;
+      return {
+        schid: slot.schid,
+        label: slot.label,
+        sides: [<NameLines key="a" names={actual[0]} />, <NameLines key="b" names={actual[1]} />],
+        state: isLive ? <span className="live-tag">LIVE</span> : game?.finished && legs ? `${legs[0]} - ${legs[1]}／終了` : '進行中',
+        live: isLive,
+      };
+    }
+    const status = planOf(slot.schid);
+    const plannedGame = planned?.games.get(slot.schid);
+    const sideOf = (index: 0 | 1): React.JSX.Element => {
+      const names = plannedNames(plannedGame, index, status);
+      return names ? <NameLines key={index} names={names.map((name) => withAverage(card.teams[index].id, name))} /> : <span key={index} className="muted">—</span>;
+    };
+    const index = upcoming.findIndex((entry) => entry.schid === slot.schid);
+    return {
+      schid: slot.schid,
+      label: slot.label,
+      sides: [sideOf(0), sideOf(1)],
+      state: cardOver ? '未実施' : `開始前・${status === 'published' ? '確定済み' : PLAN_TEXT[status]}`,
+      live: false,
+      note: !cardOver && minutesPerGame && index >= 0 ? `約${Math.round(minutesPerGame * (index + (card.current || liveSchid ? 1 : 0)))}分後 (推定)` : undefined,
+    };
+  });
 
   return (
     <section className="focus-card" aria-label={`${pane === 'left' ? '左: ' : pane === 'right' ? '右: ' : ''}${names[0]} 対 ${names[1]}`} data-testid="focus-card" data-pane={pane}>
       <header className="focus-head">
         <span className={registered.includes(card.teams[0].id) ? 'own' : ''}>{names[0]}</span>
-        <strong aria-label={`獲得ゲーム ${won[0]} 対 ${won[1]}`}>
-          {won[0]} - {won[1]}
-        </strong>
+        {notStarted ? (
+          <strong aria-label="開始前">VS</strong>
+        ) : (
+          <strong aria-label={`獲得ゲーム ${won[0]} 対 ${won[1]}`}>
+            {won[0]} - {won[1]}
+          </strong>
+        )}
         <span className={registered.includes(card.teams[1].id) ? 'own' : ''}>{names[1]}</span>
       </header>
       <UnitChips
@@ -568,7 +650,7 @@ function FocusCard({
           // unfinished and do not hold the next one yet.
           const isLive = liveSchid !== null ? slot.schid === liveSchid : !!game && !game.finished;
           const legs: [number, number] | null = game ? (flipOf(game) ? [game.sides[1].legsWon ?? 0, game.sides[0].legsWon ?? 0] : [game.sides[0].legsWon ?? 0, game.sides[1].legsWon ?? 0]) : null;
-          return { key: slot.schid, label: slot.label, short: shortSlot(slot.label), legs, winner: cardWinner, live: isLive, playable: !!game || isLive };
+          return { key: slot.schid, label: slot.label, short: shortSlot(slot.label), legs, winner: cardWinner, live: isLive, playable: true, plan: !game && !isLive && !cardOver ? planOf(slot.schid) : undefined };
         })}
       />
 
@@ -592,6 +674,19 @@ function FocusCard({
             status={{ ...liveStatusText(status, card.finished), updated: new Date(live.updateTime).toLocaleTimeString('ja-JP') }}
           />
         </div>
+      ) : null}
+
+      {!selectedGame && !showsLive && selectedSlot ? (
+        <PlannedGameView
+          key={selectedSlot.schid}
+          label={selectedSlot.label}
+          kind={slotKindLabel(selectedSlot)}
+          names={names}
+          status={planOf(selectedSlot.schid)}
+          game={planned?.games.get(selectedSlot.schid) ?? null}
+          orders={cardOver ? null : orders}
+          waiting={!cardOver}
+        />
       ) : null}
 
       {selectedGame && !showsLive ? (
@@ -623,6 +718,22 @@ function FocusCard({
         </section>
       ) : null}
 
+      {/* The order list sits under the game shown, not between the chips and it: on a phone the live
+          leg and the points left stay on the first screen (no scrolling), as they did before. */}
+      <OrderOverview
+        names={names}
+        rows={overview}
+        selected={selected}
+        onPick={(schid) => setPicked(schid === liveSchid ? null : schid)}
+        orders={cardOver ? null : orders}
+        footnote={
+          <>
+            選手名は n01 で両チームのオーダーが確定したものだけを表示します。{anyAverage ? '( ) 内はこのシーズンの平均 (n01 公式)。' : ''}
+            {minutesPerGame ? '「分後」はこの対戦の終了ゲームの平均時間から計算した推定です。' : ''}
+          </>
+        }
+      />
+
       <details className="outlook" data-testid="outlook">
         <summary data-testid="estimate">
           <span>
@@ -637,27 +748,6 @@ function FocusCard({
         <CardTrail steps={trail} names={names} labelOf={(schid) => slotLabel(data.season, schid)} basis="このシーズンの種別ごとの勝率 (このカードを除く) から計算した参考値です。" />
       </details>
 
-      {upcoming.length > 0 ? (
-        <div className="upcoming" data-testid="upcoming">
-          <h3 className="section-mini">このあとの出場予定{minutesPerGame ? ` (1ゲーム 約${Math.round(minutesPerGame)}分)` : ''}</h3>
-          <ol className="plain small-text">
-            {upcoming.map((slot, index) => {
-              const a = orderOf(card.teams[0].id, slot.schid);
-              const b = orderOf(card.teams[1].id, slot.schid);
-              return (
-                <li key={slot.schid}>
-                  <strong>{slot.label}</strong> {a?.members.length ? withAverage(card.teams[0].id, a.members) : '(未提出)'} vs {b?.members.length ? withAverage(card.teams[1].id, b.members) : '(未提出)'}
-                  {minutesPerGame ? <span className="muted"> ・ 約{Math.round(minutesPerGame * (index + (card.current ? 1 : 0)))}分後</span> : null}
-                </li>
-              );
-            })}
-          </ol>
-          <p className="muted small-text">
-            オーダーは n01 に提出された内容。{anyAverage ? '( ) 内はこのシーズンの平均 (n01 公式)。' : ''}時刻はこの対戦の終了ゲームの平均から計算した目安です。
-          </p>
-        </div>
-      ) : null}
-
       {events.length > 0 ? (
         <div className="events" data-testid="events">
           <h3 className="section-mini">出来事</h3>
@@ -671,7 +761,7 @@ function FocusCard({
         </div>
       ) : null}
 
-      {projected ? (
+      {projected && !notStarted ? (
         <div className="projected-block" data-testid="live-standings">
           <h3 className="section-mini">このまま終わった場合の順位 (予測)</h3>
           <ol className="plain small-text">
@@ -695,6 +785,8 @@ function FocusCard({
         <Icon name="refresh" size={14} />{' '}
         {card.finished
           ? 'この対戦は終了しています'
+          : notStarted
+            ? '開始前 ・ 開始を 30 秒ごとに確認中 (画面が非表示の間は停止)'
           : status.kind === 'polling'
             ? '自動更新中'
             : status.kind === 'paused-hidden'

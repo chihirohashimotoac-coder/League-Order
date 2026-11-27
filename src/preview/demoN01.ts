@@ -18,6 +18,43 @@ declare const __PREVIEW_COMMIT__: string;
 const datasets = allFixtureDatasets();
 const START = Date.now();
 
+/** The demo season (ATDO's shape) that has a card live and cards before their first game. */
+const DEMO_TDID = 't_ABvC_5234';
+/**
+ * The demo's cards before their first game (by the fixture's card id), each showing one state of
+ * the planned orders: all confirmed; changing every minute (a player swapped, then taken back); a
+ * card that starts 90 s after the page opens; not confirmed; reads failing every other 45 s; one
+ * team confirmed. The first three play seven games, the last three the B division's five.
+ */
+type PreStage = 'fixed' | 'changing' | 'starts' | 'unfixed' | 'flaky' | 'oneSide';
+const PRE_START: Record<string, PreStage> = {
+  t_ABvC_5234_r5_2: 'fixed',
+  t_ABvC_5234_r6_1: 'changing',
+  t_ABvC_5234_r6_2: 'starts',
+  t_ABvC_5234_r5_4: 'unfixed',
+  t_ABvC_5234_r5_5: 'flaky',
+  t_ABvC_5234_r6_4: 'oneSide',
+};
+const PRE_TITLE: Record<PreStage, string> = {
+  fixed: '全ゲーム確定',
+  changing: 'オーダー変更',
+  starts: '90秒後に開始',
+  unfixed: 'オーダー未確定',
+  flaky: '通信失敗',
+  oneSide: '片側のみ確定',
+};
+/** The card that starts: its first game begins this long after the page opened. */
+const STARTS_AFTER_MS = 90_000;
+
+/** Today's date in JST as a fixture title (the app shows today's cards on the live tab). */
+function todayTitle(): string {
+  const d = new Date(Date.now() + 9 * 3_600_000);
+  return `デモ節 ${d.getUTCMonth() + 1}月${d.getUTCDate()}日`;
+}
+
+/** A failed read (HTTP 503), as n01 answers when it is down. */
+const UNAVAILABLE = Symbol('unavailable');
+
 function raw(operation: string, params: Record<string, string>): unknown | undefined {
   return fixtureResponse({ operation: operation as N01Request['operation'], params }, datasets);
 }
@@ -40,8 +77,14 @@ function normalise(operation: string, params: Record<string, string>, body: unkn
   if (!body || typeof body !== 'object') return body;
   const tdid = params.tdid;
   if (operation === 'league/schedule/get' && tdid) {
-    const b = structuredClone(body) as { schedule?: { lsid: string }[][] };
-    b.schedule?.forEach((cards) => cards.forEach((card) => (card.lsid = short(tdid, card.lsid))));
+    const b = structuredClone(body) as { schedule?: { lsid: string; t?: string }[][] };
+    b.schedule?.forEach((cards) =>
+      cards.forEach((card) => {
+        // The demo's cards before their first game are played today (their fixture says so).
+        if (tdid === DEMO_TDID && PRE_START[card.lsid]) card.t = todayTitle();
+        card.lsid = short(tdid, card.lsid);
+      }),
+    );
     return b;
   }
   if (operation === 'tournament/get' && tdid) {
@@ -63,6 +106,10 @@ function normalise(operation: string, params: Record<string, string>, body: unkn
     }
     b.tournament.lg_result = results as typeof b.tournament.lg_result;
     b.tournament.lg_setting = { ...(b.tournament.lg_setting ?? {}), point_w: 2, point_d: 1, point_l: 0, include_set: 1 };
+    // Names for the games, as n01 leagues give them (the fixture has none): ガロン, ダブルス1 …
+    const setting = b.tournament.lg_setting as { schedule?: SlotLike[]; game_setting?: { schedule?: SlotLike[] }[] };
+    nameSlots(setting.schedule);
+    for (const division of setting.game_setting ?? []) nameSlots(division.schedule);
     return b;
   }
   if (operation === 'match/list' && tdid) {
@@ -79,6 +126,23 @@ function normalise(operation: string, params: Record<string, string>, body: unkn
     return b;
   }
   return body;
+}
+
+interface SlotLike {
+  schid: string;
+  subTitle?: string;
+  num_part: number;
+}
+
+/** 「ガロン」「ダブルス1」「シングルス1」「トリオス」 by the number of players, in schedule order. */
+function nameSlots(slots: SlotLike[] | undefined): void {
+  const count = new Map<number, number>();
+  for (const slot of slots ?? []) {
+    if (slot.subTitle) continue;
+    const n = (count.get(slot.num_part) ?? 0) + 1;
+    count.set(slot.num_part, n);
+    slot.subTitle = slot.num_part >= 4 ? 'ガロン' : slot.num_part === 3 ? (n > 1 ? `トリオス${n}` : 'トリオス') : `${slot.num_part === 2 ? 'ダブルス' : 'シングルス'}${n}`;
+  }
 }
 
 function find(operation: string, params: Record<string, string>): unknown | undefined {
@@ -212,11 +276,123 @@ function liveCard(): LiveCard | null {
 }
 
 const LIVE = liveCard();
+
+interface PreCard {
+  stage: PreStage;
+  /** n01's form: the team ids in code-unit order. */
+  tmid: string;
+  teams: [{ tpid: string; name: string }, { tpid: string; name: string }];
+  slots: SlotLike[];
+}
+
+let preCache: PreCard[] | null = null;
+function preCards(): PreCard[] {
+  if (preCache) return preCache;
+  const schedule = raw('league/schedule/get', { tdid: DEMO_TDID }) as { schedule?: { p: string[]; lsid: string }[][] } | undefined;
+  const doc = find('tournament/get', { tdid: DEMO_TDID }) as (DocLike & { tournament: { lg_setting?: { schedule?: SlotLike[]; game_setting?: { round: number; schedule?: SlotLike[] }[] } } }) | undefined;
+  const names = new Map((doc?.tournament.entry_list ?? []).map((entry) => [entry.tpid, entry.name]));
+  const cards: PreCard[] = [];
+  schedule?.schedule?.forEach((list, division) => {
+    for (const card of list) {
+      const stage = PRE_START[card.lsid];
+      if (!stage || !card.p[0] || !card.p[1]) continue;
+      const slots = doc?.tournament.lg_setting?.game_setting?.find((entry) => entry.round === division)?.schedule ?? doc?.tournament.lg_setting?.schedule ?? [];
+      const ids = [...card.p].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      cards.push({
+        stage,
+        tmid: `${DEMO_TDID}_lg_${division}_${short(DEMO_TDID, card.lsid)}_${ids[0]}_${ids[1]}`,
+        teams: [
+          { tpid: card.p[0], name: names.get(card.p[0]) ?? card.p[0] },
+          { tpid: card.p[1], name: names.get(card.p[1]) ?? card.p[1] },
+        ],
+        slots,
+      });
+    }
+  });
+  preCache = cards;
+  return cards;
+}
+
+const GIVEN = ['一郎', '次郎', '三郎', '四郎', '五郎'];
+/** The members of a planned game: made-up names, `changed` swaps the second singles player for a helper. */
+function plannedMembers(card: PreCard, side: 0 | 1, slotIndex: number, changed: boolean): { oid: string; opid: string; oname: string }[] {
+  const slot = card.slots[slotIndex];
+  const team = card.teams[side];
+  if (changed && side === 0 && slot.subTitle === 'シングルス2') return [{ oid: `${team.tpid}h`, opid: '', oname: `${team.name}・助っ人（助っ人）` }];
+  return Array.from({ length: slot.num_part }, (_, k) => {
+    const n = (slotIndex + k) % GIVEN.length;
+    return { oid: `${team.tpid}${n}`, opid: `D-${team.tpid}-${n}`, oname: `${team.name}・${GIVEN[n]}` };
+  });
+}
+
+/** `team/order/list` of a card before its first game, as its stage says now. */
+function preOrders(card: PreCard, now: number): unknown {
+  if (card.stage === 'flaky' && Math.floor((now - START) / 45_000) % 2 === 1) return UNAVAILABLE;
+  const minute = Math.floor((now - START) / 60_000) % 3;
+  const changed = card.stage === 'changing' && minute >= 1;
+  const fixOf = (side: 0 | 1): number => (card.stage === 'unfixed' ? 0 : card.stage === 'oneSide' ? (side === 0 ? 1 : 0) : card.stage === 'changing' && minute === 2 && side === 1 ? 0 : 1);
+  return {
+    result: 0,
+    list: card.slots.flatMap((slot, index) => ([0, 1] as const).map((side) => ({ tmid: card.tmid, tpid: card.teams[side].tpid, schid: slot.schid, fix: fixOf(side), order: plannedMembers(card, side, index, changed) }))),
+  };
+}
+
+const startedCard = (now: number): PreCard | null => (now - START >= STARTS_AFTER_MS ? (preCards().find((card) => card.stage === 'starts') ?? null) : null);
+
+/** The started card's first game, in progress (a still picture: its first visits). */
+function startedLive(card: PreCard): Record<string, unknown> {
+  const updateTime = START + STARTS_AFTER_MS + 20_000;
+  const slot = card.slots[0];
+  const start = slot.subTitle === 'ガロン' ? 1001 : 501;
+  const throws = [
+    { p: 0, r: 1, score: 100, left: start - 100, darts: 3 },
+    { p: 1, r: 1, score: 85, left: start - 85, darts: 3 },
+    { p: 0, r: 2, score: 60, left: start - 160, darts: 3 },
+  ];
+  return {
+    result: 0,
+    changed: 1,
+    mid: `${card.tmid}_demo0`,
+    tdid: DEMO_TDID,
+    tmid: card.tmid,
+    schid: slot.schid,
+    title: `デモ ${slot.subTitle ?? ''}`,
+    match_type: '01',
+    updateTime,
+    end_match: 0,
+    end_schedule: 0,
+    format: { limit_leg: 1, limit_set: card.slots.length, schedule: 1, start_score: start },
+    show_sets: 1,
+    sets: [0, 0],
+    legs: [0, 0],
+    current_leg: 0,
+    leg_count: 1,
+    players: ([0, 1] as const).map((side) => ({ name: card.teams[side].name, tpid: card.teams[side].tpid, order: plannedMembers(card, side, 0, false).map((m) => ({ oid: m.oid, name: m.oname })) })),
+    stats: [{ avg: 80, score: 160, darts: 6 }, { avg: 85, score: 85, darts: 3 }],
+    leg: { leg: 0, first: 0, end: 0, winner: null, time: updateTime, start: [start, start], left: [start - 160, start - 85], thrower: 1, round: 2, throws },
+  };
+}
+
+function startedRow(card: PreCard): Record<string, unknown> {
+  const state = startedLive(card);
+  return {
+    mid: state.mid,
+    tdid: DEMO_TDID,
+    tmid: card.tmid,
+    schid: state.schid,
+    match_type: '01',
+    title: state.title,
+    startTime: Math.floor((START + STARTS_AFTER_MS) / 1000),
+    updateTime: state.updateTime,
+    endMatch: 0,
+    statsData: ([0, 1] as const).map((side) => ({ name: card.teams[side].name, tpid: card.teams[side].tpid, order: plannedMembers(card, side, 0, false), winLegs: 0, allScore: side === 0 ? 160 : 85, allDarts: side === 0 ? 6 : 3 })),
+  };
+}
 const VISITS = [60, 45, 100, 81, 26, 140, 41, 57, 85, 60, 100, 45, 60, 21, 40, 32, 60, 100, 36, 16];
 const STEP_MS = 4000;
-/** The demo card: four games already played (winners A, B, A, A), the fifth live. */
-const DONE_WINNERS: (0 | 1)[] = [0, 1, 0, 0];
-const LIVE_SLOT = 4;
+/** The demo card: three games already played (winners A, B, A), the fourth live, three to come. */
+const DONE_WINNERS: (0 | 1)[] = [0, 1, 0];
+const LIVE_SLOT = 3;
 const member = (side: number, slot: number, k: number): string => `デモ${side === 0 ? 'A' : 'B'}${slot + 1}-${k + 1}`;
 const members = (side: number, slot: number): { oid: string; oname: string; name: string }[] =>
   Array.from({ length: LIVE?.slots[slot]?.numPart ?? 1 }, (_, k) => ({ oid: `d${side}${slot}${k}`, oname: member(side, slot, k), name: member(side, slot, k) }));
@@ -380,7 +556,8 @@ function fixtureThrows(mid: string): unknown {
 }
 
 function todayRows(): Record<string, unknown>[] {
-  return LIVE ? [...DONE_WINNERS.map((_, slot) => doneRow(slot)), liveRow(Date.now())!] : [];
+  const started = startedCard(Date.now());
+  return [...(LIVE ? [...DONE_WINNERS.map((_, slot) => doneRow(slot)), liveRow(Date.now())!] : []), ...(started ? [startedRow(started)] : [])];
 }
 
 /**
@@ -450,11 +627,27 @@ function respond(operation: string, params: Record<string, string>): unknown | u
     return fixtureThrows(params.mid);
   }
   if (operation === 'team/order/list') {
+    const pre = preCards().find((card) => card.tmid === params.tmid);
+    if (pre) return preOrders(pre, Date.now());
     if (!LIVE || params.tmid !== LIVE.tmid) return { result: 0, list: [] };
     return {
       result: 0,
       list: LIVE.slots.flatMap((slot, index) => [0, 1].map((side) => ({ tmid: LIVE!.tmid, tpid: LIVE!.sides[side].tpid, schid: slot.schid, fix: 1, order: members(side, index) }))),
     };
+  }
+  if (operation === 'match/live' && params.tmid && preCards().some((card) => card.tmid === params.tmid)) {
+    // Nothing to follow before the first game (n01: "match not found"); the started card's game after.
+    const started = startedCard(Date.now());
+    if (!started || started.tmid !== params.tmid) return undefined;
+    const state = startedLive(started);
+    if (params.since && Number(params.since) >= Number(state.updateTime)) return { result: 0, changed: 0, mid: state.mid, updateTime: state.updateTime };
+    return state;
+  }
+  if (operation === 'match/throws' && params.mid.endsWith('_demo0') && preCards().some((card) => params.mid === `${card.tmid}_demo0`)) {
+    const started = startedCard(Date.now());
+    if (!started) return undefined;
+    const state = startedLive(started);
+    return { result: 0, changed: 1, mid: params.mid, match_type: '01', end_match: 0, updateTime: state.updateTime, leg_data: [state.leg] };
   }
   if (operation === 'match/live') {
     const state = liveState(Date.now());
@@ -470,6 +663,7 @@ async function answer(operation: string, params: Record<string, string>): Promis
   await new Promise((resolve) => setTimeout(resolve, 120));
   const body = respond(operation, params);
   if (body === undefined) throw new N01Error('notFound', 'n01 にデータが見つかりませんでした。', operation, 404);
+  if (body === UNAVAILABLE) return UNAVAILABLE;
   return structuredClone(body);
 }
 
@@ -487,6 +681,7 @@ export function installDemoN01(base: string): void {
     const params = Object.fromEntries(parsed.searchParams.entries());
     try {
       const body = await answer(operation, params);
+      if (body === UNAVAILABLE) return new Response(JSON.stringify({ result: -1, error: 'unavailable (demo)' }), { status: 503, headers: { 'content-type': 'application/json' } });
       return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
     } catch {
       return new Response(JSON.stringify({ result: -1, error: 'not found' }), { status: 404, headers: { 'content-type': 'application/json' } });
@@ -494,7 +689,7 @@ export function installDemoN01(base: string): void {
   };
   const banner = document.createElement('div');
   banner.setAttribute('role', 'note');
-  banner.textContent = `レビュー用プレビュー (commit ${__PREVIEW_COMMIT__}): n01 には接続せず、架空の模擬データを表示しています (ライブは自動で進む模擬試合)。`;
+  banner.textContent = `レビュー用プレビュー (commit ${__PREVIEW_COMMIT__}): n01 には接続せず、架空の模擬データを表示しています (ライブは自動で進む模擬試合。ATDO の本日の開始前カード: ${Object.values(PRE_TITLE).join('・')})。`;
   banner.style.cssText = 'position:sticky;top:0;z-index:50;padding:6px 16px;font-size:12px;background:#172026;color:#fff;text-align:center';
   document.body.prepend(banner);
 }

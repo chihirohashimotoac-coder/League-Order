@@ -106,7 +106,9 @@ test('an earlier game of the card opens in place; the live game stays one tap aw
   await expect(games.nth(1)).toContainText('1-2');
   await expect(games.nth(3)).toContainText('LIVE');
   await expect(games.nth(3)).toHaveAttribute('aria-pressed', 'true');
-  await expect(games.nth(4)).toBeDisabled();
+  // 2026-11-27: a game still to come opens too (its planned players); its chip says how far its order is.
+  await expect(games.nth(4)).toBeEnabled();
+  await expect(games.nth(4)).toContainText('予定');
 
   await games.nth(1).click();
   const block = focus.getByTestId('game-block');
@@ -182,7 +184,12 @@ test('the players’ season figures sit with the scoreboard and open the player 
   await expect(levels).toContainText('60.00');
   await expect(levels).toContainText('Leg 13/30');
   // Who plays next, with their season average.
-  await expect(focus.getByTestId('upcoming')).toContainText('シングルス2 井上 次郎 (60.0) vs 木村 守 (49.1)');
+  // 2026-11-27: 「このあとの出場予定」 is now the order list (オーダー一覧, closed at first), with the same averages.
+  await focus.getByTestId('order-overview-toggle').click();
+  const sg02 = focus.getByTestId('order-overview-panel').locator('tbody').filter({ hasText: 'シングルス2' });
+  await expect(sg02).toContainText('井上 次郎 (60.0)');
+  await expect(sg02).toContainText('木村 守 (49.1)');
+  await focus.getByTestId('order-overview-toggle').click();
   await levels.getByRole('button', { name: '加藤 健' }).click();
   await expect(page.getByRole('dialog')).toContainText('加藤 健');
 });

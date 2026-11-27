@@ -341,9 +341,13 @@ export class MatchesApi {
     return this.read('match/throws', request, parseThrows);
   }
 
-  /** The orders of one card (who plays which game), as submitted so far. */
-  cardOrders(tournamentId: string, tmid: string): Promise<CardOrder[]> {
-    return this.read('team/order/list', this.fresh('team/order/list', { tdid: tournamentId, tmid }), parseOrders);
+  /**
+   * The orders of one card (who plays which game), as submitted so far: one request for every game
+   * of the card (never one per game). A polling read; two screens asking for the same card at once
+   * share one request.
+   */
+  cardOrders(tournamentId: string, tmid: string, signal?: AbortSignal): Promise<CardOrder[]> {
+    return this.read('team/order/list', this.fresh('team/order/list', { tdid: tournamentId, tmid }, signal), parseOrders);
   }
 
   /** n01's own season figures per team member of a **team** event (`player_stats_list`). */

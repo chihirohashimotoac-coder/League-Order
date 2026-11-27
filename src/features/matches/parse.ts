@@ -728,15 +728,31 @@ export function mergeLegs(held: readonly ThrowLeg[], fresh: readonly ThrowLeg[])
 // team/order/list — who plays which game of a card
 // ---------------------------------------------------------------------------
 
+export interface CardOrderMember {
+  oid: string | null;
+  opid: string | null;
+  /** `oname`; `''` when n01 sent the place without a name (a member it could not find, or none chosen yet). */
+  name: string;
+}
+
 export interface CardOrder {
+  /** The card the row is of (`tmid`), `null` when n01 sent none. */
+  tmid: string | null;
   teamId: string;
   schid: string;
+  /** `fix === 1` (n01: オーダー確定済み). */
   fixed: boolean;
+  /** `fix` as sent (`null` when absent or not a number): any value but 1 is not "confirmed". */
+  fix: number | null;
+  /** Names of the members, in n01's order, blanks left out (as read before 2026-11-27). */
   members: string[];
+  /** Every place of `order`, in n01's order, blanks kept (a place n01 holds without a name). */
+  entries: CardOrderMember[];
 }
 
 export function parseOrders(raw: unknown): CardOrder[] {
   const body = ok('team/order/list', raw);
+  if (body.list !== undefined && !Array.isArray(body.list)) throw new MatchSchemaError('team/order/list', 'team/order/list: オーダー一覧 (list) が配列ではありません。');
   const list = Array.isArray(body.list) ? body.list : Array.isArray(body.order_list) ? body.order_list : [];
   const orders: CardOrder[] = [];
   for (const row of list) {
@@ -744,10 +760,11 @@ export function parseOrders(raw: unknown): CardOrder[] {
     const teamId = str(row.tpid);
     const schid = str(row.schid);
     if (!teamId || !schid) continue;
-    const members = Array.isArray(row.order)
-      ? row.order.map((entry) => (isRec(entry) ? str(entry.oname) ?? '' : '')).filter((name) => name !== '')
+    const entries: CardOrderMember[] = Array.isArray(row.order)
+      ? row.order.map((entry) => (isRec(entry) ? { oid: str(entry.oid), opid: str(entry.opid), name: (str(entry.oname) ?? '').trim() } : { oid: null, opid: null, name: '' }))
       : [];
-    orders.push({ teamId, schid, fixed: num(row.fix) === 1, members });
+    const fix = num(row.fix);
+    orders.push({ tmid: str(row.tmid), teamId, schid, fixed: fix === 1, fix, members: entries.map((entry) => entry.name).filter((name) => name !== ''), entries });
   }
   return orders;
 }
