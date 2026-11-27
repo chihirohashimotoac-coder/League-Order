@@ -269,6 +269,8 @@ export interface MotionParams {
    */
   textTouchWeight: number;
   liveRoomWeight: number;
+  /** 観戦中に、いまの位置にリアクションの余白がなく、余白のある着地点へ移れるとき、移る確率 (1 回の行動の選び方ごと)。 */
+  liveMoveChance: number;
   /** 上端から入るとき、端から足場までの落ちる高さの上限 (CSS px)。 */
   entryMaxDrop: number;
   /** 下端から入るとき、端から上辺までのよじ登る高さの上限 (CSS px)。 */
@@ -311,7 +313,8 @@ export const DEFAULT_MOTION: MotionParams = {
   entryMaxGap: 24,
   hopMaxGap: 40,
   textTouchWeight: 0.5,
-  liveRoomWeight: 3,
+  liveRoomWeight: 6,
+  liveMoveChance: 0.7,
   entryMaxDrop: 240,
   entryMaxClimb: 240,
   edgeOverhang: 8,

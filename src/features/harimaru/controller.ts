@@ -148,7 +148,7 @@ export interface LiveParams {
   pendingCheckMs: number;
 }
 
-export const DEFAULT_LIVE: LiveParams = { scoreCooldownMs: 4_000, pendingMs: 4_500, pendingCheckMs: 200, roomSearchPx: 80 };
+export const DEFAULT_LIVE: LiveParams = { scoreCooldownMs: 4_000, pendingMs: 4_500, pendingCheckMs: 200, roomSearchPx: 140 };
 /** この優先度以下 (数が小さい) は重要な出来事: 得点のクールダウンを受けず、少し待ってでも演出する。 */
 const IMPORTANT_PRIORITY = 4;
 
@@ -180,6 +180,8 @@ const NEEDS_SHEET: ReadonlySet<MotionId> = new Set<MotionId>([
 /** カードの縁の下 (カードの内側) で、体の下にさらに空ける余白 (CSS px)。 */
 const EDGE_CLEARANCE = 2;
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+/** 観戦リアクションのエフェクトがかからないようにする操作部品。 */
+const EFFECT_AVOID = 'button, a[href], select, input, textarea, [role="button"], [role="tab"], [tabindex="0"], [contenteditable="true"]';
 const HISTORY_LENGTH = 6;
 const MAX_ANIMATION_WAITS = 10;
 /** この CSS プロパティのトランジションは要素の位置・大きさを変える (色・影は数えない)。 */
@@ -251,6 +253,7 @@ export class HarimaruController {
   private liveWatching = false;
   /** 観戦リアクションの余白を探して歩いている途中か (1 つの出来事で 1 回だけ)。 */
   private seekingRoom = false;
+  private liveObstacleCache: { t: number; y: number; list: Rect[] } | null = null;
   private pendingTimer: number | null = null;
 
   /** 行動に属するタイマー (中断で消す)。 */
@@ -1217,7 +1220,7 @@ export class HarimaruController {
     }
     // エフェクトを出している途中に、その範囲へ文字・操作部品が入ってきたら、演出をやめる (重ねない)。
     const showing = this.liveNow?.id;
-    if (showing && !this.reactionRoom(showing, this.dir)) {
+    if (showing && !this.reactionRoom(showing, this.dir, this.x, this.top, true)) {
       this.log('live:stopped:room');
       this.endLive();
     }
@@ -1697,6 +1700,23 @@ export class HarimaruController {
     // 安全な候補が少ない (直前に渡った組しかない) ときは、待機や別の行動を選びやすくする。
     const score = moves.reduce((sum, o) => sum + o.penalty, 0);
     const behavior = score > 0 && score < 2 ? { ...this.behavior, weights: { ...this.behavior.weights, jump: this.behavior.weights.jump * (score / 2) } } : this.behavior;
+    // 観戦中に、いまの位置では大きいリアクション (180 のボード) の体とエフェクトが収まらない: 同じ足場の中に収まる
+    // 位置があれば歩いて寄り、なければ収まる着地点への移動を選びやすくする (出来事を待たずに備える)。
+    if (this.liveWatching && !this.liveNow && !this.reactionRoom('surprise180', this.dir) && !this.reactionRoom('surprise180', this.dir > 0 ? -1 : 1)) {
+      const spot = this.roomSpot('surprise180');
+      if (spot && Math.abs(spot.x - this.x) >= 6) {
+        this.log('live:prepare:walk');
+        this.run({ action: 'walk', durationMs: (Math.abs(spot.x - this.x) / this.behavior.walkSpeed) * 1000, targetX: spot.x });
+        return;
+      }
+      const roomy = moves.filter((o) => o.plan.end && ([-1, 1] as const).some((d) => this.reactionRoom('surprise180', d, o.plan.end!.x, o.plan.end!.top)));
+      const chosen = roomy.length > 0 && this.rng() < this.motion.liveMoveChance ? pickPlan(this.rng, roomy) : null;
+      if (chosen) {
+        this.log('live:prepare:move');
+        this.move(chosen.plan);
+        return;
+      }
+    }
     const decision = decideNext({ ...input, canJump: moves.length > 0 }, this.rng, behavior);
     if (decision.action === 'jump') {
       const chosen = pickPlan(this.rng, moves);
@@ -2481,7 +2501,7 @@ export class HarimaruController {
       this.log(`live:${kind}:skipped:asset`);
       return false;
     }
-    if (!this.reactionRoom(id, this.dir)) {
+    if (!this.reactionRoom(id, this.dir, this.x, this.top, true)) {
       // 向きを変えれば収まる: 振り向いてから演出する (180 のボードは右向きでも反転しない)。
       if (this.reactionRoom(id, this.dir > 0 ? -1 : 1)) {
         this.dir = this.dir > 0 ? -1 : 1;
@@ -2560,6 +2580,20 @@ export class HarimaruController {
    * リアクションを出す余白: 全コマの本体 (移動を含む) とエフェクトの描かれる範囲を包む矩形が、見えている範囲に
    * 収まり、文字・操作部品・色の付いた要素に重ならないか。範囲の下端は足場の上辺 (エフェクトは足元より下に出ない)。
    */
+  /** 範囲にかかる操作部品の箱 (ページ座標)。透明に重ねた選択欄・入力欄も数える (見た目の部品の上に重ねてあるため)。 */
+  private controlBoxes(region: Rect): Rect[] {
+    const sx = this.win.scrollX;
+    const sy = this.win.scrollY;
+    const out: Rect[] = [];
+    for (const el of Array.from(this.root.querySelectorAll(EFFECT_AVOID))) {
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      const box = { left: r.left + sx, top: r.top + sy, right: r.right + sx, bottom: r.bottom + sy };
+      if (box.right > region.left && box.left < region.right && box.bottom > region.top && box.top < region.bottom) out.push(box);
+    }
+    return out;
+  }
+
   /** いまの足場の上で、体とエフェクトが収まる近い位置と向き (左右 roomSearchPx 以内、近い順)。なければ null。 */
   private roomSpot(id: ReactionId): { x: number; dir: -1 | 1 } | null {
     const segment = this.currentSegment();
@@ -2576,7 +2610,23 @@ export class HarimaruController {
     return null;
   }
 
-  private reactionRoom(id: ReactionId, dir: -1 | 1, atX = this.x, atTop = this.top): boolean {
+  /**
+   * 観戦リアクションの余白の確認に使う障害物 (見えている範囲の文字・部品・入力欄など ＋ 操作部品の箱)。下見 (着地点の
+   * 選び方・余白のある位置の探索) では 250ms・同じスクロール位置の間は使い回す。演出を始める直前は集め直す。
+   */
+  private liveObstacles(fresh: boolean): Rect[] {
+    const view = this.view;
+    if (!view) return [];
+    const t = this.now();
+    const cached = this.liveObstacleCache;
+    if (!fresh && cached && t - cached.t <= 250 && cached.y === this.win.scrollY) return cached.list;
+    const region: Rect = { left: view.left, right: view.right, top: view.top, bottom: view.bottom };
+    const list = [...this.obstaclesIn(this.root, [region], this.win, undefined, this.containers), ...this.controlBoxes(region)];
+    this.liveObstacleCache = { t, y: this.win.scrollY, list };
+    return list;
+  }
+
+  private reactionRoom(id: ReactionId, dir: -1 | 1, atX = this.x, atTop = this.top, fresh = false): boolean {
     const view = this.view;
     if (!view || !this.placed) return false;
     const spec = REACTIONS[id];
@@ -2601,7 +2651,9 @@ export class HarimaruController {
     right = Math.max(right, atX + effectRight + 1);
     upper = Math.min(upper, top + box.top - 1);
     const region: Rect = { left, right, top: upper, bottom: atTop };
-    const obstacles = this.obstaclesIn(this.root, [region], this.win, undefined, this.containers);
+    // エフェクトは、文字・アイコン・入力欄などに加えて、操作部品 (透明に重ねた選択欄を含む) の箱にもかからない
+    // (体は重なってよいが、大きいエフェクトで操作部品を隠さない)。
+    const obstacles = this.liveObstacles(fresh);
     if (!boxIsClear({ ...region, bottom: atTop - 0.5 }, obstacles, view)) return false;
     // 足元より下 (カードの面) に出るエフェクト (敗北の砂ぼこり): その範囲がカードの内側の余白に収まるときだけ。
     if (box.bottom > SPRITE.height) {
