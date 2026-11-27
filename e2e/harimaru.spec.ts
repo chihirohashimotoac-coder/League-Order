@@ -404,7 +404,7 @@ test('長押し・ドラッグでは反応しない', async ({ page }, info) => 
   expect(await actions()).not.toContain('turn');
 });
 
-test('どの画面でも、入力欄・固定バー・重要な表示に重ならない (メンバー・フォーマット・履歴・設定・その他・観戦)', async ({ page }, info) => {
+test('どの画面でも、入力欄・固定バー・重要な表示に重ならない (メンバー・フォーマット・履歴・設定・その他・観戦)', async ({ page }) => {
   test.setTimeout(180_000);
   await openSampleHome(page);
   const screens: [string, () => Promise<void>][] = [
@@ -431,14 +431,12 @@ test('どの画面でも、入力欄・固定バー・重要な表示に重な�
     // 画面に 1 体だけ。
     expect(await page.getByTestId('harimaru').count()).toBeLessThanOrEqual(1);
   }
-  // スマホは観戦 (試合のないとき) 以外の画面に出る。PC (幅 1100) はメンバー・フォーマット・履歴・設定・その他の列が
-  // 狭く (左右の空白 182px)、左右の端から入れるのはオーダー・観戦 (とホーム) だけ。
-  expect(shownSomewhere, '足場のある画面のうち、いくつかには出る').toBeGreaterThanOrEqual(info.project.name === 'desktop' ? 2 : 3);
+  // 列の狭い画面も、下部ナビ・固定操作バーの上辺から入れる。
+  expect(shownSomewhere, '足場のある画面のうち、いくつかには出る').toBeGreaterThanOrEqual(3);
 });
 
-test('入力欄にフォーカスがある間は休み、離れると戻る', async ({ page }, info) => {
-  // PC のメンバーの画面はコンテンツの列が狭く (幅 1100 で左右の空白 182px)、左右の端から入れない。
-  test.skip(info.project.name === 'desktop', 'PC のメンバーの画面には左右の端から入れない (スマホで確かめる)');
+test('入力欄にフォーカスがある間は休み、離れると戻る', async ({ page }) => {
+  // PC のメンバーの画面は、コンテンツの列が狭くても、固定操作バーの上辺から入れる。
   await openSampleHome(page);
   await tab(page, 'メンバー').click();
   await page.evaluate(() => window.scrollTo(0, 0));

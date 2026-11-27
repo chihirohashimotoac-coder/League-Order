@@ -32,8 +32,11 @@ const INTERACTIVE_ROLES = new Set([
 ]);
 /** 画面に固定された帯 (この範囲にはキャラクターを出さない)。 */
 const FIXED_BARS = '.app-header, .tab-bar, .action-bar';
-/** 足場にする、画面に固定された要素 (下部ナビ)。上辺の上に体の高さの余白があり、操作バーに覆われていない区間だけ使う。 */
-const FIXED_PLATFORMS = '.tab-bar';
+/**
+ * 足場にする、画面に固定された要素 (下部ナビ・固定操作バー)。上辺が見えている (ほかの固定の要素に覆われていない)
+ * 区間だけ使う。固定操作バーがあれば、そのすぐ下の下部ナビの上辺は操作バーに覆われるので使わない。
+ */
+const FIXED_PLATFORMS = '.tab-bar, .action-bar';
 
 function toPage(rect: DOMRect, sx: number, sy: number): Rect {
   return { left: rect.left + sx, top: rect.top + sy, right: rect.right + sx, bottom: rect.bottom + sy };
@@ -446,7 +449,7 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
     }
   }
 
-  // 画面に固定された下部ナビの上辺 (root の外)。見えていて、上辺が覆われていない区間だけ。座標は計測したときの
+  // 画面に固定された下部ナビ・固定操作バーの上辺 (root の外のことがある)。見えていて、上辺が覆われていない区間だけ。座標は計測したときの
   // ページ座標 (fixed: 立っている間のスクロールは controller.ts が画面に対して止めて合わせる)。
   for (const el of Array.from(doc.querySelectorAll(FIXED_PLATFORMS))) {
     const rect = el.getBoundingClientRect();

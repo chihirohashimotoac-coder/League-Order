@@ -298,5 +298,35 @@ describe('measureTerrain: 見えているデザインはすべて足場の候補
       nav.remove();
     }
   });
+
+  it('固定操作バー (.action-bar) の上辺も固定の足場にする。そのすぐ下の下部ナビの上辺は操作バーに覆われて使わない', async () => {
+    const { measureTerrain, invalidateStyleCache } = await import('./terrainDom');
+    invalidateStyleCache();
+    const root = document.createElement('main');
+    const bar = document.createElement('div');
+    bar.className = 'action-bar';
+    bar.style.position = 'fixed';
+    bar.style.backgroundColor = 'rgb(255, 255, 255)';
+    bar.getBoundingClientRect = rect(0, 640, 1024, 706);
+    const nav = document.createElement('nav');
+    nav.className = 'tab-bar';
+    nav.style.position = 'fixed';
+    nav.style.backgroundColor = 'rgb(255, 255, 255)';
+    nav.getBoundingClientRect = rect(0, 703, 1024, 768);
+    document.body.append(root, bar, nav);
+    const original = document.elementFromPoint;
+    // ナビの上辺 (y 703〜) は、操作バー (下端 706) に覆われている。
+    document.elementFromPoint = (_x: number, y: number) => (y < 706 ? bar : nav);
+    try {
+      const { elements, platforms } = measureTerrain(root, '', window);
+      expect(elements).toEqual([bar]);
+      expect(platforms).toEqual([{ left: 0, right: 1_024, top: 640, inset: 0, fixed: true }]);
+    } finally {
+      document.elementFromPoint = original;
+      root.remove();
+      bar.remove();
+      nav.remove();
+    }
+  });
 });
 
