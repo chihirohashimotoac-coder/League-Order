@@ -16,6 +16,10 @@ export interface MeasuredTerrain extends TerrainInput {
   containers?: ReadonlySet<Element>;
   /** いま見えている範囲 (ページ座標)。固定ヘッダー・下部ナビ・固定操作バーと、ピンチズームで見えない部分を除く。 */
   view: { top: number; bottom: number; left: number; right: number };
+  /** 足場の要素の箱 (ページ座標、elements と同じ順)。側面・角の判定に使う。 */
+  boxes?: readonly Rect[];
+  /** 文書の下端 (ページ座標)。キャラクターをこれより下に置かない (スクロールできる範囲を広げない)。 */
+  docBottom?: number;
 }
 
 const SOLID_TAGS = new Set([
@@ -28,6 +32,11 @@ const INTERACTIVE_ROLES = new Set([
 ]);
 /** 画面に固定された帯 (この範囲にはキャラクターを出さない)。 */
 const FIXED_BARS = '.app-header, .tab-bar, .action-bar';
+/**
+ * 足場にする、画面に固定された要素 (下部ナビ・固定操作バー)。上辺が見えている (ほかの固定の要素に覆われていない)
+ * 区間だけ使う。固定操作バーがあれば、そのすぐ下の下部ナビの上辺は操作バーに覆われるので使わない。
+ */
+const FIXED_PLATFORMS = '.tab-bar, .action-bar';
 
 function toPage(rect: DOMRect, sx: number, sy: number): Rect {
   return { left: rect.left + sx, top: rect.top + sy, right: rect.right + sx, bottom: rect.bottom + sy };
@@ -118,14 +127,50 @@ export function containersOf(elements: readonly Element[], root: Element): Set<E
 }
 
 /**
- * 範囲 (ページ座標の矩形の一覧) に重なる障害物を集める。
- * 操作部品・画像・色や枠の付いた要素・スクロール領域・疑似要素の内容がある要素は箱全体、それ以外は直下の文字の矩形。
- * @param seeThrough カードの内側を調べるとき、そのカード自身 (背景・枠・装飾の疑似要素) は障害物にしない。
- *   カード直下の文字と、カードの中の要素はふつうに数える。
- * @param containers 足場を包む入れ物 (containersOf)。色・枠・スクロール領域でも箱全体は数えない (疑似要素の内容が
- *   ある入れ物は数える)。直下の文字はふつうに数える。
+ * 障害物の種類。hard = どんなときも重ならない (入力欄・フォーカスの輪・スコアなどの重要な表示)。soft = 見えている
+ * 文字・アイコン・画像 (移動の途中に短くかぶるのはよいが、その上で待たない)。種類のない矩形は hard とみなす。
  */
-export function collectObstacles(root: Element, regions: readonly Rect[], win: Window = window, seeThrough?: Element, containers?: ReadonlySet<Element>): Rect[] {
+export type ObstacleKind = 'hard' | 'soft';
+
+/** 障害物の種類 (列挙しないので、座標の比較には影響しない)。 */
+export function obstacleKind(rect: Rect): ObstacleKind {
+  return (rect as Rect & { kind?: ObstacleKind }).kind ?? 'hard';
+}
+
+function tag(rect: Rect, kind: ObstacleKind, source?: Element): Rect {
+  Object.defineProperty(rect, 'kind', { value: kind, enumerable: false });
+  if (source) Object.defineProperty(rect, 'source', { value: source, enumerable: false });
+  return rect;
+}
+
+/** 文字の行の矩形の印 (体は重なってよいが、同じ文字を長く隠し続けない)。 */
+function markText(rect: Rect): Rect {
+  Object.defineProperty(rect, 'text', { value: true, enumerable: false });
+  return rect;
+}
+
+/** 文字の行の矩形か (collectObstacles が印を付ける)。 */
+export function isTextRect(rect: Rect): boolean {
+  return (rect as Rect & { text?: boolean }).text === true;
+}
+
+/** 入力欄 (文字の入力・選択の邪魔をしない)。 */
+const INPUT_LIKE = 'input:not([type="button"]):not([type="submit"]):not([type="reset"]), select, textarea, [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="combobox"], [role="slider"], [role="spinbutton"]';
+/** スコアなどの重要な表示 (移動の途中でも重ならない)。 */
+const IMPORTANT = '[class*="score"], .n01-sheet, .scoreboard';
+/** 画像・アイコン (見えている内容。その上では待たない)。 */
+const MEDIA_TAGS = new Set(['IMG', 'SVG', 'CANVAS', 'VIDEO', 'PICTURE', 'IFRAME', 'OBJECT', 'EMBED', 'PROGRESS', 'METER']);
+
+/**
+ * 範囲 (ページ座標の矩形の一覧) に重なる障害物を集める。
+ * - hard: 入力欄・スコアなどの重要な表示・フォーカスの輪 (要素の外側 4px まで)
+ * - soft: 直下の文字の矩形・画像やアイコン・疑似要素の内容・中身がスクロールする領域
+ * カード・ボタン・タブ・枠・帯などのデザインの箱そのものは障害物にしない (足場の候補。体が重なってよい)。
+ * @param seeThrough この要素自身の箱 (疑似要素・画像) は数えない (中の文字・要素は数える)。
+ * @param _containers 互換のための引数 (デザインの箱を数えなくなったので使わない)。
+ */
+export function collectObstacles(root: Element, regions: readonly Rect[], win: Window = window, seeThrough?: Element | ReadonlySet<Element>, _containers?: ReadonlySet<Element>): Rect[] {
+  const through = (el: Element): boolean => (seeThrough instanceof Set ? seeThrough.has(el) : seeThrough === el);
   const doc = root.ownerDocument;
   const sx = win.scrollX;
   const sy = win.scrollY;
@@ -137,23 +182,28 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
     // SVG の子要素は親の svg で数える。
     if (el.parentElement?.closest('svg')) continue;
     const box = toPage(el.getBoundingClientRect(), sx, sy);
-    if (box.right <= box.left || box.bottom <= box.top || !inRegion(box)) continue;
-    const style = win.getComputedStyle(el);
-    if (style.display === 'contents') continue;
-    // 入れ物を数えないのは、重なっている範囲をすべて包んでいるときだけ (帯の一部にかかるだけの別の色付きの枠は数える)。
-    const behind = containers?.has(el) === true && regions.every((g) => !(box.bottom > g.top && box.top < g.bottom && box.right > g.left && box.left < g.right) || (box.left <= g.left && box.right >= g.right && box.top <= g.top && box.bottom >= g.bottom));
-    // 実際にスクロールする入れ物 (中身が動く) は、包んでいても箱全体を数える。
-    const scrolling = /(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`) && overflows(el, style);
-    const solid = isSolid(el, style) && (!behind || scrolling);
-    if (el !== seeThrough && (solid || hasPseudoContent(el, win))) {
-      obstacles.push(box);
+    if (box.right <= box.left || box.bottom <= box.top) continue;
+    // キーボードのフォーカスの輪 (要素の外側に描かれる) は、要素の箱より広く数える。
+    if (focusRing(el)) {
+      const ring = { left: box.left - FOCUS_RING, top: box.top - FOCUS_RING, right: box.right + FOCUS_RING, bottom: box.bottom + FOCUS_RING };
+      if (inRegion(ring)) obstacles.push(tag(ring, 'hard', el));
+    }
+    if (!inRegion(box)) continue;
+    const info = styleOf(el, win);
+    if (info.contents || info.hidden) continue;
+    if (el.matches(INPUT_LIKE) || el.matches(IMPORTANT)) {
+      obstacles.push(tag(box, 'hard', el));
       continue;
+    }
+    if (!through(el) && (MEDIA_TAGS.has(el.tagName.toUpperCase()) || el.getAttribute('role') === 'img' || info.pseudo || info.scrolls)) {
+      obstacles.push(tag(box, 'soft', el));
+      if (!info.scrolls) continue;
     }
     for (const node of Array.from(el.childNodes)) {
       if (node.nodeType !== 3 || !node.textContent?.trim()) continue;
       range.selectNodeContents(node);
       for (const rect of Array.from(range.getClientRects())) {
-        if (rect.width > 0 && rect.height > 0) obstacles.push(toPage(rect, sx, sy));
+        if (rect.width > 0 && rect.height > 0) obstacles.push(markText(tag(toPage(rect, sx, sy), 'soft', el)));
       }
     }
   }
@@ -161,26 +211,109 @@ export function collectObstacles(root: Element, regions: readonly Rect[], win: W
   return obstacles;
 }
 
+// ------------------------------------------------------------------ 計算したスタイルの控え
+
+interface StyleInfo {
+  /** 背景 (色・画像)・枠・影のある、見えているデザインか。 */
+  design: boolean;
+  /** 上の枠線・下の枠線だけで描かれる仕切りか (下の線を足場にする)。 */
+  bottomLine: boolean;
+  /** 位置が固定・sticky か。中身がスクロールする (はみ出している) か。 */
+  fixed: boolean;
+  scrolls: boolean;
+  /** overflow が auto・scroll の入れ物か (中の要素はページのスクロールとは別に動きうる)。 */
+  scrollBox: boolean;
+  /** 見えない (visibility・display・ほぼ透明) か。display: contents か。 */
+  hidden: boolean;
+  contents: boolean;
+  /** 疑似要素の内容 (アイコンなど) があるか。 */
+  pseudo: boolean;
+}
+
+/** 計算したスタイルの控え。DOM の変化 (クラス・style など) で invalidateStyleCache を呼んで捨てる。 */
+let styleCache = new WeakMap<Element, StyleInfo>();
+
+/** スタイルの控えを捨てる (DOM・クラス・style が変わったとき)。 */
+export function invalidateStyleCache(): void {
+  styleCache = new WeakMap<Element, StyleInfo>();
+}
+
+function borderVisible(style: CSSStyleDeclaration, side: 'top' | 'bottom'): boolean {
+  const width = parseFloat(style.getPropertyValue(`border-${side}-width`) || '0');
+  return width > 0 && style.getPropertyValue(`border-${side}-style`) !== 'none' && !transparent(style.getPropertyValue(`border-${side}-color`));
+}
+
+function styleOf(el: Element, win: Window): StyleInfo {
+  const cached = styleCache.get(el);
+  if (cached) return cached;
+  const style = win.getComputedStyle(el);
+  const fill = (!!style.backgroundColor && !transparent(style.backgroundColor)) || (!!style.backgroundImage && style.backgroundImage !== 'none');
+  const top = borderVisible(style, 'top');
+  const bottom = borderVisible(style, 'bottom');
+  const shadow = !!style.boxShadow && style.boxShadow !== 'none';
+  const info: StyleInfo = {
+    design: fill || top || shadow,
+    bottomLine: bottom && !fill && !top && !shadow,
+    scrollBox: /(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`),
+    fixed: style.position === 'fixed' || style.position === 'sticky',
+    scrolls: /(auto|scroll)/.test(`${style.overflowX ?? ''} ${style.overflowY ?? ''}`) && overflows(el, style),
+    hidden: style.visibility === 'hidden' || style.visibility === 'collapse' || style.display === 'none' || parseFloat(style.opacity || '1') < 0.05,
+    contents: style.display === 'contents',
+    pseudo: hasPseudoContent(el, win),
+  };
+  styleCache.set(el, info);
+  return info;
+}
+
+/** フォーカスの輪として、要素の外側に数える幅 (CSS px)。 */
+const FOCUS_RING = 4;
+
+function focusRing(el: Element): boolean {
+  if (el !== el.ownerDocument.activeElement) return false;
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return false;
+  }
+}
+
 /** 要素の上辺の角丸の半径 (左右の大きい方、CSS px)。 */
 export function topCornerRadius(el: Element, win: Window = window): number {
   const style = win.getComputedStyle(el);
-  const radius = (value: string): number => {
-    // 「12px 8px」(横 縦) は横の半径を使う。% は要素の幅に対する割合。
-    const first = (value || '0').trim().split(/\s+/)[0];
-    const n = parseFloat(first) || 0;
-    return first.endsWith('%') ? (el.getBoundingClientRect().width * n) / 100 : n;
+  const rect = el.getBoundingClientRect();
+  /** 角の横・縦の半径 (「12px 8px」は横 縦。% は横は幅、縦は高さに対する割合)。 */
+  const corner = (value: string): [number, number] => {
+    const parts = (value || '0').trim().split(/\s+/);
+    const size = (part: string, length: number): number => {
+      const n = parseFloat(part) || 0;
+      return part.endsWith('%') ? (length * n) / 100 : n;
+    };
+    return [size(parts[0], rect.width), size(parts[1] ?? parts[0], rect.height)];
   };
-  return Math.max(radius(style.borderTopLeftRadius), radius(style.borderTopRightRadius));
+  const tl = corner(style.borderTopLeftRadius);
+  const tr = corner(style.borderTopRightRadius);
+  const bl = corner(style.borderBottomLeftRadius);
+  const br = corner(style.borderBottomRightRadius);
+  // CSS は辺ごとの半径の和が辺の長さを超えると、すべての半径を同じ割合で縮めて描く (999px の丸いボタン・楕円)。
+  let f = 1;
+  if (rect.width > 0 && rect.height > 0) {
+    for (const [sum, length] of [[tl[0] + tr[0], rect.width], [bl[0] + br[0], rect.width], [tl[1] + bl[1], rect.height], [tr[1] + br[1], rect.height]]) {
+      if (sum > length) f = Math.min(f, length / sum);
+    }
+  }
+  return Math.max(tl[0], tr[0]) * f;
 }
 
-/** 計測する。root (例: `.app-main`) の中だけを見る。 */
-export function measureTerrain(root: Element, platformSelector: string, win: Window = window): MeasuredTerrain {
-  const doc = root.ownerDocument;
+/**
+ * いま見えている範囲 (ページ座標)。固定ヘッダー・下部ナビ・固定操作バーの内側で、ピンチズーム中は実際に見えている
+ * 範囲 (visual viewport)。固定バーと画面の大きさだけを読む軽い計測 (スクロールのたびに呼べる)。
+ */
+export function viewport(win: Window = window): MeasuredTerrain['view'] {
+  const doc = win.document;
   const sx = win.scrollX;
   const sy = win.scrollY;
   const viewportWidth = doc.documentElement.clientWidth || win.innerWidth;
   const viewportHeight = win.innerHeight;
-
   let viewTop = 0;
   let viewBottom = viewportHeight;
   for (const bar of Array.from(doc.querySelectorAll(FIXED_BARS))) {
@@ -189,27 +322,6 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
     if (rect.top < viewportHeight / 2) viewTop = Math.max(viewTop, rect.bottom);
     else viewBottom = Math.min(viewBottom, rect.top);
   }
-
-  const platforms: Platform[] = [];
-  const elements: Element[] = [];
-  for (const el of Array.from(root.querySelectorAll(platformSelector))) {
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) continue;
-    if (movesOnItsOwn(el, root, win)) continue;
-    platforms.push({ left: rect.left + sx, right: rect.right + sx, top: rect.top + sy });
-    elements.push(el);
-  }
-
-  const bands: Rect[] = platforms.map((p) => ({
-    left: p.left,
-    right: p.right,
-    top: p.top - SPRITE.height - DEFAULT_TERRAIN.clearanceTop,
-    bottom: p.top,
-  }));
-  const containers = containersOf(elements, root);
-  const obstacles = collectObstacles(root, bands, win, undefined, containers);
-
-  // ピンチズーム中は、実際に見えている範囲 (visual viewport) に狭める。
   let viewLeft = 0;
   let viewRight = viewportWidth;
   const visual = win.visualViewport;
@@ -219,13 +331,162 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
     viewLeft = Math.max(viewLeft, visual.offsetLeft);
     viewRight = Math.min(viewRight, visual.offsetLeft + visual.width);
   }
+  return { top: sy + viewTop, bottom: sy + viewBottom, left: sx + viewLeft, right: sx + viewRight };
+}
+
+/** フォーカスの表示 (キーボード操作の輪) が、要素かその中に出ているか。その上には立たない。 */
+function focusShown(el: Element): boolean {
+  const active = el.ownerDocument.activeElement;
+  if (!active || active === el.ownerDocument.body || !el.contains(active)) return false;
+  try {
+    return active.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+}
+
+/** 足場の候補にしない要素 (入力欄・メディア)。 */
+function notPlatform(el: Element): boolean {
+  return el.matches(INPUT_LIKE) || MEDIA_TAGS.has(el.tagName.toUpperCase());
+}
+
+/** 要素 (またはその祖先) が固定・sticky・内側のスクロール領域の中・見えない、のどれかか (控えを使う)。 */
+function unusable(el: Element, root: Element, win: Window): boolean {
+  for (let node: Element | null = el; node && node !== root.parentElement; node = node.parentElement) {
+    const info = styleOf(node, win);
+    if (info.hidden) return true;
+    if (node === root) break;
+    if (info.fixed) return true;
+    if (node !== el && info.scrollBox) return true;
+  }
+  return false;
+}
+
+/**
+ * 辺の見えている区間: 辺のすぐ内側の点で、いちばん手前に描かれているのがその要素かその中身なら見えている。
+ * 左・中・右の 3 点がすべて見えていれば null (辺の全体)。そうでなければ EDGE_STEP ごとに確かめて、見えている区間
+ * (画面の座標) を返す (ほかの要素に覆われた部分は使わない。すべて覆われていれば空)。画面の外は確かめられないので
+ * 見えているとみなす。
+ */
+function edgeVisible(el: Element, left: number, right: number, y: number, win: Window): [number, number][] | null {
+  const doc = el.ownerDocument;
+  if (typeof doc.elementFromPoint !== 'function') return null;
+  if (y < 0 || y >= win.innerHeight) return null;
+  const width = doc.documentElement.clientWidth || win.innerWidth;
+  const shown = (x: number): boolean => {
+    if (x < 0 || x >= width) return true;
+    const top = doc.elementFromPoint(x, y);
+    // 描画レイヤー (クリックを受け取らない) は elementFromPoint に出ない。
+    return top !== null && (top === el || el.contains(top));
+  };
+  const probes = [left + (right - left) * 0.2, (left + right) / 2, left + (right - left) * 0.8].map(shown);
+  if (probes.every(Boolean)) return null;
+  // 一部が覆われている: EDGE_STEP ごとに確かめて、見えている区間だけを返す (覆われた部分を歩かない)。
+  const runs: [number, number][] = [];
+  let start: number | null = null;
+  const xs: number[] = [];
+  for (let x = left + 1; x < right - 1; x += EDGE_STEP) xs.push(x);
+  xs.push(right - 1);
+  for (let i = 0; i < xs.length; i += 1) {
+    const ok = shown(xs[i]);
+    if (ok && start === null) start = i === 0 ? left : xs[i];
+    if (!ok && start !== null) {
+      runs.push([start, xs[i - 1]]);
+      start = null;
+    }
+  }
+  if (start !== null) runs.push([start, right]);
+  return runs;
+}
+
+/** 一部が覆われた辺を確かめる間隔 (CSS px)。 */
+const EDGE_STEP = 6;
+
+/**
+ * 計測する。root (例: `.app-main`) の中だけを見る。
+ * 足場の候補は、登録したセレクターの要素と、見えているデザイン (背景・枠・影のある要素。カード・ボタン・タブ・
+ * メニュー・枠・帯・装飾) の上辺、下の枠線だけの仕切りの線。入力欄・画像・固定や sticky・内側のスクロール領域の中・
+ * 見えない要素・フォーカスの輪が出ている要素・ほかの要素に覆われた辺は使わない。文字そのものは足場にしない。
+ * 計測は見えている範囲の上下 1 画面ぶんの要素だけ (長いページでも重くならない)。
+ */
+export function measureTerrain(root: Element, platformSelector: string, win: Window = window): MeasuredTerrain {
+  const doc = root.ownerDocument;
+  const sx = win.scrollX;
+  const sy = win.scrollY;
+  const viewportWidth = doc.documentElement.clientWidth || win.innerWidth;
+  const view = viewport(win);
+  const reach = Math.max(win.innerHeight, 400);
+
+  const platforms: Platform[] = [];
+  const elements: Element[] = [];
+  const boxes: Rect[] = [];
+  const listed = new Set(platformSelector ? Array.from(root.querySelectorAll(platformSelector)) : []);
+  for (const el of Array.from(root.querySelectorAll('*'))) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height <= 0) continue;
+    const page = toPage(rect, sx, sy);
+    if (page.bottom < view.top - reach || page.top > view.bottom + reach) continue;
+    if (notPlatform(el) || el.parentElement?.closest('svg')) continue;
+    const info = styleOf(el, win);
+    const line = !listed.has(el) && !info.design && info.bottomLine;
+    if (!listed.has(el) && !info.design && !line) continue;
+    if (unusable(el, root, win) || focusShown(el)) continue;
+    // 上辺 (仕切りの線は下の線) が、ほかの要素に覆われずに見えているか。
+    const y = line ? rect.bottom - 0.5 : rect.top + 1;
+    const runs = edgeVisible(el, rect.left, rect.right, y, win);
+    // 上辺の角丸 (半径が大きい要素ほど、平らな部分は短い)。立てる範囲から除く幅に使う。
+    const inset = line ? 0 : Math.min(topCornerRadius(el, win), rect.width / 2);
+    const top = line ? page.bottom : page.top;
+    for (const [l, r] of runs ?? [[rect.left, rect.right]]) {
+      if (r - l < 8) continue;
+      const left = l + sx;
+      const right = r + sx;
+      const cutLeft = l > rect.left + 0.5;
+      const cutRight = r < rect.right - 0.5;
+      platforms.push({ left, right, top, inset, ...(cutLeft ? { cutLeft } : {}), ...(cutRight ? { cutRight } : {}) });
+      elements.push(el);
+      boxes.push({ ...page, left, right, top, inset } as Rect);
+    }
+  }
+
+  // 画面に固定された下部ナビ・固定操作バーの上辺 (root の外のことがある)。見えていて、上辺が覆われていない区間だけ。座標は計測したときの
+  // ページ座標 (fixed: 立っている間のスクロールは controller.ts が画面に対して止めて合わせる)。
+  for (const el of Array.from(doc.querySelectorAll(FIXED_PLATFORMS))) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height <= 0 || rect.top <= 0 || rect.top >= win.innerHeight) continue;
+    if (styleOf(el, win).hidden) continue;
+    const page = toPage(rect, sx, sy);
+    const runs = edgeVisible(el, rect.left, rect.right, rect.top + 1, win);
+    for (const [l, r] of runs ?? [[rect.left, rect.right]]) {
+      if (r - l < 8) continue;
+      const left = l + sx;
+      const right = r + sx;
+      const cutLeft = l > rect.left + 0.5;
+      const cutRight = r < rect.right - 0.5;
+      platforms.push({ left, right, top: page.top, inset: 0, fixed: true, ...(cutLeft ? { cutLeft } : {}), ...(cutRight ? { cutRight } : {}) });
+      elements.push(el);
+      boxes.push({ ...page, left, right, inset: 0, fixed: true } as Rect);
+    }
+  }
+
+  const bands: Rect[] = platforms.map((p) => ({
+    left: p.left,
+    right: p.right,
+    top: p.top - SPRITE.height - DEFAULT_TERRAIN.clearanceTop,
+    bottom: p.top,
+  }));
+  const containers = containersOf(elements, root);
+  // 足場を切るのは、体が重なってはいけないもの (hard) だけ。文字・画像 (soft) には体が重なってよい。
+  const obstacles = collectObstacles(root, bands, win, undefined, containers).filter((o) => obstacleKind(o) === 'hard');
 
   return {
     platforms,
     elements,
+    boxes,
     containers,
     obstacles,
     bounds: { left: sx + 4, right: sx + viewportWidth - 4 },
-    view: { top: sy + viewTop, bottom: sy + viewBottom, left: sx + viewLeft, right: sx + viewRight },
+    view,
+    docBottom: Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0),
   };
 }

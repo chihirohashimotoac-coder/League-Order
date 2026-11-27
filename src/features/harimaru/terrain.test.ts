@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TERRAIN, SPRITE } from './params';
-import { arcAt, arcBounds, arcIsClear, arcPeakFoot, boxIsClear, computeSegments, findSegment, jumpCandidates, mergePlatforms, spriteBox, subtractIntervals, visibleSegments } from './terrain';
+import { hopPlans } from './paths';
+import { arcAt, arcBounds, arcIsClear, arcPeakFoot, boxIsClear, computeSegments, findSegment, mergePlatforms, spriteBox, subtractIntervals, visibleSegments } from './terrain';
 
 const bounds = { left: 0, right: 2_000 };
 const inset = DEFAULT_TERRAIN.cornerInset;
 
 describe('mergePlatforms', () => {
+  it('ほかの要素に覆われて切れた端 (cutLeft・cutRight) からは角丸の幅を除かない', () => {
+    const [cut] = mergePlatforms([{ left: 240, right: 600, top: 400, inset: 16, cutLeft: true }]);
+    expect(cut.left).toBe(240);
+    expect(cut.right).toBe(600 - 16);
+    const [both] = mergePlatforms([{ left: 240, right: 600, top: 400, cutLeft: true, cutRight: true }]);
+    expect([both.left, both.right]).toEqual([240, 600]);
+  });
   it('隙間のある横並びのタイルはつながない (継ぎ目の隙間と角丸の上を歩かない)。どのタイルも両端の角を避ける', () => {
     const merged = mergePlatforms([
       { left: 0, right: 100, top: 50 },
@@ -76,15 +84,17 @@ describe('横並びのカードの継ぎ目', () => {
     const segments = computeSegments({ platforms: tiles, obstacles: [], bounds });
     expect(segments.map((s) => [s.left, s.right])).toEqual(tiles.map((t) => [t.left + inset, t.right - inset]));
     const middle = segments[1];
-    const plans = jumpCandidates(middle, segments, 10);
-    expect(plans.filter((plan) => plan.to.x > plan.from.x).map((plan) => plan.target)).toEqual([segments[2]]);
-    expect(plans.filter((plan) => plan.to.x < plan.from.x).map((plan) => plan.target)).toEqual([segments[0]]);
+    // 継ぎ目を渡るのは横の小ジャンプ (paths.ts) だけ。旧来のジャンプの候補 (上り・下りを含む) は置き換えた。
+    const boxes = tiles.map((t) => ({ ...t, bottom: t.top + 119 }));
+    const plans = hopPlans(middle, segments, boxes);
+    expect([...new Set(plans.filter((plan) => plan.end!.x > plan.startX!).map((plan) => plan.end!.segment))]).toEqual([segments[2]]);
+    expect([...new Set(plans.filter((plan) => plan.end!.x < plan.startX!).map((plan) => plan.end!.segment))]).toEqual([segments[0]]);
     // 踏切・着地は、どちらも足場の上 (表示枠の左端 x の範囲の中)。
     for (const plan of plans) {
-      expect(plan.from.x).toBeGreaterThanOrEqual(middle.minX);
-      expect(plan.from.x).toBeLessThanOrEqual(middle.maxX);
-      expect(plan.to.x).toBeGreaterThanOrEqual(plan.target.minX);
-      expect(plan.to.x).toBeLessThanOrEqual(plan.target.maxX);
+      expect(plan.startX!).toBeGreaterThanOrEqual(middle.minX);
+      expect(plan.startX!).toBeLessThanOrEqual(middle.maxX);
+      expect(plan.end!.x).toBeGreaterThanOrEqual(plan.end!.segment.minX);
+      expect(plan.end!.x).toBeLessThanOrEqual(plan.end!.segment.maxX);
     }
   });
 });
@@ -217,20 +227,13 @@ describe('ジャンプの経路', () => {
     expect(boxIsClear(spriteBox(100, 200), [{ left: 128, right: 140, top: 180, bottom: 200 }], { top: 0, bottom: 999 })).toBe(true);
     expect(boxIsClear(spriteBox(100, 200), [{ left: 120, right: 140, top: 180, bottom: 200 }], { top: 0, bottom: 999 })).toBe(false);
   });
-  it('候補は横に並ぶ足場だけ。隙間・上り・下りの上限を超えるものは除く', () => {
-    const segment = (left: number, right: number, top: number) => ({ top, left, right, minX: left, maxX: right - SPRITE.width });
-    const current = segment(0, 200, 300);
-    const near = segment(230, 400, 290);
-    const farGap = segment(200 + DEFAULT_TERRAIN.jumpMaxGap + 40, 700, 300);
-    const tooHigh = segment(240, 400, 300 - DEFAULT_TERRAIN.jumpMaxRise - 1);
-    const tooLow = segment(240, 400, 300 + DEFAULT_TERRAIN.jumpMaxDrop + 1);
-    const stacked = segment(0, 200, 380);
-    const plans = jumpCandidates(current, [current, near, farGap, tooHigh, tooLow, stacked], 14);
-    expect(plans.map((p) => p.target)).toEqual([near]);
-    expect(plans[0].from.x).toBe(current.maxX);
-    expect(plans[0].to.x).toBeGreaterThan(near.minX);
-    const back = jumpCandidates(near, [current], 14);
-    expect(back[0].from.x).toBe(near.minX);
-    expect(back[0].to.x).toBeLessThan(current.maxX);
+});
+
+describe('角丸の半径で立てる範囲を狭める', () => {
+  it('半径が cornerInset より大きい足場は、その半径だけ両端を除く (ボタンの大きな角丸の曲線を歩かない)', () => {
+    const [plain] = mergePlatforms([{ left: 0, right: 200, top: 100 }]);
+    const [round] = mergePlatforms([{ left: 0, right: 200, top: 100, inset: 18 }]);
+    expect([plain.left, plain.right]).toEqual([12, 188]);
+    expect([round.left, round.right]).toEqual([18, 182]);
   });
 });

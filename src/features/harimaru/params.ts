@@ -33,7 +33,9 @@ export interface BehaviorParams {
   repeatTwicePenalty: number;
   /** 動く行動 (歩く・走る・跳ねる・ジャンプ) のあとに、動く行動の重みに掛ける係数。2 回続いたら 0。 */
   afterMovingPenalty: number;
-  /** 無操作がこの時間続くと、眠る重みを sleepWhenInactive に上げる。 */
+  /** 静かな行動 (待機・見回す・毛づくろい・伸び) のあとに、静かな行動の重みに掛ける係数 (無操作になるまで。2 回続いたら 0)。 */
+  afterQuietPenalty: number;
+  /** 無操作がこの時間続くと、眠る重みを sleepWhenInactive に上げる (それまでは眠り・伏せて休むを選ばない)。 */
   inactiveSleepAfterMs: number;
   sleepWhenInactive: number;
   /** 待機の長さ (最小・最大)。 */
@@ -60,19 +62,20 @@ export interface BehaviorParams {
 }
 
 export const DEFAULT_BEHAVIOR: BehaviorParams = {
-  weights: { idle: 4, rest: 1.2, look: 1.5, walk: 3, run: 0.45, hop: 0.4, jump: 1.2, hide: 0.35, sleep: 0.35, groom: 0.8, stretch: 0.6 },
+  weights: { idle: 3, rest: 1.2, look: 1.5, walk: 3.5, run: 0.45, hop: 0.3, jump: 2, hide: 0.2, sleep: 0.35, groom: 0.8, stretch: 0.6 },
   repeatPenalty: 0.4,
   repeatTwicePenalty: 0.12,
   afterMovingPenalty: 0.5,
+  afterQuietPenalty: 0.35,
   inactiveSleepAfterMs: 45_000,
   sleepWhenInactive: 6,
-  idleMs: [2_500, 7_000],
+  idleMs: [1_200, 3_500],
   sleepMs: [12_000, 40_000],
   restMs: [6_000, 16_000],
-  lookMs: [2_400, 5_000],
-  hiddenMs: [1_200, 3_500],
+  lookMs: [1_500, 3_000],
+  hiddenMs: [800, 2_000],
   walkToEdgeChance: 0.4,
-  walkDistance: [18, 150],
+  walkDistance: [30, 160],
   walkSpeed: 20,
   runDistance: [40, 180],
   runSpeed: 64,
@@ -235,5 +238,94 @@ export const DEFAULT_TIMING: TimingParams = {
   enterDelayMs: [1_200, 2_600],
   remeasureDebounceMs: 200,
   scrollIdleMs: 260,
-  wakeOnActivityChance: 0.5,
+  wakeOnActivityChance: 1,
+};
+
+/**
+ * 画面端からの登場と、カード・ボタンの上辺・側面を使う移動 (動作素材 v1.0) の調整値。**暫定値** (プレビューで調整する)。
+ * 開発サーバーでは `__harimaru.tune({ ... })` で、その場で差し替えられる。
+ */
+export interface MotionParams {
+  /** 登場で、端から耳と目を見せて短くのぞく確率 (残りは立ち止まらずに入る)。 */
+  entryPeekChance: number;
+  /** のぞいたあと、足場へ出ずに同じ端へ引っ込む確率 (直前に引っ込んだときは引っ込まない)。 */
+  entryRetreatChance: number;
+  /** 端でのぞいている時間。 */
+  peekHoldMs: [number, number];
+  /** 引っ込んだあと、同じ端から出直すまで空ける時間。 */
+  retreatCooldownMs: [number, number];
+  /** スクロールで画面の外へ出たあと、スクロールが止まってから端に現れるまでの時間。 */
+  edgeReturnDelayMs: [number, number];
+  /**
+   * 左右の端から入るとき、画面の端と最初の要素の間の実際の空白の上限 (CSS px)。超えれば入らない (広い空白を
+   * 飛び越える長いジャンプはしない。要素が端まで続いていれば歩いて入る)。
+   */
+  entryMaxGap: number;
+  /** 横の小ジャンプで飛び越える、要素どうしの実際の隙間の上限 (CSS px)。 */
+  hopMaxGap: number;
+  /** 文字・アイコンにかかる経路の選びやすさに掛ける係数 (体は重なってよい。読みやすい経路を選びやすくする)。 */
+  textTouchWeight: number;
+  /** 同じ位置で文字を隠し続けてよい時間の上限 (ms)。これを超える前に、文字を隠さない位置へ離れる (5 秒未満)。 */
+  textHoldMs: number;
+  /** 上端から入るとき、端から足場までの落ちる高さの上限 (CSS px)。 */
+  entryMaxDrop: number;
+  /** 下端から入るとき、端から上辺までのよじ登る高さの上限 (CSS px)。 */
+  entryMaxClimb: number;
+  /** 側面をよじ登る間、体 (不透明な部分) が画面の左右の端から外へ出てよい幅 (CSS px。出た部分は描かれない)。 */
+  edgeOverhang: number;
+  /** 候補にしたカード・ボタン自体の背景・枠に、体が重なってよい幅 (CSS px)。文字・アイコン・入力・周りの要素は保護する。 */
+  decorAllowance: number;
+  /** 高さの差がこれ以内なら横の小ジャンプ。これより低い足場へは飛び降り、高い足場へは側面をよじ登る。 */
+  flatTolerance: number;
+  /** 横の小ジャンプの弧の高さ: base + 隙間 × perPx を [min, max] に収める。 */
+  hopArc: { base: number; perPx: number; min: number; max: number };
+  /** 横の小ジャンプ・飛び降りの空中の時間 (水平 1px あたり、最小)。 */
+  flightMsPerPx: number;
+  flightMinMs: number;
+  /** 着地の位置の調整幅 (着地先の立てる範囲の端からの距離の候補, CSS px)。安全な候補だけを使う。 */
+  landingInsets: readonly number[];
+  /** 飛び降りの高さの上限と、縁から着地点までの横の距離の上限 (CSS px)。 */
+  dropMax: number;
+  dropMaxReach: number;
+  /** 落ちる速さの目安 (CSS px / 秒²)。落ちる時間 = √(2 × 高さ ÷ これ)。 */
+  gravity: number;
+  /** 側面をよじ登る高さの下限・上限 (CSS px) と、前足をかけ直す 1 回の高さの目安。 */
+  climbMinRise: number;
+  climbMaxRise: number;
+  climbStep: number;
+  /** 準備の動き (下をのぞく・踏み切りの構え) のあとで、移動を見送る確率。見送ったら一歩戻るか伏せる。 */
+  reconsiderChance: number;
+  /** 直前に渡った 2 つの足場の間の経路を選びにくくする時間と、その間の重みの係数。 */
+  pairCooldownMs: number;
+  pairPenalty: number;
+}
+
+export const DEFAULT_MOTION: MotionParams = {
+  entryPeekChance: 0.5,
+  entryRetreatChance: 0.25,
+  peekHoldMs: [380, 1_000],
+  retreatCooldownMs: [4_000, 8_000],
+  edgeReturnDelayMs: [500, 1_300],
+  entryMaxGap: 24,
+  hopMaxGap: 40,
+  textTouchWeight: 0.5,
+  textHoldMs: 3_500,
+  entryMaxDrop: 240,
+  entryMaxClimb: 240,
+  edgeOverhang: 8,
+  decorAllowance: 3,
+  flatTolerance: 6,
+  hopArc: { base: 2, perPx: 0.4, min: 3, max: 16 },
+  flightMsPerPx: 3.5,
+  flightMinMs: 140,
+  landingInsets: [6, 12, 18, 26],
+  dropMax: 120,
+  dropMaxReach: 48,
+  gravity: 2_400,
+  climbMinRise: 24,
+  climbMaxRise: 180,
+  climbStep: 6,
+  reconsiderChance: 0.15,
+  pairCooldownMs: 30_000,
+  pairPenalty: 0.15,
 };

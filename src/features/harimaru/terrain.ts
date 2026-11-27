@@ -21,6 +21,19 @@ export interface Platform {
   right: number;
   /** 上辺の y (ページ座標)。 */
   top: number;
+  /** 上辺の両端から除く幅 (角丸の半径と cornerInset の大きい方)。省略時は cornerInset。 */
+  inset?: number;
+  /**
+   * 左・右の端が、ほかの要素に覆われて切れた端か (要素の角ではない)。切れた端からは幅を除かない (覆っている要素の
+   * 面の手前まで立てる。そこは側面をよじ登る壁の前)。
+   */
+  cutLeft?: boolean;
+  cutRight?: boolean;
+  /**
+   * 画面に固定された要素 (下部ナビ) の上辺か。座標は計測したときのスクロール位置でのページ座標。立っている間に
+   * スクロールしたら、体を画面に対して止めたまま、ページ座標をずらして合わせる (controller.ts)。
+   */
+  fixed?: boolean;
 }
 
 export interface Segment {
@@ -32,6 +45,8 @@ export interface Segment {
   /** 表示枠 (幅 SPRITE.width) の左端 x が取りうる範囲。 */
   minX: number;
   maxX: number;
+  /** 画面に固定された要素 (下部ナビ) の上辺の足場か (Platform.fixed)。 */
+  fixed?: boolean;
 }
 
 export interface TerrainInput {
@@ -50,14 +65,18 @@ export interface TerrainInput {
 export function mergePlatforms(platforms: readonly Platform[], params: TerrainParams = DEFAULT_TERRAIN): Platform[] {
   const byTop = [...platforms]
     .filter((p) => Number.isFinite(p.left) && Number.isFinite(p.right) && Number.isFinite(p.top) && p.right > p.left)
-    .map((p) => ({ ...p, left: p.left + params.cornerInset, right: p.right - params.cornerInset }))
+    .map((p) => {
+      const inset = Math.max(params.cornerInset, p.inset ?? 0);
+      return { ...p, left: p.left + (p.cutLeft ? 0 : inset), right: p.right - (p.cutRight ? 0 : inset) };
+    })
     .filter((p) => p.right > p.left)
     .sort((a, b) => a.top - b.top);
   // 高さの差が rowTolerance 以内の足場を 1 つの段にまとめ、段の中で左から順につなぐ (段の高さは最も高い上辺)。
   const rows: Platform[][] = [];
   for (const platform of byTop) {
     const row = rows[rows.length - 1];
-    if (row && platform.top - row[0].top <= params.rowTolerance) row.push(platform);
+    // 画面に固定された足場は、スクロールで動く足場とつながない。
+    if (row && platform.top - row[0].top <= params.rowTolerance && !!row[0].fixed === !!platform.fixed) row.push(platform);
     else rows.push([platform]);
   }
   const merged: Platform[] = [];
@@ -113,7 +132,7 @@ export function computeSegments(input: TerrainInput, params: TerrainParams = DEF
       const minX = freeLeft - SPRITE.sideInset;
       const maxX = freeRight - SPRITE.width + SPRITE.sideInset;
       if (maxX < minX) continue;
-      segments.push({ top: platform.top, left: freeLeft, right: freeRight, minX, maxX });
+      segments.push({ top: platform.top, left: freeLeft, right: freeRight, minX, maxX, ...(platform.fixed ? { fixed: true } : {}) });
     }
   }
   return segments;
@@ -237,33 +256,4 @@ export function arcIsClear(
     previous = box;
   }
   return true;
-}
-
-/**
- * いまの足場から、横に並ぶ別の足場へのジャンプの候補 (経路の安全はまだ確かめない)。
- * 横の隙間が jumpMaxGap 以下、上りは jumpMaxRise 以下、下りは jumpMaxDrop 以下のものだけ。
- */
-export function jumpCandidates(
-  current: Segment,
-  segments: readonly Segment[],
-  height: number,
-  params: TerrainParams = DEFAULT_TERRAIN,
-): JumpPlan[] {
-  const plans: JumpPlan[] = [];
-  for (const target of segments) {
-    if (target.top === current.top && target.minX === current.minX && target.maxX === current.maxX) continue;
-    const rise = current.top - target.top;
-    if (rise > params.jumpMaxRise || -rise > params.jumpMaxDrop) continue;
-    const inset = Math.min(16, (target.maxX - target.minX) / 2);
-    if (target.minX > current.maxX) {
-      const gap = target.minX - current.maxX;
-      if (gap > params.jumpMaxGap || gap < 4) continue;
-      plans.push({ from: { x: current.maxX, top: current.top }, to: { x: target.minX + inset, top: target.top }, height, target });
-    } else if (target.maxX < current.minX) {
-      const gap = current.minX - target.maxX;
-      if (gap > params.jumpMaxGap || gap < 4) continue;
-      plans.push({ from: { x: current.minX, top: current.top }, to: { x: target.maxX - inset, top: target.top }, height, target });
-    }
-  }
-  return plans;
 }

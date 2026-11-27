@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seededRng } from './behavior';
 import { HarimaruController } from './controller';
-import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, DEFAULT_TIMING, SPRITE } from './params';
+import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, SPRITE, DEFAULT_MOTION } from './params';
 import { CLIP_IDS, CLIPS, type ClipId } from './sprite';
 import type { Rect } from './terrain';
 import type { MeasuredTerrain } from './terrainDom';
@@ -49,6 +49,8 @@ const only = (weights: Partial<typeof DEFAULT_BEHAVIOR.weights>): typeof DEFAULT
 
 function make(options: { seed?: number; behavior?: typeof DEFAULT_BEHAVIOR; finePointer?: boolean; sheets?: boolean } = {}): HarimaruController {
   controller = new HarimaruController({
+    // 登場の端からカードまでの空白は 100px 前後 (この組のテストは登場の距離の上限を調べない)。
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120 },
     sprite,
     root,
     watch: app,
@@ -76,10 +78,15 @@ function advance(ms: number): void {
 /** 立って待機している状態まで進める。 */
 function standing(options: Parameters<typeof make>[0] = {}): HarimaruController {
   make(options).start();
-  advance(DEFAULT_TIMING.enterDelayMs[1] + DEFAULT_ANIMATION.sinkMs * 2 + 3_000);
-  for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
+  // 画面の端から入って (のぞいて引っ込む回もある)、足場の上で待機するまで。
+  for (let i = 0; i < 2_000 && !(controller.snapshot().placed && controller.snapshot().action === 'idle'); i += 1) advance(16);
   expect(controller.snapshot().placed).toBe(true);
   return controller;
+}
+
+/** 姿を消したあと、端から入り直して足場に立つまで進める。 */
+function untilPlaced(): void {
+  for (let i = 0; i < 2_000 && !controller.snapshot().placed; i += 1) advance(16);
 }
 
 /** 表示枠の左上 (transform の translate3d)。 */
@@ -135,8 +142,13 @@ describe('滑る → しがみつく → よじ登る → 待機', () => {
     const dirs = new Set<number>();
     for (let seed = 1; seed < 12 && dirs.size < 2; seed += 1) {
       standing({ seed });
+      // 端から入ると、入った向きのまま立つ: 2 回目は振り向かせて、反対の向きでも確かめる。
+      if (dirs.has(controller.snapshot().dir)) {
+        controller.trigger('turn');
+        for (let i = 0; i < 200 && !(controller.snapshot().action === 'idle' && !dirs.has(controller.snapshot().dir)); i += 1) advance(16);
+      }
       const start = controller.snapshot();
-      if (dirs.has(start.dir)) {
+      if (dirs.has(start.dir) || start.action !== 'idle') {
         controller.destroy();
         continue;
       }
@@ -250,7 +262,7 @@ describe('滑る → しがみつく → よじ登る → 待機', () => {
     expect(s.placed).toBe(false);
     expect(s.airborne).toBe(false);
     expect(s.events).toContain('jump:aborted');
-    advance(DEFAULT_TIMING.enterDelayMs[1] + 1_500);
+    untilPlaced();
     s = controller.snapshot();
     expect(s.placed).toBe(true);
     expect(s.poseY).toBe(0);
@@ -278,7 +290,7 @@ describe('滑る → しがみつく → よじ登る → 待機', () => {
     expect(controller.snapshot().events).toContain('hold:lost');
     expect(controller.snapshot().airborne).toBe(false);
     cardRect = saved;
-    advance(DEFAULT_TIMING.enterDelayMs[1] + 1_500);
+    untilPlaced();
     expect(controller.snapshot().placed).toBe(true);
     // 寝ぼけている途中にカードが 2px 下へずれた。
     for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
@@ -304,7 +316,7 @@ describe('滑る → しがみつく → よじ登る → 待機', () => {
     expect(controller.snapshot().timers).toBe(0);
     modal.remove();
     await Promise.resolve();
-    advance(DEFAULT_TIMING.enterDelayMs[1] + 1_500);
+    untilPlaced();
     const s = controller.snapshot();
     expect(s.placed).toBe(true);
     expect(s.poseX).toBe(0);
@@ -382,7 +394,8 @@ describe('転ぶ・寝ぼける', () => {
   });
 
   it('眠っている途中に、気まぐれに寝ぼける (縁の下に文字があれば見送る)', () => {
-    const sleepy = { ...only({ sleep: 1, idle: 0.0001 }), sleepWhenInactive: 1, sleepMs: [14_000, 15_000] as [number, number], sleepyFallChance: 1 };
+    // 眠るのは無操作になってから (inactiveSleepAfterMs)。このテストはすぐに眠らせる。
+    const sleepy = { ...only({ sleep: 1, idle: 0.0001 }), inactiveSleepAfterMs: 0, sleepWhenInactive: 1, sleepMs: [14_000, 15_000] as [number, number], sleepyFallChance: 1 };
     make({ behavior: sleepy }).start();
     const seen = new Set<string>();
     for (let i = 0; i < 3_000 && !seen.has('action:sleepyFall'); i += 1) {
@@ -567,7 +580,8 @@ describe('カーソルにぶら下がる (PC)', () => {
   });
 
   it('近くで止まったカーソルに、気まぐれに見上げる・首をかしげる・ぶら下がる (高い頻度で繰り返さない)', () => {
-    standing({ finePointer: true, behavior: only({ idle: 1 }) });
+    // 待機の長さは、カーソルが止まってから反応を考えるまで (cursorStillMs) より長くする。
+    standing({ finePointer: true, behavior: { ...only({ idle: 1 }), idleMs: [2_500, 7_000] } });
     const seen = new Set<string>();
     let reactions = 0;
     for (let i = 0; i < 60; i += 1) {

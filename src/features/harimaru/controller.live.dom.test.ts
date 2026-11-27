@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seededRng } from './behavior';
 import { DEFAULT_LIVE, HarimaruController } from './controller';
-import { DEFAULT_ANIMATION, DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, DEFAULT_TIMING } from './params';
+import { DEFAULT_BEHAVIOR, DEFAULT_INTERACTION, DEFAULT_MOTION } from './params';
 import { CLIP_IDS, REACTION_IDS, REACTIONS } from './sprite';
 import type { Rect } from './terrain';
 import type { MeasuredTerrain } from './terrainDom';
@@ -43,6 +43,8 @@ const quiet = {
 
 function make(options: { seed?: number; reactions?: boolean } = {}): HarimaruController {
   controller = new HarimaruController({
+    // 登場の端からカードまでの空白は 100px 前後 (この組のテストは登場の距離の上限を調べない)。
+    motion: { ...DEFAULT_MOTION, entryMaxGap: 120 },
     sprite,
     effect,
     root,
@@ -71,8 +73,8 @@ function advance(ms: number): void {
 
 function standing(options: Parameters<typeof make>[0] = {}): HarimaruController {
   make(options).start();
-  advance(DEFAULT_TIMING.enterDelayMs[1] + DEFAULT_ANIMATION.sinkMs * 2 + 3_000);
-  for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
+  // 画面の端から入って (のぞいて引っ込む回もある)、足場の上で待機するまで。
+  for (let i = 0; i < 2_000 && !(controller.snapshot().placed && controller.snapshot().action === 'idle'); i += 1) advance(16);
   expect(controller.snapshot().placed).toBe(true);
   return controller;
 }
@@ -302,28 +304,23 @@ describe('優先順位・割り込み・クールダウン', () => {
 });
 
 describe('安全: エフェクトの範囲・素材の読み込み・後片付け', () => {
-  it('足元より下に出るエフェクト (敗北の砂ぼこり) は、カードの面の文字・カードの角に重なるなら演出しない', () => {
+  it('足元より下に出るエフェクト (敗北の砂ぼこり) は、カードの面の文字に重なっても演出する。見えている範囲の下で切れるなら演出しない', () => {
     standing();
     const { x, top } = controller.snapshot();
-    // カードの面 (足元のすぐ下) に、左右どちらの向きの砂ぼこりにもかかる幅の文字。
-    const inside = (_root: Element, _regions: readonly Rect[], _win: Window, seeThrough?: Element) => (seeThrough ? [{ left: x - 20, right: x + 50, top: top + 1, bottom: top + 3 }] : []);
-    // 演出するかは obstaclesIn の差し替えで決まる: ここでは controller を作り直す。
-    controller.destroy();
-    controller = new HarimaruController({
-      sprite, effect, root, watch: app, platformSelector: '.x', rng: seededRng(1), now: () => now, measure: () => terrain(),
-      obstaclesIn: inside, behavior: quiet, finePointer: false, interaction: DEFAULT_INTERACTION,
-    });
-    controller.setSheet('base', 'base.png');
-    for (const id of REACTION_IDS) controller.setReactionSheets(id, `${id}-body.png`, `${id}-effect.png`);
-    controller.start();
-    advance(DEFAULT_TIMING.enterDelayMs[1] + DEFAULT_ANIMATION.sinkMs * 2 + 3_000);
-    for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
-    const at = controller.snapshot();
-    expect(at.x).toBe(x);
-    expect(controller.reactLive('frustrated')).toBe(false);
-    expect(controller.snapshot().events.at(-1)).toBe('live:frustrated:skipped:room');
-    // 砂ぼこりの出ない演出は、カードの面を調べない。
-    expect(controller.reactLive('victory')).toBe(true);
+    // カードの面 (足元のすぐ下) に、砂ぼこりにかかる幅の文字。
+    obstacles = [{ left: x - 20, right: x + 50, top: top + 1, bottom: top + 3 }];
+    expect(controller.reactLive('frustrated')).toBe(true);
+    advance(4_000);
+    // 見えている範囲の下端が足元のすぐ下 (下部ナビ): 砂ぼこりが切れる。同じ高さのどこでも切れるので見送る。
+    advance(DEFAULT_LIVE.scoreCooldownMs);
+    const bottom = VIEW.bottom;
+    VIEW.bottom = top + 2;
+    try {
+      expect(controller.reactLive('frustrated')).toBe(false);
+      expect(controller.snapshot().events.at(-1)).toBe('live:frustrated:skipped:room');
+    } finally {
+      VIEW.bottom = bottom;
+    }
   });
 
   it('観戦の対象が変わった (cancelLive): 演出中のリアクションをエフェクトごとやめ、待っている出来事を捨てる', () => {
@@ -347,24 +344,62 @@ describe('安全: エフェクトの範囲・素材の読み込み・後片付�
     }
   });
 
-  it('エフェクトの範囲 (本体より広い) に文字・操作部品があれば演出しない。演出中に入ってきたらやめる', async () => {
+  it('体とエフェクトは文字・ボタンなどほかの UI に重なってよい。見えている範囲で切れる (固定ヘッダーの裏) なら演出しない。演出中に切れたらやめる', async () => {
     standing();
-    const { x, top } = controller.snapshot();
-    // 180 のボードは頭の上 14px まで。そこに文字。
-    obstacles = [{ left: x + 5, right: x + 25, top: top - 20 - 12, bottom: top - 20 - 2 }];
-    expect(controller.reactLive('surprise180')).toBe(false);
-    expect(controller.snapshot().events.at(-1)).toBe('live:surprise180:skipped:room');
-    // 本体の帯の外、エフェクトの届かない場所の文字は関係ない。
-    obstacles = [{ left: x - 60, right: x - 40, top: top - 40, bottom: top - 30 }];
+    const { top } = controller.snapshot();
+    // 180 のボードの高さに文字・ボタン: 重なってよい。
+    obstacles = [{ left: 0, right: 1_000, top: top - 20 - 12, bottom: top - 20 - 2 }];
     expect(controller.reactLive('surprise180')).toBe(true);
-    advance(200);
-    // 演出中に DOM が変わり、範囲に文字が入った。
-    obstacles = [{ left: x, right: x + 30, top: top - 30, bottom: top - 24 }];
-    root.append(document.createElement('p'));
-    await Promise.resolve();
-    advance(32);
-    expect(controller.snapshot().events).toContain('live:stopped:room');
-    expect(effect.dataset.active).toBe('false');
+    advance(4_000);
+    // 見えている範囲の上端 (固定ヘッダーの下端) がボードの途中: 同じ高さのどこでも切れるので見送る。
+    const viewTop = VIEW.top;
+    VIEW.top = top - 20 - 4;
+    try {
+      expect(controller.reactLive('surprise180')).toBe(false);
+      expect(controller.snapshot().events.at(-1)).toBe('live:surprise180:skipped:room');
+      VIEW.top = viewTop;
+      expect(controller.reactLive('surprise180')).toBe(true);
+      advance(200);
+      // 演出中に画面が変わり、ボードが見えている範囲から切れた。
+      VIEW.top = top - 20 - 4;
+      root.append(document.createElement('p'));
+      await Promise.resolve();
+      advance(32);
+      expect(controller.snapshot().events).toContain('live:stopped:room');
+      expect(effect.dataset.active).toBe('false');
+    } finally {
+      VIEW.top = viewTop;
+    }
+  });
+
+  it('その場では見えている範囲で切れるなら、振り向くか、同じ足場の近くで収まる位置へ歩いてから演出する (重要な出来事だけ)', () => {
+    standing();
+    const { x } = controller.snapshot();
+    // 見えている範囲の左端が、いまの位置のボードの左側にかかる (ピンチズームなど)。振り向くか、右へ寄れば収まる。
+    const left = VIEW.left;
+    VIEW.left = x - 4;
+    try {
+      controller.reactLive('surprise180');
+      const first = controller.snapshot().events.at(-1);
+      expect(['live:surprise180', 'live:surprise180:seeking']).toContain(first);
+      advance(6_000);
+      expect(controller.snapshot().events).toContain('live:surprise180');
+      expect(controller.snapshot().events.filter((e) => e === 'live:surprise180:skipped:room')).toEqual([]);
+      const after = controller.snapshot().x;
+      expect(Math.abs(after - x)).toBeLessThanOrEqual(DEFAULT_LIVE.roomSearchPx);
+      // 体のいる位置で、どちらかの向きなら収まる (演出した位置)。
+      expect(after).toBeGreaterThanOrEqual(x);
+      // 通常の得点 (重要でない) は探さずに見送る (左右とも切れる位置)。
+      VIEW.left = after - 4;
+      VIEW.right = after + 30 + 4;
+      advance(DEFAULT_LIVE.scoreCooldownMs + 2_000);
+      for (let i = 0; i < 400 && controller.snapshot().action !== 'idle'; i += 1) advance(16);
+      controller.reactLive('cheer');
+      expect(controller.snapshot().events.at(-1)).not.toBe('live:cheer:seeking');
+    } finally {
+      VIEW.left = left;
+      VIEW.right = 1_000;
+    }
   });
 
   it('リアクションの画像を読み込めていなければ演出しない (逆転・Leg やゲームの結果は PR2 の動作で演出する)', () => {

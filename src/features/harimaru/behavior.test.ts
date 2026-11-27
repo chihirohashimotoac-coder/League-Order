@@ -29,9 +29,11 @@ describe('actionWeights', () => {
     expect(actionWeights({ ...base, x: 0, minX: 0, maxX: 10 }).walk).toBe(0);
   });
   it('直前と同じ行動は重みが下がり、2 回続くとさらに下がる', () => {
-    const fresh = actionWeights(base);
-    const once = actionWeights({ ...base, history: ['look'] });
-    const twice = actionWeights({ ...base, history: ['look', 'look'] });
+    // 無操作のあと (静かな行動を続けない規則は、操作のある間だけ)。
+    const quiet = { ...base, lastActivityAt: base.now - DEFAULT_BEHAVIOR.inactiveSleepAfterMs };
+    const fresh = actionWeights(quiet);
+    const once = actionWeights({ ...quiet, history: ['look'] });
+    const twice = actionWeights({ ...quiet, history: ['look', 'look'] });
     expect(once.look).toBeCloseTo(fresh.look * DEFAULT_BEHAVIOR.repeatPenalty);
     expect(twice.look).toBeCloseTo(fresh.look * DEFAULT_BEHAVIOR.repeatTwicePenalty);
   });
@@ -45,14 +47,38 @@ describe('actionWeights', () => {
     for (const action of ['walk', 'run', 'hop', 'jump'] as const) expect(twice[action]).toBe(0);
     expect(twice.idle).toBeGreaterThan(0);
   });
-  it('無操作が続くと眠りやすくなる (境界値を含む)', () => {
+  it('無操作になるまでは眠り・伏せて休むを選ばず、無操作になったら眠りやすくなる (境界値を含む)', () => {
     const awake = actionWeights({ ...base, lastActivityAt: base.now - DEFAULT_BEHAVIOR.inactiveSleepAfterMs + 1 });
     const inactive = actionWeights({ ...base, lastActivityAt: base.now - DEFAULT_BEHAVIOR.inactiveSleepAfterMs });
-    expect(awake.sleep).toBe(DEFAULT_BEHAVIOR.weights.sleep);
+    expect(awake.sleep).toBe(0);
+    expect(awake.rest).toBe(0);
     expect(inactive.sleep).toBe(DEFAULT_BEHAVIOR.sleepWhenInactive);
+    expect(inactive.rest).toBeCloseTo(DEFAULT_BEHAVIOR.weights.rest * 2);
+  });
+  it('操作のある間は、静かな行動のあとは静かな行動を選びにくく、2 回続いたら位置の変わる行動を選ぶ', () => {
+    const all = { ...base, canJump: true };
+    const fresh = actionWeights(all);
+    const once = actionWeights({ ...all, history: ['walk', 'idle'] });
+    expect(once.look).toBeCloseTo(fresh.look * DEFAULT_BEHAVIOR.afterQuietPenalty);
+    expect(once.walk).toBeCloseTo(fresh.walk);
+    const twice = actionWeights({ ...all, history: ['idle', 'look'] });
+    for (const action of ['idle', 'look', 'groom', 'stretch'] as const) expect(twice[action]).toBe(0);
+    expect(twice.walk + twice.jump).toBeGreaterThan(0);
+    // 歩けない・移れない足場では止まってよい。無操作のあとは規則を使わない。
+    const stuck = actionWeights({ ...base, x: 0, minX: 0, maxX: 10, history: ['idle', 'look'] });
+    expect(stuck.idle).toBeGreaterThan(0);
+    const inactive = actionWeights({ ...all, lastActivityAt: 0, now: DEFAULT_BEHAVIOR.inactiveSleepAfterMs, history: ['idle', 'look'] });
+    expect(inactive.idle).toBeGreaterThan(0);
   });
   it('目覚めた直後は眠り直さない', () => {
-    expect(actionWeights({ ...base, lastActivityAt: 0, history: ['sleep'] }).sleep).toBe(0);
+    expect(actionWeights({ ...base, lastActivityAt: base.now - DEFAULT_BEHAVIOR.inactiveSleepAfterMs, history: ['sleep'] }).sleep).toBe(0);
+  });
+  it('歩くときは、歩ける距離の長い向きを選びやすい (端に寄った位置で短い往復を繰り返さない)', () => {
+    const near = { ...base, x: 40, minX: 0, maxX: 400, available: (id: string) => id === 'walk' };
+    const rng = seededRng(3);
+    let right = 0;
+    for (let i = 0; i < 200; i += 1) if ((decideNext(near, rng).targetX ?? 0) > 40) right += 1;
+    expect(right).toBeGreaterThan(130);
   });
 });
 
@@ -78,7 +104,7 @@ describe('decideNext', () => {
     expect(idle.durationMs).toBeGreaterThanOrEqual(DEFAULT_BEHAVIOR.idleMs[0]);
     expect(idle.durationMs).toBeLessThanOrEqual(DEFAULT_BEHAVIOR.idleMs[1]);
     // 抽選の最後の候補を眠りにする (毛づくろい・伸びを除く)。
-    const sleep = decideNext({ ...base, lastActivityAt: 0, available: (id) => id !== 'groom' && id !== 'stretch' }, fixed(0.99, 0.5));
+    const sleep = decideNext({ ...base, lastActivityAt: base.now - DEFAULT_BEHAVIOR.inactiveSleepAfterMs, available: (id) => id !== 'groom' && id !== 'stretch' }, fixed(0.99, 0.5));
     expect(sleep.action).toBe('sleep');
     expect(sleep.durationMs).toBeGreaterThanOrEqual(DEFAULT_BEHAVIOR.sleepMs[0]);
     expect(sleep.durationMs).toBeLessThanOrEqual(DEFAULT_BEHAVIOR.sleepMs[1]);

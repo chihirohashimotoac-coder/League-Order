@@ -28,7 +28,14 @@ import './harimaru.css';
  * `.n01-sheet` (ライブのスコア表の枠) は PR3 で追加: 観戦のライブ画面は、本日の対戦の帯 (横スクロール) が
  * フォーカスカードの上辺をふさぎ、ほかに立てる場所がなかったため (観戦リアクションを見せる場所)。
  */
-const PLATFORMS = '.card, .next-match-card, .quick-tile, .focus-card, .board-tile, .n01-list, .browse-lobby, .n01-sheet';
+const CARDS = '.card, .next-match-card, .quick-tile, .focus-card, .board-tile, .n01-list, .browse-lobby, .n01-sheet';
+/**
+ * 通常のコンテンツの中のボタンも足場の候補にする (上辺の安全な区間だけを使う。中央のラベルの左右など、区間ごとに判定)。
+ * 入力欄は含めない。固定ナビ・モーダルの中は従来どおり使わない (root の外・固定・休止)。見えない要素とフォーカスの
+ * 輪が出ている要素は計測で除く (terrainDom)。
+ */
+const BUTTONS = 'button, [role="button"], a.btn';
+const PLATFORMS = `${CARDS}, ${BUTTONS}`;
 
 /** 足場を探す画面。登録のない画面には出ない。 */
 export const HARIMARU_PLATFORMS: Partial<Record<string, string>> = Object.fromEntries(
@@ -36,6 +43,12 @@ export const HARIMARU_PLATFORMS: Partial<Record<string, string>> = Object.fromEn
 );
 
 export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+/**
+ * 画面遷移のとき、次の画面のハリマルが入る左右の端 (前の画面でいた位置に近い側)。座標・足場・タイマーは
+ * 引き継がない (画面ごとに作り直す)。初回は記録なし (安全な経路のある左右どちらか)。
+ */
+let carriedSide: 'left' | 'right' | null = null;
 
 export function HarimaruLayer({ page }: { page: string }): React.JSX.Element | null {
   const enabled = useHarimaruEnabled();
@@ -145,7 +158,14 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
         sprite.style.backgroundImage = `url("${url}")`;
         sprite.dataset.ready = 'true';
         if (!controller) {
-          controller = new HarimaruController({ sprite, effect: effect ?? undefined, root, watch: root.closest('.app') ?? root.parentElement ?? root, platformSelector: selector });
+          controller = new HarimaruController({
+            sprite,
+            effect: effect ?? undefined,
+            root,
+            watch: root.closest('.app') ?? root.parentElement ?? root,
+            platformSelector: selector,
+            entryFrom: carriedSide,
+          });
           controller.start();
           // 開発サーバーだけ: 動作の確認用に操作口を出す (本番のビルドには含まれない)。
           if (import.meta.env.DEV) (window as Window & { __harimaru?: HarimaruController }).__harimaru = controller;
@@ -240,6 +260,7 @@ function HarimaruSprite({ selector, onFail }: { selector: string; onFail: (faile
       tracker = null;
       keepReactions.length = 0;
       window.removeEventListener('resize', load);
+      if (controller) carriedSide = controller.exitSide() ?? carriedSide;
       controller?.destroy();
       controller = null;
       keep.clear();
