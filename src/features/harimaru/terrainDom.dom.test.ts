@@ -222,4 +222,39 @@ describe('measureTerrain: 見えているデザインはすべて足場の候補
     expect(measureTerrain(root, '', window).elements).toEqual([el]);
     root.remove();
   });
+
+  it('ほかの要素に一部が覆われた辺は、見えている区間だけを足場にする (すべて覆われていれば使わない)', async () => {
+    const { measureTerrain, invalidateStyleCache } = await import('./terrainDom');
+    invalidateStyleCache();
+    const root = document.createElement('main');
+    document.body.append(root);
+    const low = document.createElement('div');
+    low.style.backgroundColor = 'rgb(0, 0, 0)';
+    low.getBoundingClientRect = rect(0, 400, 600, 500);
+    const hidden = document.createElement('div');
+    hidden.style.backgroundColor = 'rgb(0, 0, 0)';
+    hidden.getBoundingClientRect = rect(0, 600, 300, 640);
+    const high = document.createElement('div');
+    high.style.backgroundColor = 'rgb(255, 255, 255)';
+    high.getBoundingClientRect = rect(0, 300, 240, 460);
+    root.append(low, hidden, high);
+    // high が low の上辺の左 (x 0〜240) を覆う。hidden の上辺は全体が覆われている (cover)。
+    const cover = document.createElement('div');
+    const original = document.elementFromPoint;
+    document.elementFromPoint = (x: number, y: number) => (y > 590 ? cover : y > 300 && y < 460 && x < 240 ? high : y >= 400 && y < 500 ? low : high);
+    try {
+      const { elements, platforms } = measureTerrain(root, '', window);
+      const of = (el: Element) => platforms.filter((_, i) => elements?.[i] === el).map((p) => [Math.round(p.left), Math.round(p.right)]);
+      expect(of(high)).toEqual([[0, 240]]);
+      const runs = of(low);
+      expect(runs).toHaveLength(1);
+      expect(runs[0][0]).toBeGreaterThanOrEqual(240);
+      expect(runs[0][0]).toBeLessThanOrEqual(247);
+      expect(runs[0][1]).toBe(600);
+      expect(of(hidden)).toEqual([]);
+    } finally {
+      document.elementFromPoint = original;
+      root.remove();
+    }
+  });
 });

@@ -347,21 +347,44 @@ function unusable(el: Element, root: Element, win: Window): boolean {
 }
 
 /**
- * 辺が実際に見えているか: 辺のすぐ内側の点 (左・中・右) のうち 1 つでも、いちばん手前に描かれているのがその要素か
- * その中身なら見えている (ほかの要素に覆われた辺は使わない)。画面の外の辺は確かめられないので見えているとみなす。
+ * 辺の見えている区間: 辺のすぐ内側の点で、いちばん手前に描かれているのがその要素かその中身なら見えている。
+ * 左・中・右の 3 点がすべて見えていれば null (辺の全体)。そうでなければ EDGE_STEP ごとに確かめて、見えている区間
+ * (画面の座標) を返す (ほかの要素に覆われた部分は使わない。すべて覆われていれば空)。画面の外は確かめられないので
+ * 見えているとみなす。
  */
-function edgeVisible(el: Element, left: number, right: number, y: number, win: Window): boolean {
+function edgeVisible(el: Element, left: number, right: number, y: number, win: Window): [number, number][] | null {
   const doc = el.ownerDocument;
-  if (typeof doc.elementFromPoint !== 'function') return true;
-  if (y < 0 || y >= win.innerHeight) return true;
-  const xs = [left + (right - left) * 0.2, (left + right) / 2, left + (right - left) * 0.8].filter((x) => x >= 0 && x < (doc.documentElement.clientWidth || win.innerWidth));
-  if (xs.length === 0) return true;
-  return xs.some((x) => {
+  if (typeof doc.elementFromPoint !== 'function') return null;
+  if (y < 0 || y >= win.innerHeight) return null;
+  const width = doc.documentElement.clientWidth || win.innerWidth;
+  const shown = (x: number): boolean => {
+    if (x < 0 || x >= width) return true;
     const top = doc.elementFromPoint(x, y);
     // 描画レイヤー (クリックを受け取らない) は elementFromPoint に出ない。
     return top !== null && (top === el || el.contains(top));
-  });
+  };
+  const probes = [left + (right - left) * 0.2, (left + right) / 2, left + (right - left) * 0.8].map(shown);
+  if (probes.every(Boolean)) return null;
+  // 一部が覆われている: EDGE_STEP ごとに確かめて、見えている区間だけを返す (覆われた部分を歩かない)。
+  const runs: [number, number][] = [];
+  let start: number | null = null;
+  const xs: number[] = [];
+  for (let x = left + 1; x < right - 1; x += EDGE_STEP) xs.push(x);
+  xs.push(right - 1);
+  for (let i = 0; i < xs.length; i += 1) {
+    const ok = shown(xs[i]);
+    if (ok && start === null) start = i === 0 ? left : xs[i];
+    if (!ok && start !== null) {
+      runs.push([start, xs[i - 1]]);
+      start = null;
+    }
+  }
+  if (start !== null) runs.push([start, right]);
+  return runs;
 }
+
+/** 一部が覆われた辺を確かめる間隔 (CSS px)。 */
+const EDGE_STEP = 6;
 
 /**
  * 計測する。root (例: `.app-main`) の中だけを見る。
@@ -394,13 +417,18 @@ export function measureTerrain(root: Element, platformSelector: string, win: Win
     if (unusable(el, root, win) || focusShown(el)) continue;
     // 上辺 (仕切りの線は下の線) が、ほかの要素に覆われずに見えているか。
     const y = line ? rect.bottom - 0.5 : rect.top + 1;
-    if (!edgeVisible(el, rect.left, rect.right, y, win)) continue;
+    const runs = edgeVisible(el, rect.left, rect.right, y, win);
     // 上辺の角丸 (半径が大きい要素ほど、平らな部分は短い)。立てる範囲から除く幅に使う。
     const inset = line ? 0 : Math.min(topCornerRadius(el, win), rect.width / 2);
     const top = line ? page.bottom : page.top;
-    platforms.push({ left: page.left, right: page.right, top, inset });
-    elements.push(el);
-    boxes.push({ ...page, top, inset } as Rect);
+    for (const [l, r] of runs ?? [[rect.left, rect.right]]) {
+      if (r - l < 8) continue;
+      const left = l + sx;
+      const right = r + sx;
+      platforms.push({ left, right, top, inset });
+      elements.push(el);
+      boxes.push({ ...page, left, right, top, inset } as Rect);
+    }
   }
 
   const bands: Rect[] = platforms.map((p) => ({

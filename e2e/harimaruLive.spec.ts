@@ -217,6 +217,14 @@ async function watchLive(page: Page): Promise<() => Promise<{ live: string[]; ef
   return () => page.evaluate(() => (window as unknown as { __hl: { live: string[]; effects: string[]; mirrored: string[]; overlaps: string[]; starts: string[] } }).__hl);
 }
 
+/**
+ * PC は幅 1100 で確かめる (観戦の画面の左右の端から 20px にカードがある)。1189 以上はコンテンツの列の外の空白が
+ * 24px を超え、左右の端から入れない。
+ */
+test.beforeEach(async ({ page }, info) => {
+  if (info.project.name === 'desktop') await page.setViewportSize({ width: 1100, height: 720 });
+});
+
 /** ハリマルが立って見えるまで時計を進める (観戦の画面の上の方を見る)。 */
 async function waitHarimaru(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0));

@@ -274,6 +274,19 @@ async function waitStanding(page: Page): Promise<void> {
 
 test('顔をタップ・クリックすると喜び、下の画面の操作には何も起きない', async ({ page }) => {
   await openSampleHome(page);
+  // 顔の近く (タッチの位置の補正が届く 16px。足元の側は足場なので除く) に操作部品がない位置に立つまで待つ。体はボタンに重なってよく、ボタンの上の
+  // 顔を触ると、触った操作はボタンに届く (ハリマルはクリックを受け取らない。その場合は喜ばない)。
+  let clear = false;
+  for (let attempt = 0; attempt < 20 && !clear; attempt += 1) {
+    await waitStanding(page);
+    const p = await body(page);
+    clear = await page.evaluate(({ x, y }) => {
+      const near = [[0, 0], [-16, 0], [16, 0], [0, -16]].map(([dx, dy]) => document.elementFromPoint(x + dx, y + dy));
+      return near.every((e) => !e?.closest('button, a, input, select, textarea, label, [role="button"], [tabindex="0"]'));
+    }, { x: p.faceX, y: p.y - 5 });
+    if (!clear) await page.waitForTimeout(1_500);
+  }
+  expect(clear, '顔の近くに操作部品のない位置に立つ').toBe(true);
   await waitStanding(page);
   const url = page.url();
   const actions = await watchActions(page);
@@ -309,7 +322,7 @@ test('長押し・ドラッグでは反応しない', async ({ page }, info) => 
   expect(await actions()).not.toContain('turn');
 });
 
-test('どの画面でも、入力欄・固定バーに重ならず、立っている間は文字に重ならない (メンバー・フォーマット・履歴・設定・その他・観戦)', async ({ page }) => {
+test('どの画面でも、入力欄・固定バーに重ならず、立っている間は文字に重ならない (メンバー・フォーマット・履歴・設定・その他・観戦)', async ({ page }, info) => {
   test.setTimeout(180_000);
   await openSampleHome(page);
   const screens: [string, () => Promise<void>][] = [
@@ -336,10 +349,14 @@ test('どの画面でも、入力欄・固定バーに重ならず、立って�
     // 画面に 1 体だけ。
     expect(await page.getByTestId('harimaru').count()).toBeLessThanOrEqual(1);
   }
-  expect(shownSomewhere, '足場のある画面のうち、いくつかには出る').toBeGreaterThan(2);
+  // スマホは観戦 (試合のないとき) 以外の画面に出る。PC (幅 1100) はメンバー・フォーマット・履歴・設定・その他の列が
+  // 狭く (左右の空白 182px)、左右の端から入れるのはオーダー・観戦 (とホーム) だけ。
+  expect(shownSomewhere, '足場のある画面のうち、いくつかには出る').toBeGreaterThanOrEqual(info.project.name === 'desktop' ? 2 : 3);
 });
 
-test('入力欄にフォーカスがある間は休み、離れると戻る', async ({ page }) => {
+test('入力欄にフォーカスがある間は休み、離れると戻る', async ({ page }, info) => {
+  // PC のメンバーの画面はコンテンツの列が狭く (幅 1100 で左右の空白 182px)、左右の端から入れない。
+  test.skip(info.project.name === 'desktop', 'PC のメンバーの画面には左右の端から入れない (スマホで確かめる)');
   await openSampleHome(page);
   await tab(page, 'メンバー').click();
   await page.evaluate(() => window.scrollTo(0, 0));

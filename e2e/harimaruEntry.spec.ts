@@ -148,9 +148,9 @@ test('PC 1280・1920: 左右の端の空白が広いホームでは、上下の�
   test.skip(info.project.name !== 'desktop', 'PC のホーム (コンテンツの列の外の空白が広い)');
   test.setTimeout(120_000);
   await fixed(page, 20261126);
+  await openSample(page);
   for (const size of [{ width: 1280, height: 720 }, { width: 1920, height: 1080 }]) {
     await page.setViewportSize(size);
-    await openSample(page);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(1_500);
     const gutter = await page.evaluate(() => {
