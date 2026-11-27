@@ -121,7 +121,8 @@ async function serveN01Canned(page: Page, live?: () => unknown): Promise<string[
     else if (operation === 'match/throws') body = throwsBody(q.get('mid') ?? '');
     else if (operation === 'match/live' && live) body = live();
     else if (operation === 'team/order/list')
-      body = { result: 0, list: [{ tpid: 'AAAA', schid: 'sg01', fix: 1, order: [{ oid: 'a1', oname: 'A1' }] }, { tpid: 'CCCC', schid: 'sg01', fix: 1, order: [{ oid: 'c1', oname: 'C1' }] }] };
+      // Rows carry their card (`tmid`) as n01's do (manual §4.9); the 開始前 view only takes rows of the card shown (2026-11-27).
+      body = { result: 0, list: [{ tmid: q.get('tmid'), tpid: 'AAAA', schid: 'sg01', fix: 1, order: [{ oid: 'a1', oname: 'A1' }] }, { tmid: q.get('tmid'), tpid: 'CCCC', schid: 'sg01', fix: 1, order: [{ oid: 'c1', oname: 'C1' }] }] };
     else if (operation === 'tournament/stats') body = { result: 0, stats: { a1: { tpid: 'AAAA', score: 3006, darts: 120, leg: 10, winLeg: 7, ton80: 2, highOut: 120, best: 15 }, b1: { tpid: 'BBBB', score: 2400, darts: 120, leg: 10, winLeg: 3, ton80: 0 } } };
     else if (operation === 'team/player/list') body = { result: 0, list: [{ tpid: 'AAAA', oid: 'a1', oname: 'A1' }, { tpid: 'BBBB', oid: 'b1', oname: 'B1' }] };
     if (body === null) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: -1, error: 'not found' }) });
@@ -190,7 +191,13 @@ test.describe('watching without a team (リーグ・大会を見る)', () => {
     await focus.getByTestId('estimate').click();
     await expect(focus.getByTestId('card-trail')).toContainText('Arrows の勝率 (予測) の推移');
     await expect(focus.getByTestId('next-thrower')).toContainText('C1');
-    await expect(focus.getByTestId('upcoming')).toContainText('シングルス1 A1 (75.2) vs C1');
+    // 2026-11-27: 「このあとの出場予定」 is now the order list (オーダー一覧, closed at first), with the same season averages.
+    await focus.getByTestId('order-overview-toggle').click();
+    const sg01 = focus.getByTestId('order-overview-panel').locator('tbody').filter({ hasText: 'シングルス1' });
+    await expect(sg01).toContainText('A1 (75.2)');
+    await expect(sg01).toContainText('C1');
+    await expect(sg01).toContainText('開始前・確定済み');
+    await focus.getByTestId('order-overview-toggle').click();
     // The game in progress as a scoreboard: Scored / To Go, the points left, the game's figures,
     // then League Order's own figures (leg / game chance).
     const board = focus.getByTestId('live-board');

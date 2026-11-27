@@ -6,6 +6,8 @@ import { LivePoller } from '../livePoller';
 import type { LiveStatus } from '../livePoller';
 import { Icon } from '../../../components/icons';
 import { CopyLink } from './CopyLink';
+import type { PlanStatus } from '../plannedOrders';
+import { PLAN_SHORT, PLAN_TEXT } from '../plannedOrders';
 
 /**
  * The parts every 観戦 view of one match is made of — a league card (ATDO / TDO / TDA), a
@@ -20,9 +22,16 @@ import { CopyLink } from './CopyLink';
  *   players (avg)        1 - 2        players (avg)
  *   …the live scoreboard, or the legs and figures of the unit…
  *
- * The unit chips wrap instead of scrolling sideways (eleven sets fit a phone), take the arrow
+ * Up to seven unit chips stand in one row of equal columns (a card of seven games fits a 320 px
+ * phone); more wrap instead of scrolling sideways (eleven sets fit a phone). They take the arrow
  * keys (one tab stop, Home / End), and are the same on a phone and on a PC.
+ *
+ * A league card's games are all chips that open, played or not: a game still to come opens its
+ * planned players (PlannedParts), and its chip says how far its order is (予定 / 未確定 / 失敗).
  */
+
+/** Chips in one row of equal columns up to this many; more wrap (the existing responsive grid). */
+export const ONE_ROW_UNITS = 7;
 
 export interface MatchUnit {
   key: string;
@@ -35,8 +44,10 @@ export interface MatchUnit {
   /** Left (0) / right (1) won it, -1 drawn, `null` not decided. */
   winner: 0 | 1 | -1 | null;
   live: boolean;
-  /** It has a record to open (played, or being played). */
+  /** It opens (a played or live unit; any game of a league card, planned ones included). */
   playable: boolean;
+  /** Not started yet: how far its planned order is (league cards only). */
+  plan?: PlanStatus;
 }
 
 /** 「ダブルス1」 → 「D1」 (the kinds n01 events name their games and sets by). */
@@ -84,15 +95,34 @@ export function UnitChips({
 }): React.JSX.Element {
   const stop = units.find((unit) => unit.key === selected && unit.playable) ?? units.find((unit) => unit.playable) ?? null;
   return (
-    <ol className="game-tabs" aria-label={label} onKeyDown={onChipsKeyDown} data-testid={testId}>
+    <ol
+      className={`game-tabs${units.length <= ONE_ROW_UNITS ? ' is-row' : ''}`}
+      style={units.length <= ONE_ROW_UNITS ? ({ '--units': Math.max(1, units.length) } as React.CSSProperties) : undefined}
+      aria-label={label}
+      onKeyDown={onChipsKeyDown}
+      data-testid={testId}
+    >
       {units.map((unit) => {
         const legs = unit.legs && unit.legs[0] !== null && unit.legs[1] !== null ? unit.legs : null;
-        const said = unit.live ? '進行中' : unit.winner === 0 ? `${names[0]} 勝ち` : unit.winner === 1 ? `${names[1]} 勝ち` : unit.winner === -1 ? '引き分け' : unit.playable ? '未決着' : '未実施';
+        const planned = !unit.live && !legs && unit.plan !== undefined ? unit.plan : null;
+        const said = unit.live
+          ? '進行中'
+          : unit.winner === 0
+            ? `${names[0]} 勝ち`
+            : unit.winner === 1
+              ? `${names[1]} 勝ち`
+              : unit.winner === -1
+                ? '引き分け'
+                : planned
+                  ? `開始前 ${PLAN_TEXT[planned]}`
+                  : unit.playable
+                    ? '未決着'
+                    : '未実施';
         return (
           <li key={unit.key}>
             <button
               type="button"
-              className={`game-tab${unit.winner === 0 ? ' a' : unit.winner === 1 ? ' b' : ''}${unit.live ? ' is-live' : ''}${!unit.playable ? ' todo' : ''}`}
+              className={`game-tab${unit.winner === 0 ? ' a' : unit.winner === 1 ? ' b' : ''}${unit.live ? ' is-live' : ''}${!unit.playable ? ' todo' : ''}${planned ? ` is-planned plan-${planned}` : ''}`}
               aria-pressed={selected === unit.key}
               tabIndex={stop?.key === unit.key ? 0 : -1}
               disabled={!unit.playable}
@@ -111,6 +141,8 @@ export function UnitChips({
                   <>
                     <b className={unit.winner === 0 ? 'win' : undefined}>{legs[0]}</b>-<b className={unit.winner === 1 ? 'win' : undefined}>{legs[1]}</b>
                   </>
+                ) : planned ? (
+                  <span className="plan-short">{PLAN_SHORT[planned]}</span>
                 ) : (
                   '—'
                 )}
@@ -138,7 +170,7 @@ export function LiveReturn({ text, onReturn, label = 'ライブに戻る' }: { t
   );
 }
 
-/** The unit shown: its name and state, then who played it and its legs. */
+/** The unit shown: its name and state, then who played it and its legs (a game still to come: PlannedParts.PlannedGameView). */
 export function UnitHead({
   label,
   kind,

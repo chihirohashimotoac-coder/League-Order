@@ -180,7 +180,8 @@ export async function serveNight(page: Page, options: NightOptions = {}): Promis
     else if (operation === 'match/live')
       body = liveBody({ mid: 'c004_db01', scid: 'scid_c004', tmid: `${TDID}_lg_0_c004_BBBB_DDDD`, schid: 'db01', title: 'Test League A Division ダブルス1', sets: [0, 1], legs: [0, 1], current_leg: 1, players: [{ name: 'Bulls', tpid: 'BBBB', order: [{ oid: 'b1', name: '佐藤 B1' }, { oid: 'b2', name: '鈴木 B2' }] }, { name: 'Doubles', tpid: 'DDDD', order: [{ oid: 'd1', name: '田中 D1' }, { oid: 'd2', name: '千葉 D2' }] }] });
     else if (operation === 'team/order/list')
-      body = { result: 0, list: [{ tpid: 'AAAA', schid: 'sg02', fix: 1, order: [{ oid: 'a2', oname: '井上 次郎' }] }, { tpid: 'CCCC', schid: 'sg02', fix: 1, order: [{ oid: 'c2', oname: '木村 守' }] }] };
+      // Rows carry their card (`tmid`) as n01's do (manual §4.9); the 開始前 view only takes rows of the card shown (2026-11-27).
+      body = { result: 0, list: [{ tmid: q.get('tmid'), tpid: 'AAAA', schid: 'sg02', fix: 1, order: [{ oid: 'a2', oname: '井上 次郎' }] }, { tmid: q.get('tmid'), tpid: 'CCCC', schid: 'sg02', fix: 1, order: [{ oid: 'c2', oname: '木村 守' }] }] };
     else if (operation === 'tournament/stats')
       body = { result: 0, stats: { a1: { tpid: 'AAAA', score: 9018, darts: 360, leg: 30, winLeg: 21, ton80: 2, highOut: 120, best: 15 }, a2: { tpid: 'AAAA', score: 6600, darts: 330, leg: 24, winLeg: 12 }, c1: { tpid: 'CCCC', score: 7200, darts: 360, leg: 30, winLeg: 13, ton80: 0 }, c2: { tpid: 'CCCC', score: 5400, darts: 330, leg: 22, winLeg: 8 } } };
     else if (operation === 'team/player/list')

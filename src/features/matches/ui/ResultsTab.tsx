@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../../components/icons';
 import { useAppStore } from '../../../state/appStore';
 import type { MatchesApi } from '../api';
@@ -24,6 +24,10 @@ import { CardTrail } from './CardTrail';
 import { outlookTrail, slotChances } from '../cardTrail';
 import type { HighlightFocus } from './Highlights';
 import { useHarimaruLive } from '../../harimaru/useHarimaruLive';
+import { PLAN_TEXT, isFixtureToday, orderTmidOf, planCard } from '../plannedOrders';
+import { useCardOrders, useCardStart } from './useCardOrders';
+import { NameLines, OrderOverview, PlannedGameView, planStatusOf, plannedNames } from './PlannedParts';
+import type { OverviewRow } from './PlannedParts';
 
 /**
  * 日程・結果. The next round to be played comes first (the cards still to come are one tap away,
@@ -244,10 +248,21 @@ function MatchCenter({
   // season's list, which is read less often: the card never goes back to the list's older state.
   // A late reply of a game whose slot the list shows replayed (another mid, older than the list's
   // row) is dropped by the poller itself: not shown, not used as `since`, not taken as the end.
-  const { live: polled, status } = useCardLive(api, listed.state === 'live' ? listed.tmid : null, (state) => !liveSuperseded(listed, state));
+  //
+  // A card none of whose games the list holds (開始前) has no `tmid` from a game row: n01's form of
+  // it is used. Dated today (JST), its start is checked every 30 s; once a game is seen it is
+  // followed as a card in progress.
+  const tmid = orderTmidOf(listed);
+  const [openedAt] = useState(() => Date.now());
+  const today = !listed.official && data.season.status !== 40 && isFixtureToday(listed.title, openedAt);
+  // A card of today not followed yet: before its first game (scheduled), or between two games when
+  // the list was read (every game finished, no result yet) — the next game's start is caught too.
+  const started = useCardStart(api, tmid, (listed.state === 'scheduled' || listed.state === 'unrecorded') && today);
+  const following = listed.state === 'live' || started;
+  const { live: polled, status } = useCardLive(api, following ? tmid : null, (state) => !liveSuperseded(listed, state));
   // 対戦が進行中の間、画面の自動スリープを防ぐ (ライブタブと同じく、終了はポーラーの判定に従う。
-  // ポーラーが取得上限 `budget` で止まったら解除する)。
-  useScreenWake(listed.state === 'live' && status.kind !== 'finished' && status.kind !== 'budget' && !(polled && (polled.cardEnded || (!polled.isSchedule && polled.gameEnded))));
+  // ポーラーが取得上限 `budget` で止まったら解除する)。開始前のカードを開いただけでは防がない。
+  useScreenWake(following && status.kind !== 'finished' && status.kind !== 'budget' && !(polled && (polled.cardEnded || (!polled.isSchedule && polled.gameEnded))));
   const [states, setStates] = useState<ReadonlyMap<string, LiveState>>(() => new Map());
   const [statesFrom, setStatesFrom] = useState<LiveState | null>(null);
   if (polled !== statesFrom) {
@@ -255,6 +270,17 @@ function MatchCenter({
     if (polled?.schid) setStates((map) => (map.get(polled.schid!) === polled ? map : new Map(map).set(polled.schid!, polled)));
   }
   const card = useMemo(() => cardWithLive(listed, states, polled), [listed, states, polled]);
+  // The orders of the games still to come (one read for the card): every 30 s while the card is
+  // played today, once otherwise (a later round). None once the card has n01's result or is over.
+  // Over: n01's result, the card's end seen live, or played on another day and left without a
+  // result (its games not played will not be: no plan, no 「開始待ち」).
+  const cardOver = !!card.official || !!(polled && polled.cardEnded) || (listed.state === 'unrecorded' && !today && !following);
+  const wantsOrders = !cardOver && card.games.some((entry) => entry.state === 'notPlayed');
+  const orders = useCardOrders(api, data.season.tournamentId, wantsOrders ? tmid : null, { poll: wantsOrders && (following || today) });
+  const planned = useMemo(
+    () => (orders.rows ? planCard(orders.rows, { tmid, teamIds: [listed.teams[0].id, listed.teams[1].id], schids: listed.games.map((entry) => entry.slot.schid) }) : null),
+    [orders.rows, tmid, listed],
+  );
   // A late live state of a game the list has gone past (its slot replayed) is neither shown nor
   // followed: the list's newer game is.
   const live = polled && !liveSuperseded(listed, polled) ? polled : null;
@@ -262,12 +288,13 @@ function MatchCenter({
   // under them — on a phone and on a PC alike. Opened on the game a link names, else the game
   // being played, else the last one played.
   const playable = card.games.filter((entry) => entry.game);
-  const linked = link?.game && playable.some((entry) => entry.slot.schid === link.game) ? link.game : null;
+  // Any game of the card can be linked and opened, played or not.
+  const linked = link?.game && card.games.some((entry) => entry.slot.schid === link.game) ? link.game : null;
   const liveSchid = live && !live.gameEnded && !live.cardEnded ? live.schid : null;
   // Followed (no game in the link): the game the live state is about — being played, or the last
   // one played once it is over — else the game the list has in progress, else the last played.
   const followed = live?.schid && playable.some((entry) => entry.slot.schid === live.schid) ? live.schid : null;
-  const fallback = liveSchid ?? followed ?? (playable.find((entry) => entry.state === 'live') ?? playable[playable.length - 1])?.slot.schid ?? null;
+  const fallback = liveSchid ?? followed ?? (playable.find((entry) => entry.state === 'live') ?? playable[playable.length - 1])?.slot.schid ?? card.games[0]?.slot.schid ?? null;
   const game = linked ?? fallback;
   // ハリマル (観戦リアクション): 表示している状態を渡すだけ (取得は増やさない)。ライブに追従している間だけ
   // (リンクで別のゲームを開いている間は渡さない)。
@@ -276,6 +303,12 @@ function MatchCenter({
   const names: [string, string] = [card.teams[0].name, card.teams[1].name];
   const here: WatchLink = { ...base, card: card.key };
   const setGame = (schid: string | null): void => replaceWatchLink(schid ? { ...here, game: schid } : here);
+  // The game opened before it started has started: it is followed (the link drops the game), so
+  // the view goes on to the card's next game as usual. Another game starting leaves it alone.
+  const linkedNowLive = linked !== null && linked === liveSchid;
+  useEffect(() => {
+    if (linkedNowLive) replaceWatchLink({ ...base, card: listed.key });
+  }, [linkedNowLive, base, listed.key]);
   const openHighlight = (next: HighlightFocus): void => {
     setGame(next.schid);
     setFocus(next);
@@ -291,6 +324,33 @@ function MatchCenter({
   };
   const score = cardScore(card);
   const chosen = game ? (playable.find((entry) => entry.slot.schid === game) ?? null) : null;
+  const chosenSlot = game ? (card.games.find((entry) => entry.slot.schid === game) ?? null) : null;
+  const planOf = (schid: string) => planStatusOf(orders, planned, schid);
+  const overview: OverviewRow[] = card.games.map((entry) => {
+    const isLive = liveSchid !== null ? entry.slot.schid === liveSchid : entry.state === 'live';
+    if (entry.game) {
+      return {
+        schid: entry.slot.schid,
+        label: entry.slot.label,
+        sides: [<NameLines key="a" names={entry.members[0]} />, <NameLines key="b" names={entry.members[1]} />],
+        state: isLive ? <span className="live-tag">LIVE</span> : entry.state === 'finished' ? `${entry.legs[0] ?? '—'} - ${entry.legs[1] ?? '—'}／終了` : '進行中',
+        live: isLive,
+      };
+    }
+    const status = planOf(entry.slot.schid);
+    const plannedGame = planned?.games.get(entry.slot.schid);
+    const sideOf = (index: 0 | 1): React.JSX.Element => {
+      const names = plannedNames(plannedGame, index, status);
+      return names ? <NameLines key={index} names={names} /> : <span key={index} className="muted">—</span>;
+    };
+    return {
+      schid: entry.slot.schid,
+      label: entry.slot.label,
+      sides: [sideOf(0), sideOf(1)],
+      state: cardOver ? '未実施' : `開始前・${status === 'published' ? '確定済み' : PLAN_TEXT[status]}`,
+      live: false,
+    };
+  });
   const showsLive = live !== null && !live.gameEnded && game === liveSchid;
   const side = (entry: CardGame, index: 0 | 1): React.JSX.Element => (
     <>
@@ -342,8 +402,20 @@ function MatchCenter({
           legs: entry.state === 'notPlayed' ? null : entry.legs,
           winner: entry.winner,
           live: liveSchid !== null ? entry.slot.schid === liveSchid : entry.state === 'live',
-          playable: !!entry.game || entry.slot.schid === liveSchid,
+          playable: true,
+          plan: !entry.game && entry.slot.schid !== liveSchid && !cardOver ? planOf(entry.slot.schid) : undefined,
         }))}
+      />
+      <OrderOverview
+        names={names}
+        rows={overview}
+        selected={game}
+        onPick={(schid) => {
+          setFocus(null);
+          setGame(schid === liveSchid ? null : schid);
+        }}
+        orders={wantsOrders ? orders : null}
+        footnote="選手名は、終了・進行中のゲームは実際の出場者、開始前のゲームは n01 で両チームのオーダーが確定したものです。"
       />
       {live && liveSchid && !showsLive ? (
         <LiveReturn
@@ -373,6 +445,17 @@ function MatchCenter({
             openPlayedLeg
           />
         </section>
+      ) : chosenSlot ? (
+        <PlannedGameView
+          key={chosenSlot.slot.schid}
+          label={chosenSlot.slot.label}
+          kind={slotKindLabel(chosenSlot.slot)}
+          names={names}
+          status={planOf(chosenSlot.slot.schid)}
+          game={planned?.games.get(chosenSlot.slot.schid) ?? null}
+          orders={wantsOrders ? orders : null}
+          waiting={!cardOver}
+        />
       ) : (
         <p className="muted small-text">このカードには、まだ記録のあるゲームがありません。</p>
       )}
